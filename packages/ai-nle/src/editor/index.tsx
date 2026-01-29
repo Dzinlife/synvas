@@ -10,7 +10,7 @@ import PreviewEditor from "./PreviewEditor";
 import TimelineEditor from "./TimelineEditor";
 import type { TimelineTrack } from "./timeline/types";
 import timelineData from "./timeline.json";
-import { loadTimelineFromObject } from "./timelineLoader";
+import { loadTimelineFromObject, type TimelineSettings } from "./timelineLoader";
 
 // 导入所有组件以触发注册
 import "@/dsl/BackdropZoom";
@@ -95,6 +95,8 @@ const Editor = () => {
 	const [tracks, setTracks] = useState<TimelineTrack[]>([]);
 	const [timelineFps, setTimelineFps] = useState(30);
 	const [canvasSize, setCanvasSize] = useState({ width: 1920, height: 1080 });
+	const [timelineSettings, setTimelineSettings] =
+		useState<TimelineSettings | null>(null);
 	const [isLoading, setIsLoading] = useState(true);
 
 	useEffect(() => {
@@ -104,6 +106,7 @@ const Editor = () => {
 			setTracks(loaded.tracks);
 			setTimelineFps(loaded.fps);
 			setCanvasSize(loaded.canvas);
+			setTimelineSettings(loaded.settings);
 		} catch (error) {
 			console.error("Failed to load timeline:", error);
 		} finally {
@@ -125,6 +128,7 @@ const Editor = () => {
 				tracks={tracks}
 				canvasSize={canvasSize}
 				fps={timelineFps}
+				settings={timelineSettings ?? undefined}
 			>
 				<ModelManager>
 					<PreviewProvider>

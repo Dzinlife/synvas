@@ -20,8 +20,16 @@ export interface TimelineJSON {
 		width: number;
 		height: number;
 	};
+	settings: TimelineSettings;
 	tracks?: TimelineTrackJSON[];
 	elements: TimelineElement[];
+}
+
+export interface TimelineSettings {
+	snapEnabled: boolean;
+	autoAttach: boolean;
+	mainTrackMagnetEnabled: boolean;
+	previewAxisEnabled: boolean;
 }
 
 export interface TimelineData {
@@ -29,6 +37,7 @@ export interface TimelineData {
 	canvas: { width: number; height: number };
 	tracks: TimelineTrack[];
 	elements: TimelineElement[];
+	settings: TimelineSettings;
 }
 
 export interface TimelineTrackJSON {
@@ -70,9 +79,10 @@ export function saveTimelineToJSON(
 	fps: number,
 	canvasSize: { width: number; height: number } = { width: 1920, height: 1080 },
 	tracks?: TimelineTrack[],
+	settings?: TimelineSettings,
 ): string {
 	return JSON.stringify(
-		saveTimelineToObject(elements, fps, canvasSize, tracks),
+		saveTimelineToObject(elements, fps, canvasSize, tracks, settings),
 		null,
 		2,
 	);
@@ -86,12 +96,14 @@ export function saveTimelineToObject(
 	fps: number,
 	canvasSize: { width: number; height: number } = { width: 1920, height: 1080 },
 	tracks?: TimelineTrack[],
+	settings?: TimelineSettings,
 ): TimelineJSON {
 	const serializedTracks = serializeTracks(tracks);
 	return {
 		version: "1.0",
 		fps,
 		canvas: canvasSize,
+		...(settings ? { settings } : {}),
 		...(serializedTracks ? { tracks: serializedTracks } : {}),
 		elements: elements.map((el) => ensureTimecodes(el, fps)),
 	};
@@ -125,6 +137,7 @@ function validateTimeline(data: TimelineJSON): TimelineData {
 		fps: data.fps,
 		canvas: data.canvas,
 		tracks: validateTracks(data.tracks, "tracks"),
+		settings: validateSettings(data.settings, "settings"),
 		elements: data.elements.map((el, index) =>
 			validateElement(el, index, data.fps),
 		),
@@ -227,6 +240,36 @@ function validateTracks(
 	return tracks.map((track, index) =>
 		validateTrack(track, `${path}[${index}]`, index),
 	);
+}
+
+function validateSettings(
+	settings: any,
+	path: string,
+): TimelineSettings {
+	if (settings === undefined) {
+		throw new Error(`${path}: required`);
+	}
+	if (!settings || typeof settings !== "object") {
+		throw new Error(`${path}: must be an object`);
+	}
+	const resolveBoolean = (value: any, field: keyof TimelineSettings): boolean => {
+		if (typeof value !== "boolean") {
+			throw new Error(`${path}.${field}: must be a boolean`);
+		}
+		return value;
+	};
+	return {
+		snapEnabled: resolveBoolean(settings.snapEnabled, "snapEnabled"),
+		autoAttach: resolveBoolean(settings.autoAttach, "autoAttach"),
+		mainTrackMagnetEnabled: resolveBoolean(
+			settings.mainTrackMagnetEnabled,
+			"mainTrackMagnetEnabled",
+		),
+		previewAxisEnabled: resolveBoolean(
+			settings.previewAxisEnabled,
+			"previewAxisEnabled",
+		),
+	};
 }
 
 function validateTrack(

@@ -28,6 +28,7 @@ import {
 	getStoredTrackAssignments,
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
+import type { TimelineSettings } from "../timelineLoader";
 
 // Ghost 元素状态类型
 export interface DragGhostState {
@@ -1804,6 +1805,7 @@ export const TimelineProvider = ({
 	tracks: initialTracks,
 	canvasSize: initialCanvasSize,
 	fps: initialFps,
+	settings: initialSettings,
 }: {
 	children: React.ReactNode;
 	currentTime?: number;
@@ -1811,9 +1813,18 @@ export const TimelineProvider = ({
 	tracks?: TimelineTrack[];
 	canvasSize?: { width: number; height: number };
 	fps?: number;
+	settings?: TimelineSettings;
 }) => {
 	const lastTimeRef = useRef<number | null>(null);
 	const frameRemainderRef = useRef(0);
+	const settingsState = initialSettings
+		? {
+				snapEnabled: initialSettings.snapEnabled,
+				autoAttach: initialSettings.autoAttach,
+				mainTrackMagnetEnabled: initialSettings.mainTrackMagnetEnabled,
+				previewAxisEnabled: initialSettings.previewAxisEnabled,
+			}
+		: null;
 
 	// 在首次渲染前同步设置初始状态
 	// 使用 useLayoutEffect 确保在子组件渲染前执行
@@ -1831,6 +1842,7 @@ export const TimelineProvider = ({
 				tracks,
 				canvasSize: initialCanvasSize ?? { width: 1920, height: 1080 },
 				fps: normalizeFps(initialFps ?? DEFAULT_FPS),
+				...(settingsState ?? {}),
 			});
 			useTimelineStore.getState().resetHistory();
 			return;
@@ -1838,8 +1850,13 @@ export const TimelineProvider = ({
 		if (initialTracks) {
 			useTimelineStore.setState({
 				tracks: initialTracks,
+				...(settingsState ?? {}),
 			});
 			useTimelineStore.getState().resetHistory();
+			return;
+		}
+		if (settingsState) {
+			useTimelineStore.setState(settingsState);
 		}
 	}, []);
 

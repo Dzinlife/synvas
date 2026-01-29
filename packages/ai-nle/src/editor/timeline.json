@@ -5,6 +5,12 @@
 		"width": 1920,
 		"height": 1080
 	},
+	"settings": {
+		"snapEnabled": true,
+		"autoAttach": true,
+		"mainTrackMagnetEnabled": true,
+		"previewAxisEnabled": true
+	},
 	"tracks": [
 		{
 			"id": "main",
