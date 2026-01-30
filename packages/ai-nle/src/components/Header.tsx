@@ -12,6 +12,7 @@ import {
 import { useProjectStore } from "@/projects/projectStore";
 import { saveTimelineToObject } from "@/editor/timelineLoader";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { useTranscriptStore } from "@/asr/transcriptStore";
 
 export default function Header() {
 	const status = useProjectStore((state) => state.status);
@@ -35,6 +36,7 @@ export default function Header() {
 
 	const getTimelineSnapshot = useEffectEvent(() => {
 		const state = useTimelineStore.getState();
+		const transcripts = useTranscriptStore.getState().transcripts;
 		return saveTimelineToObject(
 			state.elements,
 			state.fps,
@@ -46,6 +48,7 @@ export default function Header() {
 				mainTrackMagnetEnabled: state.mainTrackMagnetEnabled,
 				previewAxisEnabled: state.previewAxisEnabled,
 			},
+			transcripts,
 		);
 	});
 

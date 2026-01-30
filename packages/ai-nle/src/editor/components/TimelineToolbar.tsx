@@ -6,6 +6,7 @@ import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import { cn } from "@/lib/utils";
 import { clampFrame } from "@/utils/timecode";
 import { usePreview } from "../contexts/PreviewProvider";
+import AsrDialog from "./AsrDialog";
 import {
 	useAttachments,
 	useElements,
@@ -339,6 +340,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 				/>
 			</div>
 			<div className="flex-1" />
+			<AsrDialog />
 			<button
 				onClick={handleExport}
 				disabled={isExporting || isVideoExporting}

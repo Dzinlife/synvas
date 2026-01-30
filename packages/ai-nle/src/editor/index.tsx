@@ -8,6 +8,7 @@ import { TimelineProvider } from "./contexts/TimelineContext";
 import PreviewEditor from "./PreviewEditor";
 import TimelineEditor from "./TimelineEditor";
 import { useProjectStore } from "@/projects/projectStore";
+import { useTranscriptStore } from "@/asr/transcriptStore";
 
 // 导入所有组件以触发注册
 import "@/dsl/BackdropZoom";
@@ -93,10 +94,17 @@ const Editor = () => {
 		(state) => state.currentProjectData,
 	);
 	const initialize = useProjectStore((state) => state.initialize);
+	const setTranscripts = useTranscriptStore((state) => state.setTranscripts);
 
 	useEffect(() => {
 		initialize();
 	}, [initialize]);
+
+	useEffect(() => {
+		if (!currentProjectData) return;
+		// 同步项目转写数据到转写 store
+		setTranscripts(currentProjectData.transcripts ?? []);
+	}, [currentProjectData, setTranscripts]);
 
 	const queryClient = new QueryClient();
 

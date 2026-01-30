@@ -7,6 +7,7 @@ import type {
 	TransitionMeta,
 } from "../dsl/types";
 import { ELEMENT_TYPE_VALUES } from "../dsl/types";
+import type { TranscriptRecord, TranscriptSegment, TranscriptWord } from "@/asr/types";
 import { framesToTimecode, timecodeToFrames } from "@/utils/timecode";
 import type { TimelineTrack } from "./timeline/types";
 
@@ -22,6 +23,7 @@ export interface TimelineJSON {
 	};
 	settings: TimelineSettings;
 	tracks?: TimelineTrackJSON[];
+	transcripts?: TranscriptRecord[];
 	elements: TimelineElement[];
 }
 
@@ -37,6 +39,7 @@ export interface TimelineData {
 	canvas: { width: number; height: number };
 	tracks: TimelineTrack[];
 	elements: TimelineElement[];
+	transcripts: TranscriptRecord[];
 	settings: TimelineSettings;
 }
 
@@ -80,9 +83,10 @@ export function saveTimelineToJSON(
 	canvasSize: { width: number; height: number } = { width: 1920, height: 1080 },
 	tracks?: TimelineTrack[],
 	settings?: TimelineSettings,
+	transcripts?: TranscriptRecord[],
 ): string {
 	return JSON.stringify(
-		saveTimelineToObject(elements, fps, canvasSize, tracks, settings),
+		saveTimelineToObject(elements, fps, canvasSize, tracks, settings, transcripts),
 		null,
 		2,
 	);
@@ -97,6 +101,7 @@ export function saveTimelineToObject(
 	canvasSize: { width: number; height: number } = { width: 1920, height: 1080 },
 	tracks?: TimelineTrack[],
 	settings?: TimelineSettings,
+	transcripts?: TranscriptRecord[],
 ): TimelineJSON {
 	const serializedTracks = serializeTracks(tracks);
 	return {
@@ -105,6 +110,7 @@ export function saveTimelineToObject(
 		canvas: canvasSize,
 		...(settings ? { settings } : {}),
 		...(serializedTracks ? { tracks: serializedTracks } : {}),
+		...(transcripts ? { transcripts } : {}),
 		elements: elements.map((el) => ensureTimecodes(el, fps)),
 	};
 }
@@ -137,6 +143,7 @@ function validateTimeline(data: TimelineJSON): TimelineData {
 		fps: data.fps,
 		canvas: data.canvas,
 		tracks: validateTracks(data.tracks, "tracks"),
+		transcripts: validateTranscripts(data.transcripts, "transcripts"),
 		settings: validateSettings(data.settings, "settings"),
 		elements: data.elements.map((el, index) =>
 			validateElement(el, index, data.fps),
@@ -240,6 +247,155 @@ function validateTracks(
 	return tracks.map((track, index) =>
 		validateTrack(track, `${path}[${index}]`, index),
 	);
+}
+
+function validateTranscripts(
+	transcripts: any,
+	path: string,
+): TranscriptRecord[] {
+	if (transcripts === undefined) {
+		return [];
+	}
+	if (!Array.isArray(transcripts)) {
+		throw new Error(`${path}: must be an array`);
+	}
+	return transcripts.map((record, index) =>
+		validateTranscript(record, `${path}[${index}]`),
+	);
+}
+
+function validateTranscript(record: any, path: string): TranscriptRecord {
+	if (!record || typeof record !== "object") {
+		throw new Error(`${path}: must be an object`);
+	}
+	if (!record.id || typeof record.id !== "string") {
+		throw new Error(`${path}.id: must be a string`);
+	}
+	const source = validateTranscriptSource(record.source, `${path}.source`);
+	if (typeof record.language !== "string") {
+		throw new Error(`${path}.language: must be a string`);
+	}
+	if (typeof record.model !== "string") {
+		throw new Error(`${path}.model: must be a string`);
+	}
+	if (
+		record.model !== "tiny" &&
+		record.model !== "small" &&
+		record.model !== "medium"
+	) {
+		throw new Error(`${path}.model: must be one of tiny | small | medium`);
+	}
+	if (!Number.isFinite(record.createdAt)) {
+		throw new Error(`${path}.createdAt: must be a number`);
+	}
+	if (!Number.isFinite(record.updatedAt)) {
+		throw new Error(`${path}.updatedAt: must be a number`);
+	}
+	if (!Array.isArray(record.segments)) {
+		throw new Error(`${path}.segments: must be an array`);
+	}
+	const segments = record.segments.map((segment: any, index: number) =>
+		validateTranscriptSegment(segment, `${path}.segments[${index}]`),
+	);
+
+	return {
+		id: record.id,
+		source,
+		language: record.language,
+		model: record.model,
+		createdAt: record.createdAt,
+		updatedAt: record.updatedAt,
+		segments,
+	};
+}
+
+function validateTranscriptSource(
+	source: any,
+	path: string,
+): TranscriptRecord["source"] {
+	if (!source || typeof source !== "object") {
+		throw new Error(`${path}: must be an object`);
+	}
+	if (source.type !== "opfs-audio") {
+		throw new Error(`${path}.type: must be opfs-audio`);
+	}
+	if (typeof source.uri !== "string") {
+		throw new Error(`${path}.uri: must be a string`);
+	}
+	if (typeof source.fileName !== "string") {
+		throw new Error(`${path}.fileName: must be a string`);
+	}
+	if (!Number.isFinite(source.duration) || source.duration < 0) {
+		throw new Error(`${path}.duration: must be a non-negative number`);
+	}
+	return {
+		type: "opfs-audio",
+		uri: source.uri,
+		fileName: source.fileName,
+		duration: source.duration,
+	};
+}
+
+function validateTranscriptSegment(
+	segment: any,
+	path: string,
+): TranscriptSegment {
+	if (!segment || typeof segment !== "object") {
+		throw new Error(`${path}: must be an object`);
+	}
+	if (!segment.id || typeof segment.id !== "string") {
+		throw new Error(`${path}.id: must be a string`);
+	}
+	if (!Number.isFinite(segment.start)) {
+		throw new Error(`${path}.start: must be a number`);
+	}
+	if (!Number.isFinite(segment.end)) {
+		throw new Error(`${path}.end: must be a number`);
+	}
+	if (typeof segment.text !== "string") {
+		throw new Error(`${path}.text: must be a string`);
+	}
+	if (!Array.isArray(segment.words)) {
+		throw new Error(`${path}.words: must be an array`);
+	}
+	const words = segment.words.map((word: any, index: number) =>
+		validateTranscriptWord(word, `${path}.words[${index}]`),
+	);
+	return {
+		id: segment.id,
+		start: segment.start,
+		end: segment.end,
+		text: segment.text,
+		words,
+	};
+}
+
+function validateTranscriptWord(word: any, path: string): TranscriptWord {
+	if (!word || typeof word !== "object") {
+		throw new Error(`${path}: must be an object`);
+	}
+	if (!word.id || typeof word.id !== "string") {
+		throw new Error(`${path}.id: must be a string`);
+	}
+	if (typeof word.text !== "string") {
+		throw new Error(`${path}.text: must be a string`);
+	}
+	if (!Number.isFinite(word.start)) {
+		throw new Error(`${path}.start: must be a number`);
+	}
+	if (!Number.isFinite(word.end)) {
+		throw new Error(`${path}.end: must be a number`);
+	}
+	if (word.confidence !== undefined && !Number.isFinite(word.confidence)) {
+		throw new Error(`${path}.confidence: must be a number`);
+	}
+	return {
+		id: word.id,
+		text: word.text,
+		start: word.start,
+		end: word.end,
+		...(word.confidence !== undefined ? { confidence: word.confidence } : {}),
+	};
 }
 
 function validateSettings(

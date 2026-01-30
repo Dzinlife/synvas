@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useSelectedElement } from "../contexts/TimelineContext";
 import MaterialLibrary from "../MaterialLibrary";
 import ElementSettingsPanel from "./ElementSettingsPanel";
+import TranscriptPanel from "./TranscriptPanel";
 
 interface SidebarPanelProps {
 	title: string;
@@ -53,7 +54,7 @@ const EditorSidebars: React.FC = () => {
 	const [panelOpenState, setPanelOpenState] = useState({
 		material: true,
 		element: false,
-		rightPlaceholder: true,
+		transcript: true,
 	});
 
 	// 选中元素时自动收起素材库，并展开设置面板
@@ -70,7 +71,7 @@ const EditorSidebars: React.FC = () => {
 	}, [selectedElement?.id]);
 
 	const togglePanel = useCallback(
-		(panelId: "material" | "element" | "rightPlaceholder") => {
+		(panelId: "material" | "element" | "transcript") => {
 			if (panelId === "element" && !selectedElement) {
 				return;
 			}
@@ -130,12 +131,12 @@ const EditorSidebars: React.FC = () => {
 			</div>
 			<div className="absolute right-4 top-4 bottom-4 flex flex-col gap-2 pointer-events-auto overflow-y-auto min-h-0">
 				<SidebarPanel
-					title="右侧面板"
-					isOpen={panelOpenState.rightPlaceholder}
-					onToggle={() => togglePanel("rightPlaceholder")}
+					title="转写结果"
+					isOpen={panelOpenState.transcript}
+					onToggle={() => togglePanel("transcript")}
 					widthClassName="w-64"
 				>
-					<div className="text-xs text-neutral-500">右侧面板占位</div>
+					<TranscriptPanel />
 				</SidebarPanel>
 			</div>
 		</div>

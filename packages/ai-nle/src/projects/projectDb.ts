@@ -45,6 +45,7 @@ export const buildEmptyTimeline = (): TimelineJSON => ({
 		previewAxisEnabled: true,
 	},
 	tracks: [],
+	transcripts: [],
 	elements: [],
 });
 
