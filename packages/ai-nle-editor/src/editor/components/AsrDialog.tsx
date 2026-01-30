@@ -72,15 +72,18 @@ const AsrDialog = () => {
 		useState<AbortController | null>(null);
 	const [collapsed, setCollapsed] = useState(false);
 	const isElectron = typeof window !== "undefined" && "aiNleElectron" in window;
+	const isWebDisabled = !isElectron;
 	const model: AsrModelSize = isElectron ? "large-v3-turbo" : "tiny";
 
 	const isRunning = status === "loading" || status === "running";
 	const progressText = useMemo(() => {
 		return `${Math.round(progress * 100)}%`;
 	}, [progress]);
-	const statusText = statusDetail
-		? `${formatStatus(status)} · ${statusDetail}`
-		: formatStatus(status);
+	const statusText = isWebDisabled
+		? "仅桌面版可用"
+		: statusDetail
+			? `${formatStatus(status)} · ${statusDetail}`
+			: formatStatus(status);
 
 	const panelVisible = open || isRunning || status === "error";
 
@@ -131,7 +134,14 @@ const AsrDialog = () => {
 	);
 
 	const handleStart = useCallback(async () => {
-		if (!file || isRunning) return;
+		if (isWebDisabled || !file || isRunning) {
+			if (isWebDisabled) {
+				setError("Web 版转写已移除，请下载桌面版使用本地 ASR。");
+				setOpen(true);
+				setCollapsed(false);
+			}
+			return;
+		}
 		setError(null);
 		setProgress(0);
 		setStatus("loading");
@@ -282,13 +292,25 @@ const AsrDialog = () => {
 							</div>
 						) : (
 							<>
+								{isWebDisabled && (
+									<div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+										<div className="font-medium">仅桌面版支持转写</div>
+										<div className="mt-1 text-amber-100/80">
+											Web 版已移除转写功能，建议下载桌面版使用本地
+											ASR。
+										</div>
+										<div className="mt-1 text-[11px] text-amber-100/70">
+											请前往项目主页下载桌面版。
+										</div>
+									</div>
+								)}
 								<div className="grid gap-2">
 									<Label htmlFor="asr-audio-file">音频文件</Label>
 									<Input
 										id="asr-audio-file"
 										type="file"
 										accept="audio/*"
-										disabled={isRunning}
+										disabled={isRunning || isWebDisabled}
 										onChange={handleFileChange}
 									/>
 									{file && (
@@ -300,7 +322,7 @@ const AsrDialog = () => {
 									<Select
 										value={language}
 										onValueChange={setLanguage}
-										disabled={isRunning}
+										disabled={isRunning || isWebDisabled}
 									>
 										<SelectTrigger className="w-full">
 											<SelectValue placeholder="选择语言" />
@@ -333,7 +355,10 @@ const AsrDialog = () => {
 											取消
 										</Button>
 									) : (
-										<Button onClick={handleStart} disabled={!file}>
+										<Button
+											onClick={handleStart}
+											disabled={!file || isWebDisabled}
+										>
 											开始转写
 										</Button>
 									)}

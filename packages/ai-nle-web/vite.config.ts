@@ -13,10 +13,6 @@ import viteTsConfigPaths from "vite-tsconfig-paths";
 // import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const onnxRuntimeWasmEntry = path.resolve(
-	__dirname,
-	"node_modules/onnxruntime-web/dist/ort.wasm.bundle.min.mjs",
-);
 
 export default defineConfig(({ command, mode }) => {
 	const isDev = command === "serve" || mode === "development";
@@ -47,8 +43,6 @@ export default defineConfig(({ command, mode }) => {
 
 		resolve: {
 			alias: {
-				// 仅替换 /wasm 子路径，避免将 "onnxruntime-web/wasm" 拼到文件路径后面。
-				"onnxruntime-web/wasm": onnxRuntimeWasmEntry,
 				"@nle": path.resolve(__dirname, "../ai-nle-editor/src"),
 				// react-skia-lite 的 dist 目前不完整，这里先统一走源码。
 				"react-skia-lite": path.resolve(__dirname, "../react-skia-lite/src"),
