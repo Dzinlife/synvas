@@ -247,7 +247,10 @@ export function reorderMainTrackElementsByInsert(
 	options: TimelinePostProcessOptions,
 ): TimelineElement[] {
 	const ordered = sortMainTrackElements(elements);
-	if (ordered.length <= 1) return elements;
+	if (ordered.length <= 1) {
+		// 单元素也需要执行主轨磁吸归一化
+		return finalizeTimelineElements(elements, options);
+	}
 	const target = ordered.find((el) => el.id === targetId);
 	if (!target) return elements;
 
