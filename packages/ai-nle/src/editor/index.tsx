@@ -2,15 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { ModelManager } from "@/dsl/model";
-import { TimelineElement } from "@/dsl/types";
 import EditorSidebars from "./components/EditorSidebars";
 import PreviewProvider from "./contexts/PreviewProvider";
 import { TimelineProvider } from "./contexts/TimelineContext";
 import PreviewEditor from "./PreviewEditor";
 import TimelineEditor from "./TimelineEditor";
-import type { TimelineTrack } from "./timeline/types";
-import timelineData from "./timeline.json";
-import { loadTimelineFromObject, type TimelineSettings } from "./timelineLoader";
+import { useProjectStore } from "@/projects/projectStore";
 
 // 导入所有组件以触发注册
 import "@/dsl/BackdropZoom";
@@ -91,32 +88,19 @@ const EditorContent: React.FC = () => {
 };
 
 const Editor = () => {
-	const [elements, setElements] = useState<TimelineElement[]>([]);
-	const [tracks, setTracks] = useState<TimelineTrack[]>([]);
-	const [timelineFps, setTimelineFps] = useState(30);
-	const [canvasSize, setCanvasSize] = useState({ width: 1920, height: 1080 });
-	const [timelineSettings, setTimelineSettings] =
-		useState<TimelineSettings | null>(null);
-	const [isLoading, setIsLoading] = useState(true);
+	const status = useProjectStore((state) => state.status);
+	const currentProjectData = useProjectStore(
+		(state) => state.currentProjectData,
+	);
+	const initialize = useProjectStore((state) => state.initialize);
 
 	useEffect(() => {
-		try {
-			const loaded = loadTimelineFromObject(timelineData as any);
-			setElements(loaded.elements);
-			setTracks(loaded.tracks);
-			setTimelineFps(loaded.fps);
-			setCanvasSize(loaded.canvas);
-			setTimelineSettings(loaded.settings);
-		} catch (error) {
-			console.error("Failed to load timeline:", error);
-		} finally {
-			setIsLoading(false);
-		}
-	}, []);
+		initialize();
+	}, [initialize]);
 
 	const queryClient = new QueryClient();
 
-	if (isLoading) {
+	if (status !== "ready" || !currentProjectData) {
 		return <div>Loading timeline...</div>;
 	}
 
@@ -124,11 +108,11 @@ const Editor = () => {
 		<QueryClientProvider client={queryClient}>
 			<Toaster />
 			<TimelineProvider
-				elements={elements}
-				tracks={tracks}
-				canvasSize={canvasSize}
-				fps={timelineFps}
-				settings={timelineSettings ?? undefined}
+				elements={currentProjectData.elements}
+				tracks={currentProjectData.tracks}
+				canvasSize={currentProjectData.canvas}
+				fps={currentProjectData.fps}
+				settings={currentProjectData.settings}
 			>
 				<ModelManager>
 					<PreviewProvider>
