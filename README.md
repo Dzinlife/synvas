@@ -7,7 +7,9 @@ This is a monorepo using pnpm workspaces and Turborepo.
 ```
 ai-nle/
 ├── packages/
-│   ├── ai-nle/          # Main application (TanStack Start)
+│   ├── ai-nle-web/      # Web entry (TanStack Start)
+│   ├── ai-nle-editor/   # Editor UI + shared logic
+│   ├── ai-nle-electron/ # Desktop app (Electron) - local Whisper.cpp backend
 │   └── react-skia-lite/ # ESM version of react-native-skia for web
 ├── pnpm-workspace.yaml
 ├── turbo.json
@@ -24,7 +26,7 @@ pnpm install
 
 ### Development
 
-Run all packages in development mode:
+Run all packages in development mode (via Turbo):
 
 ```bash
 pnpm dev
@@ -33,7 +35,8 @@ pnpm dev
 Run a specific package:
 
 ```bash
-pnpm --filter ai-nle dev
+pnpm --filter ai-nle-web dev
+pnpm --filter ai-nle-electron dev
 pnpm --filter react-skia-lite dev
 ```
 
@@ -48,7 +51,8 @@ pnpm build
 Build a specific package:
 
 ```bash
-pnpm --filter ai-nle build
+pnpm --filter ai-nle-web build
+pnpm --filter ai-nle-electron build
 pnpm --filter react-skia-lite build
 ```
 
@@ -70,9 +74,35 @@ pnpm check
 
 ## Packages
 
-### ai-nle
+### ai-nle-web
 
 Main application built with TanStack Start, React Router, and Tailwind CSS.
+
+### ai-nle-electron
+
+Electron desktop application that runs ASR with a local `whisper.cpp` CLI (better utilizes local hardware).
+
+Required env vars (pick one):
+
+```bash
+export AI_NLE_WHISPER_MODEL=/absolute/path/to/ggml-small.bin
+# or:
+export AI_NLE_WHISPER_MODEL_TINY=/path/to/ggml-tiny.bin
+export AI_NLE_WHISPER_MODEL_SMALL=/path/to/ggml-small.bin
+export AI_NLE_WHISPER_MODEL_MEDIUM=/path/to/ggml-medium.bin
+```
+
+Optional:
+
+```bash
+export AI_NLE_WHISPER_CLI=whisper-cli
+```
+
+The renderer uses `mediabunny` to export 16kHz mono 16-bit WAV before calling `whisper-cli`.
+
+### ai-nle-editor
+
+Editor UI + shared logic (used by both web and electron).
 
 ### react-skia-lite
 
