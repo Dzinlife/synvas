@@ -32,6 +32,12 @@ const getWhisperCppDir = () =>
 	path.join(app.getPath("userData"), "whisper.cpp");
 const getMetalMarkerPath = (whisperDir) =>
 	path.join(whisperDir, ".ai-nle-metal");
+const getWhisperCliInstallPath = (whisperDir) => {
+	const binDir = path.join(whisperDir, "build", "bin");
+	const fileName =
+		process.platform === "win32" ? "whisper-cli.exe" : "whisper-cli";
+	return { binDir, cliPath: path.join(binDir, fileName) };
+};
 
 const getDefaultModelPath = (modelSize) => {
 	const baseDir = path.join(app.getPath("userData"), "models", "whisper");
@@ -46,6 +52,38 @@ const resolveModelPath = (modelSize) => {
 	const candidate = process.env.AI_NLE_WHISPER_MODEL;
 	if (candidate) return candidate;
 	return getDefaultModelPath(normalizeModel(modelSize));
+};
+
+const getWhisperCliDownloadFileName = () => {
+	if (process.platform === "darwin") {
+		if (process.arch === "arm64") return "whisper-cli-darwin-arm64";
+		if (process.arch === "x64") return "whisper-cli-darwin-x64";
+		return null;
+	}
+	if (process.platform === "win32") {
+		if (process.arch === "x64") return "whisper-cli-win32-x64.exe";
+		return null;
+	}
+	if (process.platform === "linux") {
+		if (process.arch === "x64") return "whisper-cli-linux-x64";
+		return null;
+	}
+	return null;
+};
+
+const resolveWhisperCliDownloadUrl = () => {
+	const direct = process.env.AI_NLE_WHISPER_CLI_DOWNLOAD_URL;
+	if (direct) return direct;
+	const key = `${process.platform}_${process.arch}`
+		.toUpperCase()
+		.replace(/[^A-Z0-9]/g, "_");
+	const perArch = process.env[`AI_NLE_WHISPER_CLI_DOWNLOAD_URL_${key}`];
+	if (perArch) return perArch;
+	const base = process.env.AI_NLE_WHISPER_CLI_DOWNLOAD_BASE;
+	if (!base) return null;
+	const fileName = getWhisperCliDownloadFileName();
+	if (!fileName) return null;
+	return `${base.replace(/\/$/, "")}/${fileName}`;
 };
 
 const fileExists = async (filePath) => {
@@ -120,6 +158,50 @@ const resolveWhisperCli = async () => {
 	return null;
 };
 
+const downloadFile = async (url, targetPath, label) => {
+	const res = await fetch(url);
+	if (!res.ok) {
+		throw new Error(`${label}下载失败：${res.status} ${res.statusText}`);
+	}
+	await fs.mkdir(path.dirname(targetPath), { recursive: true });
+
+	const tmpPath = `${targetPath}.download`;
+	try {
+		await fs.rm(tmpPath, { force: true });
+	} catch {}
+
+	if (!res.body) {
+		const buffer = Buffer.from(await res.arrayBuffer());
+		await fs.writeFile(tmpPath, buffer);
+		await fs.rename(tmpPath, targetPath);
+		return;
+	}
+
+	const readable = Readable.fromWeb(res.body);
+	const writer = createWriteStream(tmpPath);
+	await pipeline(readable, writer);
+	await fs.rename(tmpPath, targetPath);
+};
+
+const downloadWhisperCli = async (whisperDir) => {
+	const url = resolveWhisperCliDownloadUrl();
+	if (!url) return null;
+	const { binDir, cliPath } = getWhisperCliInstallPath(whisperDir);
+	if (await fileExists(cliPath)) return cliPath;
+	await fs.mkdir(binDir, { recursive: true });
+	await downloadFile(url, cliPath, "Whisper 引擎");
+	if (process.platform !== "win32") {
+		await fs.chmod(cliPath, 0o755);
+	}
+	if (process.platform === "darwin") {
+		const marker = getMetalMarkerPath(whisperDir);
+		if (!(await fileExists(marker))) {
+			await fs.writeFile(marker, "metal=prebuilt");
+		}
+	}
+	return cliPath;
+};
+
 const ensureWhisperCli = async () => {
 	const existing = await resolveWhisperCli();
 	if (existing) {
@@ -133,6 +215,14 @@ const ensureWhisperCli = async () => {
 	}
 
 	const whisperDir = getWhisperCppDir();
+	const downloaded = await downloadWhisperCli(whisperDir);
+	if (downloaded) return downloaded;
+	if (process.platform === "darwin") {
+		throw new Error(
+			"未配置预编译 Whisper 引擎下载地址，请先设置下载地址后重试。",
+		);
+	}
+
 	const existed = await dirExists(whisperDir);
 	if (existed) {
 		await ensureMetalBuild(whisperDir);
@@ -429,21 +519,7 @@ const cleanupJob = async (job) => {
 };
 
 const downloadModel = async (url, targetPath) => {
-	const res = await fetch(url);
-	if (!res.ok) {
-		throw new Error(`模型下载失败：${res.status} ${res.statusText}`);
-	}
-	await fs.mkdir(path.dirname(targetPath), { recursive: true });
-
-	if (!res.body) {
-		const buffer = Buffer.from(await res.arrayBuffer());
-		await fs.writeFile(targetPath, buffer);
-		return;
-	}
-
-	const readable = Readable.fromWeb(res.body);
-	const writer = createWriteStream(targetPath);
-	await pipeline(readable, writer);
+	await downloadFile(url, targetPath, "模型");
 };
 
 export const registerWhisperIpc = () => {
@@ -469,16 +545,24 @@ export const registerWhisperIpc = () => {
 			if (!cliPath || !hasModel) {
 				const issues = [];
 				if (!cliPath) {
-					issues.push("未安装本地 Whisper 引擎");
+					if (
+						process.platform === "darwin" &&
+						!resolveWhisperCliDownloadUrl()
+					) {
+						issues.push("未配置预编译 Whisper 引擎下载地址");
+					} else {
+						issues.push("未安装本地 Whisper 引擎");
+					}
 				}
 				if (!hasModel) {
 					issues.push(`未找到模型文件：${modelPath}`);
 				}
 				const downloadUrl = MODEL_URL_BY_SIZE[modelSize];
+				const cliDownloadUrl = resolveWhisperCliDownloadUrl();
 				return {
 					ok: false,
 					message: issues.join("；"),
-					canDownload: Boolean(downloadUrl),
+					canDownload: Boolean(downloadUrl || cliDownloadUrl),
 					modelPath,
 					downloadUrl,
 				};
