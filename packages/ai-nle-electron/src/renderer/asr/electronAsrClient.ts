@@ -1,9 +1,9 @@
 import type {
 	AsrClient,
 	AsrModelSize,
+	TranscribeAudioFileOptions,
 	TranscriptSegment,
 	TranscriptWord,
-	TranscribeAudioFileOptions,
 } from "ai-nle-editor/asr";
 import { exportWav16kMonoFromFile } from "ai-nle-editor/asr";
 import type { WhisperSegment } from "../electron";
@@ -44,11 +44,7 @@ const isCjk = (value: string): boolean => {
 	return CJK_RE.test(value);
 };
 
-const appendToken = (
-	base: string,
-	token: string,
-	language: string,
-): string => {
+const appendToken = (base: string, token: string, language: string): string => {
 	const cleaned = normalizeToken(token);
 	if (!cleaned) return base;
 	if (!base) return cleaned;
@@ -226,7 +222,11 @@ export const electronAsrClient: AsrClient = {
 	},
 	transcribeAudioFile: async (
 		options: TranscribeAudioFileOptions,
-	): Promise<{ segments: TranscriptSegment[] }> => {
+	): Promise<{
+		segments: TranscriptSegment[];
+		backend?: "coreml" | "metal" | "gpu" | "cpu";
+		durationMs?: number;
+	}> => {
 		const {
 			file,
 			language,
@@ -255,10 +255,7 @@ export const electronAsrClient: AsrClient = {
 			);
 		};
 		const startPrepProgress = () => {
-			const estimatedMs = Math.min(
-				5000,
-				Math.max(1200, (duration ?? 20) * 30),
-			);
+			const estimatedMs = Math.min(5000, Math.max(1200, (duration ?? 20) * 30));
 			const start = performance.now();
 			const timer = window.setInterval(() => {
 				const elapsed = performance.now() - start;
@@ -306,7 +303,8 @@ export const electronAsrClient: AsrClient = {
 			if (words.length === 0) return;
 			hasStream = true;
 			for (const word of words) {
-				if (!Number.isFinite(word.start) || !Number.isFinite(word.end)) continue;
+				if (!Number.isFinite(word.start) || !Number.isFinite(word.end))
+					continue;
 				const segment = streamAssembler.pushWord(word);
 				onChunk(segment);
 				reportTranscribeProgress(
@@ -324,7 +322,7 @@ export const electronAsrClient: AsrClient = {
 			const wavBuffer = wavBytes.buffer.slice(
 				wavBytes.byteOffset,
 				wavBytes.byteOffset + wavBytes.byteLength,
-			);
+			) as ArrayBuffer;
 			const result = await Promise.race([
 				bridge.asr.whisperTranscribe({
 					requestId,
@@ -356,7 +354,11 @@ export const electronAsrClient: AsrClient = {
 				}
 			}
 			reportProgress(1);
-			return { segments };
+			return {
+				segments,
+				backend: result.backend,
+				durationMs: result.durationMs,
+			};
 		} catch (error) {
 			if (!(error instanceof DOMException && error.name === "AbortError")) {
 				const message = error instanceof Error ? error.message : String(error);

@@ -19,19 +19,22 @@ const MODEL_URL_BY_SIZE = {
 
 const jobs = new Map();
 
+// 测试用：指定下次构建使用的 backend（coreml | metal），null 为自动。设置后会清除当前构建标记以触发重建。
+let forcedBackend = null;
+
 const toErrorMessage = (error) =>
 	error instanceof Error ? error.message : String(error);
 
 const logDebug = (...args) => {
-	if (!DEBUG) return;
+	// if (!DEBUG) return;
 	// 调试日志只在显式开启时输出
 	console.log("[Whisper]", ...args);
 };
 
 const getWhisperCppDir = () =>
 	path.join(app.getPath("userData"), "whisper.cpp");
-const getMetalMarkerPath = (whisperDir) =>
-	path.join(whisperDir, ".ai-nle-metal");
+const getAccelMarkerPath = (whisperDir) =>
+	path.join(whisperDir, ".ai-nle-accel");
 const getWhisperCliInstallPath = (whisperDir) => {
 	const binDir = path.join(whisperDir, "build", "bin");
 	const fileName =
@@ -43,6 +46,13 @@ const getDefaultModelPath = (modelSize) => {
 	const baseDir = path.join(app.getPath("userData"), "models", "whisper");
 	const fileName = `ggml-${modelSize}.bin`;
 	return path.join(baseDir, fileName);
+};
+
+const getCoreMLModelPath = (modelSize) => {
+	const baseDir = path.join(app.getPath("userData"), "models", "whisper");
+	// CoreML encoder 模型目录
+	const dirName = `ggml-${modelSize}-encoder.mlmodelc`;
+	return path.join(baseDir, dirName);
 };
 
 const normalizeModel = (modelSize) =>
@@ -194,7 +204,7 @@ const downloadWhisperCli = async (whisperDir) => {
 		await fs.chmod(cliPath, 0o755);
 	}
 	if (process.platform === "darwin") {
-		const marker = getMetalMarkerPath(whisperDir);
+		const marker = getAccelMarkerPath(whisperDir);
 		if (!(await fileExists(marker))) {
 			await fs.writeFile(marker, "metal=prebuilt");
 		}
@@ -202,12 +212,12 @@ const downloadWhisperCli = async (whisperDir) => {
 	return cliPath;
 };
 
-const ensureWhisperCli = async () => {
+const ensureWhisperCli = async (modelSize = DEFAULT_MODEL) => {
 	const existing = await resolveWhisperCli();
 	if (existing) {
 		const whisperDir = getWhisperCppDir();
 		if (existing.startsWith(whisperDir)) {
-			await ensureMetalBuild(whisperDir);
+			await ensureAcceleratedBuild(whisperDir, modelSize);
 			const rebuilt = await findWhisperCliInDir(whisperDir);
 			return rebuilt || existing;
 		}
@@ -225,7 +235,7 @@ const ensureWhisperCli = async () => {
 
 	const existed = await dirExists(whisperDir);
 	if (existed) {
-		await ensureMetalBuild(whisperDir);
+		await ensureAcceleratedBuild(whisperDir, modelSize);
 		const cli = await findWhisperCliInDir(whisperDir);
 		if (cli) return cli;
 		// 目录存在但不完整，尝试清理后重新安装
@@ -244,7 +254,7 @@ const ensureWhisperCli = async () => {
 		version: WHISPER_CPP_VERSION,
 		printOutput: false,
 	});
-	await ensureMetalBuild(whisperDir);
+	await ensureAcceleratedBuild(whisperDir, modelSize);
 
 	const installed = await findWhisperCliInDir(whisperDir);
 	if (!installed) {
@@ -286,17 +296,191 @@ const runCommand = async (command, args, options) => {
 	}
 };
 
-const ensureMetalBuild = async (whisperDir) => {
+// 检查 Python 命令是否可用
+const findPython = async () => {
+	for (const cmd of ["python3", "python"]) {
+		try {
+			const child = spawn(cmd, ["--version"], {
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			const exit = await new Promise((resolve) => {
+				child.on("exit", (code) => resolve({ code }));
+				child.on("error", () => resolve({ code: 1 }));
+			});
+			if (exit.code === 0) return cmd;
+		} catch {}
+	}
+	return null;
+};
+
+// 检查 Python 包是否已安装
+const checkPythonPackage = async (python, packageName) => {
+	try {
+		const child = spawn(python, ["-c", `import ${packageName}`], {
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const exit = await new Promise((resolve) => {
+			child.on("exit", (code) => resolve({ code }));
+			child.on("error", () => resolve({ code: 1 }));
+		});
+		return exit.code === 0;
+	} catch {
+		return false;
+	}
+};
+
+// 安装 Python 包
+const installPythonPackages = async (python, packages) => {
+	logDebug("安装 Python 包", packages);
+	await runCommand(python, ["-m", "pip", "install", "--upgrade", ...packages]);
+};
+
+// 将 Whisper 模型名转换为 openai-whisper 格式
+const toWhisperModelName = (modelSize) => {
+	// large-v3-turbo -> turbo, large-v3 -> large-v3
+	if (modelSize === "large-v3-turbo") return "turbo";
+	return modelSize.replace("ggml-", "").replace(".bin", "");
+};
+
+// 编译 CoreML 模型
+const compileCoreMLModel = async (whisperDir, modelSize) => {
+	if (process.platform !== "darwin") return null;
+
+	const coremlPath = getCoreMLModelPath(modelSize);
+	// 检查是否已存在
+	if (await dirExists(coremlPath)) {
+		logDebug("CoreML 模型已存在", coremlPath);
+		return coremlPath;
+	}
+
+	logDebug("开始编译 CoreML 模型", modelSize);
+
+	const python = await findPython();
+	if (!python) {
+		logDebug("未找到 Python，跳过 CoreML 编译");
+		return null;
+	}
+
+	// 检查必要的 Python 包
+	const requiredPackages = [
+		"coremltools",
+		"ane_transformers",
+		"openai_whisper",
+	];
+	const missingPackages = [];
+	for (const pkg of requiredPackages) {
+		if (!(await checkPythonPackage(python, pkg))) {
+			// pip 包名和 import 名可能不同
+			const pipName = pkg === "openai_whisper" ? "openai-whisper" : pkg;
+			missingPackages.push(pipName);
+		}
+	}
+
+	if (missingPackages.length > 0) {
+		try {
+			await installPythonPackages(python, missingPackages);
+		} catch (error) {
+			logDebug("安装 Python 包失败", toErrorMessage(error));
+			return null;
+		}
+	}
+
+	// 使用 whisper.cpp 的 generate-coreml-model.sh 脚本
+	const scriptPath = path.join(
+		whisperDir,
+		"models",
+		"generate-coreml-model.sh",
+	);
+	if (!(await fileExists(scriptPath))) {
+		logDebug("未找到 CoreML 生成脚本", scriptPath);
+		return null;
+	}
+
+	const whisperModelName = toWhisperModelName(modelSize);
+	const modelsDir = path.join(whisperDir, "models");
+
+	try {
+		// 运行生成脚本
+		logDebug("运行 CoreML 生成脚本", whisperModelName);
+		await runCommand("bash", [scriptPath, whisperModelName], {
+			cwd: modelsDir,
+		});
+
+		// 脚本会在 models 目录生成文件，移动到目标位置
+		const generatedPath = path.join(
+			modelsDir,
+			`ggml-${modelSize}-encoder.mlmodelc`,
+		);
+		// 也可能是用原始名称
+		const altGeneratedPath = path.join(
+			modelsDir,
+			`ggml-${whisperModelName}-encoder.mlmodelc`,
+		);
+
+		let sourcePath = null;
+		if (await dirExists(generatedPath)) {
+			sourcePath = generatedPath;
+		} else if (await dirExists(altGeneratedPath)) {
+			sourcePath = altGeneratedPath;
+		}
+
+		if (sourcePath) {
+			await fs.mkdir(path.dirname(coremlPath), { recursive: true });
+			await fs.rename(sourcePath, coremlPath);
+			logDebug("CoreML 模型编译完成", coremlPath);
+			return coremlPath;
+		}
+
+		logDebug("CoreML 模型生成后未找到输出文件");
+		return null;
+	} catch (error) {
+		logDebug("CoreML 模型编译失败", toErrorMessage(error));
+		return null;
+	}
+};
+
+// GPU 加速选项，按优先级排序：CoreML > Metal
+const ACCEL_OPTIONS = [
+	{
+		name: "coreml",
+		flags: ["-DWHISPER_COREML=1", "-DGGML_METAL=1"],
+		requiresCoreML: true,
+	},
+	{ name: "metal", flags: ["-DGGML_METAL=1"], requiresCoreML: false },
+	{ name: "metal-alt", flags: ["-DGGML_USE_METAL=1"], requiresCoreML: false },
+];
+
+const ensureAcceleratedBuild = async (
+	whisperDir,
+	modelSize = DEFAULT_MODEL,
+) => {
 	if (process.platform !== "darwin") return;
 	if (!(await fileExists(path.join(whisperDir, "CMakeLists.txt")))) return;
-	const marker = getMetalMarkerPath(whisperDir);
+	const marker = getAccelMarkerPath(whisperDir);
 	if (await fileExists(marker)) return;
 
-	const buildOnce = async (flag) => {
-		logDebug("尝试启用 Metal 构建", flag);
+	// 始终构建一份支持 CoreML+Metal 的二进制，Metal/CoreML 在运行时通过是否加载 .mlmodelc 切换
+	const options = ACCEL_OPTIONS;
+
+	// 尝试编译 CoreML 模型（即使失败也继续，会回退到 Metal）
+	const coremlPath = await compileCoreMLModel(whisperDir, modelSize);
+	const hasCoreML = coremlPath && (await dirExists(coremlPath));
+	logDebug("CoreML 模型状态", hasCoreML ? "可用" : "不可用");
+
+	const buildOnce = async (option) => {
+		// 如果选项需要 CoreML 但没有 CoreML 模型，跳过
+		if (option.requiresCoreML && !hasCoreML) {
+			throw new Error("CoreML 模型不可用");
+		}
+		logDebug(`尝试启用 ${option.name} 构建`, option.flags);
+		// 清理之前的构建目录，避免 cmake 缓存问题
+		const buildDir = path.join(whisperDir, "build");
+		try {
+			await fs.rm(buildDir, { recursive: true, force: true });
+		} catch {}
 		await runCommand(
 			"cmake",
-			["-B", "build", flag, "-DCMAKE_BUILD_TYPE=Release"],
+			["-B", "build", ...option.flags, "-DCMAKE_BUILD_TYPE=Release"],
 			{ cwd: whisperDir },
 		);
 		await runCommand(
@@ -304,21 +488,22 @@ const ensureMetalBuild = async (whisperDir) => {
 			["--build", "build", "-j", "--config", "Release"],
 			{ cwd: whisperDir },
 		);
-		await fs.writeFile(marker, `metal=${flag}`);
+		await fs.writeFile(marker, `accel=${option.name}`);
 	};
 
 	let lastError = null;
-	for (const flag of ["-DGGML_METAL=1", "-DGGML_USE_METAL=1"]) {
+	for (const option of options) {
 		try {
-			await buildOnce(flag);
+			await buildOnce(option);
 			return;
 		} catch (error) {
+			logDebug(`${option.name} 构建失败`, toErrorMessage(error));
 			lastError = error;
 		}
 	}
 
 	throw new Error(
-		`启用 Metal 失败，请安装 Xcode 命令行工具与 cmake 后重试：${lastError ? toErrorMessage(lastError) : ""}`,
+		`启用 GPU 加速失败，请安装 Xcode 命令行工具与 cmake 后重试：${lastError ? toErrorMessage(lastError) : ""}`,
 	);
 };
 
@@ -513,6 +698,26 @@ const findTextOutput = async (tmpDir, outPrefix) => {
 	return candidate ? path.join(tmpDir, candidate) : null;
 };
 
+// 从 whisper 输出的 systeminfo 推断当前实际使用的后端
+// 注意：无 .mlmodelc 时实际为 Metal，但 systeminfo 可能只含编译期 "Core ML"，需严格按“实际在用”判断
+const detectBackend = (systeminfo) => {
+	const info = String(systeminfo ?? "").toLowerCase();
+	// 1. CoreML 加载失败 → 实际必为 Metal 回退
+	if (/failed\s+to\s+load\s+core\s*ml/.test(info)) return "metal";
+	// 2. 出现 Metal → 以 Metal 为准（含 "using Metal backend" 或编译信息里的 Metal）
+	if (/metal/.test(info)) return "metal";
+	// 3. 仅在有“CoreML 实际在用”的证据时才判为 coreml（如 loaded、.mlmodelc、encoder），否则视为 Metal
+	const hasCoreMl = /core\s*ml|coreml/.test(info);
+	const coreMlInUse =
+		/loaded.*core\s*ml|core\s*ml.*loaded|\.mlmodelc|encoder.*core\s*ml|core\s*ml.*encoder/i.test(
+			info,
+		);
+	if (hasCoreMl && coreMlInUse) return "coreml";
+	if (hasCoreMl) return "metal";
+	if (/cuda|vulkan|gpu/.test(info)) return "gpu";
+	return "cpu";
+};
+
 const cleanupJob = async (job) => {
 	if (!job?.tmpDir) return;
 	if (KEEP_TMP) {
@@ -528,7 +733,42 @@ const downloadModel = async (url, targetPath) => {
 	await downloadFile(url, targetPath, "模型");
 };
 
+// 启动时恢复可能因中途退出而未恢复的 CoreML 模型（.mlmodelc.bak → .mlmodelc）
+const restoreCoreMLModelsIfNeeded = async () => {
+	if (process.platform !== "darwin") return;
+	const baseDir = path.join(app.getPath("userData"), "models", "whisper");
+	try {
+		const entries = await fs.readdir(baseDir, { withFileTypes: true });
+		for (const ent of entries) {
+			if (!ent.isDirectory() || !ent.name.endsWith(".mlmodelc.bak")) continue;
+			const bakPath = path.join(baseDir, ent.name);
+			const restorePath = bakPath.replace(/\.bak$/, "");
+			try {
+				await fs.rename(bakPath, restorePath);
+				logDebug("启动时已恢复 CoreML 模型", restorePath);
+			} catch {}
+		}
+	} catch {
+		// 目录不存在或不可读则忽略
+	}
+};
+
 export const registerWhisperIpc = () => {
+	restoreCoreMLModelsIfNeeded();
+
+	// 指定 backend：darwin 可选 coreml | metal | cpu，windows/linux 可选 gpu | cpu，null 自动。Metal/CoreML 在运行时切换，无需重建。
+	ipcMain.handle("asr:whisper:setBackend", (_event, backend) => {
+		const valid = ["coreml", "metal", "gpu", "cpu"].includes(backend);
+		const next = valid ? backend : null;
+		forcedBackend = next;
+		logDebug("已指定 backend:", next);
+		return { ok: true, backend: forcedBackend };
+	});
+
+	ipcMain.handle("asr:whisper:getBackend", () => ({
+		backend: forcedBackend,
+	}));
+
 	ipcMain.on("asr:whisper:abort", (_event, requestId) => {
 		const job = jobs.get(requestId);
 		if (!job) return;
@@ -544,7 +784,7 @@ export const registerWhisperIpc = () => {
 			let cliPath = await resolveWhisperCli();
 			const whisperDir = getWhisperCppDir();
 			if (cliPath && cliPath.startsWith(whisperDir)) {
-				await ensureMetalBuild(whisperDir);
+				await ensureAcceleratedBuild(whisperDir, modelSize);
 				cliPath = await findWhisperCliInDir(whisperDir);
 			}
 			const hasModel = await fileExists(modelPath);
@@ -586,7 +826,7 @@ export const registerWhisperIpc = () => {
 			if (!downloadUrl) {
 				return { ok: false, message: "未知模型类型，无法下载" };
 			}
-			await ensureWhisperCli();
+			await ensureWhisperCli(modelSize);
 			const targetPath = resolveModelPath(modelSize);
 			if (!(await fileExists(targetPath))) {
 				await downloadModel(downloadUrl, targetPath);
@@ -610,12 +850,23 @@ export const registerWhisperIpc = () => {
 		const modelPath = resolveModelPath(payload?.model);
 		const language = payload?.language;
 
+		// 指定 CoreML 时，开始前检查 .mlmodelc 是否存在，不存在则直接报错
+		if (process.platform === "darwin" && forcedBackend === "coreml") {
+			const modelSize = normalizeModel(payload?.model);
+			const coremlPath = getCoreMLModelPath(modelSize);
+			if (!(await dirExists(coremlPath))) {
+				throw new Error(
+					`已指定 CoreML 但未找到 CoreML 模型，请先编译：${coremlPath}`,
+				);
+			}
+		}
+
 		const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-nle-whisper-"));
 		logDebug("临时目录", tmpDir);
 		const wavPath = path.join(tmpDir, "audio.wav");
 		const outPrefix = path.join(tmpDir, "out");
 
-		const job = { child: null, tmpDir };
+		const job = { child: null, tmpDir, coremlRestorePath: null };
 		jobs.set(requestId, job);
 
 		try {
@@ -625,6 +876,21 @@ export const registerWhisperIpc = () => {
 			}
 			await fs.writeFile(wavPath, Buffer.from(wavBytes));
 
+			// 运行时强制 Metal：临时重命名 .mlmodelc，whisper 找不到则回退到 Metal，转写结束后恢复
+			if (process.platform === "darwin" && forcedBackend === "metal") {
+				const modelSize = normalizeModel(payload?.model);
+				const coremlPath = getCoreMLModelPath(modelSize);
+				if (await dirExists(coremlPath)) {
+					const bakPath = `${coremlPath}.bak`;
+					try {
+						await fs.rename(coremlPath, bakPath);
+						job.coremlRestorePath = coremlPath;
+						logDebug("已临时隐藏 CoreML 模型以强制 Metal", coremlPath);
+					} catch {}
+				}
+			}
+
+			const transcribeStartMs = Date.now();
 			const args = [
 				"-m",
 				modelPath,
@@ -637,6 +903,10 @@ export const registerWhisperIpc = () => {
 				"1",
 				"-sow",
 			];
+			// 指定 CPU 时禁用 GPU（darwin 上即禁用 Metal/CoreML）
+			if (forcedBackend === "cpu") {
+				args.push("--no-gpu");
+			}
 			if (language && language !== "auto") {
 				args.push("-l", language);
 			}
@@ -690,15 +960,36 @@ export const registerWhisperIpc = () => {
 
 			const content = await fs.readFile(jsonPath, "utf8");
 			const parsed = JSON.parse(content);
-			if (process.platform === "darwin") {
-				const systeminfo = String(parsed?.systeminfo ?? "");
-				if (!/metal/i.test(systeminfo)) {
-					throw new Error("未检测到 Metal 加速，请重新安装本地引擎");
+			const systeminfo = String(parsed?.systeminfo ?? "");
+			if (process.platform === "darwin" && forcedBackend !== "cpu") {
+				// 未指定 CPU 时，检查 CoreML 或 Metal 加速是否启用
+				if (!/coreml|metal/i.test(systeminfo)) {
+					throw new Error("未检测到 GPU 加速，请重新安装本地引擎");
 				}
 			}
+			// 指定了 CPU（传了 --no-gpu）则显示 cpu；否则按输出推断
+			const backend =
+				forcedBackend === "cpu" ? "cpu" : detectBackend(systeminfo);
+			const durationMs = Date.now() - transcribeStartMs;
+			// 始终打印当前使用的后端和处理时间，便于确认
+			console.log(
+				"[Whisper] 后端:",
+				backend,
+				"| 处理耗时:",
+				(durationMs / 1000).toFixed(2),
+				"s",
+			);
 			const segments = normalizeSegmentsFromJson(parsed, payload?.duration);
-			return { segments };
+			return { segments, backend, durationMs };
 		} finally {
+			// 恢复临时重命名的 CoreML 模型
+			if (job.coremlRestorePath) {
+				const bakPath = `${job.coremlRestorePath}.bak`;
+				try {
+					await fs.rename(bakPath, job.coremlRestorePath);
+					logDebug("已恢复 CoreML 模型", job.coremlRestorePath);
+				} catch {}
+			}
 			jobs.delete(requestId);
 			await cleanupJob(job);
 		}

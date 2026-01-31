@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("aiNleElectron", {
+	platform: process.platform,
 	asr: {
 		whisperCheckReady: (options) =>
 			ipcRenderer.invoke("asr:whisper:checkReady", options),
@@ -15,5 +16,8 @@ contextBridge.exposeInMainWorld("aiNleElectron", {
 		},
 		whisperAbort: (requestId) =>
 			ipcRenderer.send("asr:whisper:abort", requestId),
+		whisperSetBackend: (backend) =>
+			ipcRenderer.invoke("asr:whisper:setBackend", backend),
+		whisperGetBackend: () => ipcRenderer.invoke("asr:whisper:getBackend"),
 	},
 });

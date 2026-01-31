@@ -19,9 +19,11 @@ export type AsrClient = {
 		language: string;
 		signal: AbortSignal;
 	}) => Promise<void>;
-	transcribeAudioFile: (
-		options: TranscribeAudioFileOptions,
-	) => Promise<{ segments: TranscriptSegment[] }>;
+	transcribeAudioFile: (options: TranscribeAudioFileOptions) => Promise<{
+		segments: TranscriptSegment[];
+		backend?: "coreml" | "metal" | "gpu" | "cpu";
+		durationMs?: number;
+	}>;
 };
 
 const defaultClient: AsrClient = {

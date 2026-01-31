@@ -15,6 +15,8 @@ export type WhisperSegment = {
 
 export type WhisperTranscribeResult = {
 	segments: WhisperSegment[];
+	backend?: "coreml" | "metal" | "gpu" | "cpu";
+	durationMs?: number;
 };
 
 export type WhisperSegmentEvent = {
@@ -36,9 +38,12 @@ export type WhisperDownloadResult = {
 	path?: string;
 };
 
+export type WhisperBackend = "coreml" | "metal" | "gpu" | "cpu" | null;
+
 declare global {
 	interface Window {
 		aiNleElectron?: {
+			platform?: NodeJS.Platform;
 			asr: {
 				whisperCheckReady: (options: {
 					model: AsrModelSize;
@@ -58,6 +63,11 @@ declare global {
 					handler: (event: WhisperSegmentEvent) => void,
 				) => () => void;
 				whisperAbort: (requestId: string) => void;
+				/** 指定后端：darwin 可选 coreml | metal | cpu，windows/linux 可选 gpu | cpu，null 自动 */
+				whisperSetBackend: (
+					backend: WhisperBackend,
+				) => Promise<{ ok: boolean; backend: WhisperBackend }>;
+				whisperGetBackend: () => Promise<{ backend: WhisperBackend }>;
 			};
 		};
 	}
