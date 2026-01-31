@@ -215,22 +215,28 @@ const ensureWhisperCli = async () => {
 	}
 
 	const whisperDir = getWhisperCppDir();
-	const downloaded = await downloadWhisperCli(whisperDir);
-	if (downloaded) return downloaded;
-	if (process.platform === "darwin") {
-		throw new Error(
-			"未配置预编译 Whisper 引擎下载地址，请先设置下载地址后重试。",
-		);
-	}
+	// const downloaded = await downloadWhisperCli(whisperDir);
+	// if (downloaded) return downloaded;
+	// if (process.platform === "darwin") {
+	// 	throw new Error(
+	// 		"未配置预编译 Whisper 引擎下载地址，请先设置下载地址后重试。",
+	// 	);
+	// }
 
 	const existed = await dirExists(whisperDir);
 	if (existed) {
 		await ensureMetalBuild(whisperDir);
 		const cli = await findWhisperCliInDir(whisperDir);
 		if (cli) return cli;
-		throw new Error(
-			`本地引擎目录已存在但未找到可执行文件，请删除后重试：${whisperDir}`,
-		);
+		// 目录存在但不完整，尝试清理后重新安装
+		logDebug("目录存在但未找到可执行文件，尝试清理重装", whisperDir);
+		try {
+			await fs.rm(whisperDir, { recursive: true, force: true });
+		} catch {
+			throw new Error(
+				`本地引擎目录已存在但未找到可执行文件，且无法清理目录，请手动删除后重试：${whisperDir}`,
+			);
+		}
 	}
 
 	await installWhisperCpp({
