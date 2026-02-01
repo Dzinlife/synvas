@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Canvas, type CanvasRef } from "react-skia-lite";
+import { modelRegistry } from "@nle/dsl/model/registry";
 import type { TimelineElement } from "@nle/dsl/types";
 import { useTimelineStore } from "@nle/editor/contexts/TimelineContext";
 import type { TimelineTrack } from "@nle/editor/timeline/types";
@@ -30,6 +31,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	const targetCanvasRef = canvasRef ?? internalCanvasRef;
 	const renderTokenRef = useRef(0);
 	const disposeRef = useRef<(() => void) | null>(null);
+	const fps = useTimelineStore((state) => state.fps);
 
 	const runRender = useCallback(
 		(elements: TimelineElement[], displayTime: number) => {
@@ -44,9 +46,12 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 				sortByTrackIndex,
 				prepare: {
 					isExporting: false,
-					fps: 0,
+					// 预览态也要带上 fps，保证帧时间换算一致
+					fps: Number.isFinite(fps) ? Math.round(fps) : 0,
 					canvasSize: { width: canvasWidth, height: canvasHeight },
 					prepareTransitionPictures: true,
+					// 提供模型索引，供预览态准备帧使用
+					getModelStore: (id) => modelRegistry.get(id),
 				},
 			})
 				.then(({ children, dispose }) => {
@@ -70,6 +75,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 		[
 			canvasHeight,
 			canvasWidth,
+			fps,
 			getTrackIndexForElement,
 			sortByTrackIndex,
 			targetCanvasRef,

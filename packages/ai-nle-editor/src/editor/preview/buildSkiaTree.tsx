@@ -70,6 +70,8 @@ export const buildSkiaRenderState = async ({
 		canvasSize.height > 0
 			? canvasSize
 			: null;
+	// 只有能生成 picture 时才需要强制准备帧
+	const canRenderTransitionPictures = Boolean(transitionPictureSize);
 
 	const isActiveTransition = (element: TimelineElement): boolean => {
 		if (!isTransitionElement(element)) return false;
@@ -117,8 +119,10 @@ export const buildSkiaRenderState = async ({
 	const runPrepareRenderFrame = async (
 		target: TimelineElement,
 		extra?: Partial<RendererPrepareFrameContext>,
+		force?: boolean,
 	): Promise<void> => {
-		if (!isExporting) return;
+		// 预览态也需要强制执行，确保转场截图前视频帧已准备
+		if (!isExporting && !force) return;
 		const componentDef = componentRegistry.get(target.component);
 		if (!componentDef?.prepareRenderFrame) return;
 		await componentDef.prepareRenderFrame({
@@ -132,9 +136,15 @@ export const buildSkiaRenderState = async ({
 		});
 	};
 
-	const buildPlainElementPlan = (target: TimelineElement): RenderPlan => {
+	const buildPlainElementPlan = (
+		target: TimelineElement,
+		shouldPrepare: boolean,
+	): RenderPlan => {
 		const content = renderElementNode(target);
-		const ready = runPrepareRenderFrame(target);
+		// 转场渲染需要 picture 时，提前准备帧避免画面停在旧帧
+		const ready = shouldPrepare
+			? runPrepareRenderFrame(target, undefined, !isExporting)
+			: Promise.resolve();
 		return { node: content, ready };
 	};
 
@@ -142,7 +152,7 @@ export const buildSkiaRenderState = async ({
 		element: TimelineElement,
 	): Promise<RenderPlan> => {
 		if (!isTransitionElement(element)) {
-			return buildPlainElementPlan(element);
+			return buildPlainElementPlan(element, isExporting);
 		}
 		const transitionDef = componentRegistry.get(element.component);
 		if (!transitionDef) {
@@ -160,8 +170,14 @@ export const buildSkiaRenderState = async ({
 		if (isTransitionElement(fromElement) || isTransitionElement(toElement)) {
 			return { node: null, ready: Promise.resolve() };
 		}
-		const fromPlan = buildPlainElementPlan(fromElement);
-		const toPlan = buildPlainElementPlan(toElement);
+		const fromPlan = buildPlainElementPlan(
+			fromElement,
+			canRenderTransitionPictures,
+		);
+		const toPlan = buildPlainElementPlan(
+			toElement,
+			canRenderTransitionPictures,
+		);
 		const elementReady = Promise.all([fromPlan.ready, toPlan.ready]);
 		let fromPicture: SkPicture | null = null;
 		let toPicture: SkPicture | null = null;
