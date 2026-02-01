@@ -1,3 +1,5 @@
+import { useFps, useTimelineStore } from "@nle/editor/contexts/TimelineContext";
+import { framesToSeconds, framesToTimecode } from "@nle/utils/timecode";
 import {
 	useCallback,
 	useEffect,
@@ -5,8 +7,6 @@ import {
 	useLayoutEffect,
 	useRef,
 } from "react";
-import { useFps, useTimelineStore } from "@nle/editor/contexts/TimelineContext";
-import { framesToSeconds, framesToTimecode } from "@nle/utils/timecode";
 import { createModelSelector } from "../model/registry";
 import type { TimelineProps } from "../model/types";
 import {
@@ -93,7 +93,9 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 		let pixelRatio = 1;
 
 		try {
-			const rect = canvas.getBoundingClientRect();
+			const rect =
+				canvas.parentElement?.getBoundingClientRect() ??
+				canvas.getBoundingClientRect();
 			const viewport = canvas.closest(
 				"[data-timeline-scroll-area]",
 			) as HTMLElement | null;
@@ -107,8 +109,27 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 				return;
 			}
 
-			canvasWidth = rect.width;
+			const clipWidth = rect.width;
 			canvasHeight = rect.height;
+			if (clipWidth <= 0 || canvasHeight <= 0) {
+				return;
+			}
+
+			const visibleStartX = Math.max(0, Math.floor(visibleLeft - rect.left));
+			const visibleEndX = Math.min(
+				clipWidth,
+				Math.ceil(visibleRight - rect.left),
+			);
+			const viewportWidth = viewportRect.width;
+			if (viewportWidth <= 0) {
+				return;
+			}
+			const useViewportWidth = clipWidth > viewportWidth;
+			const canvasOffsetX = useViewportWidth ? visibleStartX : 0;
+			canvasWidth = Math.max(
+				1,
+				Math.ceil(useViewportWidth ? viewportWidth : clipWidth),
+			);
 			if (canvasWidth <= 0 || canvasHeight <= 0) {
 				return;
 			}
@@ -133,6 +154,8 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			// 兼容高 DPI，绘制仍使用 CSS 像素
 			ctx.setTransform(1, 0, 0, 1, 0, 0);
 			ctx.scale(pixelRatio, pixelRatio);
+			canvas.style.transform = `translateX(${canvasOffsetX}px)`;
+			canvas.style.width = `${canvasWidth}px`;
 			if (snapshotCanvas) {
 				// 尺寸变化时先铺一层旧画面，避免缩放闪白
 				ctx.drawImage(
@@ -159,17 +182,12 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 
 			const thumbnailHeight = canvasHeight;
 			const thumbnailWidth = Math.max(1, thumbnailHeight * sourceAspectRatio);
-			const numThumbnails = Math.max(
-				1,
-				Math.ceil(canvasWidth / thumbnailWidth),
-			);
+			const numThumbnails = Math.max(1, Math.ceil(clipWidth / thumbnailWidth));
 			const previewInterval = clipDurationSeconds / numThumbnails;
 
-			const visibleStartX = Math.max(0, visibleLeft - rect.left);
-			const visibleEndX = Math.min(canvasWidth, visibleRight - rect.left);
 			const overscan = thumbnailWidth * 2;
 			const renderStartX = Math.max(0, visibleStartX - overscan);
-			const renderEndX = Math.min(canvasWidth, visibleEndX + overscan);
+			const renderEndX = Math.min(clipWidth, visibleEndX + overscan);
 			const startIndex = Math.max(0, Math.floor(renderStartX / thumbnailWidth));
 			const endIndex = Math.min(
 				numThumbnails - 1,
@@ -183,7 +201,8 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 				clipDurationFrames,
 				offsetSeconds,
 				reversed ? 1 : 0,
-				`${canvasWidth}x${canvasHeight}`,
+				`${clipWidth}x${canvasHeight}`,
+				`${canvasOffsetX}-${canvasWidth}`,
 				pixelRatio,
 				hasSink ? 1 : 0,
 				hasInput ? 1 : 0,
@@ -229,7 +248,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 					});
 					if (renderTokenRef.current !== currentToken) return;
 					if (!thumbnail) continue;
-					const x = i * thumbnailWidth;
+					const x = i * thumbnailWidth - canvasOffsetX;
 					ctx.drawImage(
 						thumbnail,
 						0,
@@ -308,10 +327,11 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	useLayoutEffect(() => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
+		const target = canvas.parentElement ?? canvas;
 		const observer = new ResizeObserver(() => {
 			scheduleGenerate();
 		});
-		observer.observe(canvas);
+		observer.observe(target);
 		return () => observer.disconnect();
 	}, [scheduleGenerate]);
 
@@ -370,7 +390,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 
 			{/* 缩略图 canvas */}
 			<div className="absolute inset-y-4 w-full">
-				<canvas ref={canvasRef} className="absolute inset-0 size-full" />
+				<canvas ref={canvasRef} className="absolute inset-y-0" />
 			</div>
 			<div className="absolute inset-x-0 bottom-0 h-4 bg-neutral-700/20"></div>
 		</div>
