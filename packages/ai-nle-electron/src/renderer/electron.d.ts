@@ -13,15 +13,52 @@ export type WhisperSegment = {
 	words?: WhisperWord[];
 };
 
+/** whisper.cpp -oj 输出的 JSON 结构（后端原样返回） */
+export type WhisperJsonToken = {
+	id: number;
+	offsets: {
+		from: number;
+		to: number;
+	};
+	p: number;
+	t_dtw: number;
+	text: string;
+	timestamps: {
+		/** 模板字符串类型，格式为 00:00:00,000 */
+		from: `${number}:${number}:${number},${number}`;
+		to: `${number}:${number}:${number},${number}`;
+	};
+};
+
+export type WhisperJsonSegment = {
+	offsets: {
+		from: number;
+		to: number;
+	};
+	text: string;
+	timestamps: {
+		/** 模板字符串类型，格式为 00:00:00,000 */
+		from: `${number}:${number}:${number},${number}`;
+		to: `${number}:${number}:${number},${number}`;
+	};
+	tokens?: WhisperJsonToken[];
+};
+
+export type WhisperJsonOutput = {
+	transcription?: WhisperJsonSegment[];
+	systeminfo?: string;
+};
+
 export type WhisperTranscribeResult = {
-	segments: WhisperSegment[];
-	backend?: "coreml" | "metal" | "gpu" | "cpu";
+	data: WhisperJsonOutput;
+	backend?: "gpu" | "cpu";
 	durationMs?: number;
 };
 
+/** 实时流式：后端只推原始 stdout 行，前端解析 */
 export type WhisperSegmentEvent = {
 	requestId: string;
-	segment: WhisperSegment;
+	raw: string;
 };
 
 export type WhisperReadyResult = {
@@ -38,7 +75,7 @@ export type WhisperDownloadResult = {
 	path?: string;
 };
 
-export type WhisperBackend = "coreml" | "metal" | "gpu" | "cpu" | null;
+export type WhisperBackend = "gpu" | "cpu" | null;
 
 declare global {
 	interface Window {
@@ -63,7 +100,7 @@ declare global {
 					handler: (event: WhisperSegmentEvent) => void,
 				) => () => void;
 				whisperAbort: (requestId: string) => void;
-				/** 指定后端：darwin 可选 coreml | metal | cpu，windows/linux 可选 gpu | cpu，null 自动 */
+				/** 指定后端：gpu | cpu，null 自动 */
 				whisperSetBackend: (
 					backend: WhisperBackend,
 				) => Promise<{ ok: boolean; backend: WhisperBackend }>;

@@ -39,13 +39,7 @@ const LANGUAGE_OPTIONS = [
 ];
 
 // 高级选项：后端（仅 Electron 本地转写可用），按平台区分
-const BACKEND_OPTIONS_DARWIN = [
-	{ value: "auto", label: "自动" },
-	{ value: "metal", label: "Metal" },
-	{ value: "coreml", label: "CoreML" },
-	{ value: "cpu", label: "CPU" },
-];
-const BACKEND_OPTIONS_WIN_LINUX = [
+const BACKEND_OPTIONS = [
 	{ value: "auto", label: "自动" },
 	{ value: "gpu", label: "GPU" },
 	{ value: "cpu", label: "CPU" },
@@ -83,13 +77,9 @@ const AsrDialog = () => {
 	const [abortController, setAbortController] =
 		useState<AbortController | null>(null);
 	const [collapsed, setCollapsed] = useState(false);
-	const [lastBackend, setLastBackend] = useState<
-		"coreml" | "metal" | "gpu" | "cpu" | null
-	>(null);
+	const [lastBackend, setLastBackend] = useState<"gpu" | "cpu" | null>(null);
 	const [lastDurationMs, setLastDurationMs] = useState<number | null>(null);
-	const [backend, setBackend] = useState<
-		"auto" | "metal" | "coreml" | "gpu" | "cpu"
-	>("auto");
+	const [backend, setBackend] = useState<"auto" | "gpu" | "cpu">("auto");
 	const isElectron = typeof window !== "undefined" && "aiNleElectron" in window;
 	const platform =
 		typeof window !== "undefined"
@@ -101,9 +91,7 @@ const AsrDialog = () => {
 		(platform === undefined &&
 			typeof navigator !== "undefined" &&
 			navigator.platform === "MacIntel");
-	const backendOptions = isDarwin
-		? BACKEND_OPTIONS_DARWIN
-		: BACKEND_OPTIONS_WIN_LINUX;
+	const backendOptions = BACKEND_OPTIONS;
 	const model: AsrModelSize = isElectron ? "large-v3-turbo" : "tiny";
 
 	const isRunning = status === "loading" || status === "running";
@@ -176,9 +164,7 @@ const AsrDialog = () => {
 				window as Window & {
 					aiNleElectron?: {
 						asr?: {
-							whisperSetBackend: (
-								b: "coreml" | "metal" | "gpu" | "cpu" | null,
-							) => Promise<unknown>;
+							whisperSetBackend: (b: "gpu" | "cpu" | null) => Promise<unknown>;
 						};
 					};
 				}
@@ -284,12 +270,7 @@ const AsrDialog = () => {
 	}, [abortController]);
 
 	const handleBackendChange = useCallback((value: string | null) => {
-		const next = (value ?? "auto") as
-			| "auto"
-			| "metal"
-			| "coreml"
-			| "gpu"
-			| "cpu";
+		const next = (value ?? "auto") as "auto" | "gpu" | "cpu";
 		setBackend(next);
 		const bridge =
 			typeof window !== "undefined" && "aiNleElectron" in window
@@ -298,7 +279,7 @@ const AsrDialog = () => {
 							aiNleElectron?: {
 								asr?: {
 									whisperSetBackend: (
-										b: "coreml" | "metal" | "gpu" | "cpu" | null,
+										b: "gpu" | "cpu" | null,
 									) => Promise<unknown>;
 								};
 							};
@@ -426,9 +407,7 @@ const AsrDialog = () => {
 											</SelectContent>
 										</Select>
 										<div className="text-xs text-neutral-500">
-											{isDarwin
-												? "自动：优先 CoreML，失败用 Metal；Metal/CoreML 可在运行时切换，无需重建。"
-												: "自动：使用 GPU（若可用）；指定后转写使用该后端。"}
+											自动：使用 GPU（若可用）；指定后转写使用该后端。
 										</div>
 									</div>
 								)}

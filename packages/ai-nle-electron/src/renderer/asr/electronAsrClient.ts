@@ -6,7 +6,100 @@ import type {
 	TranscriptWord,
 } from "ai-nle-editor/asr";
 import { exportWav16kMonoFromFile } from "ai-nle-editor/asr";
-import type { WhisperSegment } from "../electron";
+import type { WhisperJsonOutput, WhisperSegment } from "../electron";
+
+/** whisper.cpp -oj 原始 JSON 转为 WhisperSegment[] */
+function normalizeSegmentsFromJson(
+	data: WhisperJsonOutput,
+	durationSeconds?: number,
+): WhisperSegment[] {
+	const raw = data?.transcription ?? [];
+	if (!Array.isArray(raw)) return [];
+
+	const segs = raw
+		.map((s): WhisperSegment | null => {
+			const from = s.offsets?.from;
+			const to = s.offsets?.to;
+			const start =
+				typeof from === "number" && Number.isFinite(from) ? from / 1000 : null;
+			const end =
+				typeof to === "number" && Number.isFinite(to) ? to / 1000 : null;
+			const text = String(s?.text ?? "").trim();
+			if (start === null || end === null) return null;
+			const words =
+				Array.isArray(s.tokens) && s.tokens.length > 0
+					? s.tokens
+							.map((t) => {
+								const of = t.offsets;
+								const ws =
+									typeof of?.from === "number" && Number.isFinite(of.from)
+										? of.from / 1000
+										: null;
+								const we =
+									typeof of?.to === "number" && Number.isFinite(of.to)
+										? of.to / 1000
+										: null;
+								const wt = String(t?.text ?? "").trim();
+								if (ws === null || we === null) return null;
+								return { start: ws, end: we, text: wt };
+							})
+							.filter((x): x is { start: number; end: number; text: string } =>
+								Boolean(x),
+							)
+					: undefined;
+			return { start, end, text, words };
+		})
+		.filter((x): x is WhisperSegment => x != null);
+
+	if (segs.length > 0) return segs;
+
+	const end =
+		typeof durationSeconds === "number" && Number.isFinite(durationSeconds)
+			? durationSeconds
+			: 0;
+	const firstText =
+		raw[0] && typeof raw[0] === "object" && "text" in raw[0]
+			? String((raw[0] as { text?: string }).text ?? "").trim()
+			: "";
+	if (!firstText) return [];
+	return [{ start: 0, end, text: firstText }];
+}
+
+/** whisper-cli stdout 行格式：[0.0 --> 1.5] 文本 */
+function parseSegmentFromConsoleLine(
+	line: string | null | undefined,
+): WhisperSegment | null {
+	if (!line?.trim()) return null;
+	const match = line.match(/^\s*\[(.+?)\s*-->\s*(.+?)\]\s*(.*)$/);
+	if (!match) return null;
+	const start = parseTimestampToSeconds(match[1]);
+	const end = parseTimestampToSeconds(match[2]);
+	if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+	const text = match[3]?.trim() ?? "";
+	if (!text) return null;
+	return { start: start!, end: end!, text };
+}
+
+function parseTimestampToSeconds(value: unknown): number | null {
+	if (value === null || value === undefined) return null;
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	if (typeof value !== "string") return null;
+	const cleaned = (value as string).trim().replace(",", ".");
+	if (!cleaned) return null;
+	const asNumber = Number(cleaned);
+	if (Number.isFinite(asNumber)) return asNumber;
+	const parts = cleaned.split(":");
+	if (parts.length >= 2 && parts.length <= 3) {
+		const nums = parts.map((p) => Number(p));
+		if (nums.some((n) => !Number.isFinite(n))) return null;
+		const [a, b, c] =
+			parts.length === 3
+				? [Number(parts[0]), Number(parts[1]), Number(parts[2])]
+				: [0, Number(parts[0]), Number(parts[1])];
+		return a * 3600 + b * 60 + c;
+	}
+	return null;
+}
 
 const createId = (prefix: string): string => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -32,31 +125,18 @@ const normalizeLanguage = (language: string): string => {
 
 const PREP_PROGRESS_RATIO = 0.2;
 
-const NO_SPACE_LANGS = new Set(["zh", "ja", "ko"]);
-const PUNCT_ONLY_RE = /^[,.;:!?，。？！、…]+$/;
-const NO_SPACE_PREFIX_RE = /^[’'"“”\-–—]/;
-const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
+/** Intl.Segmenter 用的 locale，按语言码映射 */
+const languageToLocale = (language: string): string => {
+	const map: Record<string, string> = {
+		zh: "zh-CN",
+		en: "en-US",
+		ja: "ja-JP",
+		ko: "ko-KR",
+	};
+	return map[language] ?? "en-US";
+};
 
 const normalizeToken = (value: string): string => String(value ?? "").trim();
-
-const isCjk = (value: string): boolean => {
-	if (!value) return false;
-	return CJK_RE.test(value);
-};
-
-const appendToken = (base: string, token: string, language: string): string => {
-	const cleaned = normalizeToken(token);
-	if (!cleaned) return base;
-	if (!base) return cleaned;
-	if (NO_SPACE_LANGS.has(language)) return base + cleaned;
-	if (PUNCT_ONLY_RE.test(cleaned) || NO_SPACE_PREFIX_RE.test(cleaned)) {
-		return base + cleaned;
-	}
-	if (isCjk(cleaned) || isCjk(base.slice(-1))) {
-		return base + cleaned;
-	}
-	return `${base} ${cleaned}`;
-};
 
 const toTranscriptWords = (segment: WhisperSegment): TranscriptWord[] => {
 	const text = normalizeToken(segment.text ?? "");
@@ -72,7 +152,7 @@ const toTranscriptWords = (segment: WhisperSegment): TranscriptWord[] => {
 			)
 			.map((word) => ({
 				id: createId("word"),
-				text: String(word.text ?? ""),
+				text: String(word.text ?? "").trim(),
 				start: word.start,
 				end: word.end,
 			}));
@@ -89,81 +169,93 @@ const toTranscriptWords = (segment: WhisperSegment): TranscriptWord[] => {
 	];
 };
 
-const WORD_GAP_SECONDS = 0.9;
-const MAX_WORDS_PER_SEGMENT = 60;
-const MAX_TEXT_LENGTH = 240;
+/** 单字符语系（不以空格分词）：汉、平假名、片假名、泰、老挝、高棉；韩语为空格语系故不包含 */
+const CHAR_SCRIPT_RE =
+	/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}]/u;
+const containsCharScript = (text: string): boolean =>
+	CHAR_SCRIPT_RE.test(text ?? "");
 
-const createWordAssembler = (language: string) => {
-	let currentId = "";
-	let currentStart = 0;
-	let currentEnd = 0;
-	let currentText = "";
-	let currentWords: TranscriptWord[] = [];
-	let segments: TranscriptSegment[] = [];
-
-	const shouldSplit = (word: TranscriptWord) => {
-		if (!currentId) return true;
-		if (word.start - currentEnd >= WORD_GAP_SECONDS) return true;
-		if (currentWords.length >= MAX_WORDS_PER_SEGMENT) return true;
-		if (currentText.length >= MAX_TEXT_LENGTH) return true;
-		return false;
-	};
-
-	const startSegment = (word: TranscriptWord) => {
-		currentId = createId("segment");
-		currentStart = word.start;
-		currentEnd = word.end;
-		currentText = normalizeToken(word.text);
-		currentWords = [word];
-		const segment: TranscriptSegment = {
-			id: currentId,
-			start: currentStart,
-			end: currentEnd,
-			text: currentText,
-			words: currentWords,
-		};
-		segments.push(segment);
-		return segment;
-	};
-
-	const pushWord = (word: TranscriptWord) => {
-		if (shouldSplit(word)) {
-			return startSegment(word);
-		}
-		const nextText = appendToken(currentText, word.text, language);
-		const nextWords = [...currentWords, word];
-		const segment: TranscriptSegment = {
-			id: currentId,
-			start: currentStart,
-			end: word.end,
-			text: nextText,
-			words: nextWords,
-		};
-		currentEnd = word.end;
-		currentText = nextText;
-		currentWords = nextWords;
-		segments[segments.length - 1] = segment;
-		return segment;
-	};
-
-	const getSegments = () => segments.slice();
-
-	return { pushWord, getSegments };
-};
-
-const mergeWhisperSegments = (
-	raw: WhisperSegment[],
-	language: string,
+/**
+ * 用 Intl.Segmenter 按句切分：一句话一个 segment。
+ * 若词中包含单字符语系（汉/假名/泰/老挝/高棉），则该词单独作为一个 segment。
+ */
+const wordsToSegments = (
+	words: TranscriptWord[],
+	locale: string,
 ): TranscriptSegment[] => {
-	const assembler = createWordAssembler(language);
-	for (const seg of raw) {
-		const words = toTranscriptWords(seg);
-		for (const word of words) {
-			if (!Number.isFinite(word.start) || !Number.isFinite(word.end)) continue;
-			assembler.pushWord(word);
+	if (words.length === 0) return [];
+
+	const segments: TranscriptSegment[] = [];
+	let segmentIndex = 0;
+
+	const flushRun = (
+		runWords: TranscriptWord[],
+		runParts: string[],
+		runRanges: { wordIndex: number; start: number; end: number }[],
+	) => {
+		if (runWords.length === 0) return;
+		const fullText = runParts.join(" ");
+		if (!fullText.trim()) return;
+		const segmenter = new Intl.Segmenter(locale, { granularity: "sentence" });
+		for (const seg of segmenter.segment(fullText)) {
+			const segStart = seg.index;
+			const segEnd = seg.index + seg.segment.length;
+			const sentenceWords: TranscriptWord[] = [];
+			for (const wr of runRanges) {
+				if (wr.start < segEnd && wr.end > segStart) {
+					sentenceWords.push(runWords[wr.wordIndex]);
+				}
+			}
+			if (sentenceWords.length === 0) continue;
+			const start = Math.min(...sentenceWords.map((w) => w.start));
+			const end = Math.max(...sentenceWords.map((w) => w.end));
+			segments.push({
+				id: `segment-${segmentIndex}`,
+				start,
+				end,
+				text: seg.segment.trim(),
+				words: sentenceWords,
+			});
+			segmentIndex += 1;
+		}
+	};
+
+	let runWords: TranscriptWord[] = [];
+	let runParts: string[] = [];
+	const runRanges: { wordIndex: number; start: number; end: number }[] = [];
+	let pos = 0;
+
+	for (let i = 0; i < words.length; i++) {
+		const w = words[i];
+		const t = w.text.trim();
+		if (!t) continue;
+		if (containsCharScript(t)) {
+			flushRun(runWords, runParts, runRanges);
+			runWords = [];
+			runParts = [];
+			runRanges.length = 0;
+			pos = 0;
+			segments.push({
+				id: `segment-${segmentIndex}`,
+				start: w.start,
+				end: w.end,
+				text: t,
+				words: [w],
+			});
+			segmentIndex += 1;
+		} else {
+			runRanges.push({
+				wordIndex: runWords.length,
+				start: pos,
+				end: pos + t.length,
+			});
+			runWords.push(w);
+			runParts.push(t);
+			pos += t.length + 1;
 		}
 	}
-	return assembler.getSegments();
+	flushRun(runWords, runParts, runRanges);
+	return segments;
 };
 
 const progressFromSegments = (options: {
@@ -224,7 +316,7 @@ export const electronAsrClient: AsrClient = {
 		options: TranscribeAudioFileOptions,
 	): Promise<{
 		segments: TranscriptSegment[];
-		backend?: "coreml" | "metal" | "gpu" | "cpu";
+		backend?: "gpu" | "cpu";
 		durationMs?: number;
 	}> => {
 		const {
@@ -295,18 +387,28 @@ export const electronAsrClient: AsrClient = {
 			signal.addEventListener("abort", abortListener, { once: true });
 		});
 
-		const streamAssembler = createWordAssembler(language);
+		// 流式：累积词，以词为单位更新 UI；用 Intl.Segmenter 按句切分，一句一个 segment
+		const streamWords: TranscriptWord[] = [];
+		let prevSegmentCount = 0;
+		const locale = languageToLocale(language);
 		let hasStream = false;
 		const disposeStream = bridge.asr.whisperOnSegment((event) => {
 			if (event.requestId !== requestId) return;
-			const words = toTranscriptWords(event.segment);
+			const rawSeg = parseSegmentFromConsoleLine(event.raw);
+			if (!rawSeg) return;
+			const words = toTranscriptWords(rawSeg);
 			if (words.length === 0) return;
 			hasStream = true;
 			for (const word of words) {
 				if (!Number.isFinite(word.start) || !Number.isFinite(word.end))
 					continue;
-				const segment = streamAssembler.pushWord(word);
-				onChunk(segment);
+				streamWords.push(word);
+				const segments = wordsToSegments(streamWords, locale);
+				// 只推送当前句及新完成的句（以词为单位更新 UI）
+				for (let i = prevSegmentCount; i < segments.length; i += 1) {
+					onChunk(segments[i]);
+				}
+				prevSegmentCount = Math.max(0, segments.length - 1);
 				reportTranscribeProgress(
 					progressFromSegments({
 						index: 0,
@@ -334,8 +436,16 @@ export const electronAsrClient: AsrClient = {
 				abortPromise,
 			]);
 
-			const raw = Array.isArray(result.segments) ? result.segments : [];
-			const segments = mergeWhisperSegments(raw, language);
+			const rawSegments = normalizeSegmentsFromJson(result.data, duration);
+			const allWords: TranscriptWord[] = [];
+			for (const seg of rawSegments) {
+				const words = toTranscriptWords(seg);
+				for (const w of words) {
+					if (Number.isFinite(w.start) && Number.isFinite(w.end))
+						allWords.push(w);
+				}
+			}
+			const segments = wordsToSegments(allWords, languageToLocale(language));
 			if (!hasStream) {
 				for (let i = 0; i < segments.length; i += 1) {
 					if (signal.aborted) {

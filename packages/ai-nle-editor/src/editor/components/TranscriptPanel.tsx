@@ -63,10 +63,13 @@ const TranscriptPanel = () => {
 			return;
 		}
 		if (scrollThrottleRef.current !== null) return;
-		scrollThrottleRef.current = window.setTimeout(() => {
-			scrollThrottleRef.current = null;
-			runScroll();
-		}, wait - (now - lastScrollAtRef.current));
+		scrollThrottleRef.current = window.setTimeout(
+			() => {
+				scrollThrottleRef.current = null;
+				runScroll();
+			},
+			wait - (now - lastScrollAtRef.current),
+		);
 	}, [activeRecord?.updatedAt, activeRecord?.id]);
 
 	useEffect(() => {
@@ -101,9 +104,9 @@ const TranscriptPanel = () => {
 			{activeRecord ? (
 				<div className="flex flex-col gap-2 text-xs text-neutral-200">
 					<div className="text-neutral-400">{activeRecord.source.fileName}</div>
-					<div className="flex flex-col gap-2">
+					<div className="leading-relaxed text-neutral-100">
 						{activeRecord.segments.map((segment) => (
-							<div
+							<span
 								key={segment.id}
 								ref={
 									segment.id ===
@@ -111,15 +114,13 @@ const TranscriptPanel = () => {
 										? lastSegmentRef
 										: undefined
 								}
-								className="rounded-lg border border-neutral-800 bg-neutral-900/60 px-2 py-1.5"
+								className=""
 							>
-								<div className="text-[11px] text-neutral-500">
-									{formatTime(segment.start)} - {formatTime(segment.end)}
+								<div className="text-[11px] text-neutral-500 mt-1.5 leading-none">
+									{formatTime(segment.start)}
 								</div>
-								<div className="leading-relaxed text-neutral-100">
-									{segment.text || "(空)"}
-								</div>
-							</div>
+								<span className="">{segment.text}</span>
+							</span>
 						))}
 					</div>
 				</div>

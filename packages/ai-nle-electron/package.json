@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "./src/main/main.mjs",
+  "main": "./dist/main/main.js",
   "scripts": {
-    "dev": "node ./scripts/dev.mjs",
-    "build": "vite build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "dev": "pnpm run build:main && node ./scripts/dev.mjs",
+    "build": "pnpm run build:main && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint",
     "format": "biome format",
@@ -14,7 +15,6 @@
   },
   "dependencies": {
     "ai-nle-editor": "workspace:*",
-    "@remotion/install-whisper-cpp": "4.0.410",
     "@fontsource-variable/inter": "^5.2.8",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

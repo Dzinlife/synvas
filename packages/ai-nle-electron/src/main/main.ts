@@ -1,25 +1,27 @@
-import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerWhisperIpc } from "./asr/whisperIpc.mjs";
+import { app, BrowserWindow } from "electron";
+import { registerWhisperIpc } from "./asr/whisperIpc.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// 主进程编译后在 dist/main，preload 在源码 src/preload，需回退到包根再找 preload
+const preloadPath = path.join(__dirname, "../../src/preload/preload.cjs");
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
-const createMainWindow = async () => {
+const createMainWindow = async (): Promise<BrowserWindow> => {
 	const win = new BrowserWindow({
 		width: 1400,
 		height: 900,
 		webPreferences: {
-			preload: path.join(__dirname, "../preload/preload.cjs"),
+			preload: preloadPath,
 			contextIsolation: true,
 			nodeIntegration: false,
 		},
 	});
 
 	if (isDev) {
-		await win.loadURL(process.env.VITE_DEV_SERVER_URL);
+		await win.loadURL(process.env.VITE_DEV_SERVER_URL!);
 		win.webContents.openDevTools({ mode: "detach" });
 	} else {
 		await win.loadFile(path.join(app.getAppPath(), "dist/renderer/index.html"));

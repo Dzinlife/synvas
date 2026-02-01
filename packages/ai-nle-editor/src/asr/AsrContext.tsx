@@ -21,7 +21,7 @@ export type AsrClient = {
 	}) => Promise<void>;
 	transcribeAudioFile: (options: TranscribeAudioFileOptions) => Promise<{
 		segments: TranscriptSegment[];
-		backend?: "coreml" | "metal" | "gpu" | "cpu";
+		backend?: "gpu" | "cpu";
 		durationMs?: number;
 	}>;
 };

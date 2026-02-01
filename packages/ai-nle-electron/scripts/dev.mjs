@@ -100,6 +100,7 @@ vite.on("exit", (code) => {
 try {
 	await waitForServer(devServerUrl, { timeoutMs: 60_000 });
 	await ensureElectronInstalled();
+	// 主进程已由 pnpm dev 的 build:main 编译到 dist/main
 	electron = spawnInherited(pnpmCmd, ["exec", "electron", "."], {
 		env: {
 			...process.env,
