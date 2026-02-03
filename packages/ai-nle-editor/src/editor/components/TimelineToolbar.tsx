@@ -11,7 +11,7 @@ import {
 	useAttachments,
 	useElements,
 	useFps,
-	useMainTrackMagnet,
+	useRippleEditing,
 	useMultiSelect,
 	usePlaybackControl,
 	usePreviewAxis,
@@ -99,8 +99,8 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const [isVideoExporting, setIsVideoExporting] = useState(false);
 	const { snapEnabled, setSnapEnabled } = useSnap();
 	const { autoAttach, setAutoAttach } = useAttachments();
-	const { mainTrackMagnetEnabled, setMainTrackMagnetEnabled } =
-		useMainTrackMagnet();
+	const { rippleEditingEnabled, setRippleEditingEnabled } =
+		useRippleEditing();
 	const { previewAxisEnabled, setPreviewAxisEnabled } = usePreviewAxis();
 	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { canUndo, canRedo, undo, redo } = useTimelineHistory();
@@ -304,16 +304,16 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 					联动
 				</button>
 				<button
-					onClick={() => setMainTrackMagnetEnabled(!mainTrackMagnetEnabled)}
+					onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
 					className={cn(
 						"px-2 py-1 text-xs rounded transition-colors",
-						mainTrackMagnetEnabled
+						rippleEditingEnabled
 							? "bg-green-600 text-white"
 							: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
 					)}
-					title="主轨道磁吸"
+					title="主轨波纹编辑"
 				>
-					主轨磁吸
+					波纹编辑
 				</button>
 				<button
 					onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}

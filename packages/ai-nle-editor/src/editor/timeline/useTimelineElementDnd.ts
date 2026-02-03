@@ -50,7 +50,7 @@ interface UseTimelineElementDndOptions {
 	currentTime: number;
 	snapEnabled: boolean;
 	autoAttach: boolean;
-	mainTrackMagnetEnabled: boolean;
+	rippleEditingEnabled: boolean;
 	attachments: Map<string, string[]>;
 	selectedIds: string[];
 	select: (id: string, additive?: boolean) => void;
@@ -345,7 +345,7 @@ export const useTimelineElementDnd = ({
 	currentTime,
 	snapEnabled,
 	autoAttach,
-	mainTrackMagnetEnabled,
+	rippleEditingEnabled,
 	attachments,
 	selectedIds,
 	select,
@@ -406,7 +406,7 @@ export const useTimelineElementDnd = ({
 	const finalizeWithTrackAssignments = useCallback(
 		(nextElements: TimelineElement[]) => {
 			const finalized = finalizeTimelineElements(nextElements, {
-				mainTrackMagnetEnabled,
+				rippleEditingEnabled,
 				attachments,
 				autoAttach,
 				fps,
@@ -416,7 +416,7 @@ export const useTimelineElementDnd = ({
 		},
 		[
 			applyTrackAssignments,
-			mainTrackMagnetEnabled,
+			rippleEditingEnabled,
 			attachments,
 			autoAttach,
 			fps,
@@ -545,8 +545,8 @@ export const useTimelineElementDnd = ({
 	dragRefs.current.currentEnd = element.timeline.end;
 
 	const storedTrackIndex = element.timeline.trackIndex ?? 0;
-	const isMainTrackMagnetActive =
-		mainTrackMagnetEnabled && storedTrackIndex === 0;
+	const isRippleEditingActive =
+		rippleEditingEnabled && storedTrackIndex === 0;
 	const isTransition = isTransitionElement(element);
 	const supportsOffset = isOffsetElement(element);
 	const clampStartByMaxDuration = (
@@ -712,7 +712,7 @@ export const useTimelineElementDnd = ({
 			}
 
 			const deltaFrames = Math.round(mx / ratio);
-			if (isMainTrackMagnetActive) {
+			if (isRippleEditingActive) {
 				let previewStart = Math.max(
 					0,
 					Math.min(
@@ -842,9 +842,9 @@ export const useTimelineElementDnd = ({
 			let clampedByNeighbor = false;
 			const shouldClampByNeighbor =
 				storedTrackIndex > 0 ||
-				(storedTrackIndex === 0 && !mainTrackMagnetEnabled);
+				(storedTrackIndex === 0 && !rippleEditingEnabled);
 			if (shouldClampByNeighbor) {
-				// 主轨关闭磁吸时，禁止与相邻元素重叠
+				// 主轨关闭波纹编辑时，禁止与相邻元素重叠
 				const { prevEnd } = getStoredTrackNeighbors(
 					dragRefs.current.initialStart,
 					dragRefs.current.initialEnd,
@@ -931,7 +931,7 @@ export const useTimelineElementDnd = ({
 			}
 
 			const deltaFrames = Math.round(mx / ratio);
-			if (isMainTrackMagnetActive) {
+			if (isRippleEditingActive) {
 				let newEnd = Math.max(
 					dragRefs.current.initialStart + 1,
 					dragRefs.current.initialEnd + deltaFrames,
@@ -1009,9 +1009,9 @@ export const useTimelineElementDnd = ({
 			let clampedByNeighbor = false;
 			const shouldClampByNeighbor =
 				storedTrackIndex > 0 ||
-				(storedTrackIndex === 0 && !mainTrackMagnetEnabled);
+				(storedTrackIndex === 0 && !rippleEditingEnabled);
 			if (shouldClampByNeighbor) {
-				// 主轨关闭磁吸时，禁止与相邻元素重叠
+				// 主轨关闭波纹编辑时，禁止与相邻元素重叠
 				const { nextStart } = getStoredTrackNeighbors(
 					dragRefs.current.initialStart,
 					dragRefs.current.initialEnd,
@@ -1216,12 +1216,12 @@ export const useTimelineElementDnd = ({
 						if (isTransitionElement(selectedElement)) return true;
 						return getElementRole(selectedElement) === "clip";
 					});
-				const shouldUseMagnetMulti =
-					mainTrackMagnetEnabled && isMainTrackCandidate;
+				const shouldUseRippleEditingMulti =
+					rippleEditingEnabled && isMainTrackCandidate;
 
 				const snapResult = runPipeline(
 					{ deltaFrames, snapPoint: null as SnapPoint | null },
-					snapEnabled && !shouldUseMagnetMulti
+					snapEnabled && !shouldUseRippleEditingMulti
 						? [
 								(state) => {
 									let bestDelta = state.deltaFrames;
@@ -1356,9 +1356,9 @@ export const useTimelineElementDnd = ({
 						hasRangesOverlapOnTrack(selectedRangesForOverlap, 0));
 				const canDropToMainTrack =
 					isMainTrackCandidate &&
-					(mainTrackMagnetEnabled || !mainTrackOverlap);
+					(rippleEditingEnabled || !mainTrackOverlap);
 				const forceMainTrackPlacement =
-					!shouldUseMagnetMulti && canDropToMainTrack;
+					!shouldUseRippleEditingMulti && canDropToMainTrack;
 
 				let resolvedDropTarget = resolveDropTargetForRole(
 					baseDropTarget,
@@ -1572,7 +1572,7 @@ export const useTimelineElementDnd = ({
 						const primaryCopyId = getCopyId(element.id) ?? copyIds[0] ?? null;
 
 						if (hasMovement && copyIds.length > 0) {
-							if (shouldUseMagnetMulti) {
+							if (shouldUseRippleEditingMulti) {
 								const copies = dragSelectedIds
 									.map((sourceId) => {
 										const source = elements.find((el) => el.id === sourceId);
@@ -1582,15 +1582,15 @@ export const useTimelineElementDnd = ({
 									})
 									.filter(Boolean) as TimelineElement[];
 								if (copies.length > 0) {
-									const dropStartForMagnet = groupSpanStart;
+									const dropStartForRippleEditing = groupSpanStart;
 									setElements((prev) =>
 										applyTrackAssignments(
 											insertElementsIntoMainTrackGroup(
 												[...prev, ...copies],
 												copyIds,
-												dropStartForMagnet,
+												dropStartForRippleEditing,
 												{
-													mainTrackMagnetEnabled,
+													rippleEditingEnabled,
 													attachments,
 													autoAttach,
 													fps,
@@ -1625,7 +1625,7 @@ export const useTimelineElementDnd = ({
 								if (copies.length > 0) {
 									setElements((prev) =>
 										finalizeTimelineElements([...prev, ...copies], {
-											mainTrackMagnetEnabled,
+											rippleEditingEnabled,
 											attachments,
 											autoAttach,
 											fps,
@@ -1722,18 +1722,18 @@ export const useTimelineElementDnd = ({
 						return;
 					}
 
-					if (shouldUseMagnetMulti) {
+					if (shouldUseRippleEditingMulti) {
 						setLocalStartTime(null);
 						setLocalEndTime(null);
-						const dropStartForMagnet = groupSpanStart;
+						const dropStartForRippleEditing = groupSpanStart;
 
 						setElements((prev) =>
 							insertElementsIntoMainTrackGroup(
 								prev,
 								dragSelectedIds,
-								dropStartForMagnet,
+								dropStartForRippleEditing,
 								{
-									mainTrackMagnetEnabled,
+									rippleEditingEnabled,
 									attachments,
 									autoAttach,
 									fps,
@@ -1826,7 +1826,7 @@ export const useTimelineElementDnd = ({
 								movedChildren,
 							);
 							return finalizeTimelineElements(withChildrenTracks, {
-								mainTrackMagnetEnabled,
+								rippleEditingEnabled,
 								attachments,
 								autoAttach,
 								fps,
@@ -1945,7 +1945,7 @@ export const useTimelineElementDnd = ({
 							movedChildren,
 						);
 						return finalizeTimelineElements(withChildrenTracks, {
-							mainTrackMagnetEnabled,
+							rippleEditingEnabled,
 							attachments,
 							autoAttach,
 							fps,
@@ -1960,15 +1960,15 @@ export const useTimelineElementDnd = ({
 					setLocalTrackY(null);
 					stopAutoScroll();
 				} else {
-					if (shouldUseMagnetMulti) {
-						const dropStartForMagnet = groupSpanStart;
+					if (shouldUseRippleEditingMulti) {
+						const dropStartForRippleEditing = groupSpanStart;
 						setActiveSnapPoint(null);
 						setActiveDropTarget({
 							type: "track",
 							trackIndex: 0,
 							elementId: element.id,
-							start: dropStartForMagnet,
-							end: dropStartForMagnet + groupCompactDuration,
+							start: dropStartForRippleEditing,
+							end: dropStartForRippleEditing + groupCompactDuration,
 							finalTrackIndex: 0,
 						});
 					} else if (forceMainTrackPlacement) {
@@ -2050,8 +2050,8 @@ export const useTimelineElementDnd = ({
 				elements,
 				trackAssignments,
 			);
-			const shouldUseMagnet =
-				mainTrackMagnetEnabled &&
+			const shouldUseRippleEditing =
+				rippleEditingEnabled &&
 				resolvedDropTarget.type === "track" &&
 				resolvedDropTarget.trackIndex === 0;
 
@@ -2060,7 +2060,7 @@ export const useTimelineElementDnd = ({
 			const activeCopyId = isCopyDrag ? getCopyId(element.id) : undefined;
 
 			let snapPoint = null;
-			if (snapEnabled && !shouldUseMagnet) {
+			if (snapEnabled && !shouldUseRippleEditing) {
 				const snapExcludeId = activeCopyId ?? element.id;
 				const snapPoints = collectSnapPoints(
 					elements,
@@ -2073,7 +2073,7 @@ export const useTimelineElementDnd = ({
 				snapPoint = snapped.snapPoint;
 			}
 
-			const tempElements = !shouldUseMagnet
+			const tempElements = !shouldUseRippleEditing
 				? isCopyDrag
 					? elements
 					: elements.map((el) =>
@@ -2094,7 +2094,7 @@ export const useTimelineElementDnd = ({
 					? [...tempElements, { ...element, id: activeCopyId }]
 					: tempElements;
 			const finalTrackResult =
-				finalTrackElements && !shouldUseMagnet
+				finalTrackElements && !shouldUseRippleEditing
 					? calculateFinalTrack(
 							resolvedDropTarget,
 							{ start: newStart, end: newEnd },
@@ -2115,8 +2115,8 @@ export const useTimelineElementDnd = ({
 				if (isCopyDrag) {
 					const hasMovement = Math.abs(mx) > 0 || Math.abs(my) > 0;
 					if (hasMovement && activeCopyId) {
-						if (shouldUseMagnet) {
-							const dropStartForMagnet =
+						if (shouldUseRippleEditing) {
+							const dropStartForRippleEditing =
 								getMainTrackDropStart(
 									xy[0],
 									xy[1],
@@ -2129,9 +2129,9 @@ export const useTimelineElementDnd = ({
 									insertElementIntoMainTrack(
 										prev,
 										activeCopyId,
-										dropStartForMagnet,
+										dropStartForRippleEditing,
 										{
-											mainTrackMagnetEnabled,
+											rippleEditingEnabled,
 											attachments,
 											autoAttach,
 											fps,
@@ -2184,11 +2184,11 @@ export const useTimelineElementDnd = ({
 					return;
 				}
 
-				if (shouldUseMagnet) {
+				if (shouldUseRippleEditing) {
 					setLocalStartTime(null);
 					setLocalEndTime(null);
 					if (Math.abs(mx) > 0 || Math.abs(my) > 0) {
-						const dropStartForMagnet =
+						const dropStartForRippleEditing =
 							getMainTrackDropStart(
 								xy[0],
 								xy[1],
@@ -2196,8 +2196,8 @@ export const useTimelineElementDnd = ({
 								initialMouseOffsetRef.current.x,
 							) ?? newStart;
 						setElements((prev) =>
-							insertElementIntoMainTrack(prev, element.id, dropStartForMagnet, {
-								mainTrackMagnetEnabled,
+							insertElementIntoMainTrack(prev, element.id, dropStartForRippleEditing, {
+								rippleEditingEnabled,
 								attachments,
 								autoAttach,
 								fps,
@@ -2255,7 +2255,7 @@ export const useTimelineElementDnd = ({
 					setLocalEndTime(newEnd);
 					setLocalTrackY(newY);
 				}
-				setActiveSnapPoint(shouldUseMagnet ? null : snapPoint);
+				setActiveSnapPoint(shouldUseRippleEditing ? null : snapPoint);
 
 				const ghostWidth = isTransition
 					? Math.max(6, transitionDuration * ratio)
@@ -2273,8 +2273,8 @@ export const useTimelineElementDnd = ({
 					},
 				]);
 
-				if (shouldUseMagnet) {
-					const dropStartForMagnet =
+				if (shouldUseRippleEditing) {
+					const dropStartForRippleEditing =
 						getMainTrackDropStart(
 							xy[0],
 							xy[1],
@@ -2285,8 +2285,8 @@ export const useTimelineElementDnd = ({
 						type: "track",
 						trackIndex: 0,
 						elementId: ghostId,
-						start: dropStartForMagnet,
-						end: dropStartForMagnet + (newEnd - newStart),
+						start: dropStartForRippleEditing,
+						end: dropStartForRippleEditing + (newEnd - newStart),
 						finalTrackIndex: 0,
 					});
 				} else if (finalTrackResult) {

@@ -30,7 +30,7 @@ export interface TimelineJSON {
 export interface TimelineSettings {
 	snapEnabled: boolean;
 	autoAttach: boolean;
-	mainTrackMagnetEnabled: boolean;
+	rippleEditingEnabled: boolean;
 	previewAxisEnabled: boolean;
 }
 
@@ -413,13 +413,26 @@ function validateSettings(
 		}
 		return value;
 	};
+	const resolveOptionalBoolean = (value: any, field: string) => {
+		if (value === undefined) return undefined;
+		if (typeof value !== "boolean") {
+			throw new Error(`${path}.${field}: must be a boolean`);
+		}
+		return value;
+	};
+	const rippleEditingEnabled =
+		resolveOptionalBoolean(settings.rippleEditingEnabled, "rippleEditingEnabled") ??
+		resolveOptionalBoolean(
+			settings.mainTrackMagnetEnabled,
+			"mainTrackMagnetEnabled",
+		);
+	if (rippleEditingEnabled === undefined) {
+		throw new Error(`${path}.rippleEditingEnabled: must be a boolean`);
+	}
 	return {
 		snapEnabled: resolveBoolean(settings.snapEnabled, "snapEnabled"),
 		autoAttach: resolveBoolean(settings.autoAttach, "autoAttach"),
-		mainTrackMagnetEnabled: resolveBoolean(
-			settings.mainTrackMagnetEnabled,
-			"mainTrackMagnetEnabled",
-		),
+		rippleEditingEnabled,
 		previewAxisEnabled: resolveBoolean(
 			settings.previewAxisEnabled,
 			"previewAxisEnabled",

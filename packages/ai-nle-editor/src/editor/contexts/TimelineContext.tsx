@@ -85,8 +85,8 @@ interface TimelineStore {
 	activeSnapPoint: SnapPoint | null;
 	// 层叠关联相关状态
 	autoAttach: boolean;
-	// 主轨道磁吸模式
-	mainTrackMagnetEnabled: boolean;
+	// 主轨波纹编辑模式
+	rippleEditingEnabled: boolean;
 	// 拖拽目标指示状态
 	activeDropTarget: ExtendedDropTarget | null;
 	// 拖拽 Ghost 状态
@@ -138,8 +138,8 @@ interface TimelineStore {
 	setActiveSnapPoint: (point: SnapPoint | null) => void;
 	// 层叠关联相关方法
 	setAutoAttach: (enabled: boolean) => void;
-	// 主轨道磁吸模式方法
-	setMainTrackMagnetEnabled: (enabled: boolean) => void;
+	// 主轨波纹编辑模式方法
+	setRippleEditingEnabled: (enabled: boolean) => void;
 	// 拖拽目标指示方法
 	setActiveDropTarget: (target: ExtendedDropTarget | null) => void;
 	// 拖拽 Ghost 方法
@@ -156,7 +156,7 @@ interface TimelineStore {
 interface TimelineHistorySnapshot {
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
-	mainTrackMagnetEnabled: boolean;
+	rippleEditingEnabled: boolean;
 }
 
 const HISTORY_LIMIT = 100;
@@ -189,13 +189,13 @@ const trimHistory = (
 const buildHistorySnapshot = (state: {
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
-	mainTrackMagnetEnabled: boolean;
+	rippleEditingEnabled: boolean;
 }): TimelineHistorySnapshot => {
 	// 使用不可变快照复用元素/轨道引用，避免深拷贝占用内存
 	return {
 		elements: state.elements,
 		tracks: state.tracks,
-		mainTrackMagnetEnabled: state.mainTrackMagnetEnabled,
+		rippleEditingEnabled: state.rippleEditingEnabled,
 	};
 };
 
@@ -273,8 +273,8 @@ export const useTimelineStore = create<TimelineStore>()(
 		activeSnapPoint: null,
 		// 层叠关联相关状态初始值
 		autoAttach: true,
-		// 主轨道磁吸模式初始值
-		mainTrackMagnetEnabled: false,
+		// 主轨波纹编辑模式初始值
+		rippleEditingEnabled: false,
 		// 拖拽目标指示状态初始值
 		activeDropTarget: null,
 		// 拖拽 Ghost 状态初始值
@@ -389,7 +389,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				return {
 					elements: previous.elements,
 					tracks: previous.tracks,
-					mainTrackMagnetEnabled: previous.mainTrackMagnetEnabled,
+					rippleEditingEnabled: previous.rippleEditingEnabled,
 					historyPast: nextPast,
 					historyFuture: nextFuture,
 					selectedIds: selection.selectedIds,
@@ -415,7 +415,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				return {
 					elements: next.elements,
 					tracks: next.tracks,
-					mainTrackMagnetEnabled: next.mainTrackMagnetEnabled,
+					rippleEditingEnabled: next.rippleEditingEnabled,
 					historyPast: nextPast,
 					historyFuture: nextFuture,
 					selectedIds: selection.selectedIds,
@@ -736,16 +736,16 @@ export const useTimelineStore = create<TimelineStore>()(
 			set({ autoAttach: enabled });
 		},
 
-		// 主轨道磁吸模式方法
-		setMainTrackMagnetEnabled: (enabled: boolean) => {
+		// 主轨波纹编辑模式方法
+		setRippleEditingEnabled: (enabled: boolean) => {
 			set((state) => {
-				if (state.mainTrackMagnetEnabled === enabled) return state;
+				if (state.rippleEditingEnabled === enabled) return state;
 				const nextPast = trimHistory(
 					[...state.historyPast, buildHistorySnapshot(state)],
 					state.historyLimit,
 				);
 				return {
-					mainTrackMagnetEnabled: enabled,
+					rippleEditingEnabled: enabled,
 					historyPast: nextPast,
 					historyFuture: [],
 				};
@@ -1038,17 +1038,17 @@ export const useSnap = () => {
 	};
 };
 
-export const useMainTrackMagnet = () => {
-	const mainTrackMagnetEnabled = useTimelineStore(
-		(state) => state.mainTrackMagnetEnabled,
+export const useRippleEditing = () => {
+	const rippleEditingEnabled = useTimelineStore(
+		(state) => state.rippleEditingEnabled,
 	);
-	const setMainTrackMagnetEnabled = useTimelineStore(
-		(state) => state.setMainTrackMagnetEnabled,
+	const setRippleEditingEnabled = useTimelineStore(
+		(state) => state.setRippleEditingEnabled,
 	);
 
 	return {
-		mainTrackMagnetEnabled,
-		setMainTrackMagnetEnabled,
+		rippleEditingEnabled,
+		setRippleEditingEnabled,
 	};
 };
 
@@ -1087,8 +1087,8 @@ export const useTrackAssignments = () => {
 	const setElements = useTimelineStore((state) => state.setElements);
 	const tracks = useTimelineStore((state) => state.tracks);
 	const fps = useTimelineStore((state) => state.fps);
-	const mainTrackMagnetEnabled = useTimelineStore(
-		(state) => state.mainTrackMagnetEnabled,
+	const rippleEditingEnabled = useTimelineStore(
+		(state) => state.rippleEditingEnabled,
 	);
 	const { attachments, autoAttach } = useAttachments();
 	const trackLockedMap = useMemo(() => {
@@ -1355,7 +1355,7 @@ export const useTrackAssignments = () => {
 				});
 
 				return finalizeTimelineElements(updated, {
-					mainTrackMagnetEnabled,
+					rippleEditingEnabled,
 					attachments,
 					autoAttach,
 					fps,
@@ -1365,7 +1365,7 @@ export const useTrackAssignments = () => {
 		},
 		[
 			setElements,
-			mainTrackMagnetEnabled,
+			rippleEditingEnabled,
 			attachments,
 			autoAttach,
 			fps,
@@ -1649,7 +1649,7 @@ export const useTrackAssignments = () => {
 				}
 
 				const finalized = finalizeTimelineElements(updated, {
-					mainTrackMagnetEnabled,
+					rippleEditingEnabled,
 					attachments,
 					autoAttach,
 					fps,
@@ -1660,7 +1660,7 @@ export const useTrackAssignments = () => {
 		},
 		[
 			setElements,
-			mainTrackMagnetEnabled,
+			rippleEditingEnabled,
 			attachments,
 			autoAttach,
 			fps,
@@ -1821,7 +1821,7 @@ export const TimelineProvider = ({
 		? {
 				snapEnabled: initialSettings.snapEnabled,
 				autoAttach: initialSettings.autoAttach,
-				mainTrackMagnetEnabled: initialSettings.mainTrackMagnetEnabled,
+				rippleEditingEnabled: initialSettings.rippleEditingEnabled,
 				previewAxisEnabled: initialSettings.previewAxisEnabled,
 			}
 		: null;

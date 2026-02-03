@@ -7,7 +7,7 @@ import {
 	useCurrentTime,
 	useElements,
 	useFps,
-	useMainTrackMagnet,
+	useRippleEditing,
 } from "../contexts/TimelineContext";
 import {
 	resolveMaterialDropTarget,
@@ -46,7 +46,7 @@ export function useExternalMaterialDnd({
 	const { currentTime } = useCurrentTime();
 	const { setElements } = useElements();
 	const { attachments, autoAttach } = useAttachments();
-	const { mainTrackMagnetEnabled } = useMainTrackMagnet();
+	const { rippleEditingEnabled } = useRippleEditing();
 	const materialDndContext = useMaterialDndContext();
 	const trackLockedMap = materialDndContext.trackLockedMap;
 
@@ -365,7 +365,7 @@ export function useExternalMaterialDnd({
 				let targetType: "track" | "gap" = resolvedDropTarget.type ?? "track";
 
 				const postProcessOptions = {
-					mainTrackMagnetEnabled,
+					rippleEditingEnabled,
 					attachments,
 					autoAttach,
 					fps,
@@ -434,7 +434,7 @@ export function useExternalMaterialDnd({
 							postProcessOptions,
 						);
 						targetType = "track";
-					} else if (mainTrackMagnetEnabled && insertIndex === 0) {
+					} else if (rippleEditingEnabled && insertIndex === 0) {
 						nextElements = insertElementIntoMainTrack(
 							nextElements,
 							newElement.id,
@@ -466,7 +466,7 @@ export function useExternalMaterialDnd({
 			currentTime,
 			fps,
 			materialDndContext,
-			mainTrackMagnetEnabled,
+			rippleEditingEnabled,
 			attachments,
 			autoAttach,
 			trackLockedMap,

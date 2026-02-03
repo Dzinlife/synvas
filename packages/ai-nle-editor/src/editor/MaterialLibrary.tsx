@@ -24,7 +24,7 @@ import {
 import {
 	useAttachments,
 	useFps,
-	useMainTrackMagnet,
+	useRippleEditing,
 	useTimelineStore,
 } from "./contexts/TimelineContext";
 import {
@@ -227,7 +227,7 @@ const MaterialLibrary: React.FC = () => {
 	const currentTime = useTimelineStore((state) => state.currentTime);
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
-	const { mainTrackMagnetEnabled } = useMainTrackMagnet();
+	const { rippleEditingEnabled } = useRippleEditing();
 
 	// 处理素材库拖拽放置到时间线
 	const handleTimelineDrop = useCallback(
@@ -241,7 +241,7 @@ const MaterialLibrary: React.FC = () => {
 				const startFrame = clampFrame(time);
 
 				const postProcessOptions = {
-					mainTrackMagnetEnabled,
+					rippleEditingEnabled,
 					attachments,
 					autoAttach,
 					fps,
@@ -361,8 +361,8 @@ const MaterialLibrary: React.FC = () => {
 					);
 				}
 
-				// 主轨开启磁吸时，插入逻辑交给主轨处理以保持连续性
-				if (mainTrackMagnetEnabled && trackIndex === 0) {
+				// 主轨开启波纹编辑时，插入逻辑交给主轨处理以保持连续性
+				if (rippleEditingEnabled && trackIndex === 0) {
 					return insertElementIntoMainTrack(
 						prev,
 						newElement.id,
@@ -380,7 +380,7 @@ const MaterialLibrary: React.FC = () => {
 		},
 		[
 			setElements,
-			mainTrackMagnetEnabled,
+			rippleEditingEnabled,
 			attachments,
 			autoAttach,
 			fps,
@@ -402,7 +402,7 @@ const MaterialLibrary: React.FC = () => {
 				const newId = `element-${Date.now()}`;
 				const trackAssignments = getStoredTrackAssignments(prev);
 				const trackCount = getTrackCount(trackAssignments);
-				// 预览投放默认落在非主轨，避免主轨磁吸造成意外移动
+				// 预览投放默认落在非主轨，避免主轨波纹编辑造成意外移动
 				const targetTrackIndex = 1; // 预览投放默认非主轨
 				const finalTrack = findAvailableTrack(
 					startFrame,

@@ -53,7 +53,7 @@ export interface MaterialDndContext {
 	trackRoleMap: Map<number, TrackRole>;
 	trackLockedMap: Map<number, boolean>;
 	trackCount: number;
-	mainTrackMagnetEnabled: boolean;
+	rippleEditingEnabled: boolean;
 }
 
 export function useMaterialDndContext(): MaterialDndContext {
@@ -61,8 +61,8 @@ export function useMaterialDndContext(): MaterialDndContext {
 	const { timelineScale } = useTimelineScale();
 	const ratio = getPixelsPerFrame(fps, timelineScale);
 	const elements = useTimelineStore((state) => state.elements);
-	const mainTrackMagnetEnabled = useTimelineStore(
-		(state) => state.mainTrackMagnetEnabled,
+	const rippleEditingEnabled = useTimelineStore(
+		(state) => state.rippleEditingEnabled,
 	);
 	const { tracks } = useTracks();
 	const trackAssignments = useMemo(
@@ -93,7 +93,7 @@ export function useMaterialDndContext(): MaterialDndContext {
 		trackRoleMap,
 		trackLockedMap,
 		trackCount,
-		mainTrackMagnetEnabled,
+		rippleEditingEnabled,
 	};
 }
 
@@ -190,7 +190,7 @@ export function resolveMaterialDropTarget(
 	): boolean => {
 		if (!isRoleCompatibleWithTrack(state.materialRole, trackIndex)) return true;
 		if (resolveTrackRole(trackIndex) !== state.materialRole) return true;
-		if (trackIndex === MAIN_TRACK_INDEX && context.mainTrackMagnetEnabled) {
+		if (trackIndex === MAIN_TRACK_INDEX && context.rippleEditingEnabled) {
 			return false;
 		}
 		return hasOverlapOnTrack(

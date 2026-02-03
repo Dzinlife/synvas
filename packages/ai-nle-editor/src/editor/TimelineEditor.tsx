@@ -24,11 +24,10 @@ import {
 	useDragging,
 	useElements,
 	useFps,
-	useMainTrackMagnet,
+	useRippleEditing,
 	useMultiSelect,
 	usePlaybackControl,
 	usePreviewAxis,
-	usePreviewTime,
 	useSnap,
 	useTimelineScale,
 	useTimelineStore,
@@ -88,7 +87,7 @@ const TimelineEditor = () => {
 	const setCurrentTime = useTimelineStore((state) => state.setCurrentTime);
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
 	const setScrollLeft = useTimelineStore((state) => state.setScrollLeft);
-	const { setPreviewTime } = usePreviewTime();
+	const setPreviewTime = useTimelineStore((state) => state.setPreviewTime);
 	const { previewAxisEnabled } = usePreviewAxis();
 	const { isPlaying } = usePlaybackControl();
 	const { currentTime } = useCurrentTime();
@@ -108,7 +107,7 @@ const TimelineEditor = () => {
 	const { activeDropTarget, dragGhosts, isDragging } = useDragging();
 	const { autoScrollSpeed, autoScrollSpeedY } = useAutoScroll();
 	const { attachments, autoAttach } = useAttachments();
-	const { mainTrackMagnetEnabled } = useMainTrackMagnet();
+	const { rippleEditingEnabled } = useRippleEditing();
 	const trackLockedMap = useMemo(() => {
 		return new Map(
 			tracks.map((track, index) => [index, track.locked ?? false]),
@@ -125,7 +124,7 @@ const TimelineEditor = () => {
 		deselectAll();
 	}, [selectedIds, setElements, deselectAll, fps]);
 
-	const mainTrackMagnetRef = useRef(mainTrackMagnetEnabled);
+	const rippleEditingRef = useRef(rippleEditingEnabled);
 
 	// 滚动位置 refs
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -149,6 +148,11 @@ const TimelineEditor = () => {
 		rectBottom: number;
 	} | null>(null);
 	const wasDraggingRef = useRef(false);
+	const lastPreviewTimeRef = useRef<number | null>(null);
+	const previewTimeRafRef = useRef<number | null>(null);
+	const pendingPreviewTimeRef = useRef<number | null>(null);
+	const currentTimeRafRef = useRef<number | null>(null);
+	const pendingCurrentTimeRef = useRef<number | null>(null);
 
 	// 左侧列宽度状态
 	const [leftColumnWidth] = useState(172); // 默认 44 * 4 = 176px (w-44)
@@ -165,11 +169,11 @@ const TimelineEditor = () => {
 	});
 	const selectionRectRef = useRef(selectionRect);
 	useEffect(() => {
-		if (mainTrackMagnetEnabled && !mainTrackMagnetRef.current) {
+		if (rippleEditingEnabled && !rippleEditingRef.current) {
 			setElements(
 				(prev) =>
 					finalizeTimelineElements(prev, {
-						mainTrackMagnetEnabled: true,
+						rippleEditingEnabled: true,
 						attachments,
 						autoAttach,
 						fps,
@@ -178,9 +182,9 @@ const TimelineEditor = () => {
 				{ history: false },
 			);
 		}
-		mainTrackMagnetRef.current = mainTrackMagnetEnabled;
+		rippleEditingRef.current = rippleEditingEnabled;
 	}, [
-		mainTrackMagnetEnabled,
+		rippleEditingEnabled,
 		setElements,
 		attachments,
 		autoAttach,
@@ -297,6 +301,74 @@ const TimelineEditor = () => {
 		[setElements, fps],
 	);
 
+	const updatePreviewTime = useCallback(
+		(time: number | null) => {
+			if (typeof window === "undefined") {
+				if (lastPreviewTimeRef.current === time) return;
+				lastPreviewTimeRef.current = time;
+				setPreviewTime(time);
+				return;
+			}
+			pendingPreviewTimeRef.current = time;
+			if (previewTimeRafRef.current !== null) return;
+			// 使用 rAF 合并高频预览更新，减少 Electron 下卡顿
+			previewTimeRafRef.current = window.requestAnimationFrame(() => {
+				previewTimeRafRef.current = null;
+				const nextTime = pendingPreviewTimeRef.current ?? null;
+				pendingPreviewTimeRef.current = null;
+				if (lastPreviewTimeRef.current === nextTime) return;
+				lastPreviewTimeRef.current = nextTime;
+				setPreviewTime(nextTime);
+			});
+		},
+		[setPreviewTime],
+	);
+
+	const scheduleCurrentTime = useCallback(
+		(time: number) => {
+			if (typeof window === "undefined") {
+				setCurrentTime(time);
+				return;
+			}
+			pendingCurrentTimeRef.current = time;
+			if (currentTimeRafRef.current !== null) return;
+			// 使用 rAF 合并拖拽更新，避免高频 seek 阻塞
+			currentTimeRafRef.current = window.requestAnimationFrame(() => {
+				currentTimeRafRef.current = null;
+				const nextTime = pendingCurrentTimeRef.current;
+				if (nextTime === null || nextTime === undefined) return;
+				pendingCurrentTimeRef.current = null;
+				setCurrentTime(nextTime);
+			});
+		},
+		[setCurrentTime],
+	);
+
+	const flushCurrentTime = useCallback(() => {
+		if (typeof window !== "undefined" && currentTimeRafRef.current !== null) {
+			window.cancelAnimationFrame(currentTimeRafRef.current);
+			currentTimeRafRef.current = null;
+		}
+		const nextTime = pendingCurrentTimeRef.current;
+		if (nextTime === null || nextTime === undefined) return;
+		pendingCurrentTimeRef.current = null;
+		setCurrentTime(nextTime);
+	}, [setCurrentTime]);
+
+	useEffect(() => {
+		return () => {
+			if (typeof window === "undefined") return;
+			if (previewTimeRafRef.current !== null) {
+				window.cancelAnimationFrame(previewTimeRafRef.current);
+				previewTimeRafRef.current = null;
+			}
+			if (currentTimeRafRef.current !== null) {
+				window.cancelAnimationFrame(currentTimeRafRef.current);
+				currentTimeRafRef.current = null;
+			}
+		};
+	}, []);
+
 	// hover 时设置预览时间（临时）
 	const handleMouseMove = useCallback(
 		(e: React.MouseEvent<HTMLDivElement>) => {
@@ -310,12 +382,12 @@ const TimelineEditor = () => {
 				rectBottom: rect.bottom,
 			};
 			if (isRulerDraggingRef.current) {
-				setPreviewTime(null);
+				updatePreviewTime(null);
 				return;
 			}
 			const x = e.clientX - rect.left;
 			if (x <= leftColumnWidth) {
-				setPreviewTime(null);
+				updatePreviewTime(null);
 				return;
 			}
 			if (isPlaying || isDragging || isSelectingRef.current) return;
@@ -324,19 +396,19 @@ const TimelineEditor = () => {
 				(x - leftColumnWidth - timelinePaddingLeft + scrollLeft) / ratio,
 			);
 			startTransition(() => {
-				setPreviewTime(time);
+				updatePreviewTime(time);
 			});
 		},
-		[
-			previewAxisEnabled,
-			ratio,
-			scrollLeft,
-			leftColumnWidth,
-			isPlaying,
-			isDragging,
-			setPreviewTime,
-		],
-	);
+			[
+				previewAxisEnabled,
+				ratio,
+				scrollLeft,
+				leftColumnWidth,
+				isPlaying,
+				isDragging,
+				updatePreviewTime,
+			],
+		);
 
 	const {
 		handleExternalDragEnter,
@@ -365,8 +437,8 @@ const TimelineEditor = () => {
 			const time = clampFrame(
 				(x - leftColumnWidth - timelinePaddingLeft + scrollLeft) / ratio,
 			);
-			setCurrentTime(time);
-			setPreviewTime(null); // 清除预览时间
+				setCurrentTime(time);
+				updatePreviewTime(null); // 清除预览时间
 			if (!options?.keepSelection) {
 				deselectAll(); // 清除选中状态
 			}
@@ -376,24 +448,36 @@ const TimelineEditor = () => {
 			scrollLeft,
 			leftColumnWidth,
 			timelinePaddingLeft,
-			setCurrentTime,
-			setPreviewTime,
-			deselectAll,
-			selectionRect,
-		],
-	);
+				setCurrentTime,
+				updatePreviewTime,
+				deselectAll,
+				selectionRect,
+			],
+		);
 
 	const updateCurrentTimeFromClientX = useCallback(
-		(clientX: number) => {
+		(clientX: number, options?: { immediate?: boolean }) => {
 			const rect = timeStampsRef.current?.getBoundingClientRect();
 			if (!rect) return;
 			const x = clientX - rect.left;
 			const time = clampFrame(
 				(x - leftColumnWidth - timelinePaddingLeft + scrollLeft) / ratio,
 			);
-			setCurrentTime(time);
+			if (options?.immediate) {
+				pendingCurrentTimeRef.current = time;
+				flushCurrentTime();
+				return;
+			}
+			scheduleCurrentTime(time);
 		},
-		[leftColumnWidth, ratio, scrollLeft, setCurrentTime, timelinePaddingLeft],
+		[
+			leftColumnWidth,
+			ratio,
+			scrollLeft,
+			timelinePaddingLeft,
+			scheduleCurrentTime,
+			flushCurrentTime,
+		],
 	);
 
 	// 时间尺点击只更新时间，不影响选中状态
@@ -407,8 +491,8 @@ const TimelineEditor = () => {
 	// 鼠标离开时清除预览时间，回到固定时间
 	const handleMouseLeave = useCallback(() => {
 		lastHoverRef.current = null;
-		setPreviewTime(null);
-	}, [setPreviewTime]);
+		updatePreviewTime(null);
+	}, [updatePreviewTime]);
 	const bindRulerDrag = useDrag(
 		({ first, last, tap, xy, cancel }) => {
 			if (tap) return;
@@ -421,9 +505,9 @@ const TimelineEditor = () => {
 					return;
 				}
 				isRulerDraggingRef.current = true;
-				setPreviewTime(null);
+				updatePreviewTime(null);
 			}
-			updateCurrentTimeFromClientX(xy[0]);
+			updateCurrentTimeFromClientX(xy[0], { immediate: last });
 			if (last) {
 				isRulerDraggingRef.current = false;
 			}
@@ -435,9 +519,9 @@ const TimelineEditor = () => {
 
 	useEffect(() => {
 		if (selectionRect.visible) {
-			setPreviewTime(null);
+			updatePreviewTime(null);
 		}
-	}, [selectionRect.visible, setPreviewTime]);
+	}, [selectionRect.visible, updatePreviewTime]);
 
 	useEffect(() => {
 		if (wasDraggingRef.current && !isDragging && !isPlaying) {
@@ -451,28 +535,28 @@ const TimelineEditor = () => {
 				if (isInside && !isSelectingRef.current) {
 					const x = lastHover.clientX - lastHover.rectLeft;
 					if (!previewAxisEnabled || x <= leftColumnWidth) {
-						setPreviewTime(null);
+						updatePreviewTime(null);
 						wasDraggingRef.current = isDragging;
 						return;
 					}
 					const time = clampFrame(
 						(x - leftColumnWidth - timelinePaddingLeft + scrollLeft) / ratio,
 					);
-					setPreviewTime(time);
+					updatePreviewTime(time);
 				}
 			}
 		}
 		wasDraggingRef.current = isDragging;
-	}, [
-		isDragging,
-		isPlaying,
-		previewAxisEnabled,
-		leftColumnWidth,
-		ratio,
-		scrollLeft,
-		timelinePaddingLeft,
-		setPreviewTime,
-	]);
+		}, [
+			isDragging,
+			isPlaying,
+			previewAxisEnabled,
+			leftColumnWidth,
+			ratio,
+			scrollLeft,
+			timelinePaddingLeft,
+			updatePreviewTime,
+		]);
 
 	const computeSelectionInRect = useCallback(
 		(rect: { x1: number; y1: number; x2: number; y2: number }) => {
@@ -594,7 +678,7 @@ const TimelineEditor = () => {
 			}
 			if (!selectionActivatedRef.current) {
 				selectionActivatedRef.current = true;
-				setPreviewTime(null); // 进入框选后暂停预览，避免画面闪烁
+				updatePreviewTime(null); // 进入框选后暂停预览，避免画面闪烁
 			}
 			const nextRect = {
 				visible: true,
@@ -607,7 +691,7 @@ const TimelineEditor = () => {
 			setSelectionRect(nextRect);
 			applyMarqueeSelection(nextRect);
 		},
-		[applyMarqueeSelection, setPreviewTime],
+		[applyMarqueeSelection, updatePreviewTime],
 	);
 
 	const handleSelectionMouseUp = useCallback(() => {

@@ -20,7 +20,7 @@ export interface MainTrackMagnetOptions {
 }
 
 export interface TimelinePostProcessOptions extends MainTrackMagnetOptions {
-	mainTrackMagnetEnabled?: boolean;
+	rippleEditingEnabled?: boolean;
 }
 
 function isMainTrackElement(element: TimelineElement): boolean {
@@ -153,7 +153,7 @@ export function finalizeTimelineElements(
 	options: TimelinePostProcessOptions = {},
 ): TimelineElement[] {
 	let normalized = normalizeStoredTrackIndices(elements);
-	if (options.mainTrackMagnetEnabled) {
+	if (options.rippleEditingEnabled) {
 		normalized = compactMainTrackElements(normalized, {
 			attachments: options.attachments,
 			autoAttach: options.autoAttach,
@@ -231,9 +231,9 @@ export function shiftMainTrackElementsAfter(
 		updates,
 		normalizeFps(options.fps),
 	);
-	const magnetEnabled = options.mainTrackMagnetEnabled ?? true;
+	const rippleEditingEnabled = options.rippleEditingEnabled ?? true;
 	return finalizeTimelineElements(updated, {
-		mainTrackMagnetEnabled: magnetEnabled,
+		rippleEditingEnabled,
 		attachments: options.attachments,
 		autoAttach: options.autoAttach,
 		fps: options.fps,
@@ -248,7 +248,7 @@ export function reorderMainTrackElementsByInsert(
 ): TimelineElement[] {
 	const ordered = sortMainTrackElements(elements);
 	if (ordered.length <= 1) {
-		// 单元素也需要执行主轨磁吸归一化
+		// 单元素也需要执行主轨波纹编辑归一化
 		return finalizeTimelineElements(elements, options);
 	}
 	const target = ordered.find((el) => el.id === targetId);
@@ -275,9 +275,9 @@ export function reorderMainTrackElementsByInsert(
 	const startAt = ordered[0].timeline.start;
 	const orderedIds = newOrder.map((el) => el.id);
 	const updated = reflowMainTrack(elements, orderedIds, startAt, options);
-	const magnetEnabled = options.mainTrackMagnetEnabled ?? true;
+	const rippleEditingEnabled = options.rippleEditingEnabled ?? true;
 	return finalizeTimelineElements(updated, {
-		mainTrackMagnetEnabled: magnetEnabled,
+		rippleEditingEnabled,
 		attachments: options.attachments,
 		autoAttach: options.autoAttach,
 		fps: options.fps,
@@ -378,7 +378,7 @@ export function insertElementsIntoMainTrackGroup(
 	const reflowed = reflowMainTrack(updated, orderedIds, 0, options);
 
 	return finalizeTimelineElements(reflowed, {
-		mainTrackMagnetEnabled: options.mainTrackMagnetEnabled ?? true,
+		rippleEditingEnabled: options.rippleEditingEnabled ?? true,
 		attachments: options.attachments,
 		autoAttach: options.autoAttach,
 	});

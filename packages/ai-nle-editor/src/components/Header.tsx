@@ -45,7 +45,7 @@ export default function Header() {
 			{
 				snapEnabled: state.snapEnabled,
 				autoAttach: state.autoAttach,
-				mainTrackMagnetEnabled: state.mainTrackMagnetEnabled,
+				rippleEditingEnabled: state.rippleEditingEnabled,
 				previewAxisEnabled: state.previewAxisEnabled,
 			},
 			transcripts,

@@ -41,7 +41,7 @@ export const buildEmptyTimeline = (): TimelineJSON => ({
 	settings: {
 		snapEnabled: true,
 		autoAttach: true,
-		mainTrackMagnetEnabled: true,
+		rippleEditingEnabled: true,
 		previewAxisEnabled: true,
 	},
 	tracks: [],
