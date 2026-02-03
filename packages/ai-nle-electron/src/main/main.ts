@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow } from "electron";
+import fs from "node:fs";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { registerWhisperIpc } from "./asr/whisperIpc.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,29 @@ const createMainWindow = async (): Promise<BrowserWindow> => {
 
 app.whenReady().then(async () => {
 	registerWhisperIpc();
+	ipcMain.handle("file:stat", async (_event, filePath: string) => {
+		const stat = await fs.promises.stat(filePath);
+		return { size: stat.size };
+	});
+	ipcMain.handle(
+		"file:read",
+		async (_event, filePath: string, start: number, end: number) => {
+			const handle = await fs.promises.open(filePath, "r");
+			try {
+				const length = Math.max(0, end - start);
+				const buffer = Buffer.alloc(length);
+				const { bytesRead } = await handle.read(
+					buffer,
+					0,
+					length,
+					start,
+				);
+				return buffer.subarray(0, bytesRead);
+			} finally {
+				await handle.close();
+			}
+		},
+	);
 	await createMainWindow();
 
 	app.on("activate", async () => {

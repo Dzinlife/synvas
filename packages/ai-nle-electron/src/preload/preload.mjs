@@ -1,7 +1,15 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 contextBridge.exposeInMainWorld("aiNleElectron", {
 	platform: process.platform,
+	webUtils: {
+		getPathForFile: (file) => webUtils.getPathForFile(file),
+	},
+	file: {
+		stat: (filePath) => ipcRenderer.invoke("file:stat", filePath),
+		read: (filePath, start, end) =>
+			ipcRenderer.invoke("file:read", filePath, start, end),
+	},
 	asr: {
 		whisperCheckReady: (options) =>
 			ipcRenderer.invoke("asr:whisper:checkReady", options),

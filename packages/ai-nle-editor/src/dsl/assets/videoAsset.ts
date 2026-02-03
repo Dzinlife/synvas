@@ -1,4 +1,10 @@
-import { ALL_FORMATS, CanvasSink, Input, UrlSource } from "mediabunny";
+import {
+	ALL_FORMATS,
+	CanvasSink,
+	Input,
+	StreamSource,
+	UrlSource,
+} from "mediabunny";
 import type { SkImage } from "react-skia-lite";
 import { type AssetHandle, assetStore } from "./AssetStore";
 
@@ -34,6 +40,11 @@ export const acquireVideoAsset = (
 };
 
 const OPFS_PREFIX = "opfs://";
+const FILE_PREFIX = "file://";
+
+const isElectronEnv = (): boolean => {
+	return typeof window !== "undefined" && "aiNleElectron" in window;
+};
 
 const resolveOpfsFile = async (uri: string): Promise<File> => {
 	const rawPath = uri.slice(OPFS_PREFIX.length);
@@ -50,20 +61,84 @@ const resolveOpfsFile = async (uri: string): Promise<File> => {
 	return fileHandle.getFile();
 };
 
-const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
-	let sourceUrl = uri;
-	let releaseSource: (() => void) | undefined;
+const resolveFilePathFromUri = (uri: string): string | null => {
+	if (!uri.startsWith(FILE_PREFIX)) return null;
+	try {
+		const url = new URL(uri);
+		let pathname = decodeURIComponent(url.pathname);
+		if (url.hostname) {
+			pathname = `//${url.hostname}${pathname}`;
+		}
+		if (/^\/[a-zA-Z]:\//.test(pathname)) {
+			pathname = pathname.slice(1);
+		}
+		return pathname;
+	} catch {
+		return null;
+	}
+};
 
-	if (uri.startsWith(OPFS_PREFIX)) {
+const getElectronFileBridge = (): {
+	stat: (filePath: string) => Promise<{ size: number }>;
+	read: (
+		filePath: string,
+		start: number,
+		end: number,
+	) => Promise<Uint8Array | ArrayBuffer>;
+} | null => {
+	if (typeof window === "undefined") return null;
+	const bridge = (
+		window as Window & {
+			aiNleElectron?: {
+				file?: {
+					stat: (filePath: string) => Promise<{ size: number }>;
+					read: (
+						filePath: string,
+						start: number,
+						end: number,
+					) => Promise<Uint8Array | ArrayBuffer>;
+				};
+			};
+		}
+	).aiNleElectron?.file;
+	if (!bridge?.stat || !bridge.read) return null;
+	return bridge;
+};
+
+const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
+	let releaseSource: (() => void) | undefined;
+	let source: UrlSource | StreamSource;
+
+	if (isElectronEnv() && uri.startsWith(FILE_PREFIX)) {
+		const filePath = resolveFilePathFromUri(uri);
+		const bridge = getElectronFileBridge();
+		if (!filePath || !bridge) {
+			throw new Error("无法读取本地视频文件");
+		}
+		source = new StreamSource({
+			getSize: async () => {
+				const { size } = await bridge.stat(filePath);
+				return size;
+			},
+			read: async (start, end) => {
+				const data = await bridge.read(filePath, start, end);
+				if (data instanceof Uint8Array) return data;
+				return new Uint8Array(data);
+			},
+			prefetchProfile: "fileSystem",
+		});
+	} else if (uri.startsWith(OPFS_PREFIX)) {
 		// OPFS 文件需要转成 objectURL 供解码器读取
 		const file = await resolveOpfsFile(uri);
-		sourceUrl = URL.createObjectURL(file);
+		const sourceUrl = URL.createObjectURL(file);
+		source = new UrlSource(sourceUrl);
 		releaseSource = () => {
 			URL.revokeObjectURL(sourceUrl);
 		};
+	} else {
+		source = new UrlSource(uri);
 	}
 
-	const source = new UrlSource(sourceUrl);
 	const input = new Input({
 		source,
 		formats: ALL_FORMATS,

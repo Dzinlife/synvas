@@ -20,7 +20,7 @@ import {
 	getFallbackVideoMetadata,
 	isVideoFile,
 	readVideoMetadata,
-	writeVideoToOpfs,
+	resolveExternalVideoUri,
 } from "../utils/externalVideo";
 import {
 	finalizeTimelineElements,
@@ -77,23 +77,31 @@ export function useExternalMaterialDnd({
 		[],
 	);
 
+	const isElectron = typeof window !== "undefined" && "aiNleElectron" in window;
+
 	const getExternalVideoFiles = useCallback(
 		(dataTransfer: DataTransfer | null) => {
 			if (!dataTransfer) return [];
+			const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+			const itemFiles = items
+				.map((item) => (item.kind === "file" ? item.getAsFile() : null))
+				.filter((file): file is File => Boolean(file));
+			const itemVideoFiles = itemFiles.filter((file) => isVideoFile(file));
+			if (isElectron) {
+				const hasFilePath = (file: File): boolean => {
+					const rawPath = (file as File & { path?: string }).path;
+					return typeof rawPath === "string" && rawPath.trim().length > 0;
+				};
+				const itemWithPath = itemVideoFiles.filter((file) => hasFilePath(file));
+				if (itemWithPath.length > 0) return itemWithPath;
+			}
 			const files = Array.from(dataTransfer.files);
 			if (files.length > 0) {
 				return files.filter((file) => isVideoFile(file));
 			}
-			if (dataTransfer.items) {
-				const items = Array.from(dataTransfer.items);
-				return items
-					.map((item) => (item.kind === "file" ? item.getAsFile() : null))
-					.filter((file): file is File => Boolean(file))
-					.filter((file) => isVideoFile(file));
-			}
-			return [];
+			return itemVideoFiles;
 		},
-		[],
+		[isElectron],
 	);
 
 	const resolveExternalDropTarget = useCallback(
@@ -244,7 +252,7 @@ export function useExternalMaterialDnd({
 			}[] = [];
 			for (const file of files) {
 				try {
-					const { uri } = await writeVideoToOpfs(file);
+					const uri = await resolveExternalVideoUri(file);
 					const metadata = await readVideoMetadata(file).catch(() =>
 						getFallbackVideoMetadata(),
 					);

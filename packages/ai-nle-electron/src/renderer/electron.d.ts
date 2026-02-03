@@ -81,6 +81,17 @@ declare global {
 	interface Window {
 		aiNleElectron?: {
 			platform?: NodeJS.Platform;
+			webUtils?: {
+				getPathForFile?: (file: File) => string | null | undefined;
+			};
+			file?: {
+				stat?: (filePath: string) => Promise<{ size: number }>;
+				read?: (
+					filePath: string,
+					start: number,
+					end: number,
+				) => Promise<Uint8Array | ArrayBuffer>;
+			};
 			asr: {
 				whisperCheckReady: (options: {
 					model: AsrModelSize;
