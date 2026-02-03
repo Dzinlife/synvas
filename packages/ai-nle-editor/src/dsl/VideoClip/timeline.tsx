@@ -1,4 +1,9 @@
-import { useFps, useTimelineStore } from "@nle/editor/contexts/TimelineContext";
+import {
+	useFps,
+	useTimelineScale,
+	useTimelineStore,
+} from "@nle/editor/contexts/TimelineContext";
+import { getPixelsPerFrame } from "@nle/editor/utils/timelineScale";
 import { framesToSeconds, framesToTimecode } from "@nle/utils/timecode";
 import {
 	useCallback,
@@ -31,6 +36,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	end,
 }) => {
 	const { fps } = useFps();
+	const { timelineScale } = useTimelineScale();
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const renderTokenRef = useRef(0);
 	const lastRenderKeyRef = useRef("");
@@ -183,7 +189,10 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			const thumbnailHeight = canvasHeight;
 			const thumbnailWidth = Math.max(1, thumbnailHeight * sourceAspectRatio);
 			const numThumbnails = Math.max(1, Math.ceil(clipWidth / thumbnailWidth));
-			const previewInterval = clipDurationSeconds / numThumbnails;
+			// 预览间隔跟时间线缩放相关，避免随 clip 时长变化抖动
+			const pixelsPerSecond = getPixelsPerFrame(fps, timelineScale) * fps;
+			const previewInterval =
+				thumbnailWidth / Math.max(1e-6, pixelsPerSecond);
 
 			const overscan = thumbnailWidth * 2;
 			const renderStartX = Math.max(0, visibleStartX - overscan);
@@ -204,6 +213,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 				`${clipWidth}x${canvasHeight}`,
 				`${canvasOffsetX}-${canvasWidth}`,
 				pixelRatio,
+				timelineScale,
 				hasSink ? 1 : 0,
 				hasInput ? 1 : 0,
 				`${startIndex}-${endIndex}`,
@@ -294,6 +304,8 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 		clipDurationSeconds,
 		clipDurationFrames,
 		offsetSeconds,
+		fps,
+		timelineScale,
 	]);
 
 	const scheduleGenerate = useCallback(() => {

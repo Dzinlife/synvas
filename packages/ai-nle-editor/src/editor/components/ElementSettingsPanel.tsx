@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useModelSelectorSafe } from "@nle/dsl/model";
+import { Button } from "@nle/components/ui/button";
+import { useModel, useModelSelectorSafe } from "@nle/dsl/model";
 import { framesToTimecode } from "@nle/utils/timecode";
+import React, { useEffect, useMemo, useState } from "react";
 import {
 	useElements,
 	useFps,
@@ -96,6 +97,16 @@ const ElementSettingsPanel: React.FC = () => {
 							: "-"}
 					</div>
 					<div>props: {JSON.stringify(selectedElement.props)}</div>
+					<div>
+						<Button
+							onClick={() => {
+								const model = useModel(selectedElement.id);
+								console.log(model.getState());
+							}}
+						>
+							log internal
+						</Button>
+					</div>
 				</div>
 			</div>
 		</div>
