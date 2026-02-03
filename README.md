@@ -7,9 +7,10 @@ This is a monorepo using pnpm workspaces and Turborepo.
 ```
 ai-nle/
 ├── packages/
-│   ├── ai-nle-web/      # Web entry (TanStack Start)
-│   ├── ai-nle-editor/   # Editor UI + shared logic
-│   ├── ai-nle-electron/ # Desktop app (Electron) - local Whisper.cpp backend
+│   ├── core/     # Core Engine
+│   ├── web/      # Web entry (TanStack Start)
+│   ├── editor/   # Editor UI + shared logic
+│   ├── electron/ # Desktop app (Electron) - local Whisper.cpp backend
 │   └── react-skia-lite/ # ESM version of react-native-skia for web
 ├── pnpm-workspace.yaml
 ├── turbo.json

@@ -1,0 +1,37 @@
+{
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": [
+    "**/*.flow",
+    "**/node_modules/**/*.flow",
+    "../react-skia-lite/**/*",
+    "src/test/**/*"
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": false,
+    "noEmit": true,
+
+    /* Linting */
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@nle/editor": ["../editor/src/*"],
+      "core": ["../core/src/index.ts"],
+      "core/*": ["../core/src/*"]
+    }
+  }
+}

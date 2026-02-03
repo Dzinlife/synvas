@@ -1,0 +1,429 @@
+import type { TimelineElement, TrackRole } from "../../dsl/types";
+import type { TimelineTrack } from "../timeline/types";
+
+/**
+ * 主轨道索引（固定为 0，显示在最底部）
+ */
+export const MAIN_TRACK_INDEX = 0;
+
+export type ResolveRole = (element: TimelineElement) => TrackRole;
+
+export type TrackRoleOptions = {
+	resolveRole?: ResolveRole;
+};
+
+/**
+ * 获取元素 role（缺省时按 timeline.role -> resolveRole -> clip）
+ */
+export function getElementRole(
+	element: TimelineElement,
+	options?: TrackRoleOptions,
+): TrackRole {
+	if (element.timeline.role) {
+		return element.timeline.role;
+	}
+	if (options?.resolveRole) {
+		return options.resolveRole(element);
+	}
+	return "clip";
+}
+
+/**
+ * 轨道是否允许该角色
+ */
+export function isRoleCompatibleWithTrack(
+	role: TrackRole,
+	trackIndex: number,
+): boolean {
+	return trackIndex !== MAIN_TRACK_INDEX || role === "clip";
+}
+
+/**
+ * 计算轨道角色映射（基于分配结果）
+ */
+export function getTrackRoleMap(
+	elements: TimelineElement[],
+	assignments: Map<string, number>,
+	options?: TrackRoleOptions,
+): Map<number, TrackRole> {
+	const roleMap = new Map<number, TrackRole>();
+
+	for (const el of elements) {
+		const trackIndex = assignments.get(el.id) ?? el.timeline.trackIndex ?? 0;
+		if (trackIndex === MAIN_TRACK_INDEX) {
+			roleMap.set(MAIN_TRACK_INDEX, "clip");
+			continue;
+		}
+		if (!roleMap.has(trackIndex)) {
+			roleMap.set(trackIndex, getElementRole(el, options));
+		}
+	}
+
+	if (!roleMap.has(MAIN_TRACK_INDEX)) {
+		roleMap.set(MAIN_TRACK_INDEX, "clip");
+	}
+
+	return roleMap;
+}
+
+/**
+ * 基于轨道列表生成角色映射
+ */
+export function getTrackRoleMapFromTracks(
+	tracks: TimelineTrack[],
+): Map<number, TrackRole> {
+	const roleMap = new Map<number, TrackRole>();
+	for (let index = 0; index < tracks.length; index += 1) {
+		const track = tracks[index];
+		roleMap.set(index, track.role);
+	}
+	return roleMap;
+}
+
+/**
+ * 检查轨道角色冲突（基于分配结果）
+ */
+export function hasRoleConflictOnTrack(
+	role: TrackRole,
+	trackIndex: number,
+	elements: TimelineElement[],
+	assignments: Map<string, number>,
+	excludeId?: string,
+	options?: TrackRoleOptions,
+): boolean {
+	if (!isRoleCompatibleWithTrack(role, trackIndex)) {
+		return true;
+	}
+	for (const el of elements) {
+		if (el.id === excludeId) continue;
+		const elTrack = assignments.get(el.id);
+		if (elTrack !== trackIndex) continue;
+		if (el.type === "Transition") continue;
+		const elRole = getElementRole(el, options);
+		if (elRole !== role) return true;
+	}
+	return false;
+}
+
+/**
+ * 检查轨道角色冲突（基于存储的 trackIndex）
+ */
+export function hasRoleConflictOnStoredTrack(
+	role: TrackRole,
+	trackIndex: number,
+	elements: TimelineElement[],
+	excludeId?: string,
+	options?: TrackRoleOptions,
+): boolean {
+	if (!isRoleCompatibleWithTrack(role, trackIndex)) {
+		return true;
+	}
+	for (const el of elements) {
+		if (el.id === excludeId) continue;
+		const elTrack = el.timeline.trackIndex ?? 0;
+		if (elTrack !== trackIndex) continue;
+		const elRole = getElementRole(el, options);
+		if (elRole !== role) return true;
+	}
+	return false;
+}
+
+/**
+ * 检查两个时间范围是否重叠
+ */
+export function isTimeOverlapping(
+	start1: number,
+	end1: number,
+	start2: number,
+	end2: number,
+): boolean {
+	return start1 < end2 && end1 > start2;
+}
+
+/**
+ * 检查元素是否与轨道上的其他元素重叠
+ */
+export function hasOverlapOnTrack(
+	start: number,
+	end: number,
+	trackIndex: number,
+	elements: TimelineElement[],
+	assignments: Map<string, number>,
+	excludeId?: string,
+): boolean {
+	for (const el of elements) {
+		if (el.id === excludeId) continue;
+		const elTrack = assignments.get(el.id);
+		if (elTrack !== trackIndex) continue;
+
+		if (isTimeOverlapping(start, end, el.timeline.start, el.timeline.end)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * 检查元素是否与轨道上的其他元素重叠（基于存储的 trackIndex）
+ */
+export function hasOverlapOnStoredTrack(
+	start: number,
+	end: number,
+	trackIndex: number,
+	elements: TimelineElement[],
+	excludeId?: string,
+): boolean {
+	for (const el of elements) {
+		if (el.id === excludeId) continue;
+		const elStoredTrack = el.timeline.trackIndex ?? 0;
+		if (elStoredTrack !== trackIndex) continue;
+		if (el.type === "Transition") continue;
+
+		if (isTimeOverlapping(start, end, el.timeline.start, el.timeline.end)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * 从指定轨道向上查找可用轨道（基于存储的 trackIndex）
+ */
+export function findAvailableStoredTrack(
+	start: number,
+	end: number,
+	targetTrack: number,
+	elements: TimelineElement[],
+	excludeId: string,
+	maxTrack: number,
+): number {
+	for (let track = targetTrack; track <= maxTrack; track++) {
+		if (!hasOverlapOnStoredTrack(start, end, track, elements, excludeId)) {
+			return track;
+		}
+	}
+	// 所有现有轨道都有重叠
+	return maxTrack + 1;
+}
+
+/**
+ * 为元素找到合适的轨道位置
+ */
+export function findAvailableTrack(
+	start: number,
+	end: number,
+	targetTrack: number,
+	role: TrackRole,
+	elements: TimelineElement[],
+	assignments: Map<string, number>,
+	excludeId: string,
+	trackCount: number,
+	options?: TrackRoleOptions,
+): number {
+	const currentElement = elements.find((el) => el.id === excludeId);
+	if (currentElement?.type === "Transition") {
+		return targetTrack;
+	}
+	for (let track = targetTrack; track < trackCount + 1; track++) {
+		if (hasRoleConflictOnTrack(role, track, elements, assignments, excludeId, options)) {
+			continue;
+		}
+		if (!hasOverlapOnTrack(start, end, track, elements, assignments, excludeId)) {
+			return track;
+		}
+	}
+	return trackCount;
+}
+
+/**
+ * 基于元素的 timeline.trackIndex 进行轨道分配
+ */
+export function assignTracks(
+	elements: TimelineElement[],
+	options?: TrackRoleOptions,
+): Map<string, number> {
+	if (elements.length === 0) {
+		return new Map();
+	}
+
+	const assignments = new Map<string, number>();
+
+	const sorted = [...elements].sort((a, b) => {
+		const aTrack = a.timeline.trackIndex ?? -1;
+		const bTrack = b.timeline.trackIndex ?? -1;
+		if (aTrack === -1 && bTrack === -1) {
+			return a.timeline.start - b.timeline.start;
+		}
+		if (aTrack === -1) return 1;
+		if (bTrack === -1) return -1;
+		return aTrack - bTrack;
+	});
+
+	let maxTrack = MAIN_TRACK_INDEX;
+
+	for (const element of sorted) {
+		const { start, end, trackIndex } = element.timeline;
+		const role = getElementRole(element, options);
+		const targetTrack = trackIndex ?? MAIN_TRACK_INDEX;
+
+		const finalTrack = findAvailableTrack(
+			start,
+			end,
+			targetTrack,
+			role,
+			elements,
+			assignments,
+			element.id,
+			maxTrack + 1,
+			options,
+		);
+
+		assignments.set(element.id, finalTrack);
+		maxTrack = Math.max(maxTrack, finalTrack);
+	}
+
+	return assignments;
+}
+
+/**
+ * 计算需要的轨道总数（至少1个主轨道）
+ */
+export function getTrackCount(assignments: Map<string, number>): number {
+	if (assignments.size === 0) {
+		return 1;
+	}
+	return Math.max(...assignments.values()) + 1;
+}
+
+/**
+ * 直接基于存储的 trackIndex 生成轨道分配
+ */
+export function getStoredTrackAssignments(
+	elements: TimelineElement[],
+): Map<string, number> {
+	const assignments = new Map<string, number>();
+	for (const el of elements) {
+		assignments.set(el.id, el.timeline.trackIndex ?? MAIN_TRACK_INDEX);
+	}
+	return assignments;
+}
+
+/**
+ * 规范化轨道分配，移除空轨道（主轨道除外）
+ */
+export function normalizeTrackAssignments(
+	assignments: Map<string, number>,
+): Map<string, number> {
+	if (assignments.size === 0) {
+		return new Map();
+	}
+
+	const usedTracks = new Set<number>();
+	for (const track of assignments.values()) {
+		usedTracks.add(track);
+	}
+	usedTracks.add(MAIN_TRACK_INDEX);
+
+	const sortedTracks = [...usedTracks].sort((a, b) => a - b);
+
+	const trackMapping = new Map<number, number>();
+	sortedTracks.forEach((oldTrack, newTrack) => {
+		trackMapping.set(oldTrack, newTrack);
+	});
+
+	const normalized = new Map<string, number>();
+	for (const [elementId, oldTrack] of assignments.entries()) {
+		const newTrack = trackMapping.get(oldTrack) ?? oldTrack;
+		normalized.set(elementId, newTrack);
+	}
+
+	return normalized;
+}
+
+/**
+ * 将规范化后的轨道分配写回元素
+ */
+export function applyTrackAssignments(
+	elements: TimelineElement[],
+	options?: TrackRoleOptions,
+): TimelineElement[] {
+	if (elements.length === 0) {
+		return elements;
+	}
+
+	const normalized = normalizeTrackAssignments(assignTracks(elements, options));
+	let didChange = false;
+	const updated = elements.map((el) => {
+		const nextTrack = normalized.get(el.id);
+		const currentTrack = el.timeline.trackIndex ?? MAIN_TRACK_INDEX;
+		if (nextTrack === undefined || nextTrack === currentTrack) {
+			return el;
+		}
+		didChange = true;
+		return { ...el, timeline: { ...el.timeline, trackIndex: nextTrack } };
+	});
+
+	return didChange ? updated : elements;
+}
+
+/**
+ * 基于存储的 trackIndex 压缩空轨道（不重新分配）
+ */
+export function normalizeStoredTrackIndices(
+	elements: TimelineElement[],
+): TimelineElement[] {
+	if (elements.length === 0) {
+		return elements;
+	}
+
+	const usedTracks = new Set<number>();
+	for (const el of elements) {
+		usedTracks.add(el.timeline.trackIndex ?? MAIN_TRACK_INDEX);
+	}
+	usedTracks.add(MAIN_TRACK_INDEX);
+
+	const sortedTracks = [...usedTracks].sort((a, b) => a - b);
+	const trackMapping = new Map<number, number>();
+	sortedTracks.forEach((oldTrack, newIndex) => {
+		trackMapping.set(oldTrack, newIndex);
+	});
+
+	let didChange = false;
+	const normalized = elements.map((el) => {
+		const oldTrack = el.timeline.trackIndex ?? MAIN_TRACK_INDEX;
+		const newTrack = trackMapping.get(oldTrack) ?? oldTrack;
+		if (newTrack === oldTrack) {
+			return el;
+		}
+		didChange = true;
+		return {
+			...el,
+			timeline: {
+				...el.timeline,
+				trackIndex: newTrack,
+			},
+		};
+	});
+
+	return didChange ? normalized : elements;
+}
+
+/**
+ * 插入新轨道：将指定位置及以上的所有轨道向上移动
+ */
+export function insertTrackAt(
+	insertAt: number,
+	assignments: Map<string, number>,
+): Map<string, number> {
+	const result = new Map<string, number>();
+
+	for (const [elementId, track] of assignments.entries()) {
+		if (track >= insertAt) {
+			result.set(elementId, track + 1);
+		} else {
+			result.set(elementId, track);
+		}
+	}
+
+	return result;
+}

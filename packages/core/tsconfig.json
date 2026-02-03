@@ -1,0 +1,28 @@
+{
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/*.flow", "**/node_modules/**/*.flow", "../react-skia-lite/**/*"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": false,
+    "noEmit": true,
+
+    /* Linting */
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "react-skia-lite": ["../react-skia-lite/src/index.ts"]
+    }
+  }
+}
