@@ -1,3 +1,4 @@
+import { type ChangeEvent, useCallback, useMemo, useState } from "react";
 import { useAsrClient } from "@/asr";
 import {
 	isAudioFile,
@@ -5,11 +6,7 @@ import {
 	writeAudioToOpfs,
 } from "@/asr/opfsAudio";
 import { useTranscriptStore } from "@/asr/transcriptStore";
-import type {
-	AsrJobStatus,
-	AsrModelSize,
-	TranscriptRecord,
-} from "@/asr/types";
+import type { AsrJobStatus, AsrModelSize, TranscriptRecord } from "@/asr/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +17,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { type ChangeEvent, useCallback, useMemo, useState } from "react";
 
 const createId = (prefix: string): string => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -297,7 +293,7 @@ const AsrDialog = () => {
 			</Button>
 			{panelVisible && (
 				<div
-					className={`fixed left-1/2 z-30 -translate-x-1/2 rounded-2xl border border-white/10 bg-neutral-900/95 shadow-2xl backdrop-blur-xl transition-all ${
+					className={`fixed left-1/2 z-30 -translate-x-1/2 rounded-2xl [corner-shape:superellipse(1.1)] border border-white/10 bg-neutral-900/95 shadow-2xl backdrop-blur-xl transition-all ${
 						collapsed ? "top-3 w-[360px]" : "top-20 w-[520px]"
 					}`}
 				>

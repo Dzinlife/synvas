@@ -185,6 +185,24 @@ export function createVideoClipModel(
 	};
 
 	const fallbackFrameCache = new Map<number, SkImage>();
+	// 当前显示帧，避免缓存回收时误释放
+	let pinnedFrame: SkImage | null = null;
+	let pinnedFrameAsset: VideoAsset | null = null;
+
+	const updatePinnedFrame = (
+		nextFrame: SkImage | null,
+		asset: VideoAsset | null,
+	) => {
+		if (pinnedFrame === nextFrame && pinnedFrameAsset === asset) return;
+		if (pinnedFrame && pinnedFrameAsset) {
+			pinnedFrameAsset.unpinFrame(pinnedFrame);
+		}
+		if (nextFrame && asset) {
+			asset.pinFrame(nextFrame);
+		}
+		pinnedFrame = nextFrame;
+		pinnedFrameAsset = nextFrame && asset ? asset : null;
+	};
 
 	// 将 canvas 转换为 SkImage
 	const canvasToSkImage = async (
@@ -207,6 +225,7 @@ export function createVideoClipModel(
 			assetHandle?.asset.storeFrame(alignedTime, skiaImage);
 		}
 
+		updatePinnedFrame(skiaImage, assetHandle?.asset ?? null);
 		store.setState((state) => ({
 			...state,
 			internal: {
@@ -519,6 +538,7 @@ export function createVideoClipModel(
 		// 检查缓存
 		const cachedFrame = assetHandle?.asset.getCachedFrame(alignedTime);
 		if (cachedFrame) {
+			updatePinnedFrame(cachedFrame, assetHandle?.asset ?? null);
 			store.setState((state) => ({
 				...state,
 				internal: {
@@ -895,6 +915,7 @@ export function createVideoClipModel(
 				asyncId++; // 取消所有进行中的异步操作
 				const internal = get().internal as VideoClipInternal;
 
+				updatePinnedFrame(null, null);
 				stopPlayback();
 
 				// 清理迭代器
