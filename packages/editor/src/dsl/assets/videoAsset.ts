@@ -22,6 +22,8 @@ export type VideoAsset = {
 	getCachedFrame: (timestamp: number) => SkImage | undefined;
 	storeFrame: (timestamp: number, image: SkImage) => void;
 	clearCache: () => void;
+	pinFrame: (image: SkImage) => void;
+	unpinFrame: (image: SkImage) => void;
 	releaseSource?: () => void;
 };
 
@@ -171,6 +173,8 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 
 	const frameCache = new Map<number, SkImage>();
 	const cacheAccessOrder: number[] = [];
+	// 记录仍在使用的帧，避免缓存回收时误释放
+	const pinnedFrames = new Map<SkImage, number>();
 
 	const updateCacheAccess = (key: number) => {
 		const index = cacheAccessOrder.indexOf(key);
@@ -181,15 +185,40 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 	};
 
 	const cleanupCache = () => {
+		if (frameCache.size <= DEFAULT_MAX_CACHE_SIZE) return;
+		let guard = cacheAccessOrder.length;
 		while (
 			frameCache.size > DEFAULT_MAX_CACHE_SIZE &&
-			cacheAccessOrder.length > 0
+			cacheAccessOrder.length > 0 &&
+			guard > 0
 		) {
 			const oldestKey = cacheAccessOrder.shift();
-			if (oldestKey !== undefined) {
-				frameCache.delete(oldestKey);
+			guard -= 1;
+			if (oldestKey === undefined) continue;
+			const image = frameCache.get(oldestKey);
+			if (!image) continue;
+			if (pinnedFrames.has(image)) {
+				cacheAccessOrder.push(oldestKey);
+				continue;
 			}
+			frameCache.delete(oldestKey);
+			image.dispose();
 		}
+	};
+
+	const pinFrame = (image: SkImage) => {
+		const count = pinnedFrames.get(image) ?? 0;
+		pinnedFrames.set(image, count + 1);
+	};
+
+	const unpinFrame = (image: SkImage) => {
+		const count = pinnedFrames.get(image);
+		if (!count) return;
+		if (count <= 1) {
+			pinnedFrames.delete(image);
+			return;
+		}
+		pinnedFrames.set(image, count - 1);
 	};
 
 	return {
@@ -216,9 +245,15 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 			}
 		},
 		clearCache: () => {
+			for (const image of frameCache.values()) {
+				image.dispose();
+			}
 			frameCache.clear();
 			cacheAccessOrder.length = 0;
+			pinnedFrames.clear();
 		},
+		pinFrame,
+		unpinFrame,
 		releaseSource,
 	};
 };
