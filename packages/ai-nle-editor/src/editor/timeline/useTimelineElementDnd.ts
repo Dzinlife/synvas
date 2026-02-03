@@ -2131,6 +2131,7 @@ export const useTimelineElementDnd = ({
 										activeCopyId,
 										dropStartForMagnet,
 										{
+											mainTrackMagnetEnabled,
 											attachments,
 											autoAttach,
 											fps,
@@ -2196,6 +2197,7 @@ export const useTimelineElementDnd = ({
 							) ?? newStart;
 						setElements((prev) =>
 							insertElementIntoMainTrack(prev, element.id, dropStartForMagnet, {
+								mainTrackMagnetEnabled,
 								attachments,
 								autoAttach,
 								fps,
