@@ -1,7 +1,7 @@
 import { clampFrame } from "@/utils/timecode";
 import { DEFAULT_TRACK_HEIGHT } from "../timeline/trackConfig";
 import { DropTarget } from "../timeline/types";
-import { getDropTargetFromHeights } from "../utils/trackAssignment";
+import { GAP_THRESHOLD, getDropTargetFromHeights } from "../utils/trackAssignment";
 
 export function parseTrackHeights(value?: string): number[] {
 	if (!value) return [];
@@ -151,7 +151,7 @@ export function findTimelineDropTargetFromScreenPosition(
 			}
 
 			if (audioTrackCount <= 0) {
-				return { trackIndex: -1, type: "track" };
+				return { trackIndex: -1, type: "gap" };
 			}
 
 			const contentRelativeY = mouseY - contentTop;
@@ -161,11 +161,28 @@ export function findTimelineDropTargetFromScreenPosition(
 				for (let i = 0; i < maxIndex; i += 1) {
 					const height = trackHeights[i] ?? zoneTrackHeight;
 					if (contentRelativeY < cumulative + height) {
-						return { trackIndex: -(i + 1), type: "track" };
+						const positionInTrack = Math.max(0, contentRelativeY - cumulative);
+						const isInUpperGap = positionInTrack < GAP_THRESHOLD;
+						const isInLowerGap = positionInTrack > height - GAP_THRESHOLD;
+						const currentTrackIndex = -(i + 1);
+
+						if (isInUpperGap) {
+							return { trackIndex: currentTrackIndex, type: "gap" };
+						}
+
+						if (isInLowerGap) {
+							return { trackIndex: currentTrackIndex - 1, type: "gap" };
+						}
+
+						return { trackIndex: currentTrackIndex, type: "track" };
 					}
 					cumulative += height;
 				}
-				return { trackIndex: -maxIndex, type: "track" };
+				return { trackIndex: -maxIndex - 1, type: "gap" };
+			}
+
+			if (contentRelativeY < 0) {
+				return { trackIndex: -1, type: "gap" };
 			}
 
 			const trackFromTop = Math.floor(contentRelativeY / zoneTrackHeight);
@@ -173,7 +190,20 @@ export function findTimelineDropTargetFromScreenPosition(
 				0,
 				Math.min(audioTrackCount - 1, trackFromTop),
 			);
-			return { trackIndex: -(clamped + 1), type: "track" };
+			const positionInTrack = contentRelativeY - clamped * zoneTrackHeight;
+			const isInUpperGap = positionInTrack < GAP_THRESHOLD;
+			const isInLowerGap = positionInTrack > zoneTrackHeight - GAP_THRESHOLD;
+			const currentTrackIndex = -(clamped + 1);
+
+			if (isInUpperGap) {
+				return { trackIndex: currentTrackIndex, type: "gap" };
+			}
+
+			if (isInLowerGap) {
+				return { trackIndex: currentTrackIndex - 1, type: "gap" };
+			}
+
+			return { trackIndex: currentTrackIndex, type: "track" };
 		}
 	}
 

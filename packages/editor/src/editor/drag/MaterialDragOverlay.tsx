@@ -97,6 +97,73 @@ const MaterialDropIndicator: React.FC = () => {
 	let indicatorHeight = 40;
 
 	if (targetType === "gap") {
+		if (trackIndex < 0) {
+			targetZone = document.querySelector<HTMLElement>(
+				'[data-track-drop-zone="audio"]',
+			);
+			if (!targetZone) return null;
+			const contentArea = targetZone.querySelector<HTMLElement>(
+				'[data-track-content-area="audio"]',
+			);
+			if (!contentArea) return null;
+
+			const contentRect = contentArea.getBoundingClientRect();
+			const audioTrackCount = parseInt(
+				targetZone.dataset.trackCount || "0",
+				10,
+			);
+			const trackHeights = parseTrackHeights(targetZone.dataset.trackHeights);
+			const fallbackTrackHeight = parseInt(
+				targetZone.dataset.trackHeight || "60",
+				10,
+			);
+			const paddingLeft = contentArea.parentElement
+				? parseFloat(
+						getComputedStyle(contentArea.parentElement).paddingLeft || "0",
+					)
+				: 0;
+
+			let gapY = 0;
+			const totalTracks = Math.max(audioTrackCount, 0);
+			if (totalTracks > 0) {
+				const heights = [...trackHeights];
+				if (heights.length < totalTracks) {
+					const missing = totalTracks - heights.length;
+					for (let i = 0; i < missing; i += 1) {
+						heights.push(fallbackTrackHeight);
+					}
+				}
+				if (heights.length > totalTracks) {
+					heights.length = totalTracks;
+				}
+				const totalHeight = heights.reduce((sum, height) => sum + height, 0);
+				const absIndex = Math.abs(trackIndex);
+				if (absIndex > totalTracks) {
+					gapY = totalHeight;
+				} else {
+					const trackFromTop = absIndex - 1;
+					for (let i = 0; i < trackFromTop; i += 1) {
+						gapY += heights[i] ?? fallbackTrackHeight;
+					}
+				}
+			}
+
+			screenX = contentRect.left - paddingLeft;
+			screenY = contentRect.top + gapY;
+
+			return createPortal(
+				<div
+					className="fixed h-px bg-green-500 z-9998 pointer-events-none rounded-full shadow-lg shadow-green-500/50"
+					style={{
+						left: screenX,
+						top: screenY,
+						width: contentRect.width + paddingLeft,
+					}}
+				/>,
+				document.body,
+			);
+		}
+
 		targetZone = document.querySelector<HTMLElement>(
 			'[data-track-drop-zone="other"]',
 		);

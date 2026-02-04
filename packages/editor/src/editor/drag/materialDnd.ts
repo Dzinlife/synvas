@@ -320,16 +320,43 @@ export function resolveMaterialDropTarget(
 	}
 
 	if (state.materialRole === "audio") {
-		const audioTrackIndex =
-			baseDropTarget.trackIndex < MAIN_TRACK_INDEX
-				? baseDropTarget.trackIndex
-				: -1;
+		if (baseDropTarget.trackIndex >= MAIN_TRACK_INDEX) {
+			return {
+				zone: "timeline",
+				type: "track",
+				trackIndex: -1,
+				time,
+				canDrop: true,
+			};
+		}
+
+		let resolvedDropTarget = baseDropTarget;
+		if (resolvedDropTarget.type === "gap") {
+			const gapIndex =
+				resolvedDropTarget.trackIndex < MAIN_TRACK_INDEX
+					? resolvedDropTarget.trackIndex
+					: -1;
+			resolvedDropTarget = { type: "gap", trackIndex: gapIndex };
+		}
+
+		if (
+			resolvedDropTarget.type === "track" &&
+			shouldForceGapInsert(resolvedDropTarget.trackIndex, time, dropEnd)
+		) {
+			resolvedDropTarget = {
+				type: "gap",
+				trackIndex: resolvedDropTarget.trackIndex,
+			};
+		}
+
 		return {
 			zone: "timeline",
-			type: "track",
-			trackIndex: audioTrackIndex,
+			type: resolvedDropTarget.type,
+			trackIndex: resolvedDropTarget.trackIndex,
 			time,
-			canDrop: true,
+			canDrop:
+				resolvedDropTarget.type === "gap" ||
+				!isTrackLocked(resolvedDropTarget.trackIndex),
 		};
 	}
 

@@ -176,6 +176,51 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 				);
 				if (contentArea) {
 					const contentRect = contentArea.getBoundingClientRect();
+					if (activeDropTarget.type === "gap") {
+						const totalTracks = Math.max(audioTrackCount, 0);
+						let gapY = 0;
+						if (totalTracks > 0) {
+							const heights = [...audioTrackHeights];
+							if (heights.length < totalTracks) {
+								const missing = totalTracks - heights.length;
+								for (let i = 0; i < missing; i += 1) {
+									heights.push(DEFAULT_TRACK_HEIGHT);
+								}
+							}
+							if (heights.length > totalTracks) {
+								heights.length = totalTracks;
+							}
+							const totalHeight = heights.reduce(
+								(sum, height) => sum + height,
+								0,
+							);
+							const absIndex = Math.abs(activeDropTarget.trackIndex);
+							if (absIndex > totalTracks) {
+								gapY = totalHeight;
+							} else {
+								const trackFromTop = absIndex - 1;
+								for (let i = 0; i < trackFromTop; i += 1) {
+									gapY += heights[i] ?? DEFAULT_TRACK_HEIGHT;
+								}
+							}
+						}
+
+						screenX = contentRect.left - timelinePaddingLeft;
+						screenY = contentRect.top + gapY;
+
+						const indicator = (
+							<div
+								className="fixed h-px bg-green-500 z-9998 pointer-events-none rounded-full shadow-lg shadow-green-500/50"
+								style={{
+									left: screenX,
+									top: screenY,
+									width: contentRect.width + timelinePaddingLeft,
+								}}
+							/>
+						);
+						return createPortal(indicator, document.body);
+					}
+
 					const audioIndex = Math.min(
 						Math.max(1, Math.abs(activeDropTarget.finalTrackIndex)),
 						Math.max(audioTrackCount, 1),

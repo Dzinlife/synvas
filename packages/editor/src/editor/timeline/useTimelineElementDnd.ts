@@ -21,6 +21,8 @@ import {
 	getElementRole,
 	hasOverlapOnStoredTrack,
 	hasRoleConflictOnStoredTrack,
+	getStoredTrackAssignments,
+	insertTrackAt,
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
 import {
@@ -2146,19 +2148,29 @@ export const useTimelineElementDnd = ({
 							setElements((prev) => {
 								const shifted =
 									insertTrackIndex !== null
-										? prev.map((el) => {
-												const baseTrack = el.timeline.trackIndex ?? 0;
-												if (baseTrack >= insertTrackIndex) {
-													return {
-														...el,
-														timeline: {
-															...el.timeline,
-															trackIndex: baseTrack + 1,
-														},
-													};
-												}
-												return el;
-											})
+										? (() => {
+												const assignments = getStoredTrackAssignments(prev);
+												const updated = insertTrackAt(
+													insertTrackIndex,
+													assignments,
+												);
+												return prev.map((el) => {
+													const nextTrack = updated.get(el.id);
+													if (
+														nextTrack !== undefined &&
+														nextTrack !== el.timeline.trackIndex
+													) {
+														return {
+															...el,
+															timeline: {
+																...el.timeline,
+																trackIndex: nextTrack,
+															},
+														};
+													}
+													return el;
+												});
+											})()
 										: prev;
 								return finalizeWithTrackAssignments([
 									...shifted,
@@ -2282,12 +2294,15 @@ export const useTimelineElementDnd = ({
 						finalTrackIndex: 0,
 					});
 				} else if (finalTrackResult) {
+					const displayTrackIndex =
+						finalTrackResult.displayType === "gap"
+							? finalTrackResult.trackIndex
+							: elementRole === "audio"
+								? finalTrackResult.trackIndex
+								: resolvedDropTarget.trackIndex;
 					setActiveDropTarget({
 						type: finalTrackResult.displayType,
-						trackIndex:
-							finalTrackResult.displayType === "gap"
-								? finalTrackResult.trackIndex
-								: resolvedDropTarget.trackIndex,
+						trackIndex: displayTrackIndex,
 						elementId: ghostId,
 						start: newStart,
 						end: newEnd,

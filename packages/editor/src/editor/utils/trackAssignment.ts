@@ -441,6 +441,9 @@ export function resolveDropTargetForRole(
 			dropTarget.trackIndex < MAIN_TRACK_INDEX
 				? dropTarget.trackIndex
 				: -1;
+		if (dropTarget.type === "gap") {
+			return { type: "gap", trackIndex: targetTrack };
+		}
 		return { type: "track", trackIndex: targetTrack };
 	}
 

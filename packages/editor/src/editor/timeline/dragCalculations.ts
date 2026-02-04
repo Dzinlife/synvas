@@ -167,17 +167,34 @@ export function calculateFinalTrack(
 	if (elementRole === "audio") {
 		const targetTrack =
 			dropTarget.trackIndex < 0 ? dropTarget.trackIndex : -1;
-		let candidate = targetTrack;
-		while (
-			hasRoleConflictOnStoredTrack(elementRole, candidate, elements, elementId) ||
-			hasOverlapOnTrack(timeRange, candidate, elements, elementId)
-		) {
-			candidate -= 1;
+		const hasConflict = (trackIndex: number) =>
+			hasRoleConflictOnStoredTrack(
+				elementRole,
+				trackIndex,
+				elements,
+				elementId,
+			) || hasOverlapOnTrack(timeRange, trackIndex, elements, elementId);
+
+		if (dropTarget.type === "gap") {
+			return {
+				trackIndex: targetTrack,
+				displayType: "gap",
+				needsInsert: true,
+			};
 		}
+
+		if (!hasConflict(targetTrack)) {
+			return {
+				trackIndex: targetTrack,
+				displayType: "track",
+				needsInsert: false,
+			};
+		}
+
 		return {
-			trackIndex: candidate,
-			displayType: "track",
-			needsInsert: false,
+			trackIndex: targetTrack,
+			displayType: "gap",
+			needsInsert: true,
 		};
 	}
 
@@ -448,6 +465,18 @@ export function insertTrackAt(
 	elements: TimelineElement[]
 ): Map<string, number> {
 	const result = new Map<string, number>();
+
+	if (insertAt < 0) {
+		for (const el of elements) {
+			const track = el.timeline.trackIndex ?? 0;
+			if (track <= insertAt) {
+				result.set(el.id, track - 1);
+			} else {
+				result.set(el.id, track);
+			}
+		}
+		return result;
+	}
 
 	for (const el of elements) {
 		const track = el.timeline.trackIndex ?? 0;

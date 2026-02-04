@@ -25,6 +25,7 @@ import {
 	hasOverlapOnStoredTrack,
 	hasRoleConflictOnStoredTrack,
 	insertTrackAt,
+	MAIN_TRACK_INDEX,
 	getStoredTrackAssignments,
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
@@ -1151,6 +1152,45 @@ export const useTrackAssignments = () => {
 		[setElements, trackAssignments, trackCount, tracks],
 	);
 
+	const resolveAudioDropResult = (
+		entries: TimelineElement[],
+		elementId: string,
+		start: number,
+		end: number,
+		dropTarget: DropTarget,
+		assignments: Map<string, number>,
+	) => {
+		const targetTrack =
+			dropTarget.trackIndex < MAIN_TRACK_INDEX ? dropTarget.trackIndex : -1;
+		const hasConflict = (trackIndex: number) =>
+			hasRoleConflictOnStoredTrack(
+				"audio",
+				trackIndex,
+				entries,
+				elementId,
+			) ||
+			hasOverlapOnStoredTrack(start, end, trackIndex, entries, elementId);
+
+		if (dropTarget.type === "gap") {
+			return {
+				finalTrack: targetTrack,
+				updatedAssignments: insertTrackAt(targetTrack, assignments),
+			};
+		}
+
+		if (!hasConflict(targetTrack)) {
+			return {
+				finalTrack: targetTrack,
+				updatedAssignments: assignments,
+			};
+		}
+
+		return {
+			finalTrack: targetTrack,
+			updatedAssignments: insertTrackAt(targetTrack, assignments),
+		};
+	};
+
 	// 更新元素的时间和轨道位置（用于拖拽结束）
 	const updateElementTimeAndTrack = useCallback(
 		(elementId: string, start: number, end: number, dropTarget: DropTarget) => {
@@ -1171,7 +1211,18 @@ export const useTrackAssignments = () => {
 				let finalTrack: number;
 				let updatedAssignments: Map<string, number>;
 
-				if (resolvedDropTarget.type === "gap") {
+				if (elementRole === "audio") {
+					const audioResult = resolveAudioDropResult(
+						prev,
+						elementId,
+						start,
+						end,
+						resolvedDropTarget,
+						currentAssignments,
+					);
+					finalTrack = audioResult.finalTrack;
+					updatedAssignments = audioResult.updatedAssignments;
+				} else if (resolvedDropTarget.type === "gap") {
 					// 间隙模式：使用存储的 trackIndex 检查重叠，避免级联重分配问题
 					const gapTrackIndex = resolvedDropTarget.trackIndex;
 					const belowTrack = gapTrackIndex - 1; // 缝隙下方的轨道
@@ -1406,7 +1457,18 @@ export const useTrackAssignments = () => {
 				let finalTrack: number;
 				let updatedAssignments: Map<string, number>;
 
-				if (resolvedDropTarget.type === "gap") {
+				if (elementRole === "audio") {
+					const audioResult = resolveAudioDropResult(
+						prev,
+						elementId,
+						start,
+						end,
+						resolvedDropTarget,
+						currentAssignments,
+					);
+					finalTrack = audioResult.finalTrack;
+					updatedAssignments = audioResult.updatedAssignments;
+				} else if (resolvedDropTarget.type === "gap") {
 					// 间隙模式：使用存储的 trackIndex 检查重叠，避免级联重分配问题
 					const gapTrackIndex = resolvedDropTarget.trackIndex;
 					const belowTrack = gapTrackIndex - 1; // 缝隙下方的轨道

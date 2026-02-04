@@ -507,6 +507,17 @@ export function insertTrackAt(
 ): Map<string, number> {
 	const result = new Map<string, number>();
 
+	if (insertAt < MAIN_TRACK_INDEX) {
+		for (const [elementId, track] of assignments.entries()) {
+			if (track <= insertAt) {
+				result.set(elementId, track - 1);
+			} else {
+				result.set(elementId, track);
+			}
+		}
+		return result;
+	}
+
 	for (const [elementId, track] of assignments.entries()) {
 		if (track >= insertAt) {
 			result.set(elementId, track + 1);

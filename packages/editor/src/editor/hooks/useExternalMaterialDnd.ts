@@ -40,6 +40,7 @@ import {
 	findAvailableTrack,
 	getStoredTrackAssignments,
 	getTrackCount,
+	insertTrackAt,
 } from "../utils/trackAssignment";
 
 const IMAGE_EXTENSIONS = new Set([
@@ -655,11 +656,13 @@ export function useExternalMaterialDnd({
 					let nextElements = prev;
 					let nextStart = clampFrame(resolvedDropTarget.time ?? 0);
 					let targetTrackIndex = resolvedDropTarget.trackIndex ?? -1;
+					let targetType: "track" | "gap" = resolvedDropTarget.type ?? "track";
 					if (targetTrackIndex >= 0) {
 						targetTrackIndex = -1;
+						targetType = "track";
 					}
 
-					const assignments = getStoredTrackAssignments(prev);
+					let assignments = getStoredTrackAssignments(prev);
 					const trackCount = getTrackCount(assignments);
 
 					prepared.forEach((item, index) => {
@@ -667,6 +670,31 @@ export function useExternalMaterialDnd({
 						const startFrame = nextStart;
 						const endFrame = startFrame + durationFrames;
 						const newId = `external-audio-${Date.now()}-${index}`;
+						if (targetType === "gap") {
+							const updatedAssignments = insertTrackAt(
+								targetTrackIndex,
+								assignments,
+							);
+							nextElements = nextElements.map((el) => {
+								const nextTrack = updatedAssignments.get(el.id);
+								if (
+									nextTrack !== undefined &&
+									nextTrack !== el.timeline.trackIndex
+								) {
+									return {
+										...el,
+										timeline: {
+											...el.timeline,
+											trackIndex: nextTrack,
+										},
+									};
+								}
+								return el;
+							});
+							assignments = updatedAssignments;
+							targetType = "track";
+						}
+
 						const finalTrack = findAvailableTrack(
 							startFrame,
 							endFrame,
