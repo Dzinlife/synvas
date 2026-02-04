@@ -63,21 +63,24 @@ const renderElementNode = (
 	return <TargetRenderer id={target.id} {...target.props} />;
 };
 
-export const buildSkiaRenderStateCore = async ({
-	elements,
-	displayTime,
-	tracks,
-	getTrackIndexForElement,
-	sortByTrackIndex,
-	prepare,
-}: {
-	elements: TimelineElement[];
-	displayTime: number;
-	tracks: TimelineTrack[];
-	getTrackIndexForElement: (element: TimelineElement) => number;
-	sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
-	prepare?: RenderPrepareOptions;
-}, deps: BuildSkiaDeps) => {
+export const buildSkiaRenderStateCore = async (
+	{
+		elements,
+		displayTime,
+		tracks,
+		getTrackIndexForElement,
+		sortByTrackIndex,
+		prepare,
+	}: {
+		elements: TimelineElement[];
+		displayTime: number;
+		tracks: TimelineTrack[];
+		getTrackIndexForElement: (element: TimelineElement) => number;
+		sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
+		prepare?: RenderPrepareOptions;
+	},
+	deps: BuildSkiaDeps,
+) => {
 	const elementsById = new Map(elements.map((el) => [el.id, el] as const));
 	const isExporting = prepare?.isExporting ?? false;
 	const fps = prepare?.fps ?? 0;
@@ -282,8 +285,10 @@ export const buildSkiaTreeCore = async (
 	},
 	deps: BuildSkiaDeps,
 ) => {
-	const { children, orderedElements, dispose } =
-		await buildSkiaRenderStateCore(args, deps);
+	const { children, orderedElements, dispose } = await buildSkiaRenderStateCore(
+		args,
+		deps,
+	);
 	return { children, orderedElements, dispose };
 };
 

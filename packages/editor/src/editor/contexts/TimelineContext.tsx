@@ -16,6 +16,7 @@ import { finalizeTimelineElements } from "../utils/mainTrackMagnet";
 import { SnapPoint } from "../utils/snap";
 import { updateElementTime } from "../utils/timelineTime";
 import { MAIN_TRACK_ID, reconcileTracks } from "../utils/trackState";
+import { getAudioContext } from "../audio/audioEngine";
 import {
 	findAvailableTrack,
 	getDropTarget,
@@ -78,6 +79,7 @@ interface TimelineStore {
 	isPlaying: boolean;
 	isExporting: boolean; // 导出时暂停预览更新
 	exportTime: number | null; // 导出用时间帧
+	seekEpoch: number; // 用户主动 seek 计数
 	isDragging: boolean; // 是否正在拖拽元素
 	selectedIds: string[]; // 当前选中的元素 ID 列表
 	primarySelectedId: string | null; // 主选中元素 ID
@@ -99,6 +101,7 @@ interface TimelineStore {
 	scrollLeft: number;
 	setFps: (fps: number) => void;
 	setCurrentTime: (time: number) => void;
+	seekTo: (time: number) => void;
 	setPreviewTime: (time: number | null) => void;
 	setPreviewAxisEnabled: (enabled: boolean) => void;
 	setElements: (
@@ -266,6 +269,7 @@ export const useTimelineStore = create<TimelineStore>()(
 		isPlaying: false,
 		isExporting: false,
 		exportTime: null,
+		seekEpoch: 0,
 		isDragging: false,
 		selectedIds: [],
 		primarySelectedId: null,
@@ -303,6 +307,17 @@ export const useTimelineStore = create<TimelineStore>()(
 			if (currentTime !== nextTime) {
 				set({ currentTime: nextTime });
 			}
+		},
+		seekTo: (time: number) => {
+			set((state) => {
+				if (state.isExporting) return state;
+				const nextTime = clampFrame(time);
+				if (state.currentTime === nextTime) return state;
+				return {
+					currentTime: nextTime,
+					seekEpoch: state.seekEpoch + 1,
+				};
+			});
 		},
 
 		setPreviewTime: (time: number | null) => {
@@ -801,11 +816,12 @@ export const useCurrentTime = () => {
 	const previewAxisEnabled = useTimelineStore(
 		(state) => state.previewAxisEnabled,
 	);
-	const setCurrentTime = useTimelineStore((state) => state.setCurrentTime);
+	const seekTo = useTimelineStore((state) => state.seekTo);
 
 	return {
 		currentTime: previewAxisEnabled ? previewTime ?? currentTime : currentTime,
-		setCurrentTime,
+		setCurrentTime: seekTo,
+		seekTo,
 	};
 };
 
@@ -861,6 +877,7 @@ export const usePreviewAxis = () => {
 		setPreviewAxisEnabled,
 	};
 };
+
 
 export const useElements = () => {
 	const elements = useTimelineStore((state) => state.elements);
@@ -1917,8 +1934,11 @@ export const TimelineProvider = ({
 	fps?: number;
 	settings?: TimelineSettings;
 }) => {
-	const lastTimeRef = useRef<number | null>(null);
-	const frameRemainderRef = useRef(0);
+	const clockModeRef = useRef<"audio" | "perf" | null>(null);
+	const clockStartFrameRef = useRef(0);
+	const audioStartTimeRef = useRef<number | null>(null);
+	const perfStartTimeRef = useRef<number | null>(null);
+	const seekEpochRef = useRef<number | null>(null);
 	const settingsState = initialSettings
 		? {
 				snapEnabled: initialSettings.snapEnabled,
@@ -2031,28 +2051,79 @@ export const TimelineProvider = ({
 			(state) => state.isPlaying,
 			(isPlaying) => {
 				if (isPlaying) {
-					lastTimeRef.current = performance.now();
+					const resetAudioClock = (
+						state: TimelineStore,
+						context: AudioContext,
+					) => {
+						clockModeRef.current = "audio";
+						clockStartFrameRef.current = state.currentTime;
+						audioStartTimeRef.current = context.currentTime;
+						perfStartTimeRef.current = null;
+					};
+					const resetPerfClock = (state: TimelineStore, now: number) => {
+						clockModeRef.current = "perf";
+						clockStartFrameRef.current = state.currentTime;
+						perfStartTimeRef.current = now;
+						audioStartTimeRef.current = null;
+					};
 					const animate = (now: number) => {
 						const state = useTimelineStore.getState();
 						if (!state.isPlaying) return;
 
-						if (lastTimeRef.current !== null) {
-							const deltaSeconds = (now - lastTimeRef.current) / 1000;
-							frameRemainderRef.current += deltaSeconds * state.fps;
-							const stepFrames = Math.floor(frameRemainderRef.current);
-							if (stepFrames > 0) {
-								const newTime = state.currentTime + stepFrames;
-								state.setCurrentTime(newTime);
-								frameRemainderRef.current -= stepFrames;
+						const context = getAudioContext();
+						// 用户主动 seek 时重置时钟基准，避免被播放循环覆盖
+						if (seekEpochRef.current === null) {
+							seekEpochRef.current = state.seekEpoch;
+						}
+						if (seekEpochRef.current !== state.seekEpoch) {
+							seekEpochRef.current = state.seekEpoch;
+							if (context && context.state === "running") {
+								resetAudioClock(state, context);
+							} else {
+								resetPerfClock(state, now);
+							}
+							requestAnimationFrame(animate);
+							return;
+						}
+
+						if (context && context.state === "running") {
+							if (
+								clockModeRef.current !== "audio" ||
+								audioStartTimeRef.current === null
+							) {
+								resetAudioClock(state, context);
+							}
+							if (audioStartTimeRef.current !== null) {
+								const elapsed = context.currentTime - audioStartTimeRef.current;
+								const nextTime = clampFrame(
+									clockStartFrameRef.current + elapsed * state.fps,
+								);
+								state.setCurrentTime(nextTime);
+							}
+						} else {
+							if (
+								clockModeRef.current !== "perf" ||
+								perfStartTimeRef.current === null
+							) {
+								resetPerfClock(state, now);
+							}
+							if (perfStartTimeRef.current !== null) {
+								const elapsed = (now - perfStartTimeRef.current) / 1000;
+								const nextTime = clampFrame(
+									clockStartFrameRef.current + elapsed * state.fps,
+								);
+								state.setCurrentTime(nextTime);
 							}
 						}
-						lastTimeRef.current = now;
+
 						requestAnimationFrame(animate);
 					};
 					requestAnimationFrame(animate);
 				} else {
-					lastTimeRef.current = null;
-					frameRemainderRef.current = 0;
+					clockModeRef.current = null;
+					audioStartTimeRef.current = null;
+					perfStartTimeRef.current = null;
+					seekEpochRef.current = null;
 				}
 			},
 			{ fireImmediately: true },

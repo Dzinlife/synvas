@@ -1,4 +1,4 @@
-export type AssetKind = "video" | "image" | "font";
+export type AssetKind = "video" | "image" | "font" | "audio";
 
 export type AssetHandle<T> = {
 	asset: T;

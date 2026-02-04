@@ -30,10 +30,10 @@ importers:
         specifier: ^1.27.3
         version: 1.27.3
       react:
-        specifier: ^18.0.0 || ^19.0.0
+        specifier: ^19.2.0
         version: 19.2.3
       react-dom:
-        specifier: ^18.0.0 || ^19.0.0
+        specifier: ^19.2.0
         version: 19.2.3(react@19.2.3)
       react-skia-lite:
         specifier: workspace:*

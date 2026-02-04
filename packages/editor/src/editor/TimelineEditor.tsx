@@ -84,13 +84,12 @@ const applyOffsetDelta = (
 };
 
 const TimelineEditor = () => {
-	const setCurrentTime = useTimelineStore((state) => state.setCurrentTime);
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
 	const setScrollLeft = useTimelineStore((state) => state.setScrollLeft);
 	const setPreviewTime = useTimelineStore((state) => state.setPreviewTime);
 	const { previewAxisEnabled } = usePreviewAxis();
 	const { isPlaying } = usePlaybackControl();
-	const { currentTime } = useCurrentTime();
+	const { currentTime, setCurrentTime: seekTo } = useCurrentTime();
 	const { fps } = useFps();
 	const { timelineScale } = useTimelineScale();
 	const { elements, setElements } = useElements();
@@ -327,7 +326,7 @@ const TimelineEditor = () => {
 	const scheduleCurrentTime = useCallback(
 		(time: number) => {
 			if (typeof window === "undefined") {
-				setCurrentTime(time);
+				seekTo(time);
 				return;
 			}
 			pendingCurrentTimeRef.current = time;
@@ -338,10 +337,10 @@ const TimelineEditor = () => {
 				const nextTime = pendingCurrentTimeRef.current;
 				if (nextTime === null || nextTime === undefined) return;
 				pendingCurrentTimeRef.current = null;
-				setCurrentTime(nextTime);
+				seekTo(nextTime);
 			});
 		},
-		[setCurrentTime],
+		[seekTo],
 	);
 
 	const flushCurrentTime = useCallback(() => {
@@ -352,8 +351,8 @@ const TimelineEditor = () => {
 		const nextTime = pendingCurrentTimeRef.current;
 		if (nextTime === null || nextTime === undefined) return;
 		pendingCurrentTimeRef.current = null;
-		setCurrentTime(nextTime);
-	}, [setCurrentTime]);
+		seekTo(nextTime);
+	}, [seekTo]);
 
 	useEffect(() => {
 		return () => {
@@ -437,7 +436,7 @@ const TimelineEditor = () => {
 			const time = clampFrame(
 				(x - leftColumnWidth - timelinePaddingLeft + scrollLeft) / ratio,
 			);
-			setCurrentTime(time);
+			seekTo(time);
 			updatePreviewTime(null); // 清除预览时间
 			if (!options?.keepSelection) {
 				deselectAll(); // 清除选中状态
@@ -448,7 +447,7 @@ const TimelineEditor = () => {
 			scrollLeft,
 			leftColumnWidth,
 			timelinePaddingLeft,
-			setCurrentTime,
+			seekTo,
 			updatePreviewTime,
 			deselectAll,
 			selectionRect,
