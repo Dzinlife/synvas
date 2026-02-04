@@ -50,9 +50,9 @@ export function findAttachments(
 		return result;
 	}
 
-	// 分离主轨道元素和叠加轨道元素
+	// 分离主轨道元素和其他轨道元素
 	const mainTrackElements = elements.filter((el) => getTrackIndex(el) === 0);
-	const overlayElements = elements.filter((el) => getTrackIndex(el) > 0);
+	const overlayElements = elements.filter((el) => getTrackIndex(el) !== 0);
 
 	// 为每个叠加元素找到其对应的主轨道父元素
 	for (const child of overlayElements) {

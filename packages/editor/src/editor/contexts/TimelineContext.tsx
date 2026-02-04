@@ -1660,36 +1660,76 @@ export const useTrackAssignments = () => {
 					const child = updated.find((el) => el.id === childMove.id);
 					if (!child) continue;
 
-					const currentTrack = child.timeline.trackIndex ?? 1;
 					const childRole = getElementRole(child);
-					const maxStoredTrack = Math.max(
-						0,
-						...updated.map((el) => el.timeline.trackIndex ?? 0),
-					);
+					const currentTrack =
+						child.timeline.trackIndex ?? (childRole === "audio" ? -1 : 1);
 					let availableTrack = currentTrack;
 					// 基于存储轨道判断，避免 assignTracks 提前重排掩盖重叠
-					for (let track = currentTrack; track <= maxStoredTrack + 1; track++) {
-						if (
-							hasRoleConflictOnStoredTrack(
-								childRole,
-								track,
-								updated,
-								childMove.id,
-							)
+					if (childRole === "audio") {
+						const minStoredTrack = Math.min(
+							-1,
+							...updated.map((el) => el.timeline.trackIndex ?? 0),
+						);
+						for (
+							let track = currentTrack;
+							track >= minStoredTrack - 1;
+							track--
 						) {
-							continue;
+							if (
+								hasRoleConflictOnStoredTrack(
+									childRole,
+									track,
+									updated,
+									childMove.id,
+								)
+							) {
+								continue;
+							}
+							if (
+								!hasOverlapOnStoredTrack(
+									childMove.start,
+									childMove.end,
+									track,
+									updated,
+									childMove.id,
+								)
+							) {
+								availableTrack = track;
+								break;
+							}
 						}
-						if (
-							!hasOverlapOnStoredTrack(
-								childMove.start,
-								childMove.end,
-								track,
-								updated,
-								childMove.id,
-							)
+					} else {
+						const maxStoredTrack = Math.max(
+							0,
+							...updated.map((el) => el.timeline.trackIndex ?? 0),
+						);
+						for (
+							let track = currentTrack;
+							track <= maxStoredTrack + 1;
+							track++
 						) {
-							availableTrack = track;
-							break;
+							if (
+								hasRoleConflictOnStoredTrack(
+									childRole,
+									track,
+									updated,
+									childMove.id,
+								)
+							) {
+								continue;
+							}
+							if (
+								!hasOverlapOnStoredTrack(
+									childMove.start,
+									childMove.end,
+									track,
+									updated,
+									childMove.id,
+								)
+							) {
+								availableTrack = track;
+								break;
+							}
 						}
 					}
 

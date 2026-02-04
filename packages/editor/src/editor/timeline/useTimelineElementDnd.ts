@@ -434,29 +434,62 @@ export const useTimelineElementDnd = ({
 		for (const childId of movedChildren.keys()) {
 			const child = updated.find((el) => el.id === childId);
 			if (!child) continue;
-			const currentTrack = child.timeline.trackIndex ?? 1;
 			const childRole = getElementRole(child);
-			const maxStoredTrack = Math.max(
-				0,
-				...updated.map((el) => el.timeline.trackIndex ?? 0),
-			);
+			const currentTrack =
+				child.timeline.trackIndex ?? (childRole === "audio" ? -1 : 1);
 			let availableTrack = currentTrack;
 			// 从当前轨道向上查找空位，避免联动后重叠
-			for (let track = currentTrack; track <= maxStoredTrack + 1; track++) {
-				if (hasRoleConflictOnStoredTrack(childRole, track, updated, childId)) {
-					continue;
-				}
-				if (
-					!hasOverlapOnStoredTrack(
-						child.timeline.start,
-						child.timeline.end,
-						track,
-						updated,
-						childId,
-					)
+			if (childRole === "audio") {
+				const minStoredTrack = Math.min(
+					-1,
+					...updated.map((el) => el.timeline.trackIndex ?? 0),
+				);
+				for (
+					let track = currentTrack;
+					track >= minStoredTrack - 1;
+					track--
 				) {
-					availableTrack = track;
-					break;
+					if (
+						hasRoleConflictOnStoredTrack(childRole, track, updated, childId)
+					) {
+						continue;
+					}
+					if (
+						!hasOverlapOnStoredTrack(
+							child.timeline.start,
+							child.timeline.end,
+							track,
+							updated,
+							childId,
+						)
+					) {
+						availableTrack = track;
+						break;
+					}
+				}
+			} else {
+				const maxStoredTrack = Math.max(
+					0,
+					...updated.map((el) => el.timeline.trackIndex ?? 0),
+				);
+				for (let track = currentTrack; track <= maxStoredTrack + 1; track++) {
+					if (
+						hasRoleConflictOnStoredTrack(childRole, track, updated, childId)
+					) {
+						continue;
+					}
+					if (
+						!hasOverlapOnStoredTrack(
+							child.timeline.start,
+							child.timeline.end,
+							track,
+							updated,
+							childId,
+						)
+					) {
+						availableTrack = track;
+						break;
+					}
 				}
 			}
 			if (availableTrack !== currentTrack) {
