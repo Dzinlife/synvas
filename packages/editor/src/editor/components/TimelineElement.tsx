@@ -22,8 +22,8 @@ import {
 	useDragging,
 	useElements,
 	useFps,
-	useRippleEditing,
 	useMultiSelect,
+	useRippleEditing,
 	useSnap,
 	useTimelineStore,
 	useTrackAssignments,
@@ -300,8 +300,8 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 	const transitionEnd = transitionBoundary + transitionTail;
 	const startTime = isTransition
 		? transitionStart
-		: localStartTime ?? timeline.start;
-	const endTime = isTransition ? transitionEnd : localEndTime ?? timeline.end;
+		: (localStartTime ?? timeline.start);
+	const endTime = isTransition ? transitionEnd : (localEndTime ?? timeline.end);
 	const startTimecode = framesToTimecode(startTime, fps);
 	const endTimecode = framesToTimecode(endTime, fps);
 	// 显示 Y：主轨道元素在容器内固定为 0，其他轨道使用 trackY
@@ -312,7 +312,8 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 	// 计算位置和尺寸
 	const transitionWidth = transitionDuration * ratio;
 	const transitionDisplayWidth = Math.max(6, transitionWidth - 2);
-	const transitionDisplayOffset = (transitionWidth - transitionDisplayWidth) / 2;
+	const transitionDisplayOffset =
+		(transitionWidth - transitionDisplayWidth) / 2;
 	const left = isTransition
 		? transitionStart * ratio + transitionDisplayOffset
 		: startTime * ratio;

@@ -10,6 +10,15 @@ const AUDIO_EXTENSIONS = new Set([
 	"flac",
 	"ogg",
 	"opus",
+	"aif",
+	"aiff",
+	"caf",
+	"mka",
+	"wma",
+	"weba",
+	"mid",
+	"midi",
+	"mpga",
 ]);
 
 const DEFAULT_AUDIO_DURATION_SECONDS = 1;

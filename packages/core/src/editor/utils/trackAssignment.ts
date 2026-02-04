@@ -35,6 +35,12 @@ export function isRoleCompatibleWithTrack(
 	role: TrackRole,
 	trackIndex: number,
 ): boolean {
+	if (role === "audio") {
+		return trackIndex < MAIN_TRACK_INDEX;
+	}
+	if (trackIndex < MAIN_TRACK_INDEX) {
+		return false;
+	}
 	return trackIndex !== MAIN_TRACK_INDEX || role === "clip";
 }
 
@@ -197,6 +203,22 @@ export function findAvailableStoredTrack(
 	excludeId: string,
 	maxTrack: number,
 ): number {
+	if (targetTrack < MAIN_TRACK_INDEX) {
+		let minTrack = targetTrack;
+		for (const el of elements) {
+			const track = el.timeline.trackIndex ?? MAIN_TRACK_INDEX;
+			if (track < minTrack) {
+				minTrack = track;
+			}
+		}
+		for (let track = targetTrack; track >= minTrack; track--) {
+			if (!hasOverlapOnStoredTrack(start, end, track, elements, excludeId)) {
+				return track;
+			}
+		}
+		return minTrack - 1;
+	}
+
 	for (let track = targetTrack; track <= maxTrack; track++) {
 		if (!hasOverlapOnStoredTrack(start, end, track, elements, excludeId)) {
 			return track;
@@ -224,15 +246,56 @@ export function findAvailableTrack(
 	if (currentElement?.type === "Transition") {
 		return targetTrack;
 	}
-	for (let track = targetTrack; track < trackCount + 1; track++) {
-		if (hasRoleConflictOnTrack(role, track, elements, assignments, excludeId, options)) {
+	if (role === "audio") {
+		const safeTarget = targetTrack < MAIN_TRACK_INDEX ? targetTrack : -1;
+		let minTrack = safeTarget;
+		for (const el of elements) {
+			const track = assignments.get(el.id) ?? el.timeline.trackIndex ?? MAIN_TRACK_INDEX;
+			if (track < minTrack) {
+				minTrack = track;
+			}
+		}
+		for (let track = safeTarget; track >= minTrack; track--) {
+			if (
+				hasRoleConflictOnTrack(
+					role,
+					track,
+					elements,
+					assignments,
+					excludeId,
+					options,
+				)
+			) {
+				continue;
+			}
+			if (
+				!hasOverlapOnTrack(start, end, track, elements, assignments, excludeId)
+			) {
+				return track;
+			}
+		}
+		return minTrack - 1;
+	}
+
+	const safeTarget = targetTrack < MAIN_TRACK_INDEX ? MAIN_TRACK_INDEX : targetTrack;
+	for (let track = safeTarget; track < trackCount + 1; track++) {
+		if (
+			hasRoleConflictOnTrack(
+				role,
+				track,
+				elements,
+				assignments,
+				excludeId,
+				options,
+			)
+		) {
 			continue;
 		}
 		if (!hasOverlapOnTrack(start, end, track, elements, assignments, excludeId)) {
 			return track;
 		}
 	}
-	return trackCount;
+	return Math.max(MAIN_TRACK_INDEX, trackCount);
 }
 
 /**
@@ -249,14 +312,16 @@ export function assignTracks(
 	const assignments = new Map<string, number>();
 
 	const sorted = [...elements].sort((a, b) => {
-		const aTrack = a.timeline.trackIndex ?? -1;
-		const bTrack = b.timeline.trackIndex ?? -1;
-		if (aTrack === -1 && bTrack === -1) {
+		const aTrack = a.timeline.trackIndex;
+		const bTrack = b.timeline.trackIndex;
+		const aHasTrack = Number.isFinite(aTrack);
+		const bHasTrack = Number.isFinite(bTrack);
+		if (!aHasTrack && !bHasTrack) {
 			return a.timeline.start - b.timeline.start;
 		}
-		if (aTrack === -1) return 1;
-		if (bTrack === -1) return -1;
-		return aTrack - bTrack;
+		if (!aHasTrack) return 1;
+		if (!bHasTrack) return -1;
+		return (aTrack as number) - (bTrack as number);
 	});
 
 	let maxTrack = MAIN_TRACK_INDEX;
@@ -292,7 +357,13 @@ export function getTrackCount(assignments: Map<string, number>): number {
 	if (assignments.size === 0) {
 		return 1;
 	}
-	return Math.max(...assignments.values()) + 1;
+	const nonNegative = Array.from(assignments.values()).filter(
+		(track) => track >= MAIN_TRACK_INDEX,
+	);
+	if (nonNegative.length === 0) {
+		return 1;
+	}
+	return Math.max(...nonNegative) + 1;
 }
 
 /**
@@ -318,17 +389,26 @@ export function normalizeTrackAssignments(
 		return new Map();
 	}
 
-	const usedTracks = new Set<number>();
+	const positiveTracks = new Set<number>();
+	const negativeTracks = new Set<number>();
 	for (const track of assignments.values()) {
-		usedTracks.add(track);
+		if (track < MAIN_TRACK_INDEX) {
+			negativeTracks.add(track);
+		} else {
+			positiveTracks.add(track);
+		}
 	}
-	usedTracks.add(MAIN_TRACK_INDEX);
+	positiveTracks.add(MAIN_TRACK_INDEX);
 
-	const sortedTracks = [...usedTracks].sort((a, b) => a - b);
+	const sortedPositive = [...positiveTracks].sort((a, b) => a - b);
+	const sortedNegative = [...negativeTracks].sort((a, b) => b - a);
 
 	const trackMapping = new Map<number, number>();
-	sortedTracks.forEach((oldTrack, newTrack) => {
-		trackMapping.set(oldTrack, newTrack);
+	sortedPositive.forEach((oldTrack, newIndex) => {
+		trackMapping.set(oldTrack, newIndex);
+	});
+	sortedNegative.forEach((oldTrack, newIndex) => {
+		trackMapping.set(oldTrack, -(newIndex + 1));
 	});
 
 	const normalized = new Map<string, number>();
@@ -376,16 +456,26 @@ export function normalizeStoredTrackIndices(
 		return elements;
 	}
 
-	const usedTracks = new Set<number>();
+	const positiveTracks = new Set<number>();
+	const negativeTracks = new Set<number>();
 	for (const el of elements) {
-		usedTracks.add(el.timeline.trackIndex ?? MAIN_TRACK_INDEX);
+		const trackIndex = el.timeline.trackIndex ?? MAIN_TRACK_INDEX;
+		if (trackIndex < MAIN_TRACK_INDEX) {
+			negativeTracks.add(trackIndex);
+		} else {
+			positiveTracks.add(trackIndex);
+		}
 	}
-	usedTracks.add(MAIN_TRACK_INDEX);
+	positiveTracks.add(MAIN_TRACK_INDEX);
 
-	const sortedTracks = [...usedTracks].sort((a, b) => a - b);
+	const sortedPositive = [...positiveTracks].sort((a, b) => a - b);
+	const sortedNegative = [...negativeTracks].sort((a, b) => b - a);
 	const trackMapping = new Map<number, number>();
-	sortedTracks.forEach((oldTrack, newIndex) => {
+	sortedPositive.forEach((oldTrack, newIndex) => {
 		trackMapping.set(oldTrack, newIndex);
+	});
+	sortedNegative.forEach((oldTrack, newIndex) => {
+		trackMapping.set(oldTrack, -(newIndex + 1));
 	});
 
 	let didChange = false;

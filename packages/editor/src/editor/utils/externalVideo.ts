@@ -84,9 +84,10 @@ const buildFileUrlFromPath = (rawPath: string): string => {
 export async function resolveExternalVideoUri(file: File): Promise<string> {
 	if (isElectronEnv()) {
 		const filePath = getFilePath(file) ?? getElectronFilePath(file);
-		if (filePath) {
-			return buildFileUrlFromPath(filePath);
+		if (!filePath) {
+			throw new Error("无法读取本地视频文件路径");
 		}
+		return buildFileUrlFromPath(filePath);
 	}
 	const { uri } = await writeVideoToOpfs(file);
 	return uri;

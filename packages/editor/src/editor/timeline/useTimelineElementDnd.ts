@@ -1158,7 +1158,8 @@ export const useTimelineElementDnd = ({
 
 			const isMultiDrag =
 				dragSelectedIdsRef.current.length > 1 &&
-				dragSelectedIdsRef.current.includes(element.id);
+				dragSelectedIdsRef.current.includes(element.id) &&
+				elementRole !== "audio";
 			if (isMultiDrag) {
 				let deltaFrames = Math.round(adjustedDeltaX / ratio);
 				const minStart = dragMinStartRef.current;

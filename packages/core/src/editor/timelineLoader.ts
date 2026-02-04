@@ -202,7 +202,19 @@ function validateElement(el: any, index: number, fps: number): TimelineElement {
 		`${path}.timeline`,
 		fps,
 		allowZeroDuration,
+		{
+			allowNegativeTrackIndex: el.type === "AudioClip",
+		},
 	);
+	if (el.type === "AudioClip") {
+		if (
+			timeline.trackIndex === undefined ||
+			!Number.isFinite(timeline.trackIndex) ||
+			timeline.trackIndex >= 0
+		) {
+			throw new Error(`${path}.timeline.trackIndex: AudioClip must use a negative trackIndex`);
+		}
+	}
 
 	// 验证 render (可选)
 	const render = validateRender(el.render || {}, `${path}.render`);
@@ -589,6 +601,7 @@ function validateTimelineProps(
 	path: string,
 	fps: number,
 	allowZeroDuration: boolean = false,
+	options?: { allowNegativeTrackIndex?: boolean },
 ): TimelineMeta {
 	if (!timeline || typeof timeline !== "object") {
 		throw new Error(`${path}: must be an object`);
@@ -627,7 +640,10 @@ function validateTimelineProps(
 	}
 
 	if (timeline.trackIndex !== undefined) {
-		if (typeof timeline.trackIndex !== "number" || timeline.trackIndex < 0) {
+		if (typeof timeline.trackIndex !== "number") {
+			throw new Error(`${path}.trackIndex: must be a number`);
+		}
+		if (!options?.allowNegativeTrackIndex && timeline.trackIndex < 0) {
 			throw new Error(`${path}.trackIndex: must be a non-negative number`);
 		}
 	}

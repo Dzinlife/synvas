@@ -16,6 +16,8 @@ interface TimelineDragOverlayProps {
 	scrollLeft: number;
 	otherTrackCount: number;
 	otherTrackHeights: number[];
+	audioTrackCount: number;
+	audioTrackHeights: number[];
 	mainTrackHeight: number;
 	timelinePaddingLeft?: number;
 }
@@ -57,6 +59,8 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 	scrollLeft,
 	otherTrackCount,
 	otherTrackHeights,
+	audioTrackCount,
+	audioTrackHeights,
 	mainTrackHeight,
 	timelinePaddingLeft = 0,
 }) => {
@@ -76,10 +80,27 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 			);
 			return otherTrackHeights[boundedIndex];
 		};
+		const resolveAudioTrackHeight = (trackIndex: number) => {
+			if (audioTrackCount <= 0 || audioTrackHeights.length === 0) {
+				return DEFAULT_TRACK_HEIGHT;
+			}
+			const audioIndex = Math.min(
+				Math.max(1, Math.abs(trackIndex)),
+				Math.max(audioTrackCount, 1),
+			);
+			const trackFromTop = audioIndex - 1;
+			const boundedIndex = Math.max(
+				0,
+				Math.min(audioTrackHeights.length - 1, trackFromTop),
+			);
+			return audioTrackHeights[boundedIndex] ?? DEFAULT_TRACK_HEIGHT;
+		};
 		const indicatorHeight = getElementHeightForTrack(
 			activeDropTarget.finalTrackIndex === 0
 				? mainTrackHeight
-				: resolveOtherTrackHeight(activeDropTarget.finalTrackIndex),
+				: activeDropTarget.finalTrackIndex < 0
+					? resolveAudioTrackHeight(activeDropTarget.finalTrackIndex)
+					: resolveOtherTrackHeight(activeDropTarget.finalTrackIndex),
 		);
 		const indicatorOffset = TRACK_CONTENT_GAP / 2;
 
@@ -102,7 +123,7 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 					screenY = contentRect.top + indicatorOffset;
 				}
 			}
-		} else {
+		} else if (activeDropTarget.finalTrackIndex > 0) {
 			targetZone = document.querySelector<HTMLElement>(
 				'[data-track-drop-zone="other"]',
 			);
@@ -145,6 +166,34 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 					screenY = contentRect.top + trackY + indicatorOffset;
 				}
 			}
+		} else {
+			targetZone = document.querySelector<HTMLElement>(
+				'[data-track-drop-zone="audio"]',
+			);
+			if (targetZone) {
+				const contentArea = targetZone.querySelector<HTMLElement>(
+					'[data-track-content-area="audio"]',
+				);
+				if (contentArea) {
+					const contentRect = contentArea.getBoundingClientRect();
+					const audioIndex = Math.min(
+						Math.max(1, Math.abs(activeDropTarget.finalTrackIndex)),
+						Math.max(audioTrackCount, 1),
+					);
+					const trackFromTop = audioIndex - 1;
+					let trackY = 0;
+					if (audioTrackHeights.length > 0) {
+						for (let i = 0; i < trackFromTop; i += 1) {
+							trackY += audioTrackHeights[i] ?? DEFAULT_TRACK_HEIGHT;
+						}
+					} else {
+						trackY = trackFromTop * DEFAULT_TRACK_HEIGHT;
+					}
+					screenX =
+						contentRect.left + activeDropTarget.start * ratio - scrollLeft;
+					screenY = contentRect.top + trackY + indicatorOffset;
+				}
+			}
 		}
 
 		if (!targetZone) return null;
@@ -168,6 +217,8 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 		scrollLeft,
 		otherTrackCount,
 		otherTrackHeights,
+		audioTrackCount,
+		audioTrackHeights,
 		mainTrackHeight,
 	]);
 

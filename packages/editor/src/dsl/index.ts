@@ -1,4 +1,5 @@
 export { default as BackdropZoom } from "./BackdropZoom";
+export { default as AudioClip } from "./AudioClip";
 export { default as VideoClip } from "./VideoClip";
 export { default as CloudBackground } from "./CloudBackground";
 export { default as ColorFilterLayer } from "./ColorFilterLayer";

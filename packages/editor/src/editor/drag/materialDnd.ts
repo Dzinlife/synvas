@@ -147,7 +147,7 @@ export function resolveMaterialDropTarget(
 ): DropTargetInfo | null {
 	const previewTarget = getPreviewDropTargetFromScreenPosition(screenX, screenY);
 	if (previewTarget) {
-		if (state.isTransitionMaterial) {
+		if (state.isTransitionMaterial || state.materialRole === "audio") {
 			return { ...previewTarget, canDrop: false };
 		}
 		return previewTarget;
@@ -179,6 +179,7 @@ export function resolveMaterialDropTarget(
 		context.trackLockedMap.get(trackIndex) ?? false;
 
 	const resolveTrackRole = (trackIndex: number): TrackRole => {
+		if (trackIndex < MAIN_TRACK_INDEX) return "audio";
 		if (trackIndex === MAIN_TRACK_INDEX) return "clip";
 		return context.trackRoleMap.get(trackIndex) ?? "overlay";
 	};
@@ -207,6 +208,7 @@ export function resolveMaterialDropTarget(
 
 	const isClipTrack = (trackIndex: number): boolean => {
 		if (trackIndex === MAIN_TRACK_INDEX) return true;
+		if (trackIndex < MAIN_TRACK_INDEX) return false;
 		return context.trackRoleMap.get(trackIndex) === "clip";
 	};
 
@@ -303,6 +305,30 @@ export function resolveMaterialDropTarget(
 			type: "track",
 			trackIndex: baseDropTarget.trackIndex,
 			time: target.boundary,
+			canDrop: true,
+		};
+	}
+
+	if (baseDropTarget.trackIndex < MAIN_TRACK_INDEX && state.materialRole !== "audio") {
+		return {
+			zone: "timeline",
+			type: baseDropTarget.type,
+			trackIndex: baseDropTarget.trackIndex,
+			time,
+			canDrop: false,
+		};
+	}
+
+	if (state.materialRole === "audio") {
+		const audioTrackIndex =
+			baseDropTarget.trackIndex < MAIN_TRACK_INDEX
+				? baseDropTarget.trackIndex
+				: -1;
+		return {
+			zone: "timeline",
+			type: "track",
+			trackIndex: audioTrackIndex,
+			time,
 			canDrop: true,
 		};
 	}

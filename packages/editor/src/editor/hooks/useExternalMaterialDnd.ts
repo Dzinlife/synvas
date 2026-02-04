@@ -1,8 +1,16 @@
-import type { TimelineElement as TimelineElementType } from "@/dsl/types";
-import { clampFrame } from "@/utils/timecode";
 import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import React, { useCallback, useRef } from "react";
 import { toast } from "sonner";
+import {
+	isAudioFile,
+	readAudioMetadata,
+	writeAudioToOpfs,
+} from "@/asr/opfsAudio";
+import type {
+	TimelineElement as TimelineElementType,
+	TrackRole,
+} from "@/dsl/types";
+import { clampFrame } from "@/utils/timecode";
 import {
 	useAttachments,
 	useCurrentTime,
@@ -34,6 +42,166 @@ import {
 	getTrackCount,
 } from "../utils/trackAssignment";
 
+const IMAGE_EXTENSIONS = new Set([
+	"png",
+	"jpg",
+	"jpeg",
+	"webp",
+	"gif",
+	"bmp",
+	"svg",
+	"heic",
+	"heif",
+	"tiff",
+	"tif",
+	"avif",
+	"ico",
+	"psd",
+]);
+
+const OPFS_ROOT_DIR = "ai-nle";
+const OPFS_IMAGE_DIR = "images";
+const OPFS_PREFIX = "opfs://";
+const DEFAULT_IMAGE_WIDTH = 1920;
+const DEFAULT_IMAGE_HEIGHT = 1080;
+const FILE_PREFIX = "file://";
+
+type FileWithPath = File & { path?: string };
+
+const isImageFile = (file: File): boolean => {
+	if (file.type.startsWith("image/")) return true;
+	const parts = file.name.toLowerCase().split(".");
+	if (parts.length < 2) return false;
+	const ext = parts[parts.length - 1];
+	return IMAGE_EXTENSIONS.has(ext);
+};
+
+const getFilePath = (file: File): string | null => {
+	const rawPath = (file as FileWithPath).path;
+	if (typeof rawPath !== "string") return null;
+	const trimmed = rawPath.trim();
+	return trimmed ? trimmed : null;
+};
+
+const getElectronFilePath = (file: File): string | null => {
+	if (typeof window === "undefined") return null;
+	const bridge = (
+		window as Window & {
+			aiNleElectron?: {
+				webUtils?: {
+					getPathForFile?: (file: File) => string | null | undefined;
+				};
+			};
+		}
+	).aiNleElectron;
+	const resolved = bridge?.webUtils?.getPathForFile?.(file);
+	if (typeof resolved !== "string") return null;
+	const trimmed = resolved.trim();
+	return trimmed ? trimmed : null;
+};
+
+const buildFileUrlFromPath = (rawPath: string): string => {
+	if (rawPath.startsWith(FILE_PREFIX)) return rawPath;
+	const normalized = rawPath.replace(/\\/g, "/");
+	let pathPart = normalized;
+	let isUnc = false;
+
+	if (pathPart.startsWith("//")) {
+		isUnc = true;
+		pathPart = pathPart.slice(2);
+	} else if (/^[a-zA-Z]:\//.test(pathPart)) {
+		pathPart = `/${pathPart}`;
+	} else if (!pathPart.startsWith("/")) {
+		pathPart = `/${pathPart}`;
+	}
+
+	const encoded = pathPart
+		.split("/")
+		.map((segment) => {
+			if (!segment) return "";
+			if (!isUnc && /^[a-zA-Z]:$/.test(segment)) return segment;
+			return encodeURIComponent(segment);
+		})
+		.join("/");
+
+	return `${FILE_PREFIX}${encoded}`;
+};
+
+const resolveExternalFileUrl = (file: File): string | null => {
+	if (typeof window === "undefined" || !("aiNleElectron" in window)) {
+		return null;
+	}
+	const filePath = getFilePath(file) ?? getElectronFilePath(file);
+	return filePath ? buildFileUrlFromPath(filePath) : null;
+};
+
+const normalizeFileName = (name: string): string => {
+	const clean = name.trim();
+	if (!clean) return `image-${Date.now()}.png`;
+	return clean.replace(/[\\/:*?"<>|]/g, "-");
+};
+
+const buildOpfsPath = (fileName: string): string => {
+	return `${OPFS_PREFIX}${OPFS_ROOT_DIR}/${OPFS_IMAGE_DIR}/${fileName}`;
+};
+
+const writeImageToOpfs = async (
+	file: File,
+): Promise<{ uri: string; fileName: string }> => {
+	if (!("storage" in navigator) || !("getDirectory" in navigator.storage)) {
+		throw new Error("OPFS 不可用");
+	}
+	const root = await navigator.storage.getDirectory();
+	const appDir = await root.getDirectoryHandle(OPFS_ROOT_DIR, {
+		create: true,
+	});
+	const imageDir = await appDir.getDirectoryHandle(OPFS_IMAGE_DIR, {
+		create: true,
+	});
+	const safeName = `${Date.now()}-${normalizeFileName(file.name)}`;
+	const fileHandle = await imageDir.getFileHandle(safeName, { create: true });
+	const writable = await fileHandle.createWritable();
+	try {
+		await writable.write(file);
+	} finally {
+		await writable.close();
+	}
+	return { uri: buildOpfsPath(safeName), fileName: safeName };
+};
+
+const readImageMetadata = async (
+	file: File,
+): Promise<{ width: number; height: number }> => {
+	const url = URL.createObjectURL(file);
+	const image = new Image();
+	image.src = url;
+
+	try {
+		const metadata = await new Promise<{ width: number; height: number }>(
+			(resolve, reject) => {
+				const cleanup = () => {
+					image.src = "";
+				};
+
+				image.onload = () => {
+					resolve({
+						width: image.naturalWidth || DEFAULT_IMAGE_WIDTH,
+						height: image.naturalHeight || DEFAULT_IMAGE_HEIGHT,
+					});
+					cleanup();
+				};
+				image.onerror = () => {
+					reject(new Error("读取图片元数据失败"));
+					cleanup();
+				};
+			},
+		);
+		return metadata;
+	} finally {
+		URL.revokeObjectURL(url);
+	}
+};
+
 export interface UseExternalMaterialDndOptions {
 	scrollAreaRef: React.RefObject<HTMLDivElement>;
 	verticalScrollRef: React.RefObject<HTMLDivElement>;
@@ -63,17 +231,49 @@ export function useExternalMaterialDnd({
 
 	const externalDragActiveRef = useRef(false);
 	const externalDragOffsetRef = useRef({ x: 0, y: 0 });
+	const externalDragTypeRef = useRef<"video" | "audio" | "image" | null>(null);
 
 	const hasExternalFileDrag = useCallback(
 		(dataTransfer: DataTransfer | null): boolean => {
 			if (!dataTransfer) return false;
-			if (dataTransfer.types?.includes("Files")) return true;
+			if (
+				Array.from(dataTransfer.types ?? []).some(
+					(type) =>
+						type === "Files" ||
+						type === "public.file-url" ||
+						type === "text/uri-list" ||
+						type === "application/x-moz-file" ||
+						type.toLowerCase().includes("file"),
+				)
+			) {
+				return true;
+			}
+			if (dataTransfer.files && dataTransfer.files.length > 0) {
+				return true;
+			}
 			if (dataTransfer.items) {
+				if (dataTransfer.items.length > 0) {
+					return true;
+				}
 				return Array.from(dataTransfer.items).some(
 					(item) => item.kind === "file",
 				);
 			}
 			return false;
+		},
+		[],
+	);
+
+	const getExternalAllFiles = useCallback(
+		(dataTransfer: DataTransfer | null) => {
+			if (!dataTransfer) return [];
+			const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+			const itemFiles = items
+				.map((item) => (item.kind === "file" ? item.getAsFile() : null))
+				.filter((file): file is File => Boolean(file));
+			const files = Array.from(dataTransfer.files);
+			if (files.length > 0) return files;
+			return itemFiles;
 		},
 		[],
 	);
@@ -105,12 +305,67 @@ export function useExternalMaterialDnd({
 		[isElectron],
 	);
 
+	const getExternalImageFiles = useCallback(
+		(dataTransfer: DataTransfer | null) => {
+			if (!dataTransfer) return [];
+			const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+			const itemFiles = items
+				.map((item) => (item.kind === "file" ? item.getAsFile() : null))
+				.filter((file): file is File => Boolean(file));
+			const itemImageFiles = itemFiles.filter((file) => isImageFile(file));
+			if (isElectron) {
+				const hasFilePath = (file: File): boolean => {
+					const rawPath = (file as File & { path?: string }).path;
+					return typeof rawPath === "string" && rawPath.trim().length > 0;
+				};
+				const itemWithPath = itemImageFiles.filter((file) => hasFilePath(file));
+				if (itemWithPath.length > 0) return itemWithPath;
+			}
+			const files = Array.from(dataTransfer.files);
+			if (files.length > 0) {
+				return files.filter((file) => isImageFile(file));
+			}
+			return itemImageFiles;
+		},
+		[isElectron],
+	);
+
+	const resolveExternalAudioUri = useCallback(
+		async (file: File) => {
+			if (isElectron) {
+				const fileUrl = resolveExternalFileUrl(file);
+				if (!fileUrl) {
+					throw new Error("无法读取本地音频文件路径");
+				}
+				return fileUrl;
+			}
+			const { uri } = await writeAudioToOpfs(file);
+			return uri;
+		},
+		[isElectron],
+	);
+
+	const resolveExternalImageUri = useCallback(
+		async (file: File) => {
+			if (isElectron) {
+				const fileUrl = resolveExternalFileUrl(file);
+				if (!fileUrl) {
+					throw new Error("无法读取本地图片文件路径");
+				}
+				return fileUrl;
+			}
+			const { uri } = await writeImageToOpfs(file);
+			return uri;
+		},
+		[isElectron],
+	);
+
 	const resolveExternalDropTarget = useCallback(
-		(clientX: number, clientY: number) => {
+		(clientX: number, clientY: number, materialRole: TrackRole) => {
 			return resolveMaterialDropTarget(
 				materialDndContext,
 				{
-					materialRole: "clip",
+					materialRole,
 					materialDurationFrames: materialDndContext.defaultDurationFrames,
 					isTransitionMaterial: false,
 				},
@@ -121,17 +376,61 @@ export function useExternalMaterialDnd({
 		[materialDndContext],
 	);
 
+	const getExternalAudioFiles = useCallback(
+		(dataTransfer: DataTransfer | null) => {
+			if (!dataTransfer) return [];
+			const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+			const itemFiles = items
+				.map((item) => (item.kind === "file" ? item.getAsFile() : null))
+				.filter((file): file is File => Boolean(file));
+			const itemAudioFiles = itemFiles.filter((file) => isAudioFile(file));
+			if (isElectron) {
+				const hasFilePath = (file: File): boolean => {
+					const rawPath = (file as File & { path?: string }).path;
+					return typeof rawPath === "string" && rawPath.trim().length > 0;
+				};
+				const itemWithPath = itemAudioFiles.filter((file) => hasFilePath(file));
+				if (itemWithPath.length > 0) return itemWithPath;
+			}
+			const files = Array.from(dataTransfer.files);
+			if (files.length > 0) {
+				return files.filter((file) => isAudioFile(file));
+			}
+			return itemAudioFiles;
+		},
+		[isElectron],
+	);
+
 	const handleExternalDragEnter = useCallback(
 		(event: React.DragEvent<HTMLDivElement>) => {
-			if (!hasExternalFileDrag(event.dataTransfer)) return;
 			event.preventDefault();
+			if (!hasExternalFileDrag(event.dataTransfer)) return;
 			if (externalDragActiveRef.current) return;
 			externalDragActiveRef.current = true;
 			externalDragOffsetRef.current = { x: 60, y: 40 };
+			const audioFiles = getExternalAudioFiles(event.dataTransfer);
+			const imageFiles = getExternalImageFiles(event.dataTransfer);
+			const videoFiles = getExternalVideoFiles(event.dataTransfer);
+			const dragType =
+				audioFiles.length > 0 &&
+				videoFiles.length === 0 &&
+				imageFiles.length === 0
+					? "audio"
+					: imageFiles.length > 0 &&
+							videoFiles.length === 0 &&
+							audioFiles.length === 0
+						? "image"
+						: "video";
+			externalDragTypeRef.current = dragType;
 			const dragData: MaterialDragData = {
-				type: "video",
+				type: dragType,
 				uri: "",
-				name: "视频文件",
+				name:
+					dragType === "audio"
+						? "音频文件"
+						: dragType === "image"
+							? "图片文件"
+							: "视频文件",
 				duration: materialDndContext.defaultDurationFrames,
 			};
 			startDrag("external-file", dragData, {
@@ -142,22 +441,48 @@ export function useExternalMaterialDnd({
 				label: dragData.name,
 			});
 		},
-		[hasExternalFileDrag, materialDndContext.defaultDurationFrames, startDrag],
+		[
+			hasExternalFileDrag,
+			getExternalImageFiles,
+			getExternalAudioFiles,
+			getExternalVideoFiles,
+			materialDndContext.defaultDurationFrames,
+			startDrag,
+		],
 	);
 
 	const handleExternalDragOver = useCallback(
 		(event: React.DragEvent<HTMLDivElement>) => {
-			if (!hasExternalFileDrag(event.dataTransfer)) return;
 			event.preventDefault();
 			event.stopPropagation();
+			if (!hasExternalFileDrag(event.dataTransfer)) return;
 
 			if (!externalDragActiveRef.current) {
 				externalDragActiveRef.current = true;
 				externalDragOffsetRef.current = { x: 60, y: 40 };
+				const audioFiles = getExternalAudioFiles(event.dataTransfer);
+				const imageFiles = getExternalImageFiles(event.dataTransfer);
+				const videoFiles = getExternalVideoFiles(event.dataTransfer);
+				const dragType =
+					audioFiles.length > 0 &&
+					videoFiles.length === 0 &&
+					imageFiles.length === 0
+						? "audio"
+						: imageFiles.length > 0 &&
+								videoFiles.length === 0 &&
+								audioFiles.length === 0
+							? "image"
+							: "video";
+				externalDragTypeRef.current = dragType;
 				const dragData: MaterialDragData = {
-					type: "video",
+					type: dragType,
 					uri: "",
-					name: "视频文件",
+					name:
+						dragType === "audio"
+							? "音频文件"
+							: dragType === "image"
+								? "图片文件"
+								: "视频文件",
 					duration: materialDndContext.defaultDurationFrames,
 				};
 				startDrag("external-file", dragData, {
@@ -173,9 +498,21 @@ export function useExternalMaterialDnd({
 				screenX: event.clientX - externalDragOffsetRef.current.x,
 				screenY: event.clientY - externalDragOffsetRef.current.y,
 			});
+			const dragType =
+				externalDragTypeRef.current ??
+				(getExternalAudioFiles(event.dataTransfer).length > 0 &&
+				getExternalVideoFiles(event.dataTransfer).length === 0 &&
+				getExternalImageFiles(event.dataTransfer).length === 0
+					? "audio"
+					: getExternalImageFiles(event.dataTransfer).length > 0 &&
+							getExternalVideoFiles(event.dataTransfer).length === 0 &&
+							getExternalAudioFiles(event.dataTransfer).length === 0
+						? "image"
+						: "video");
 			const dropTarget = resolveExternalDropTarget(
 				event.clientX,
 				event.clientY,
+				dragType === "audio" ? "audio" : "clip",
 			);
 			updateDropTarget(dropTarget);
 
@@ -203,6 +540,9 @@ export function useExternalMaterialDnd({
 		},
 		[
 			hasExternalFileDrag,
+			getExternalAudioFiles,
+			getExternalImageFiles,
+			getExternalVideoFiles,
 			materialDndContext.defaultDurationFrames,
 			resolveExternalDropTarget,
 			scrollAreaRef,
@@ -221,6 +561,7 @@ export function useExternalMaterialDnd({
 			event.preventDefault();
 			stopAutoScroll();
 			externalDragActiveRef.current = false;
+			externalDragTypeRef.current = null;
 			updateDropTarget(null);
 			endDrag();
 		},
@@ -229,25 +570,387 @@ export function useExternalMaterialDnd({
 
 	const handleExternalDrop = useCallback(
 		async (event: React.DragEvent<HTMLDivElement>) => {
-			const files = getExternalVideoFiles(event.dataTransfer);
-			if (files.length === 0) return;
 			event.preventDefault();
 			event.stopPropagation();
+			const videoFiles = getExternalVideoFiles(event.dataTransfer);
+			const audioFiles = getExternalAudioFiles(event.dataTransfer);
+			const imageFiles = getExternalImageFiles(event.dataTransfer);
+			const allFiles = getExternalAllFiles(event.dataTransfer);
+			const hasAudio = audioFiles.length > 0;
+			const hasImage = imageFiles.length > 0;
+			const hasVideo = videoFiles.length > 0;
+			if (!hasVideo && !hasAudio && !hasImage) {
+				if (allFiles.length > 0) {
+					toast.error("不支持的文件类型");
+				}
+				return;
+			}
+
+			externalDragTypeRef.current = null;
 
 			const dropTarget =
 				useDragStore.getState().dropTarget ??
-				resolveExternalDropTarget(event.clientX, event.clientY);
+				resolveExternalDropTarget(
+					event.clientX,
+					event.clientY,
+					hasAudio ? "audio" : "clip",
+				);
+			const fallbackDropTarget = dropTarget ?? {
+				zone: "timeline" as const,
+				type: "track" as const,
+				trackIndex: hasAudio ? -1 : 0,
+				time: clampFrame(currentTime),
+				canDrop: true,
+			};
 			stopAutoScroll();
 			externalDragActiveRef.current = false;
 			updateDropTarget(null);
 			endDrag();
+
+			if (hasAudio) {
+				const prepared: {
+					file: File;
+					uri: string;
+					duration: number;
+				}[] = [];
+				for (const file of audioFiles) {
+					try {
+						const uri = await resolveExternalAudioUri(file);
+						const metadata = await readAudioMetadata(file).catch(() => ({
+							duration: 1,
+						}));
+						prepared.push({
+							file,
+							uri,
+							duration: metadata.duration,
+						});
+					} catch (error) {
+						console.warn("外部音频导入失败:", error);
+						toast.error(`导入失败：${file.name}`);
+					}
+				}
+
+				if (prepared.length === 0) return;
+
+				const primaryDurationFrames = Math.max(
+					1,
+					Math.round(prepared[0].duration * fps),
+				);
+				const resolvedDropTarget =
+					resolveMaterialDropTarget(
+						materialDndContext,
+						{
+							materialRole: "audio",
+							materialDurationFrames: primaryDurationFrames,
+							isTransitionMaterial: false,
+						},
+						event.clientX,
+						event.clientY,
+					) ?? fallbackDropTarget;
+
+				if (!resolvedDropTarget || !resolvedDropTarget.canDrop) return;
+				if (resolvedDropTarget.zone !== "timeline") return;
+
+				setElements((prev) => {
+					let nextElements = prev;
+					let nextStart = clampFrame(resolvedDropTarget.time ?? 0);
+					let targetTrackIndex = resolvedDropTarget.trackIndex ?? -1;
+					if (targetTrackIndex >= 0) {
+						targetTrackIndex = -1;
+					}
+
+					const assignments = getStoredTrackAssignments(prev);
+					const trackCount = getTrackCount(assignments);
+
+					prepared.forEach((item, index) => {
+						const durationFrames = Math.max(1, Math.round(item.duration * fps));
+						const startFrame = nextStart;
+						const endFrame = startFrame + durationFrames;
+						const newId = `external-audio-${Date.now()}-${index}`;
+						const finalTrack = findAvailableTrack(
+							startFrame,
+							endFrame,
+							targetTrackIndex,
+							"audio",
+							nextElements,
+							assignments,
+							newId,
+							trackCount,
+						);
+						const newElement: TimelineElementType = {
+							id: newId,
+							type: "AudioClip",
+							component: "audio-clip",
+							name: item.file.name,
+							props: {
+								uri: item.uri,
+							},
+							transform: {
+								centerX: 0,
+								centerY: 0,
+								width: 1920,
+								height: 1080,
+								rotation: 0,
+							},
+							timeline: buildTimelineMeta(
+								{
+									start: startFrame,
+									end: endFrame,
+									trackIndex: finalTrack,
+									role: "audio",
+								},
+								fps,
+							),
+							render: {
+								zIndex: 0,
+								visible: true,
+								opacity: 1,
+							},
+						};
+
+						nextElements = [...nextElements, newElement];
+						assignments.set(newId, finalTrack);
+						nextStart = endFrame;
+					});
+
+					return finalizeTimelineElements(nextElements, {
+						rippleEditingEnabled,
+						attachments,
+						autoAttach,
+						fps,
+						trackLockedMap,
+					});
+				});
+				return;
+			}
+
+			if (hasImage) {
+				const prepared: {
+					file: File;
+					uri: string;
+					width: number;
+					height: number;
+				}[] = [];
+				for (const file of imageFiles) {
+					try {
+						const uri = await resolveExternalImageUri(file);
+						const metadata = await readImageMetadata(file).catch(() => ({
+							width: DEFAULT_IMAGE_WIDTH,
+							height: DEFAULT_IMAGE_HEIGHT,
+						}));
+						prepared.push({
+							file,
+							uri,
+							width: metadata.width,
+							height: metadata.height,
+						});
+					} catch (error) {
+						console.warn("外部图片导入失败:", error);
+						toast.error(`导入失败：${file.name}`);
+					}
+				}
+
+				if (prepared.length === 0) return;
+
+				const primaryDurationFrames = Math.max(
+					1,
+					materialDndContext.defaultDurationFrames,
+				);
+				const resolvedDropTarget =
+					resolveMaterialDropTarget(
+						materialDndContext,
+						{
+							materialRole: "clip",
+							materialDurationFrames: primaryDurationFrames,
+							isTransitionMaterial: false,
+						},
+						event.clientX,
+						event.clientY,
+					) ?? fallbackDropTarget;
+
+				if (!resolvedDropTarget || !resolvedDropTarget.canDrop) return;
+
+				if (resolvedDropTarget.zone === "preview") {
+					const canvasX = resolvedDropTarget.canvasX ?? 0;
+					const canvasY = resolvedDropTarget.canvasY ?? 0;
+					setElements((prev) => {
+						let nextElements = prev;
+						let nextStart = clampFrame(currentTime);
+						const assignments = getStoredTrackAssignments(prev);
+						let nextTrackCount = getTrackCount(assignments);
+
+						prepared.forEach((item, index) => {
+							const durationFrames = Math.max(
+								1,
+								materialDndContext.defaultDurationFrames,
+							);
+							const startFrame = nextStart;
+							const endFrame = startFrame + durationFrames;
+							const newId = `external-image-${Date.now()}-${index}`;
+							const finalTrack = findAvailableTrack(
+								startFrame,
+								endFrame,
+								1,
+								"clip",
+								nextElements,
+								assignments,
+								newId,
+								nextTrackCount,
+							);
+							const newElement: TimelineElementType = {
+								id: newId,
+								type: "Image",
+								component: "image",
+								name: item.file.name,
+								props: {
+									uri: item.uri,
+								},
+								transform: {
+									centerX: canvasX,
+									centerY: canvasY,
+									width: item.width,
+									height: item.height,
+									rotation: 0,
+								},
+								timeline: buildTimelineMeta(
+									{
+										start: startFrame,
+										end: endFrame,
+										trackIndex: finalTrack,
+										role: "clip",
+									},
+									fps,
+								),
+								render: {
+									zIndex: 0,
+									visible: true,
+									opacity: 1,
+								},
+							};
+
+							nextElements = [...nextElements, newElement];
+							assignments.set(newId, finalTrack);
+							nextTrackCount = Math.max(nextTrackCount, finalTrack + 1);
+							nextStart = endFrame;
+						});
+
+						return nextElements;
+					});
+					return;
+				}
+
+				if (resolvedDropTarget.zone !== "timeline") return;
+
+				setElements((prev) => {
+					let nextElements = prev;
+					let nextStart = clampFrame(resolvedDropTarget.time ?? 0);
+					let targetTrackIndex = resolvedDropTarget.trackIndex ?? 0;
+					let targetType: "track" | "gap" = resolvedDropTarget.type ?? "track";
+
+					const postProcessOptions = {
+						rippleEditingEnabled,
+						attachments,
+						autoAttach,
+						fps,
+						trackLockedMap,
+					};
+
+					prepared.forEach((item, index) => {
+						const durationFrames = Math.max(
+							1,
+							materialDndContext.defaultDurationFrames,
+						);
+						const startFrame = nextStart;
+						const endFrame = startFrame + durationFrames;
+						const insertIndex =
+							targetType === "gap"
+								? Math.max(1, targetTrackIndex)
+								: targetTrackIndex;
+
+						const newElement: TimelineElementType = {
+							id: `external-image-${Date.now()}-${index}`,
+							type: "Image",
+							component: "image",
+							name: item.file.name,
+							props: {
+								uri: item.uri,
+							},
+							transform: {
+								centerX: 0,
+								centerY: 0,
+								width: item.width,
+								height: item.height,
+								rotation: 0,
+							},
+							timeline: buildTimelineMeta(
+								{
+									start: startFrame,
+									end: endFrame,
+									trackIndex: insertIndex,
+									role: "clip",
+								},
+								fps,
+							),
+							render: {
+								zIndex: 0,
+								visible: true,
+								opacity: 1,
+							},
+						};
+
+						if (targetType === "gap") {
+							const shifted = nextElements.map((el) => {
+								const currentTrack = el.timeline.trackIndex ?? 0;
+								if (currentTrack >= insertIndex) {
+									return {
+										...el,
+										timeline: {
+											...el.timeline,
+											trackIndex: currentTrack + 1,
+										},
+									};
+								}
+								return el;
+							});
+							nextElements = finalizeTimelineElements(
+								[...shifted, newElement],
+								postProcessOptions,
+							);
+							targetType = "track";
+						} else if (rippleEditingEnabled && insertIndex === 0) {
+							nextElements = insertElementIntoMainTrack(
+								nextElements,
+								newElement.id,
+								startFrame,
+								postProcessOptions,
+								newElement,
+							);
+						} else {
+							nextElements = finalizeTimelineElements(
+								[...nextElements, newElement],
+								postProcessOptions,
+							);
+						}
+
+						const inserted = nextElements.find((el) => el.id === newElement.id);
+						nextStart = inserted ? inserted.timeline.end : endFrame;
+					});
+
+					return nextElements;
+				});
+				return;
+			}
+
+			if (!hasVideo) {
+				return;
+			}
 
 			const prepared: {
 				file: File;
 				uri: string;
 				metadata: ExternalVideoMetadata;
 			}[] = [];
-			for (const file of files) {
+			for (const file of videoFiles) {
 				try {
 					const uri = await resolveExternalVideoUri(file);
 					const metadata = await readVideoMetadata(file).catch(() =>
@@ -280,7 +983,7 @@ export function useExternalMaterialDnd({
 					},
 					event.clientX,
 					event.clientY,
-				) ?? dropTarget;
+				) ?? fallbackDropTarget;
 
 			if (!resolvedDropTarget || !resolvedDropTarget.canDrop) return;
 
@@ -455,6 +1158,9 @@ export function useExternalMaterialDnd({
 		},
 		[
 			getExternalVideoFiles,
+			getExternalAudioFiles,
+			getExternalImageFiles,
+			getExternalAllFiles,
 			resolveExternalDropTarget,
 			stopAutoScroll,
 			updateDropTarget,
@@ -467,6 +1173,8 @@ export function useExternalMaterialDnd({
 			attachments,
 			autoAttach,
 			trackLockedMap,
+			resolveExternalAudioUri,
+			resolveExternalImageUri,
 		],
 	);
 

@@ -164,6 +164,23 @@ export function calculateFinalTrack(
 		...elements.map((el) => el.timeline.trackIndex ?? 0)
 	);
 
+	if (elementRole === "audio") {
+		const targetTrack =
+			dropTarget.trackIndex < 0 ? dropTarget.trackIndex : -1;
+		let candidate = targetTrack;
+		while (
+			hasRoleConflictOnStoredTrack(elementRole, candidate, elements, elementId) ||
+			hasOverlapOnTrack(timeRange, candidate, elements, elementId)
+		) {
+			candidate -= 1;
+		}
+		return {
+			trackIndex: candidate,
+			displayType: "track",
+			needsInsert: false,
+		};
+	}
+
 	if (dropTarget.type === "gap") {
 		return calculateFinalTrackForGap(
 			dropTarget,

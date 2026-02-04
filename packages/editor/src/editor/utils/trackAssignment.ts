@@ -436,6 +436,21 @@ export function resolveDropTargetForRole(
 	elements: TimelineElement[],
 	assignments: Map<string, number>,
 ): DropTarget {
+	if (role === "audio") {
+		const targetTrack =
+			dropTarget.trackIndex < MAIN_TRACK_INDEX
+				? dropTarget.trackIndex
+				: -1;
+		return { type: "track", trackIndex: targetTrack };
+	}
+
+	if (dropTarget.trackIndex < MAIN_TRACK_INDEX) {
+		return {
+			type: "track",
+			trackIndex: role === "clip" ? MAIN_TRACK_INDEX : MAIN_TRACK_INDEX + 1,
+		};
+	}
+
 	if (dropTarget.type === "gap") {
 		if (role !== "clip" && dropTarget.trackIndex <= MAIN_TRACK_INDEX) {
 			return { type: "gap", trackIndex: MAIN_TRACK_INDEX + 1 };

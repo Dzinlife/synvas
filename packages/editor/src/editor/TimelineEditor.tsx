@@ -24,10 +24,10 @@ import {
 	useDragging,
 	useElements,
 	useFps,
-	useRippleEditing,
 	useMultiSelect,
 	usePlaybackControl,
 	usePreviewAxis,
+	useRippleEditing,
 	useSnap,
 	useTimelineScale,
 	useTimelineStore,
@@ -399,16 +399,16 @@ const TimelineEditor = () => {
 				updatePreviewTime(time);
 			});
 		},
-			[
-				previewAxisEnabled,
-				ratio,
-				scrollLeft,
-				leftColumnWidth,
-				isPlaying,
-				isDragging,
-				updatePreviewTime,
-			],
-		);
+		[
+			previewAxisEnabled,
+			ratio,
+			scrollLeft,
+			leftColumnWidth,
+			isPlaying,
+			isDragging,
+			updatePreviewTime,
+		],
+	);
 
 	const {
 		handleExternalDragEnter,
@@ -437,8 +437,8 @@ const TimelineEditor = () => {
 			const time = clampFrame(
 				(x - leftColumnWidth - timelinePaddingLeft + scrollLeft) / ratio,
 			);
-				setCurrentTime(time);
-				updatePreviewTime(null); // 清除预览时间
+			setCurrentTime(time);
+			updatePreviewTime(null); // 清除预览时间
 			if (!options?.keepSelection) {
 				deselectAll(); // 清除选中状态
 			}
@@ -448,12 +448,12 @@ const TimelineEditor = () => {
 			scrollLeft,
 			leftColumnWidth,
 			timelinePaddingLeft,
-				setCurrentTime,
-				updatePreviewTime,
-				deselectAll,
-				selectionRect,
-			],
-		);
+			setCurrentTime,
+			updatePreviewTime,
+			deselectAll,
+			selectionRect,
+		],
+	);
 
 	const updateCurrentTimeFromClientX = useCallback(
 		(clientX: number, options?: { immediate?: boolean }) => {
@@ -547,16 +547,16 @@ const TimelineEditor = () => {
 			}
 		}
 		wasDraggingRef.current = isDragging;
-		}, [
-			isDragging,
-			isPlaying,
-			previewAxisEnabled,
-			leftColumnWidth,
-			ratio,
-			scrollLeft,
-			timelinePaddingLeft,
-			updatePreviewTime,
-		]);
+	}, [
+		isDragging,
+		isPlaying,
+		previewAxisEnabled,
+		leftColumnWidth,
+		ratio,
+		scrollLeft,
+		timelinePaddingLeft,
+		updatePreviewTime,
+	]);
 
 	const computeSelectionInRect = useCallback(
 		(rect: { x1: number; y1: number; x2: number; y2: number }) => {
@@ -1005,7 +1005,7 @@ const TimelineEditor = () => {
 						{/* 外部拖拽高亮提示 */}
 						<div className="absolute inset-3 rounded-2xl border border-blue-500/60 bg-blue-500/10 shadow-[0_0_30px_rgba(59,130,246,0.25)]" />
 						<div className="absolute top-6 left-1/2 -translate-x-1/2 rounded-full bg-blue-500/15 text-blue-200 text-xs px-3 py-1 border border-blue-500/30 backdrop-blur">
-							松手导入视频到时间线
+							松手导入素材到时间线
 						</div>
 					</div>
 				)}
@@ -1046,25 +1046,77 @@ const TimelineEditor = () => {
 		timelinePaddingLeft,
 	]);
 
-	// 分离主轨道元素和其他轨道元素
-	const { mainTrackElements, otherTrackElements } = useMemo(() => {
-		const main: typeof elements = [];
-		const other: typeof elements = [];
-		for (const element of elements) {
-			const trackIndex = trackAssignments.get(element.id) ?? 0;
-			if (trackIndex === 0) {
-				main.push(element);
-			} else {
+	// 分离主轨道、其他轨道、音频轨道元素
+	const { mainTrackElements, otherTrackElements, audioTrackElements } =
+		useMemo(() => {
+			const main: typeof elements = [];
+			const other: typeof elements = [];
+			const audio: typeof elements = [];
+			for (const element of elements) {
+				const trackIndex = trackAssignments.get(element.id) ?? 0;
+				if (trackIndex === 0) {
+					main.push(element);
+					continue;
+				}
+				if (trackIndex < 0) {
+					audio.push(element);
+					continue;
+				}
 				other.push(element);
 			}
-		}
-		return { mainTrackElements: main, otherTrackElements: other };
-	}, [elements, trackAssignments, tracks]);
+			return {
+				mainTrackElements: main,
+				otherTrackElements: other,
+				audioTrackElements: audio,
+			};
+		}, [elements, trackAssignments, tracks]);
 
 	// 其他轨道数量（不包括主轨道）
 	const otherTrackCount = Math.max(trackCount - 1, 0);
 	const mainTrackVisible = !(tracks[0]?.hidden ?? false);
 	const mainTrackLocked = tracks[0]?.locked ?? false;
+
+	const audioTrackIndices = useMemo(() => {
+		if (audioTrackElements.length === 0) return [];
+		const indices = new Set<number>();
+		for (const element of audioTrackElements) {
+			const trackIndex = trackAssignments.get(element.id) ?? -1;
+			if (trackIndex < 0) {
+				indices.add(trackIndex);
+			}
+		}
+		return Array.from(indices).sort((a, b) => b - a);
+	}, [audioTrackElements, trackAssignments]);
+
+	const audioTrackIndicesForLayout = useMemo(() => {
+		return audioTrackIndices.length > 0 ? audioTrackIndices : [-1];
+	}, [audioTrackIndices]);
+
+	const audioTrackHeights = useMemo(() => {
+		return audioTrackIndicesForLayout.map(() => getTrackHeightByRole("audio"));
+	}, [audioTrackIndicesForLayout]);
+
+	const audioTracksHeight = useMemo(() => {
+		return audioTrackHeights.reduce((sum, height) => sum + height, 0);
+	}, [audioTrackHeights]);
+
+	const audioTrackLayout = useMemo(() => {
+		let currentY = 0;
+		return audioTrackIndicesForLayout.map((index) => {
+			const height = getTrackHeightByRole("audio");
+			const item = { index, height, y: currentY };
+			currentY += height;
+			return item;
+		});
+	}, [audioTrackIndicesForLayout]);
+
+	const audioTrackLayoutByIndex = useMemo(() => {
+		const map = new Map<number, (typeof audioTrackLayout)[number]>();
+		for (const item of audioTrackLayout) {
+			map.set(item.index, item);
+		}
+		return map;
+	}, [audioTrackLayout]);
 
 	// 其他轨道的时间线项目
 	const otherTimelineItems = useMemo(() => {
@@ -1198,6 +1250,52 @@ const TimelineEditor = () => {
 		mainTrackVisible,
 	]);
 
+	const audioTimelineItems = useMemo(() => {
+		if (audioTrackIndicesForLayout.length === 0) return null;
+
+		return (
+			<div
+				className="relative"
+				style={{
+					transform: `translateX(-${scrollLeft}px)`,
+					height: audioTracksHeight,
+				}}
+			>
+				{audioTrackElements.map((element) => {
+					const trackIndex = trackAssignments.get(element.id) ?? -1;
+					const layoutItem = audioTrackLayoutByIndex.get(trackIndex);
+					const y = (layoutItem?.y ?? 0) + TRACK_CONTENT_GAP / 2;
+					const elementTrackHeight =
+						layoutItem?.height ?? getTrackHeightByRole("audio");
+					return (
+						<TimelineElement
+							key={element.id}
+							element={element}
+							trackIndex={trackIndex}
+							trackY={y}
+							ratio={ratio}
+							trackHeight={elementTrackHeight}
+							trackCount={trackCount}
+							trackVisible={true}
+							trackLocked={false}
+							updateTimeRange={updateTimeRange}
+						/>
+					);
+				})}
+			</div>
+		);
+	}, [
+		audioTrackElements,
+		audioTrackLayoutByIndex,
+		audioTrackIndicesForLayout,
+		audioTracksHeight,
+		scrollLeft,
+		ratio,
+		updateTimeRange,
+		trackAssignments,
+		trackCount,
+	]);
+
 	// 其他轨道标签（不包括主轨道）
 	const otherTrackLabels = useMemo(() => {
 		if (otherTrackCount === 0) return null;
@@ -1231,6 +1329,30 @@ const TimelineEditor = () => {
 		toggleTrackMuted,
 		toggleTrackSolo,
 	]);
+
+	const audioTrackLabels = useMemo(() => {
+		return audioTrackLayout.map((item) => {
+			const label = `音轨 ${Math.abs(item.index)}`;
+			const track = {
+				id: `audio-${Math.abs(item.index)}`,
+				role: "audio" as const,
+				hidden: false,
+				locked: false,
+				muted: false,
+				solo: false,
+			};
+			return (
+				<TimelineTrackSidebarItem
+					key={track.id}
+					track={track}
+					label={label}
+					height={item.height}
+					className="text-emerald-300"
+					labelClassName="text-emerald-300"
+				/>
+			);
+		});
+	}, [audioTrackLayout]);
 
 	const otherTrackBackgrounds = useMemo(() => {
 		if (otherTrackCount === 0) return null;
@@ -1437,17 +1559,36 @@ const TimelineEditor = () => {
 							</div>
 						</div>
 						{/* 音频轨道区域 */}
-						<div className="z-10 flex-1">
+						<div className="flex flex-1">
 							{/* 左侧音频轨道标签 */}
 							<div
-								className="h-full text-white pr-4 flex flex-col z-10"
+								className="text-white z-10 pr-px flex flex-col"
 								style={{ width: leftColumnWidth }}
 							>
-								{/* <div className="h-12 flex items-center justify-end pr-3 text-xs font-medium text-neutral-400">
-									音频轨道
-								</div> */}
+								<div className="mt-1.5">{audioTrackLabels}</div>
 							</div>
-							{/* TODO: 右侧音频轨道时间线内容 */}
+							{/* 右侧音频轨道时间线内容 */}
+							<div
+								data-track-drop-zone="audio"
+								data-track-count={audioTrackIndicesForLayout.length}
+								data-track-heights={audioTrackHeights.join(",")}
+								data-track-height={getTrackHeightByRole("audio")}
+								className="relative flex-1 overflow-x-hidden pt-1.5 flex flex-col"
+								style={{
+									paddingLeft: leftColumnWidth,
+									marginLeft: -leftColumnWidth,
+								}}
+							>
+								<div style={{ paddingLeft: timelinePaddingLeft }}>
+									<div
+										className="relative"
+										data-track-content-area="audio"
+										data-content-height={audioTracksHeight}
+									>
+										{audioTimelineItems}
+									</div>
+								</div>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -1459,6 +1600,8 @@ const TimelineEditor = () => {
 					scrollLeft={scrollLeft}
 					otherTrackCount={otherTrackCount}
 					otherTrackHeights={otherTrackHeights}
+					audioTrackCount={audioTrackIndicesForLayout.length}
+					audioTrackHeights={audioTrackHeights}
 					mainTrackHeight={mainTrackHeight}
 					timelinePaddingLeft={timelinePaddingLeft}
 				/>

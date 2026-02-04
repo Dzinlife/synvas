@@ -127,9 +127,12 @@ export const reconcileTracks = (
 	}
 
 	const normalizedElements = normalizeStoredTrackIndices(elements);
+	const nonNegativeElements = normalizedElements.filter(
+		(el) => (el.timeline.trackIndex ?? MAIN_TRACK_INDEX) >= MAIN_TRACK_INDEX,
+	);
 	const elementsByIndex = new Map<number, TimelineElement[]>();
 	let maxIndex = MAIN_TRACK_INDEX;
-	for (const el of normalizedElements) {
+	for (const el of nonNegativeElements) {
 		const index = el.timeline.trackIndex ?? MAIN_TRACK_INDEX;
 		maxIndex = Math.max(maxIndex, index);
 		const bucket = elementsByIndex.get(index);
@@ -147,7 +150,7 @@ export const reconcileTracks = (
 	const prevTrackIdByIndex = new Map(
 		prevTracks.map((track, index) => [index, track.id]),
 	);
-	const trackIdStats = buildTrackIdStats(normalizedElements);
+	const trackIdStats = buildTrackIdStats(nonNegativeElements);
 	const preferredIndexById = new Map<string, number>();
 	for (const [trackId, indexMap] of trackIdStats.entries()) {
 		preferredIndexById.set(
@@ -262,6 +265,9 @@ export const reconcileTracks = (
 	let didUpdateTrackId = false;
 	const updatedElements = normalizedElements.map((el) => {
 		const index = el.timeline.trackIndex ?? MAIN_TRACK_INDEX;
+		if (index < MAIN_TRACK_INDEX) {
+			return el;
+		}
 		const targetId =
 			index === MAIN_TRACK_INDEX
 				? MAIN_TRACK_ID

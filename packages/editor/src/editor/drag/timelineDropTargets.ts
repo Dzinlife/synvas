@@ -38,6 +38,9 @@ export function findTimelineDropTargetFromScreenPosition(
 	const otherZone = document.querySelector<HTMLElement>(
 		'[data-track-drop-zone="other"]',
 	);
+	const audioZone = document.querySelector<HTMLElement>(
+		'[data-track-drop-zone="audio"]',
+	);
 
 	if (mainZone) {
 		const rect = mainZone.getBoundingClientRect();
@@ -119,6 +122,61 @@ export function findTimelineDropTargetFromScreenPosition(
 		}
 	}
 
+	if (audioZone) {
+		const rect = audioZone.getBoundingClientRect();
+		const datasetTrackCount = parseInt(audioZone.dataset.trackCount || "0", 10);
+		const baseTrackCount = datasetTrackCount > 0 ? datasetTrackCount : 0;
+		const trackHeights = parseTrackHeights(audioZone.dataset.trackHeights);
+		const audioTrackCount = Math.max(baseTrackCount, trackHeights.length);
+		const datasetTrackHeight = parseInt(
+			audioZone.dataset.trackHeight || "0",
+			10,
+		);
+		const zoneTrackHeight =
+			datasetTrackHeight > 0 ? datasetTrackHeight : trackHeightFallback;
+
+		if (
+			mouseY >= rect.top &&
+			mouseY <= rect.bottom &&
+			mouseX >= rect.left &&
+			mouseX <= rect.right
+		) {
+			const contentArea = audioZone.querySelector<HTMLElement>(
+				'[data-track-content-area="audio"]',
+			);
+			let contentTop = rect.top;
+			if (contentArea) {
+				const contentRect = contentArea.getBoundingClientRect();
+				contentTop = contentRect.top;
+			}
+
+			if (audioTrackCount <= 0) {
+				return { trackIndex: -1, type: "track" };
+			}
+
+			const contentRelativeY = mouseY - contentTop;
+			if (trackHeights.length > 0) {
+				let cumulative = 0;
+				const maxIndex = Math.max(1, audioTrackCount);
+				for (let i = 0; i < maxIndex; i += 1) {
+					const height = trackHeights[i] ?? zoneTrackHeight;
+					if (contentRelativeY < cumulative + height) {
+						return { trackIndex: -(i + 1), type: "track" };
+					}
+					cumulative += height;
+				}
+				return { trackIndex: -maxIndex, type: "track" };
+			}
+
+			const trackFromTop = Math.floor(contentRelativeY / zoneTrackHeight);
+			const clamped = Math.max(
+				0,
+				Math.min(audioTrackCount - 1, trackFromTop),
+			);
+			return { trackIndex: -(clamped + 1), type: "track" };
+		}
+	}
+
 	if (allowOutside && mainZone && otherZone) {
 		const mainRect = mainZone.getBoundingClientRect();
 		const otherRect = otherZone.getBoundingClientRect();
@@ -149,7 +207,8 @@ export function getTimelineDropTimeFromScreenX(
 	ratio: number,
 	scrollLeft: number,
 ): number | null {
-	const zoneKey = trackIndex === 0 ? "main" : "other";
+	const zoneKey =
+		trackIndex === 0 ? "main" : trackIndex < 0 ? "audio" : "other";
 	const zone = document.querySelector<HTMLElement>(
 		`[data-track-drop-zone="${zoneKey}"]`,
 	);

@@ -8,6 +8,68 @@ import type {
 	ValidationResult,
 } from "../model/types";
 
+const OPFS_PREFIX = "opfs://";
+const FILE_PREFIX = "file://";
+
+const resolveOpfsFile = async (uri: string): Promise<File> => {
+	const rawPath = uri.slice(OPFS_PREFIX.length);
+	const parts = rawPath.split("/").filter(Boolean);
+	if (parts.length === 0) {
+		throw new Error("OPFS 路径为空");
+	}
+	const root = await navigator.storage.getDirectory();
+	let current: FileSystemDirectoryHandle = root;
+	for (let i = 0; i < parts.length - 1; i += 1) {
+		current = await current.getDirectoryHandle(parts[i]);
+	}
+	const fileHandle = await current.getFileHandle(parts[parts.length - 1]);
+	return fileHandle.getFile();
+};
+
+const resolveFilePathFromUri = (uri: string): string | null => {
+	if (!uri.startsWith(FILE_PREFIX)) return null;
+	try {
+		const url = new URL(uri);
+		let pathname = decodeURIComponent(url.pathname);
+		if (url.hostname) {
+			pathname = `//${url.hostname}${pathname}`;
+		}
+		if (/^\/[a-zA-Z]:\//.test(pathname)) {
+			pathname = pathname.slice(1);
+		}
+		return pathname;
+	} catch {
+		return null;
+	}
+};
+
+const getElectronFileBridge = (): {
+	stat: (filePath: string) => Promise<{ size: number }>;
+	read: (
+		filePath: string,
+		start: number,
+		end: number,
+	) => Promise<Uint8Array | ArrayBuffer>;
+} | null => {
+	if (typeof window === "undefined") return null;
+	const bridge = (
+		window as Window & {
+			aiNleElectron?: {
+				file?: {
+					stat: (filePath: string) => Promise<{ size: number }>;
+					read: (
+						filePath: string,
+						start: number,
+						end: number,
+					) => Promise<Uint8Array | ArrayBuffer>;
+				};
+			};
+		}
+	).aiNleElectron?.file;
+	if (!bridge?.stat || !bridge.read) return null;
+	return bridge;
+};
+
 // Image 组件的 props 类型
 export interface ImageProps {
 	uri?: string;
@@ -29,8 +91,25 @@ export function createImageModel(
 ): ComponentModelStore<ImageProps, ImageInternal> {
 	const loadImage = async (uri: string): Promise<void> => {
 		try {
-			const data = await fetch(uri).then((res) => res.arrayBuffer());
-			const imageData = Skia.Data.fromBytes(new Uint8Array(data));
+			let bytes: Uint8Array;
+			if (uri.startsWith(OPFS_PREFIX)) {
+				const file = await resolveOpfsFile(uri);
+				const data = await file.arrayBuffer();
+				bytes = new Uint8Array(data);
+			} else if (uri.startsWith(FILE_PREFIX)) {
+				const filePath = resolveFilePathFromUri(uri);
+				const bridge = getElectronFileBridge();
+				if (!filePath || !bridge) {
+					throw new Error("无法读取本地图片文件");
+				}
+				const { size } = await bridge.stat(filePath);
+				const raw = await bridge.read(filePath, 0, size);
+				bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+			} else {
+				const data = await fetch(uri).then((res) => res.arrayBuffer());
+				bytes = new Uint8Array(data);
+			}
+			const imageData = Skia.Data.fromBytes(bytes);
 			const image = Skia.Image.MakeImageFromEncoded(imageData);
 
 			if (!image) {

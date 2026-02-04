@@ -163,7 +163,7 @@ const MaterialDropIndicator: React.FC = () => {
 				);
 			}
 		}
-	} else {
+	} else if (trackIndex > 0) {
 		targetZone = document.querySelector<HTMLElement>(
 			'[data-track-drop-zone="other"]',
 		);
@@ -194,6 +194,51 @@ const MaterialDropIndicator: React.FC = () => {
 					trackHeights.length > 0
 						? getTrackYFromHeights(trackIndex, trackHeights, otherTrackCount)
 						: (otherTrackCount - trackIndex) * fallbackTrackHeight;
+				const startTime = isTransitionMaterial ? time - transitionHead : time;
+				screenX = contentRect.left + startTime * ratio - scrollLeft;
+				screenY = contentRect.top + trackY + indicatorOffset;
+				indicatorHeight = getElementHeightForTrack(trackHeightForIndex);
+			}
+		}
+	} else {
+		targetZone = document.querySelector<HTMLElement>(
+			'[data-track-drop-zone="audio"]',
+		);
+		if (targetZone) {
+			const contentArea = targetZone.querySelector<HTMLElement>(
+				'[data-track-content-area="audio"]',
+			);
+			const audioTrackCount = parseInt(
+				targetZone.dataset.trackCount || "0",
+				10,
+			);
+			const trackHeights = parseTrackHeights(targetZone.dataset.trackHeights);
+			const fallbackTrackHeight = parseInt(
+				targetZone.dataset.trackHeight || "60",
+				10,
+			);
+			if (contentArea) {
+				const contentRect = contentArea.getBoundingClientRect();
+				const scrollLeft = useDragStore.getState().timelineScrollLeft;
+				const audioIndex = Math.min(
+					Math.max(1, Math.abs(trackIndex)),
+					Math.max(audioTrackCount, 1),
+				);
+				const trackFromTop = audioIndex - 1;
+				const trackHeightForIndex =
+					trackHeights.length > 0
+						? trackHeights[
+								Math.max(0, Math.min(trackHeights.length - 1, trackFromTop))
+							]
+						: fallbackTrackHeight;
+				let trackY = 0;
+				if (trackHeights.length > 0) {
+					for (let i = 0; i < trackFromTop; i += 1) {
+						trackY += trackHeights[i] ?? fallbackTrackHeight;
+					}
+				} else {
+					trackY = trackFromTop * fallbackTrackHeight;
+				}
 				const startTime = isTransitionMaterial ? time - transitionHead : time;
 				screenX = contentRect.left + startTime * ratio - scrollLeft;
 				screenY = contentRect.top + trackY + indicatorOffset;

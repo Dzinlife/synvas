@@ -12,6 +12,7 @@ import { useTranscriptStore } from "@/asr/transcriptStore";
 
 // 导入所有组件以触发注册
 import "@/dsl/BackdropZoom";
+import "@/dsl/AudioClip";
 import "@/dsl/VideoClip";
 import "@/dsl/CloudBackground";
 import "@/dsl/ColorFilterLayer";
