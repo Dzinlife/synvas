@@ -3,12 +3,13 @@
  * 用于展示可拖拽的素材（图片、视频等）
  */
 
-import { TimelineElement, TrackRole } from "@/dsl/types";
+import { ElementType, TimelineElement, TrackRole } from "@/dsl/types";
 import {
 	clampFrame,
 	framesToTimecode,
 	secondsToFrames,
 } from "@/utils/timecode";
+import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import React, { useCallback } from "react";
 import {
@@ -40,7 +41,24 @@ import {
 // 类型定义
 // ============================================================================
 
-type MaterialItem = MaterialDndItem & { thumbnailUrl: string };
+type MaterialItem = MaterialDndItem & {
+	thumbnailUrl: string;
+	component: string;
+	elementType: ElementType;
+	props: Record<string, unknown>;
+	trackRole?: TrackRole;
+};
+
+type MaterialPreset = {
+	type?: MaterialItem["type"];
+	name?: string;
+	uri?: string;
+	thumbnailUrl?: string;
+	width?: number;
+	height?: number;
+	duration?: number;
+	props?: Record<string, unknown>;
+};
 
 interface MaterialCardProps {
 	item: MaterialItem;
@@ -74,6 +92,7 @@ const MaterialCard: React.FC<MaterialCardProps> = ({
 		context: dndContext,
 		onTimelineDrop,
 		onPreviewDrop,
+		getRole: (target) => getMaterialRole(target),
 	});
 
 	return (
@@ -113,7 +132,188 @@ function formatDuration(frames: number, fps: number): string {
 
 const DEFAULT_TRANSITION_DURATION_FRAMES = 15;
 
+const buildSvgThumbnail = (label: string, color: string): string => {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"><rect width="200" height="80" fill="${color}"/><text x="100" y="50" font-size="20" fill="#ffffff" text-anchor="middle" font-family="Arial">${label}</text></svg>`;
+	return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+const MATERIAL_PRESETS: Record<string, MaterialPreset> = {
+	image: {
+		type: "image",
+		name: "示例图片",
+		uri: "/photo.jpeg",
+		thumbnailUrl: "/photo.jpeg",
+		width: 1920,
+		height: 1080,
+		props: { uri: "/photo.jpeg" },
+	},
+	"video-clip": {
+		type: "video",
+		name: "示例视频",
+		uri: "/intro.mp4",
+		thumbnailUrl: buildSvgThumbnail("VIDEO", "#1d4ed8"),
+		width: 1920,
+		height: 1080,
+		props: { uri: "/intro.mp4", reversed: false },
+	},
+	"audio-clip": {
+		type: "audio",
+		name: "示例音频",
+		uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
+		thumbnailUrl: buildSvgThumbnail("AUDIO", "#0f766e"),
+		width: 1920,
+		height: 200,
+		props: {
+			uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
+		},
+	},
+	lottie: {
+		type: "image",
+		name: "Lottie 动画",
+		uri: "https://lottie.host/2eb481e4-0f47-46a0-b670-936cd715c51f/ajTiosbGxW.lottie",
+		thumbnailUrl: buildSvgThumbnail("LOTTIE", "#7c3aed"),
+		width: 400,
+		height: 400,
+		props: {
+			uri: "https://lottie.host/2eb481e4-0f47-46a0-b670-936cd715c51f/ajTiosbGxW.lottie",
+			loop: true,
+			speed: 1.0,
+		},
+	},
+	"filter/backdrop-zoom": {
+		type: "image",
+		name: "放大镜效果",
+		thumbnailUrl: buildSvgThumbnail("ZOOM", "#d97706"),
+		width: 300,
+		height: 300,
+		props: { zoom: 1.4, shape: "circle", cornerRadius: 16 },
+	},
+	"filter/color-filter": {
+		type: "image",
+		name: "调色滤镜",
+		thumbnailUrl: buildSvgThumbnail("FILTER", "#0ea5e9"),
+		props: { hue: 30, saturation: 0.3, brightness: 0.1, contrast: 0.2 },
+	},
+	"background/cloud": {
+		type: "image",
+		name: "云层背景",
+		thumbnailUrl: buildSvgThumbnail("CLOUD", "#38bdf8"),
+	},
+	"background/sea-wave": {
+		type: "image",
+		name: "海浪背景",
+		thumbnailUrl: buildSvgThumbnail("SEA", "#1e40af"),
+	},
+	"transition/crossfade": {
+		type: "transition",
+		name: "Crossfade",
+		uri: "transition://crossfade",
+		thumbnailUrl:
+			"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='80'><rect width='200' height='80' fill='%236363f1'/><path d='M0 0 L200 80 M0 80 L200 0' stroke='%23ffffff' stroke-width='6' opacity='0.7'/><text x='100' y='50' font-size='26' fill='%23ffffff' text-anchor='middle' font-family='Arial'>T</text></svg>",
+		duration: 15,
+	},
+	"transition/pixel-shader": {
+		type: "transition",
+		name: "像素风 Shader",
+		uri: "transition://pixel-shader",
+		thumbnailUrl:
+			"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='80'><defs><pattern id='pix' width='8' height='8' patternUnits='userSpaceOnUse'><rect width='8' height='8' fill='%230f172a'/><rect width='4' height='4' fill='%23f97316'/><rect x='4' y='4' width='4' height='4' fill='%233b82f6'/></pattern></defs><rect width='200' height='80' fill='url(%23pix)'/><rect width='200' height='80' fill='none' stroke='%23ffffff' stroke-width='2' opacity='0.6'/><text x='100' y='50' font-size='20' fill='%23ffffff' text-anchor='middle' font-family='Arial'>PIXEL</text></svg>",
+		duration: 18,
+	},
+	"transition/ripple-dissolve": {
+		type: "transition",
+		name: "Ripple Dissolve",
+		uri: "transition://ripple-dissolve",
+		thumbnailUrl:
+			"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='80'><rect width='200' height='80' fill='%231e293b'/><circle cx='100' cy='40' r='10' fill='none' stroke='%23a5b4fc' stroke-width='4' opacity='0.9'/><circle cx='100' cy='40' r='24' fill='none' stroke='%23818cf8' stroke-width='3' opacity='0.7'/><circle cx='100' cy='40' r='38' fill='none' stroke='%23c7d2fe' stroke-width='2' opacity='0.6'/><text x='100' y='50' font-size='18' fill='%23ffffff' text-anchor='middle' font-family='Arial'>RIPPLE</text></svg>",
+		duration: 18,
+	},
+};
+
+const resolveMaterialType = (type: ElementType): MaterialItem["type"] => {
+	switch (type) {
+		case "AudioClip":
+			return "audio";
+		case "VideoClip":
+			return "video";
+		case "Transition":
+			return "transition";
+		case "Text":
+		case "Caption":
+			return "text";
+		default:
+			return "image";
+	}
+};
+
+const buildMaterialProps = (
+	definition: {
+		type: ElementType;
+		meta: { defaultProps?: Record<string, unknown> };
+	},
+	preset: MaterialPreset,
+): Record<string, unknown> => {
+	const merged = {
+		...(definition.meta.defaultProps ?? {}),
+		...(preset.props ?? {}),
+	};
+
+	if (
+		preset.uri &&
+		["Image", "VideoClip", "AudioClip", "Lottie"].includes(definition.type)
+	) {
+		return { ...merged, uri: preset.uri };
+	}
+
+	return merged;
+};
+
+const buildMaterialItems = (): MaterialItem[] => {
+	return componentRegistry.getAll().map((definition) => {
+		const preset = MATERIAL_PRESETS[definition.component] ?? {};
+		const name = preset.name ?? definition.meta.name;
+		const type = preset.type ?? resolveMaterialType(definition.type);
+		const uri = preset.uri ?? definition.component;
+		const thumbnailUrl =
+			preset.thumbnailUrl ?? buildSvgThumbnail(name, "#0f172a");
+		const props = buildMaterialProps(
+			{
+				type: definition.type,
+				meta: {
+					defaultProps:
+						(definition.meta.defaultProps as Record<string, unknown> | undefined) ??
+						undefined,
+				},
+			},
+			preset,
+		);
+
+		return {
+			id: `material-${definition.component}`,
+			type,
+			name,
+			uri,
+			thumbnailUrl,
+			width: preset.width ?? 1920,
+			height: preset.height ?? 1080,
+			duration: preset.duration,
+			component: definition.component,
+			elementType: definition.type,
+			props,
+			trackRole: definition.meta.trackRole,
+		};
+	});
+};
+
+const resolveMaterialDuration = (item: MaterialItem, fps: number): number => {
+	if (Number.isFinite(item.duration) && (item.duration ?? 0) > 0) {
+		return item.duration as number;
+	}
+	return secondsToFrames(5, fps);
+};
+
 const getMaterialRole = (item: MaterialItem): TrackRole => {
+	if (item.trackRole) return item.trackRole;
 	switch (item.type) {
 		case "audio":
 			return "audio";
@@ -172,57 +372,6 @@ const resolveTransitionDrop = (
 // 素材库面板组件
 // ============================================================================
 
-// 示例素材数据
-const DEMO_MATERIALS: MaterialItem[] = [
-	{
-		id: "material-1",
-		type: "image",
-		name: "示例图片",
-		uri: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800",
-		thumbnailUrl:
-			"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=200",
-		width: 1920,
-		height: 1080,
-	},
-	{
-		id: "material-2",
-		type: "image",
-		name: "风景照片",
-		uri: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=800",
-		thumbnailUrl:
-			"https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=200",
-		width: 1920,
-		height: 1280,
-	},
-	{
-		id: "material-transition-1",
-		type: "transition",
-		name: "Crossfade",
-		uri: "transition://crossfade",
-		thumbnailUrl:
-			"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='80'><rect width='200' height='80' fill='%236363f1'/><path d='M0 0 L200 80 M0 80 L200 0' stroke='%23ffffff' stroke-width='6' opacity='0.7'/><text x='100' y='50' font-size='26' fill='%23ffffff' text-anchor='middle' font-family='Arial'>T</text></svg>",
-		duration: 15,
-	},
-	{
-		id: "material-transition-2",
-		type: "transition",
-		name: "像素风 Shader",
-		uri: "transition://pixel-shader",
-		thumbnailUrl:
-			"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='80'><defs><pattern id='pix' width='8' height='8' patternUnits='userSpaceOnUse'><rect width='8' height='8' fill='%230f172a'/><rect width='4' height='4' fill='%23f97316'/><rect x='4' y='4' width='4' height='4' fill='%233b82f6'/></pattern></defs><rect width='200' height='80' fill='url(%23pix)'/><rect width='200' height='80' fill='none' stroke='%23ffffff' stroke-width='2' opacity='0.6'/><text x='100' y='50' font-size='20' fill='%23ffffff' text-anchor='middle' font-family='Arial'>PIXEL</text></svg>",
-		duration: 18,
-	},
-	{
-		id: "material-transition-3",
-		type: "transition",
-		name: "Ripple Dissolve",
-		uri: "transition://ripple-dissolve",
-		thumbnailUrl:
-			"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='80'><rect width='200' height='80' fill='%231e293b'/><circle cx='100' cy='40' r='10' fill='none' stroke='%23a5b4fc' stroke-width='4' opacity='0.9'/><circle cx='100' cy='40' r='24' fill='none' stroke='%23818cf8' stroke-width='3' opacity='0.7'/><circle cx='100' cy='40' r='38' fill='none' stroke='%23c7d2fe' stroke-width='2' opacity='0.6'/><text x='100' y='50' font-size='18' fill='%23ffffff' text-anchor='middle' font-family='Arial'>RIPPLE</text></svg>",
-		duration: 18,
-	},
-];
-
 const MaterialLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
@@ -230,6 +379,8 @@ const MaterialLibrary: React.FC = () => {
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
+
+	const materials = buildMaterialItems();
 
 	// 处理素材库拖拽放置到时间线
 	const handleTimelineDrop = useCallback(
@@ -241,6 +392,9 @@ const MaterialLibrary: React.FC = () => {
 		) => {
 			setElements((prev) => {
 				const startFrame = clampFrame(time);
+				const role = getMaterialRole(item);
+				const isTransitionItem =
+					item.elementType === "Transition" || item.type === "transition";
 
 				const postProcessOptions = {
 					rippleEditingEnabled,
@@ -250,7 +404,7 @@ const MaterialLibrary: React.FC = () => {
 					trackLockedMap: dndContext.trackLockedMap,
 				};
 
-				if (item.type === "transition") {
+				if (isTransitionItem) {
 					if (dropTargetType === "gap") return prev;
 					const link = resolveTransitionDrop(prev, trackIndex, startFrame);
 					if (!link) return prev;
@@ -264,14 +418,9 @@ const MaterialLibrary: React.FC = () => {
 					const newTransition: TimelineElement = {
 						id: `transition-${Date.now()}`,
 						type: "Transition",
-						component:
-							item.uri === "transition://pixel-shader"
-								? "transition/pixel-shader"
-								: item.uri === "transition://ripple-dissolve"
-									? "transition/ripple-dissolve"
-									: "transition/crossfade",
+						component: item.component,
 						name: item.name,
-						props: {},
+						props: { ...(item.props ?? {}) },
 						transition: {
 							duration: durationFrames,
 							boundry: startFrame,
@@ -281,8 +430,8 @@ const MaterialLibrary: React.FC = () => {
 						transform: {
 							centerX: 0,
 							centerY: 0,
-							width: 1920,
-							height: 1080,
+							width: item.width ?? 1920,
+							height: item.height ?? 1080,
 							rotation: 0,
 						},
 						timeline: buildTimelineMeta(
@@ -307,18 +456,19 @@ const MaterialLibrary: React.FC = () => {
 					);
 				}
 
-				const durationFrames = secondsToFrames(5, fps);
-				const role = getMaterialRole(item);
+				const durationFrames = resolveMaterialDuration(item, fps);
 				const insertIndex =
-					dropTargetType === "gap" ? Math.max(1, trackIndex) : trackIndex;
+					dropTargetType === "gap"
+						? role === "audio"
+							? Math.min(-1, trackIndex)
+							: Math.max(1, trackIndex)
+						: trackIndex;
 				const newElement: TimelineElement = {
 					id: `element-${Date.now()}`,
-					type: "Image" as const,
-					component: "image",
+					type: item.elementType,
+					component: item.component,
 					name: item.name,
-					props: {
-						uri: item.uri,
-					},
+					props: { ...(item.props ?? {}) },
 					transform: {
 						centerX: 0,
 						centerY: 0,
@@ -336,16 +486,29 @@ const MaterialLibrary: React.FC = () => {
 						fps,
 					),
 					render: {
-						zIndex: 0,
+						zIndex: role === "overlay" ? 2 : role === "effect" ? 1 : 0,
 						visible: true,
 						opacity: 1,
 					},
 				};
 
 				if (dropTargetType === "gap") {
-					// gap 投放需要插入新轨道，先整体下移后续轨道索引
+					// gap 投放需要插入新轨道
 					const shifted = prev.map((el) => {
 						const currentTrack = el.timeline.trackIndex ?? 0;
+						if (role === "audio") {
+							if (currentTrack <= insertIndex) {
+								return {
+									...el,
+									timeline: {
+										...el.timeline,
+										trackIndex: currentTrack - 1,
+									},
+								};
+							}
+							return el;
+						}
+
 						if (currentTrack >= insertIndex) {
 							return {
 								...el,
@@ -398,7 +561,7 @@ const MaterialLibrary: React.FC = () => {
 			const role = getMaterialRole(item);
 
 			setElements((prev) => {
-				const durationFrames = secondsToFrames(5, fps);
+				const durationFrames = resolveMaterialDuration(item, fps);
 				const startFrame = clampFrame(currentTime);
 				const endFrame = startFrame + durationFrames;
 				const newId = `element-${Date.now()}`;
@@ -418,12 +581,10 @@ const MaterialLibrary: React.FC = () => {
 				);
 				const newElement: TimelineElement = {
 					id: newId,
-					type: "Image" as const,
-					component: "image",
+					type: item.elementType,
+					component: item.component,
 					name: item.name,
-					props: {
-						uri: item.uri,
-					},
+					props: { ...(item.props ?? {}) },
 					transform: {
 						centerX: canvasX,
 						centerY: canvasY,
@@ -441,7 +602,7 @@ const MaterialLibrary: React.FC = () => {
 						fps,
 					),
 					render: {
-						zIndex: 0,
+						zIndex: role === "overlay" ? 2 : role === "effect" ? 1 : 0,
 						visible: true,
 						opacity: 1,
 					},
@@ -456,7 +617,7 @@ const MaterialLibrary: React.FC = () => {
 	return (
 		<>
 			<div className="space-y-2">
-				{DEMO_MATERIALS.map((item) => (
+				{materials.map((item) => (
 					<MaterialCard
 						key={item.id}
 						item={item}
