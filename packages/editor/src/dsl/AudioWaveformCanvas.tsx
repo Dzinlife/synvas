@@ -103,17 +103,21 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 			pixelRatio = Math.max(1, window.devicePixelRatio || 1);
 			const targetWidth = Math.max(1, Math.floor(canvasWidth * pixelRatio));
 			const targetHeight = Math.max(1, Math.floor(canvasHeight * pixelRatio));
-			if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-				canvas.width = targetWidth;
-				canvas.height = targetHeight;
-			}
 
-			canvas.style.transform = `translateX(${canvasOffsetX}px)`;
-			canvas.style.width = `${canvasWidth}px`;
+			const nextStyleTransform = `translateX(${canvasOffsetX}px)`;
+			const nextStyleWidth = `${canvasWidth}px`;
+			const nextStyleHeight = `${canvasHeight}px`;
+
+			// 先更新平移，避免缩放中画面被移出可视区
+			canvas.style.transform = nextStyleTransform;
 
 			const currentAudioSink = getAudioSink();
 			const currentAudioDuration = getAudioDuration();
 			if (!currentAudioSink || currentAudioDuration <= 0) {
+				if (ctx) {
+					ctx.setTransform(1, 0, 0, 1, 0, 0);
+					ctx.clearRect(0, 0, canvas.width, canvas.height);
+				}
 				lastRenderKeyRef.current = "";
 				return;
 			}
@@ -215,7 +219,14 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 			}
 
 			if (renderTokenRef.current !== currentToken) return;
+			if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+				canvas.width = targetWidth;
+				canvas.height = targetHeight;
+			}
+			canvas.style.width = nextStyleWidth;
+			canvas.style.height = nextStyleHeight;
 			ctx.setTransform(1, 0, 0, 1, 0, 0);
+			ctx.imageSmoothingEnabled = false;
 			ctx.clearRect(0, 0, canvas.width, canvas.height);
 			ctx.drawImage(drawCanvas, 0, 0);
 			lastRenderKeyRef.current = renderKey;

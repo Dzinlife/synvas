@@ -119,9 +119,11 @@ export const getWaveformThumbnail = async (options: {
 					);
 					if (endSample <= startSample) continue;
 
-					const totalSamples = endSample - startSample;
-					const maxSamples = bucketCount * 200;
-					const step = Math.max(1, Math.floor(totalSamples / maxSamples));
+				const totalSamples = endSample - startSample;
+				const maxSamples = bucketCount * 800;
+				const step = Math.max(1, Math.floor(totalSamples / maxSamples));
+				const probeCount = step > 1 ? Math.min(8, step) : 1;
+				const probeStride = probeCount > 1 ? step / probeCount : 0;
 
 					const channelCount = buffer.numberOfChannels;
 					const channels: Float32Array[] = [];
@@ -134,9 +136,22 @@ export const getWaveformThumbnail = async (options: {
 
 					for (let i = startSample; i < endSample; i += step) {
 						let peak = 0;
-						for (let c = 0; c < channelCount; c += 1) {
-							const value = Math.abs(channels[c][i]);
-							if (value > peak) peak = value;
+						if (probeCount <= 1) {
+							for (let c = 0; c < channelCount; c += 1) {
+								const value = Math.abs(channels[c][i]);
+								if (value > peak) peak = value;
+							}
+						} else {
+							for (let p = 0; p < probeCount; p += 1) {
+								const index = Math.min(
+									endSample - 1,
+									Math.floor(i + p * probeStride),
+								);
+								for (let c = 0; c < channelCount; c += 1) {
+									const value = Math.abs(channels[c][index]);
+									if (value > peak) peak = value;
+								}
+							}
 						}
 						if (peak <= 0) continue;
 
@@ -149,6 +164,19 @@ export const getWaveformThumbnail = async (options: {
 						}
 					}
 				}
+			}
+			if (bucketCount > 2) {
+				const smoothed = new Float32Array(bucketCount);
+				smoothed[0] = Math.max(peaks[0], (peaks[0] * 2 + peaks[1]) / 3);
+				for (let i = 1; i < bucketCount - 1; i += 1) {
+					const avg = (peaks[i - 1] + peaks[i] + peaks[i + 1]) / 3;
+					smoothed[i] = Math.max(peaks[i], avg);
+				}
+				smoothed[bucketCount - 1] = Math.max(
+					peaks[bucketCount - 1],
+					(peaks[bucketCount - 1] * 2 + peaks[bucketCount - 2]) / 3,
+				);
+				peaks.set(smoothed);
 			}
 		} catch (error) {
 			console.warn("Failed to build waveform:", error);
