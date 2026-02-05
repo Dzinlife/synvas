@@ -12,6 +12,7 @@ import {
 	useLayoutEffect,
 	useRef,
 } from "react";
+import { AudioWaveformCanvas } from "@/dsl/AudioWaveformCanvas";
 import { createModelSelector } from "../model/registry";
 import type { TimelineProps } from "../model/types";
 import {
@@ -66,6 +67,14 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	const videoDuration = useVideoClipSelector(
 		id,
 		(state) => state.internal.videoDuration,
+	);
+	const audioSink = useVideoClipSelector(
+		id,
+		(state) => state.internal.audioSink,
+	);
+	const audioDuration = useVideoClipSelector(
+		id,
+		(state) => state.internal.audioDuration,
 	);
 
 	const getVideoSink = useEffectEvent(() => videoSink);
@@ -404,7 +413,23 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			<div className="absolute inset-y-4 w-full">
 				<canvas ref={canvasRef} className="absolute inset-y-0" />
 			</div>
-			<div className="absolute inset-x-0 bottom-0 h-4 bg-neutral-700/20"></div>
+			<div className="absolute inset-x-0 bottom-0 h-4 bg-neutral-700/20 overflow-hidden">
+				{audioSink && audioDuration > 0 && uri && (
+					<AudioWaveformCanvas
+						uri={uri}
+						audioSink={audioSink}
+						audioDuration={audioDuration}
+						start={start}
+						end={end}
+						fps={fps}
+						timelineScale={timelineScale}
+						offsetFrames={timelineOffsetFrames}
+						scrollLeft={scrollLeft}
+						color="rgba(255, 255, 255, 0.7)"
+						className="absolute inset-0"
+					/>
+				)}
+			</div>
 		</div>
 	);
 };
