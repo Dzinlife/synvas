@@ -107,11 +107,33 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 		id,
 		(state) => state.internal.stopPlayback,
 	);
+	const audioDuration = useVideoClipSelector(
+		id,
+		(state) => state.internal.audioDuration,
+	);
+	const stepAudioPlayback = useVideoClipSelector(
+		id,
+		(state) => state.internal.stepAudioPlayback,
+	);
+	const stopAudioPlayback = useVideoClipSelector(
+		id,
+		(state) => state.internal.stopAudioPlayback,
+	);
 
 	// 跟踪播放状态
 	const wasPlayingRef = useRef(false);
 	const lastVideoTimeRef = useRef<number | null>(null);
 	const wasExportingRef = useRef(false);
+	const stepAudioPlaybackRef = useRef(stepAudioPlayback);
+	const stopAudioPlaybackRef = useRef(stopAudioPlayback);
+
+	useEffect(() => {
+		stepAudioPlaybackRef.current = stepAudioPlayback;
+	}, [stepAudioPlayback]);
+
+	useEffect(() => {
+		stopAudioPlaybackRef.current = stopAudioPlayback;
+	}, [stopAudioPlayback]);
 
 	useEffect(() => {
 		// sink 切换后重置播放状态，确保重新启动流式播放
@@ -195,6 +217,52 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 
 	useEffect(() => {
 		if (isExporting) {
+			stopAudioPlaybackRef.current();
+			return;
+		}
+		if (
+			isLoading ||
+			hasError ||
+			!props.uri ||
+			audioDuration <= 0 ||
+			!timeline
+		) {
+			stopAudioPlaybackRef.current();
+			return;
+		}
+
+		const safeFps = Number.isFinite(fps) && fps > 0 ? Math.round(fps) : 30;
+		const clipStartSeconds = framesToSeconds(timeline.start ?? 0, safeFps);
+		const clipEndSeconds = framesToSeconds(timeline.end ?? 0, safeFps);
+
+		if (isPlaying) {
+			const currentSeconds = framesToSeconds(currentTimeFrames, safeFps);
+			if (
+				currentSeconds < clipStartSeconds ||
+				currentSeconds >= clipEndSeconds
+			) {
+				stopAudioPlaybackRef.current();
+				return;
+			}
+			stepAudioPlaybackRef.current(currentSeconds);
+			return;
+		}
+
+		stopAudioPlaybackRef.current();
+	}, [
+		audioDuration,
+		currentTimeFrames,
+		fps,
+		hasError,
+		isExporting,
+		isLoading,
+		isPlaying,
+		props.uri,
+		timeline,
+	]);
+
+	useEffect(() => {
+		if (isExporting) {
 			// 导出期间只重置状态，不停止流式播放，避免频繁重启
 			wasExportingRef.current = true;
 			wasPlayingRef.current = false;
@@ -221,8 +289,9 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 				}
 			}
 			stopPlayback();
+			stopAudioPlaybackRef.current();
 		};
-	}, [id, isPlaying, stopPlayback]);
+	}, [id, isPlaying, isExporting, stopPlayback]);
 
 	// Loading 状态
 	if (isLoading) {

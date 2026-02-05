@@ -1,15 +1,14 @@
-import type { AudioBufferSink, Input, WrappedAudioBuffer } from "mediabunny";
+import type { AudioBufferSink, Input } from "mediabunny";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import type { AssetHandle } from "@/dsl/assets/AssetStore";
 import { type AudioAsset, acquireAudioAsset } from "@/dsl/assets/audioAsset";
 import {
-	createClipGain,
-	ensureAudioContext,
-	getAudioContext,
-} from "@/editor/audio/audioEngine";
+	createAudioPlaybackController,
+	type AudioPlaybackController,
+} from "@/editor/audio/audioPlayback";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
-import { framesToSeconds, secondsToFrames } from "@/utils/timecode";
+import { secondsToFrames } from "@/utils/timecode";
 import type {
 	ComponentModel,
 	ComponentModelStore,
@@ -31,41 +30,20 @@ export interface AudioClipInternal {
 }
 
 const DEFAULT_FPS = 30;
-const PLAYBACK_BACK_JUMP_FRAMES = 3;
-const PLAYBACK_LOOKAHEAD_SECONDS = 2;
-const PLAYBACK_LOOKAHEAD_POLL_MS = 120;
 const normalizeOffsetFrames = (offset?: number): number => {
 	if (!Number.isFinite(offset ?? NaN)) return 0;
 	return Math.max(0, Math.round(offset as number));
 };
 
-const sleep = (ms: number) =>
-	new Promise<void>((resolve) => {
-		setTimeout(resolve, ms);
-	});
-
 export function createAudioClipModel(
 	id: string,
 	initialProps: AudioClipProps,
 ): ComponentModelStore<AudioClipProps, AudioClipInternal> {
-	let asyncId = 0;
 	let initEpoch = 0;
 
 	let assetHandle: AssetHandle<AudioAsset> | null = null;
 	let unsubscribeTimelineOffset: (() => void) | null = null;
-
-	let playbackIterator: AsyncGenerator<
-		WrappedAudioBuffer | null,
-		void,
-		unknown
-	> | null = null;
-	let isPlaybackActive = false;
-	let playbackStartContextTime: number | null = null;
-	let playbackStartAudioTime: number | null = null;
-	let scheduledSources: AudioBufferSourceNode[] = [];
-	let clipGain: GainNode | null = null;
-	let lastPlaybackTargetTime: number | null = null;
-
+	let audioPlayback: AudioPlaybackController | null = null;
 
 	const getTimelineFps = () => {
 		const fps = useTimelineStore.getState().fps;
@@ -82,14 +60,6 @@ export function createAudioClipModel(
 		return normalizeOffsetFrames(timeline?.offset);
 	};
 
-	const getTimelineClipDurationSeconds = (): number | null => {
-		const timeline = getTimeline();
-		if (!timeline) return null;
-		const durationFrames = timeline.end - timeline.start;
-		if (!Number.isFinite(durationFrames)) return null;
-		return framesToSeconds(durationFrames, getTimelineFps());
-	};
-
 	const computeAvailableDurationFrames = (
 		durationSeconds: number,
 		offsetFrames: number,
@@ -102,186 +72,24 @@ export function createAudioClipModel(
 		return Math.max(1, totalFrames - offsetFrames);
 	};
 
-	const stopScheduledSources = () => {
-		for (const source of scheduledSources) {
-			try {
-				source.stop();
-			} catch {}
-		}
-		scheduledSources = [];
-	};
-
-	const schedulePlayback = async (
-		iterator: AsyncGenerator<WrappedAudioBuffer | null, void, unknown>,
-		currentAsyncId: number,
-	) => {
-		try {
-			for await (const wrapped of iterator) {
-				if (currentAsyncId !== asyncId) return;
-				if (!wrapped?.buffer) continue;
-				const context = getAudioContext();
-				if (!context) return;
-				if (!clipGain) return;
-				if (
-					playbackStartContextTime === null ||
-					playbackStartAudioTime === null
-				) {
-					return;
-				}
-				const targetStart =
-					playbackStartContextTime +
-					(wrapped.timestamp - playbackStartAudioTime);
-
-				let waitGuard = 20;
-				while (
-					currentAsyncId === asyncId &&
-					targetStart - context.currentTime > PLAYBACK_LOOKAHEAD_SECONDS &&
-					waitGuard > 0
-				) {
-					waitGuard -= 1;
-					await sleep(PLAYBACK_LOOKAHEAD_POLL_MS);
-				}
-				if (currentAsyncId !== asyncId) return;
-				if (targetStart + 0.02 < context.currentTime) continue;
-
-				const source = context.createBufferSource();
-				source.buffer = wrapped.buffer;
-				source.connect(clipGain);
-				source.onended = () => {
-					scheduledSources = scheduledSources.filter((item) => item !== source);
-				};
-				scheduledSources.push(source);
-				source.start(targetStart);
-			}
-		} catch (error) {
-			if (currentAsyncId === asyncId) {
-				console.warn("音频播放调度失败:", error);
-			}
-		}
-	};
-
-	const startPlayback = async (timelineTimeSeconds: number): Promise<void> => {
+	const getAudioPlaybackState = () => {
 		const { internal, constraints, props } = store.getState();
-		if (constraints.isLoading || constraints.hasError) return;
-		if (!props.uri || !internal.audioSink || !assetHandle) return;
-
-		const context = await ensureAudioContext();
-		if (!context) return;
-
-		if (!clipGain) {
-			clipGain = createClipGain();
-		}
-		if (!clipGain) return;
-
-		const timeline = getTimeline();
-		if (!timeline) return;
-
-		const fps = getTimelineFps();
-		const clipStartSeconds = framesToSeconds(timeline.start ?? 0, fps);
-		const clipDurationSeconds = framesToSeconds(
-			timeline.end - timeline.start,
-			fps,
-		);
-		const offsetSeconds = framesToSeconds(getTimelineOffsetFrames(), fps);
-		const safeDurationSeconds = Math.max(
-			0,
-			Math.min(assetHandle.asset.duration - offsetSeconds, clipDurationSeconds),
-		);
-		const audioStart =
-			offsetSeconds + Math.max(0, timelineTimeSeconds - clipStartSeconds);
-		const audioEnd = offsetSeconds + safeDurationSeconds;
-
-		if (!Number.isFinite(audioStart) || !Number.isFinite(audioEnd)) return;
-		if (audioStart >= audioEnd) return;
-
-		stopScheduledSources();
-		playbackIterator?.return?.();
-		playbackIterator = null;
-
-		isPlaybackActive = true;
-		asyncId += 1;
-		const currentAsyncId = asyncId;
-
-		playbackStartAudioTime = audioStart;
-		playbackStartContextTime = context.currentTime + 0.05;
-		playbackIterator = internal.audioSink.buffers(audioStart, audioEnd);
-
-		schedulePlayback(playbackIterator, currentAsyncId);
-	};
-
-	const stopPlayback = () => {
-		asyncId += 1;
-		isPlaybackActive = false;
-		playbackStartContextTime = null;
-		playbackStartAudioTime = null;
-		lastPlaybackTargetTime = null;
-		playbackIterator?.return?.();
-		playbackIterator = null;
-		stopScheduledSources();
+		return {
+			isLoading: constraints.isLoading,
+			hasError: constraints.hasError,
+			uri: props.uri,
+			audioSink: internal.audioSink,
+			audioDuration: internal.audioDuration,
+		};
 	};
 
 	const stepPlayback = async (timelineTimeSeconds: number): Promise<void> => {
-		if (!Number.isFinite(timelineTimeSeconds)) return;
-		const { internal, constraints, props } = store.getState();
-		if (constraints.isLoading || constraints.hasError) return;
-		if (!props.uri || !internal.audioSink || !assetHandle) return;
+		if (!audioPlayback) return;
+		await audioPlayback.stepPlayback(timelineTimeSeconds);
+	};
 
-		const timeline = getTimeline();
-		if (!timeline) return;
-
-		const fps = getTimelineFps();
-		const clipStartSeconds = framesToSeconds(timeline.start ?? 0, fps);
-		const clipEndSeconds = framesToSeconds(timeline.end ?? 0, fps);
-		if (
-			timelineTimeSeconds < clipStartSeconds ||
-			timelineTimeSeconds >= clipEndSeconds
-		) {
-			stopPlayback();
-			return;
-		}
-
-		const backJumpSeconds = PLAYBACK_BACK_JUMP_FRAMES / fps;
-		if (!isPlaybackActive) {
-			await startPlayback(timelineTimeSeconds);
-			lastPlaybackTargetTime = timelineTimeSeconds;
-			return;
-		}
-
-		const context = getAudioContext();
-		if (
-			!context ||
-			playbackStartAudioTime === null ||
-			playbackStartContextTime === null
-		) {
-			stopPlayback();
-			await startPlayback(timelineTimeSeconds);
-			lastPlaybackTargetTime = timelineTimeSeconds;
-			return;
-		}
-
-		if (
-			lastPlaybackTargetTime !== null &&
-			timelineTimeSeconds < lastPlaybackTargetTime - backJumpSeconds
-		) {
-			stopPlayback();
-			await startPlayback(timelineTimeSeconds);
-			lastPlaybackTargetTime = timelineTimeSeconds;
-			return;
-		}
-
-		const offsetSeconds = framesToSeconds(getTimelineOffsetFrames(), fps);
-		const audioTargetTime =
-			offsetSeconds + Math.max(0, timelineTimeSeconds - clipStartSeconds);
-		const audioNow =
-			playbackStartAudioTime + (context.currentTime - playbackStartContextTime);
-		if (Math.abs(audioNow - audioTargetTime) > 0.2) {
-			stopPlayback();
-			await startPlayback(timelineTimeSeconds);
-			lastPlaybackTargetTime = timelineTimeSeconds;
-			return;
-		}
-
-		lastPlaybackTargetTime = timelineTimeSeconds;
+	const stopPlayback = () => {
+		audioPlayback?.stopPlayback();
 	};
 
 	const store = createStore<
@@ -350,7 +158,6 @@ export function createAudioClipModel(
 
 				initEpoch += 1;
 				const currentInitEpoch = initEpoch;
-				asyncId += 1;
 				let localHandle: AssetHandle<AudioAsset> | null = null;
 
 				try {
@@ -428,15 +235,9 @@ export function createAudioClipModel(
 
 			dispose: () => {
 				initEpoch += 1;
-				asyncId += 1;
 
 				stopPlayback();
-				if (clipGain) {
-					try {
-						clipGain.disconnect();
-					} catch {}
-					clipGain = null;
-				}
+				audioPlayback?.dispose();
 
 				unsubscribeTimelineOffset?.();
 				unsubscribeTimelineOffset = null;
@@ -450,6 +251,12 @@ export function createAudioClipModel(
 			},
 		})),
 	);
+
+	audioPlayback = createAudioPlaybackController({
+		getTimeline,
+		getFps: getTimelineFps,
+		getState: getAudioPlaybackState,
+	});
 
 	return store;
 }

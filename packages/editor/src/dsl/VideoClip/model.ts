@@ -1,17 +1,27 @@
-import type { CanvasSink, Input, WrappedCanvas } from "mediabunny";
+import type { PrepareFrameContext } from "core/dsl/model/types";
+import type {
+	AudioBufferSink,
+	CanvasSink,
+	Input,
+	WrappedCanvas,
+} from "mediabunny";
 import { type SkImage, Skia } from "react-skia-lite";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import type { AssetHandle } from "@/dsl/assets/AssetStore";
+import { type AudioAsset, acquireAudioAsset } from "@/dsl/assets/audioAsset";
 import { acquireVideoAsset, type VideoAsset } from "@/dsl/assets/videoAsset";
 import type { TimelineElement } from "@/dsl/types";
+import {
+	type AudioPlaybackController,
+	createAudioPlaybackController,
+} from "@/editor/audio/audioPlayback";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import {
 	framesToSeconds,
 	framesToTimecode,
 	secondsToFrames,
 } from "@/utils/timecode";
-import type { PrepareFrameContext } from "core/dsl/model/types";
 import type {
 	ComponentModel,
 	ComponentModelStore,
@@ -34,6 +44,8 @@ export interface VideoClipInternal {
 	videoDuration: number; // 秒
 	isReady: boolean;
 	playbackEpoch: number;
+	audioSink: AudioBufferSink | null;
+	audioDuration: number;
 	// 缩略图（用于时间线预览）
 	thumbnailCanvas: HTMLCanvasElement | null;
 	// 帧缓存
@@ -48,6 +60,10 @@ export interface VideoClipInternal {
 	stepPlayback: (targetTime: number) => Promise<void>;
 	// 停止流式播放
 	stopPlayback: () => void;
+	// 音频播放步进
+	stepAudioPlayback: (timelineTime: number) => Promise<void>;
+	// 停止音频播放
+	stopAudioPlayback: () => void;
 }
 
 // 计算实际要 seek 的视频时间（考虑倒放）
@@ -127,6 +143,8 @@ export function createVideoClipModel(
 	let lastPlaybackTouch = 0;
 
 	const PLAYBACK_IDLE_MS = 500;
+	let audioInitEpoch = 0;
+	let audioPlayback: AudioPlaybackController | null = null;
 
 	const touchPlayback = () => {
 		lastPlaybackTouch = performance.now();
@@ -148,6 +166,7 @@ export function createVideoClipModel(
 	};
 
 	let assetHandle: AssetHandle<VideoAsset> | null = null;
+	let audioAssetHandle: AssetHandle<AudioAsset> | null = null;
 	let unsubscribeTimelineOffset: (() => void) | null = null;
 	let unsubscribeElements: (() => void) | null = null;
 	let unsubscribeTime: (() => void) | null = null;
@@ -161,17 +180,17 @@ export function createVideoClipModel(
 		return Math.round(fps);
 	};
 
+	const getTimeline = () => {
+		return useTimelineStore.getState().getElementById(id)?.timeline;
+	};
+
 	const getTimelineOffsetFrames = (): number => {
-		const timelineOffset = useTimelineStore
-			.getState()
-			.elements.find((el) => el.id === id)?.timeline?.offset;
+		const timelineOffset = getTimeline()?.offset;
 		return normalizeOffsetFrames(timelineOffset);
 	};
 
 	const getTimelineClipDurationSeconds = (): number | undefined => {
-		const timeline = useTimelineStore
-			.getState()
-			.elements.find((el) => el.id === id)?.timeline;
+		const timeline = getTimeline();
 		if (!timeline) return undefined;
 		const durationFrames = timeline.end - timeline.start;
 		if (!Number.isFinite(durationFrames)) return undefined;
@@ -515,6 +534,28 @@ export function createVideoClipModel(
 		lastPlaybackTargetTime = targetTime;
 	};
 
+	const getAudioPlaybackState = () => {
+		const { internal, constraints, props } = store.getState();
+		return {
+			isLoading: constraints.isLoading,
+			hasError: constraints.hasError,
+			uri: props.uri,
+			audioSink: internal.audioSink,
+			audioDuration: internal.audioDuration,
+		};
+	};
+
+	const stepAudioPlayback = async (
+		timelineTimeSeconds: number,
+	): Promise<void> => {
+		if (!audioPlayback) return;
+		await audioPlayback.stepPlayback(timelineTimeSeconds);
+	};
+
+	const stopAudioPlayback = () => {
+		audioPlayback?.stopPlayback();
+	};
+
 	// Seek 到指定时间的方法（用于拖动/跳转）
 	const seekToTime = async (seconds: number): Promise<void> => {
 		const { internal } = store.getState();
@@ -680,6 +721,8 @@ export function createVideoClipModel(
 				videoDuration: 0,
 				isReady: false,
 				playbackEpoch: 0,
+				audioSink: null,
+				audioDuration: 0,
 				thumbnailCanvas: null,
 				frameCache: fallbackFrameCache,
 				seekToTime,
@@ -687,6 +730,8 @@ export function createVideoClipModel(
 				getNextFrame,
 				stepPlayback,
 				stopPlayback,
+				stepAudioPlayback,
+				stopAudioPlayback,
 			} satisfies VideoClipInternal,
 
 			setProps: (partial) => {
@@ -788,7 +833,9 @@ export function createVideoClipModel(
 				}
 
 				initEpoch += 1;
+				audioInitEpoch += 1;
 				const currentInitEpoch = initEpoch;
+				const currentAudioInitEpoch = audioInitEpoch;
 				asyncId++;
 				let localHandle: AssetHandle<VideoAsset> | null = null;
 
@@ -890,6 +937,48 @@ export function createVideoClipModel(
 							unsub2();
 						};
 					}
+
+					let localAudioHandle: AssetHandle<AudioAsset> | null = null;
+					try {
+						localAudioHandle = await acquireAudioAsset(uri);
+						if (
+							currentInitEpoch !== initEpoch ||
+							currentAudioInitEpoch !== audioInitEpoch
+						) {
+							localAudioHandle.release();
+							return;
+						}
+
+						audioAssetHandle?.release();
+						audioAssetHandle = localAudioHandle;
+
+						const audioSink = localAudioHandle.asset.createAudioSink();
+						set((state) => ({
+							internal: {
+								...state.internal,
+								audioSink,
+								audioDuration: localAudioHandle?.asset.duration ?? 0,
+							},
+						}));
+					} catch (error) {
+						localAudioHandle?.release();
+						if (audioAssetHandle === localAudioHandle) {
+							audioAssetHandle = null;
+						}
+						if (
+							currentInitEpoch !== initEpoch ||
+							currentAudioInitEpoch !== audioInitEpoch
+						) {
+							return;
+						}
+						set((state) => ({
+							internal: {
+								...state.internal,
+								audioSink: null,
+								audioDuration: 0,
+							},
+						}));
+					}
 				} catch (error) {
 					localHandle?.release();
 					if (assetHandle === localHandle) {
@@ -912,11 +1001,14 @@ export function createVideoClipModel(
 
 			dispose: () => {
 				initEpoch += 1; // 终止进行中的 init，避免继续写入
+				audioInitEpoch += 1;
 				asyncId++; // 取消所有进行中的异步操作
 				const internal = get().internal as VideoClipInternal;
 
 				updatePinnedFrame(null, null);
 				stopPlayback();
+				stopAudioPlayback();
+				audioPlayback?.dispose();
 
 				// 清理迭代器
 				videoFrameIterator?.return?.();
@@ -930,10 +1022,14 @@ export function createVideoClipModel(
 
 				assetHandle?.release();
 				assetHandle = null;
+				audioAssetHandle?.release();
+				audioAssetHandle = null;
 
 				// 清理资源
 				internal.videoSink = null;
 				internal.input = null;
+				internal.audioSink = null;
+				internal.audioDuration = 0;
 			},
 
 			waitForReady: () => {
@@ -958,6 +1054,12 @@ export function createVideoClipModel(
 			prepareFrame,
 		})),
 	);
+
+	audioPlayback = createAudioPlaybackController({
+		getTimeline,
+		getFps: getTimelineFps,
+		getState: getAudioPlaybackState,
+	});
 
 	return store;
 }
