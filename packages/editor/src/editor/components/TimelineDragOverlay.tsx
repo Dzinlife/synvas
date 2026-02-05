@@ -66,6 +66,14 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 }) => {
 	const dropIndicatorPortal = useMemo(() => {
 		if (!activeDropTarget) return null;
+		if (activeDropTarget.type === "track" && dragGhosts.length > 1) {
+			const firstTrack = dragGhosts[0]?.element.timeline.trackIndex ?? 0;
+			const isSameTrack = dragGhosts.every(
+				(ghost) =>
+					(ghost.element.timeline.trackIndex ?? 0) === firstTrack,
+			);
+			if (!isSameTrack) return null;
+		}
 
 		const elementWidth =
 			(activeDropTarget.end - activeDropTarget.start) * ratio;
@@ -258,6 +266,7 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 		return createPortal(indicator, document.body);
 	}, [
 		activeDropTarget,
+		dragGhosts,
 		ratio,
 		scrollLeft,
 		otherTrackCount,

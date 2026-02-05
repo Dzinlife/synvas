@@ -1403,7 +1403,7 @@ const TimelineEditor = () => {
 
 	// 吸附指示线
 	const snapIndicator = useMemo(() => {
-		if (!activeSnapPoint || otherTrackCount === 0) return null;
+		if (!activeSnapPoint) return null;
 		const left = activeSnapPoint.time * ratio - scrollLeft;
 		return (
 			<div
@@ -1415,7 +1415,6 @@ const TimelineEditor = () => {
 		activeSnapPoint,
 		ratio,
 		scrollLeft,
-		otherTrackCount,
 		timelinePaddingLeft,
 	]);
 

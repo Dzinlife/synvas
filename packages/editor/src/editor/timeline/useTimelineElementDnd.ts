@@ -1193,8 +1193,7 @@ export const useTimelineElementDnd = ({
 
 			const isMultiDrag =
 				dragSelectedIdsRef.current.length > 1 &&
-				dragSelectedIdsRef.current.includes(element.id) &&
-				elementRole !== "audio";
+				dragSelectedIdsRef.current.includes(element.id);
 			if (isMultiDrag) {
 				let deltaFrames = Math.round(adjustedDeltaX / ratio);
 				const minStart = dragMinStartRef.current;
@@ -1458,6 +1457,15 @@ export const useTimelineElementDnd = ({
 						: trackValue;
 				const draggedAfterInsert = shiftForInsert(draggedBaseTrack);
 				const trackDelta = finalTrackResult.trackIndex - draggedAfterInsert;
+				const resolveTrackIndexByRole = (
+					role: ReturnType<typeof getElementRole>,
+					trackValue: number,
+				) => (role === "audio" ? Math.min(-1, trackValue) : Math.max(0, trackValue));
+				const isAnchorAudio = elementRole === "audio";
+				const getTrackDeltaForRole = (
+					role: ReturnType<typeof getElementRole>,
+				) =>
+					(role === "audio") === isAnchorAudio ? trackDelta : 0;
 				const resolveExistingTrackId = (
 					targetTrackIndex: number,
 				): string | null => {
@@ -1513,17 +1521,20 @@ export const useTimelineElementDnd = ({
 					}
 
 					const requestedTrackMap = new Map<number, number>();
-					for (const track of trackGroups.keys()) {
+					for (const [track, group] of trackGroups.entries()) {
 						requestedTrackMap.set(
 							track,
-							Math.max(0, shiftForInsert(track) + trackDelta),
+							resolveTrackIndexByRole(
+								group.role,
+								shiftForInsert(track) + getTrackDeltaForRole(group.role),
+							),
 						);
 					}
 
 					const mapping = new Map<number, number>();
 					const occupiedTracks = new Set<number>();
-					const anchorRequested = Math.max(
-						0,
+					const anchorRequested = resolveTrackIndexByRole(
+						elementRole,
 						shiftForInsert(draggedBaseTrack) + trackDelta,
 					);
 					mapping.set(draggedBaseTrack, anchorRequested);
@@ -1536,8 +1547,12 @@ export const useTimelineElementDnd = ({
 						if (!group) continue;
 						const requestedTrack =
 							requestedTrackMap.get(track) ??
-							Math.max(0, shiftForInsert(track) + trackDelta);
+							resolveTrackIndexByRole(
+								group.role,
+								shiftForInsert(track) + getTrackDeltaForRole(group.role),
+							);
 						let candidate = requestedTrack;
+						const step = group.role === "audio" ? -1 : 1;
 						// 多轨选中时逐个向上查找可用轨道，避免角色冲突/重叠
 						while (true) {
 							if (!occupiedTracks.has(candidate)) {
@@ -1558,7 +1573,7 @@ export const useTimelineElementDnd = ({
 									break;
 								}
 							}
-							candidate += 1;
+							candidate += step;
 						}
 						mapping.set(track, candidate);
 						occupiedTracks.add(candidate);
@@ -1674,17 +1689,22 @@ export const useTimelineElementDnd = ({
 										const source = elements.find((el) => el.id === sourceId);
 										const copyId = getCopyId(sourceId);
 										if (!initial || !source || !copyId) return null;
+										const role = getElementRole(source);
 										const nextStart = initial.start + deltaFrames;
 										const nextEnd = initial.end + deltaFrames;
 										const baseTrack = shiftForInsert(initial.trackIndex);
 										const mappedTrack = selectedTrackMapping.get(
 											initial.trackIndex,
 										);
-										const nextTrack = Math.max(
-											0,
-											mappedTrack ?? baseTrack + trackDelta,
+										const nextTrack = resolveTrackIndexByRole(
+											role,
+											mappedTrack ??
+												baseTrack + getTrackDeltaForRole(role),
 										);
-										const targetTrackId = resolveCopyTrackId(nextTrack);
+										const targetTrackId =
+											role === "audio"
+												? undefined
+												: resolveCopyTrackId(nextTrack);
 										const copy = createCopyElement(source, copyId);
 										const timed = updateElementTime(
 											copy,
@@ -1697,7 +1717,9 @@ export const useTimelineElementDnd = ({
 											timeline: {
 												...timed.timeline,
 												trackIndex: nextTrack,
-												trackId: targetTrackId,
+												...(targetTrackId
+													? { trackId: targetTrackId }
+													: {}),
 											},
 										};
 									})
@@ -1912,18 +1934,23 @@ export const useTimelineElementDnd = ({
 							if (selectedSet.has(el.id)) {
 								const initial = initialMap.get(el.id);
 								if (!initial) return el;
+								const role = getElementRole(el);
 								const selectedBase = shiftForInsert(initial.trackIndex);
 								const mappedTrack = selectedTrackMapping.get(
 									initial.trackIndex,
 								);
-								const nextTrackIndex = Math.max(
-									0,
-									mappedTrack ?? selectedBase + trackDelta,
+								const nextTrackIndex = resolveTrackIndexByRole(
+									role,
+									mappedTrack ??
+										selectedBase + getTrackDeltaForRole(role),
 								);
-								const targetTrackId = resolveMovedTrackId(
-									initial.trackIndex,
-									nextTrackIndex,
-								);
+								const targetTrackId =
+									role === "audio"
+										? undefined
+										: resolveMovedTrackId(
+												initial.trackIndex,
+												nextTrackIndex,
+											);
 								return {
 									...el,
 									timeline: {
@@ -1931,7 +1958,9 @@ export const useTimelineElementDnd = ({
 										start: initial.start + deltaFrames,
 										end: initial.end + deltaFrames,
 										trackIndex: nextTrackIndex,
-										...(targetTrackId ? { trackId: targetTrackId } : {}),
+										...(targetTrackId
+											? { trackId: targetTrackId }
+											: {}),
 									},
 								};
 							}
