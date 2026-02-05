@@ -37,7 +37,7 @@ export class SkiaSGRoot {
 			console.error,
 			console.error,
 			console.error,
-			console.error,
+			() => {},
 			null,
 		);
 	}
