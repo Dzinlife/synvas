@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import {
 	BufferTarget,
 	CanvasSource,
@@ -9,25 +8,11 @@ import {
 import { JsiSkSurface, Skia, SkiaSGRoot } from "react-skia-lite";
 import type { TimelineElement } from "../dsl/types";
 import type { TimelineTrack } from "./timeline/types";
+import type { buildSkiaRenderStateCore } from "./preview/buildSkiaTree";
 
-export type BuildSkiaRenderState = (args: {
-	elements: TimelineElement[];
-	displayTime: number;
-	tracks: TimelineTrack[];
-	getTrackIndexForElement: (element: TimelineElement) => number;
-	sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
-	prepare?: {
-		isExporting: boolean;
-		fps: number;
-		canvasSize: { width: number; height: number };
-		getModelStore?: (id: string) => unknown;
-		prepareTransitionPictures?: boolean;
-	};
-}) => Promise<{
-	children: ReactNode[];
-	ready: Promise<void>;
-	dispose: () => void;
-}>;
+export type BuildSkiaRenderState = (
+	args: Parameters<typeof buildSkiaRenderStateCore>[0],
+) => ReturnType<typeof buildSkiaRenderStateCore>;
 
 export type ExportTimelineAsVideoOptions = {
 	elements: TimelineElement[];
@@ -38,7 +23,9 @@ export type ExportTimelineAsVideoOptions = {
 	filename?: string;
 	startFrame?: number;
 	endFrame?: number;
-	getModelStore?: (id: string) => unknown;
+	getModelStore?: NonNullable<
+		Parameters<typeof buildSkiaRenderStateCore>[0]["prepare"]
+	>["getModelStore"];
 	waitForReady?: () => Promise<void>;
 	onFrame?: (frame: number) => void;
 };

@@ -1,14 +1,9 @@
+import type { SnapPoint } from "@/editor/timeline/types";
 import { TimelineElement } from "@/dsl/types";
 
 export const SNAP_THRESHOLD_PX = 10;
 
-export type SnapPointType = "element-start" | "element-end" | "playhead";
-
-export interface SnapPoint {
-	time: number;
-	type: SnapPointType;
-	sourceId?: string;
-}
+export type { SnapPoint, SnapPointType } from "@/editor/timeline/types";
 
 /**
  * 收集所有可用的吸附点

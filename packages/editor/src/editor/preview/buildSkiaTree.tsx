@@ -1,18 +1,12 @@
-import { componentRegistry } from "@/dsl/model/componentRegistry";
-import type {
-	ComponentModelStore,
-	RendererPrepareFrameContext,
-} from "@/dsl/model/types";
-import { renderNodeToPicture } from "@/dsl/Transition/picture";
-import type { TimelineElement } from "@/dsl/types";
-import type { TimelineTrack } from "@/editor/timeline/types";
-import { isTransitionElement } from "@/editor/utils/transitions";
 import {
-	buildKonvaTree as buildKonvaTreeCore,
+	type BuildSkiaDeps,
 	buildSkiaRenderStateCore,
 	buildSkiaTreeCore,
-	type BuildSkiaDeps,
 } from "core/editor/preview/buildSkiaTree";
+import type { RendererPrepareFrameContext } from "core/dsl/model/types";
+import { componentRegistry } from "@/dsl/model/componentRegistry";
+import { renderNodeToPicture } from "@/dsl/Transition/picture";
+import { isTransitionElement } from "@/editor/utils/transitions";
 
 const deps: BuildSkiaDeps = {
 	resolveComponent: (componentId) => componentRegistry.get(componentId),
@@ -21,67 +15,34 @@ const deps: BuildSkiaDeps = {
 	isTransitionElement,
 };
 
-export const buildSkiaRenderState = async ({
-	elements,
-	displayTime,
-	tracks,
-	getTrackIndexForElement,
-	sortByTrackIndex,
-	prepare,
-}: {
-	elements: TimelineElement[];
-	displayTime: number;
-	tracks: TimelineTrack[];
-	getTrackIndexForElement: (element: TimelineElement) => number;
-	sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
-	prepare?: {
-		isExporting: boolean;
-		fps: number;
-		canvasSize: { width: number; height: number };
-		getModelStore?: (id: string) => ComponentModelStore | undefined;
-		prepareTransitionPictures?: boolean;
-	};
-}) => {
-	return buildSkiaRenderStateCore(
-		{
-			elements,
-			displayTime,
-			tracks,
-			getTrackIndexForElement,
-			sortByTrackIndex,
-			prepare,
-		},
-		deps,
-	);
+export const buildSkiaRenderState = async (
+	args: Parameters<typeof buildSkiaRenderStateCore>[0],
+) => {
+	return buildSkiaRenderStateCore(args, deps);
 };
 
-export const buildSkiaTree = async (args: {
-	elements: TimelineElement[];
-	displayTime: number;
-	tracks: TimelineTrack[];
-	getTrackIndexForElement: (element: TimelineElement) => number;
-	sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
-	prepare?: {
-		isExporting: boolean;
-		fps: number;
-		canvasSize: { width: number; height: number };
-		getModelStore?: (id: string) => ComponentModelStore | undefined;
-		prepareTransitionPictures?: boolean;
-	};
-}) => {
+export const buildSkiaTree = async (
+	args: Parameters<typeof buildSkiaTreeCore>[0],
+) => {
 	return buildSkiaTreeCore(args, deps);
 };
 
-export const buildKonvaTree = ({
-	elements,
-	displayTime,
-	tracks,
-	sortByTrackIndex,
-}: {
-	elements: TimelineElement[];
-	displayTime: number;
-	tracks: TimelineTrack[];
-	sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
-}) => buildKonvaTreeCore({ elements, displayTime, tracks, sortByTrackIndex });
+export const buildKonvaTree = (
+	args: Pick<
+		Parameters<typeof buildSkiaRenderStateCore>[0],
+		"elements" | "displayTime" | "tracks" | "sortByTrackIndex"
+	>,
+) => {
+	const { elements, displayTime, tracks, sortByTrackIndex } = args;
+	const visibleElements = elements.filter((element) => {
+		const { start = 0, end = Infinity } = element.timeline;
+		const trackIndex = element.timeline.trackIndex ?? 0;
+		const trackHidden = tracks[trackIndex]?.hidden ?? false;
+		return !trackHidden && displayTime >= start && displayTime < end;
+	});
+	return sortByTrackIndex(
+		visibleElements.filter((element) => !isTransitionElement(element)),
+	);
+};
 
 export type { RendererPrepareFrameContext };

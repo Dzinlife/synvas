@@ -1,29 +1,11 @@
-import type { ReactNode } from "react";
+import type { PrepareFrameContext } from "core/dsl/model/types";
 import type { StoreApi } from "zustand";
 import type {
 	AudioClipMeta,
 	ClipMeta,
-	TimelineElement,
 	VideoClipMeta,
 } from "../types";
 
-export type PrepareFrameContext = {
-	element: TimelineElement;
-	displayTime: number;
-	fps: number;
-	phase?: "beforeRender" | "afterRender";
-};
-
-export type RendererPrepareFrameContext = {
-	element: TimelineElement;
-	displayTime: number;
-	fps: number;
-	modelStore?: ComponentModelStore;
-	getModelStore?: (id: string) => ComponentModelStore | undefined;
-	canvasSize?: { width: number; height: number };
-	fromNode?: ReactNode | null;
-	toNode?: ReactNode | null;
-};
 
 // 组件约束信息
 export interface ComponentConstraints {

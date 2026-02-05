@@ -11,10 +11,10 @@ import {
 	framesToTimecode,
 	secondsToFrames,
 } from "@/utils/timecode";
+import type { PrepareFrameContext } from "core/dsl/model/types";
 import type {
 	ComponentModel,
 	ComponentModelStore,
-	PrepareFrameContext,
 	ValidationResult,
 } from "../model/types";
 

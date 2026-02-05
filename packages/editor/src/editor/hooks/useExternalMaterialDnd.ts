@@ -204,8 +204,8 @@ const readImageMetadata = async (
 };
 
 export interface UseExternalMaterialDndOptions {
-	scrollAreaRef: React.RefObject<HTMLDivElement>;
-	verticalScrollRef: React.RefObject<HTMLDivElement>;
+	scrollAreaRef: React.RefObject<HTMLDivElement | null>;
+	verticalScrollRef: React.RefObject<HTMLDivElement | null>;
 }
 
 export function useExternalMaterialDnd({

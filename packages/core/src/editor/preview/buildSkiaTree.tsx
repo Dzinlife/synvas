@@ -6,7 +6,6 @@ import type {
 } from "../../dsl/model/types";
 import type { TimelineElement } from "../../dsl/types";
 import type { TimelineTrack } from "../timeline/types";
-import { computeVisibleElements } from "./utils";
 
 type RenderPlan = {
 	node: React.ReactNode | null;
@@ -290,22 +289,4 @@ export const buildSkiaTreeCore = async (
 		deps,
 	);
 	return { children, orderedElements, dispose };
-};
-
-export const buildKonvaTree = ({
-	elements,
-	displayTime,
-	tracks,
-	sortByTrackIndex,
-}: {
-	elements: TimelineElement[];
-	displayTime: number;
-	tracks: TimelineTrack[];
-	sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
-}) => {
-	const isTransitionElement = defaultIsTransitionElement;
-	const visibleElements = computeVisibleElements(elements, displayTime, tracks);
-	return sortByTrackIndex(
-		visibleElements.filter((element) => !isTransitionElement(element)),
-	);
 };

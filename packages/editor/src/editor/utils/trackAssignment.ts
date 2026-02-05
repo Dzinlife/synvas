@@ -1,4 +1,5 @@
 import type { TimelineElement, TrackRole } from "@/dsl/types";
+import type { DropTarget } from "core/editor/timeline/types";
 import type { TimelineTrack } from "../timeline/types";
 import {
 	MAIN_TRACK_INDEX,
@@ -267,15 +268,7 @@ export function getYFromTrack(
  */
 export const GAP_THRESHOLD = 12;
 
-/**
- * 拖拽目标类型
- */
-export type DropTargetType = "track" | "gap";
-
-export interface DropTarget {
-	type: DropTargetType;
-	trackIndex: number;
-}
+export type { DropTarget, DropTargetType } from "core/editor/timeline/types";
 
 export interface TrackHitResult {
 	trackIndex: number;
