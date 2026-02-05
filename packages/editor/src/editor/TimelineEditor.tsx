@@ -302,12 +302,6 @@ const TimelineEditor = () => {
 
 	const updatePreviewTime = useCallback(
 		(time: number | null) => {
-			if (typeof window === "undefined") {
-				if (lastPreviewTimeRef.current === time) return;
-				lastPreviewTimeRef.current = time;
-				setPreviewTime(time);
-				return;
-			}
 			pendingPreviewTimeRef.current = time;
 			if (previewTimeRafRef.current !== null) return;
 			// 使用 rAF 合并高频预览更新，减少 Electron 下卡顿
@@ -324,8 +318,14 @@ const TimelineEditor = () => {
 	);
 
 	const scheduleCurrentTime = useCallback(
-		(time: number) => {
-			if (typeof window === "undefined") {
+		(time: number, options?: { immediate?: boolean }) => {
+			if (options?.immediate) {
+				// 交互拖拽直接 seek，避免播放被延迟
+				if (currentTimeRafRef.current !== null) {
+					window.cancelAnimationFrame(currentTimeRafRef.current);
+					currentTimeRafRef.current = null;
+				}
+				pendingCurrentTimeRef.current = null;
 				seekTo(time);
 				return;
 			}
@@ -343,20 +343,8 @@ const TimelineEditor = () => {
 		[seekTo],
 	);
 
-	const flushCurrentTime = useCallback(() => {
-		if (typeof window !== "undefined" && currentTimeRafRef.current !== null) {
-			window.cancelAnimationFrame(currentTimeRafRef.current);
-			currentTimeRafRef.current = null;
-		}
-		const nextTime = pendingCurrentTimeRef.current;
-		if (nextTime === null || nextTime === undefined) return;
-		pendingCurrentTimeRef.current = null;
-		seekTo(nextTime);
-	}, [seekTo]);
-
 	useEffect(() => {
 		return () => {
-			if (typeof window === "undefined") return;
 			if (previewTimeRafRef.current !== null) {
 				window.cancelAnimationFrame(previewTimeRafRef.current);
 				previewTimeRafRef.current = null;
@@ -455,28 +443,16 @@ const TimelineEditor = () => {
 	);
 
 	const updateCurrentTimeFromClientX = useCallback(
-		(clientX: number, options?: { immediate?: boolean }) => {
+		(clientX: number) => {
 			const rect = timeStampsRef.current?.getBoundingClientRect();
 			if (!rect) return;
 			const x = clientX - rect.left;
 			const time = clampFrame(
 				(x - leftColumnWidth - timelinePaddingLeft + scrollLeft) / ratio,
 			);
-			if (options?.immediate) {
-				pendingCurrentTimeRef.current = time;
-				flushCurrentTime();
-				return;
-			}
-			scheduleCurrentTime(time);
+			scheduleCurrentTime(time, { immediate: true });
 		},
-		[
-			leftColumnWidth,
-			ratio,
-			scrollLeft,
-			timelinePaddingLeft,
-			scheduleCurrentTime,
-			flushCurrentTime,
-		],
+		[leftColumnWidth, ratio, scrollLeft, timelinePaddingLeft, scheduleCurrentTime],
 	);
 
 	// 时间尺点击只更新时间，不影响选中状态
@@ -506,7 +482,7 @@ const TimelineEditor = () => {
 				isRulerDraggingRef.current = true;
 				updatePreviewTime(null);
 			}
-			updateCurrentTimeFromClientX(xy[0], { immediate: last });
+			updateCurrentTimeFromClientX(xy[0]);
 			if (last) {
 				isRulerDraggingRef.current = false;
 			}
