@@ -12,7 +12,7 @@ import {
 	Volume2,
 	VolumeX,
 } from "lucide-react";
-import React from "react";
+import type React from "react";
 import { cn } from "@/lib/utils";
 import type { TimelineTrack } from "../timeline/types";
 
@@ -68,18 +68,20 @@ const TimelineTrackSidebarItem: React.FC<TimelineTrackSidebarItemProps> = ({
 			<div className="flex items-center gap-1 w-full">
 				<RoleIcon className={cn("size-3 mr-auto opacity-50", labelClassName)} />
 				<span className="sr-only">{label}</span>
-				<button
-					type="button"
-					className={buildButtonClass(track.hidden, "text-emerald-300")}
-					onClick={onToggleVisible}
-					title={track.hidden ? "显示" : "隐藏"}
-				>
-					{track.hidden ? (
-						<EyeOff className="size-3.5" />
-					) : (
-						<Eye className="size-3.5" />
-					)}
-				</button>
+				{track.role !== "audio" && onToggleVisible && (
+					<button
+						type="button"
+						className={buildButtonClass(track.hidden, "text-emerald-300")}
+						onClick={onToggleVisible}
+						title={track.hidden ? "显示" : "隐藏"}
+					>
+						{track.hidden ? (
+							<EyeOff className="size-3.5" />
+						) : (
+							<Eye className="size-3.5" />
+						)}
+					</button>
+				)}
 				<button
 					type="button"
 					className={buildButtonClass(track.locked, "text-rose-300")}

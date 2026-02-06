@@ -2,27 +2,31 @@
  * Timeline element drag-and-drop behavior (single + multi).
  */
 
-import type { TimelineElement } from "@/dsl/types";
 import { useDrag } from "@use-gesture/react";
 import {
 	insertElementIntoMainTrack,
 	insertElementsIntoMainTrackGroup,
 } from "core/editor/utils/mainTrackMagnet";
 import { useCallback, useMemo, useRef } from "react";
-import { type DragGhostState, useTimelineStore } from "../contexts/TimelineContext";
+import type { TimelineElement } from "@/dsl/types";
+import {
+	type DragGhostState,
+	useTimelineStore,
+} from "../contexts/TimelineContext";
 import { findTimelineDropTargetFromScreenPosition } from "../drag/timelineDropTargets";
+import { getAudioTrackControlState } from "../utils/audioTrackState";
+import { cloneValue, createCopySeed } from "../utils/copyUtils";
 import {
 	finalizeTimelineElements,
 	shiftMainTrackElementsAfter,
 } from "../utils/mainTrackMagnet";
-import { cloneValue, createCopySeed } from "../utils/copyUtils";
 import { applySnap, applySnapForDrag, collectSnapPoints } from "../utils/snap";
 import { updateElementTime } from "../utils/timelineTime";
 import {
 	getElementRole,
+	getStoredTrackAssignments,
 	hasOverlapOnStoredTrack,
 	hasRoleConflictOnStoredTrack,
-	getStoredTrackAssignments,
 	insertTrackAt,
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
@@ -359,11 +363,19 @@ export const useTimelineElementDnd = ({
 	const elementRole = getElementRole(element);
 	const elementHeight = getElementHeightForTrack(trackHeight);
 	const tracks = useTimelineStore((state) => state.tracks);
+	const audioTrackStates = useTimelineStore((state) => state.audioTrackStates);
 	const trackLockedMap = useMemo(() => {
-		return new Map(
+		const map = new Map<number, boolean>(
 			tracks.map((track, index) => [index, track.locked ?? false]),
 		);
-	}, [tracks]);
+		for (const trackIndexRaw of Object.keys(audioTrackStates)) {
+			const trackIndex = Number(trackIndexRaw);
+			if (!Number.isFinite(trackIndex)) continue;
+			const state = getAudioTrackControlState(audioTrackStates, trackIndex);
+			map.set(trackIndex, state.locked);
+		}
+		return map;
+	}, [tracks, audioTrackStates]);
 	const dragSelectedIdsRef = useRef<string[]>([]);
 	const transitionDurationRef = useRef(transitionDuration);
 	const dragInitialElementsRef = useRef<
@@ -424,11 +436,7 @@ export const useTimelineElementDnd = ({
 					-1,
 					...updated.map((el) => el.timeline.trackIndex ?? 0),
 				);
-				for (
-					let track = currentTrack;
-					track >= minStoredTrack - 1;
-					track--
-				) {
+				for (let track = currentTrack; track >= minStoredTrack - 1; track--) {
 					if (
 						hasRoleConflictOnStoredTrack(childRole, track, updated, childId)
 					) {
@@ -1440,12 +1448,12 @@ export const useTimelineElementDnd = ({
 				const resolveTrackIndexByRole = (
 					role: ReturnType<typeof getElementRole>,
 					trackValue: number,
-				) => (role === "audio" ? Math.min(-1, trackValue) : Math.max(0, trackValue));
+				) =>
+					role === "audio" ? Math.min(-1, trackValue) : Math.max(0, trackValue);
 				const isAnchorAudio = elementRole === "audio";
 				const getTrackDeltaForRole = (
 					role: ReturnType<typeof getElementRole>,
-				) =>
-					(role === "audio") === isAnchorAudio ? trackDelta : 0;
+				) => ((role === "audio") === isAnchorAudio ? trackDelta : 0);
 				const resolveExistingTrackId = (
 					targetTrackIndex: number,
 				): string | null => {
@@ -1678,8 +1686,7 @@ export const useTimelineElementDnd = ({
 										);
 										const nextTrack = resolveTrackIndexByRole(
 											role,
-											mappedTrack ??
-												baseTrack + getTrackDeltaForRole(role),
+											mappedTrack ?? baseTrack + getTrackDeltaForRole(role),
 										);
 										const targetTrackId =
 											role === "audio"
@@ -1697,9 +1704,7 @@ export const useTimelineElementDnd = ({
 											timeline: {
 												...timed.timeline,
 												trackIndex: nextTrack,
-												...(targetTrackId
-													? { trackId: targetTrackId }
-													: {}),
+												...(targetTrackId ? { trackId: targetTrackId } : {}),
 											},
 										};
 									})
@@ -1921,16 +1926,12 @@ export const useTimelineElementDnd = ({
 								);
 								const nextTrackIndex = resolveTrackIndexByRole(
 									role,
-									mappedTrack ??
-										selectedBase + getTrackDeltaForRole(role),
+									mappedTrack ?? selectedBase + getTrackDeltaForRole(role),
 								);
 								const targetTrackId =
 									role === "audio"
 										? undefined
-										: resolveMovedTrackId(
-												initial.trackIndex,
-												nextTrackIndex,
-											);
+										: resolveMovedTrackId(initial.trackIndex, nextTrackIndex);
 								return {
 									...el,
 									timeline: {
@@ -1938,9 +1939,7 @@ export const useTimelineElementDnd = ({
 										start: initial.start + deltaFrames,
 										end: initial.end + deltaFrames,
 										trackIndex: nextTrackIndex,
-										...(targetTrackId
-											? { trackId: targetTrackId }
-											: {}),
+										...(targetTrackId ? { trackId: targetTrackId } : {}),
 									},
 								};
 							}

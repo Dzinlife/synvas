@@ -10,31 +10,35 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import type { TimelineElement, TrackRole } from "@/dsl/types";
 import { clampFrame } from "@/utils/timecode";
+import { getAudioContext } from "../audio/audioEngine";
 import type {
 	DropTarget,
 	ExtendedDropTarget,
 	TimelineTrack,
 } from "../timeline/types";
+import type { TimelineSettings } from "../timelineLoader";
 import { findAttachments } from "../utils/attachments";
+import {
+	type AudioTrackControlStateMap,
+	getAudioTrackControlState,
+} from "../utils/audioTrackState";
 import { finalizeTimelineElements } from "../utils/mainTrackMagnet";
 import type { SnapPoint } from "../utils/snap";
 import { updateElementTime } from "../utils/timelineTime";
-import { MAIN_TRACK_ID, reconcileTracks } from "../utils/trackState";
-import { getAudioContext } from "../audio/audioEngine";
 import {
 	findAvailableTrack,
 	getDropTarget,
 	getElementRole,
+	getStoredTrackAssignments,
 	getTrackFromY,
 	getYFromTrack,
 	hasOverlapOnStoredTrack,
 	hasRoleConflictOnStoredTrack,
 	insertTrackAt,
 	MAIN_TRACK_INDEX,
-	getStoredTrackAssignments,
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
-import type { TimelineSettings } from "../timelineLoader";
+import { MAIN_TRACK_ID, reconcileTracks } from "../utils/trackState";
 
 // Ghost 元素状态类型
 export interface DragGhostState {
@@ -76,6 +80,7 @@ interface TimelineStore {
 	previewAxisEnabled: boolean; // 预览轴是否启用
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
+	audioTrackStates: AudioTrackControlStateMap;
 	historyPast: TimelineHistorySnapshot[];
 	historyFuture: TimelineHistorySnapshot[];
 	historyLimit: number;
@@ -128,6 +133,12 @@ interface TimelineStore {
 	toggleTrackMuted: (trackId: string) => void;
 	setTrackSolo: (trackId: string, solo: boolean) => void;
 	toggleTrackSolo: (trackId: string) => void;
+	setAudioTrackLocked: (trackIndex: number, locked: boolean) => void;
+	toggleAudioTrackLocked: (trackIndex: number) => void;
+	setAudioTrackMuted: (trackIndex: number, muted: boolean) => void;
+	toggleAudioTrackMuted: (trackIndex: number) => void;
+	setAudioTrackSolo: (trackIndex: number, solo: boolean) => void;
+	toggleAudioTrackSolo: (trackIndex: number) => void;
 	setCanvasSize: (size: { width: number; height: number }) => void;
 	getCurrentTime: () => number;
 	getDisplayTime: () => number; // 返回 previewTime ?? currentTime
@@ -164,6 +175,7 @@ interface TimelineStore {
 interface TimelineHistorySnapshot {
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
+	audioTrackStates: AudioTrackControlStateMap;
 	rippleEditingEnabled: boolean;
 }
 
@@ -197,12 +209,14 @@ const trimHistory = (
 const buildHistorySnapshot = (state: {
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
+	audioTrackStates: AudioTrackControlStateMap;
 	rippleEditingEnabled: boolean;
 }): TimelineHistorySnapshot => {
 	// 使用不可变快照复用元素/轨道引用，避免深拷贝占用内存
 	return {
 		elements: state.elements,
 		tracks: state.tracks,
+		audioTrackStates: state.audioTrackStates,
 		rippleEditingEnabled: state.rippleEditingEnabled,
 	};
 };
@@ -244,8 +258,36 @@ const pruneSelectionForTrackLock = (
 	const nextPrimary =
 		state.primarySelectedId && nextSelected.includes(state.primarySelectedId)
 			? state.primarySelectedId
-			: nextSelected[nextSelected.length - 1] ?? null;
+			: (nextSelected[nextSelected.length - 1] ?? null);
 	return { selectedIds: nextSelected, primarySelectedId: nextPrimary };
+};
+
+const pruneAudioTrackStates = (
+	elements: TimelineElement[],
+	audioTrackStates: AudioTrackControlStateMap,
+): AudioTrackControlStateMap => {
+	// 保留默认音轨（-1）的状态，避免面板交互在空轨时被立即清空
+	const activeTrackIndices = new Set<number>([-1]);
+	for (const element of elements) {
+		const trackIndex = element.timeline.trackIndex ?? 0;
+		if (trackIndex < 0) {
+			activeTrackIndices.add(trackIndex);
+		}
+	}
+	const currentEntries = Object.entries(audioTrackStates);
+	if (currentEntries.length === 0) return audioTrackStates;
+	let didChange = false;
+	const nextStates: AudioTrackControlStateMap = {};
+	for (const [trackIndexRaw, state] of currentEntries) {
+		const trackIndex = Number(trackIndexRaw);
+		if (!activeTrackIndices.has(trackIndex)) {
+			didChange = true;
+			continue;
+		}
+		nextStates[trackIndex] = state;
+	}
+	if (!didChange) return audioTrackStates;
+	return nextStates;
 };
 
 interface TrackPlacementResult {
@@ -412,6 +454,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				solo: false,
 			},
 		],
+		audioTrackStates: {},
 		historyPast: [],
 		historyFuture: [],
 		historyLimit: HISTORY_LIMIT,
@@ -555,6 +598,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				return {
 					elements: previous.elements,
 					tracks: previous.tracks,
+					audioTrackStates: previous.audioTrackStates,
 					rippleEditingEnabled: previous.rippleEditingEnabled,
 					historyPast: nextPast,
 					historyFuture: nextFuture,
@@ -581,6 +625,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				return {
 					elements: next.elements,
 					tracks: next.tracks,
+					audioTrackStates: next.audioTrackStates,
 					rippleEditingEnabled: next.rippleEditingEnabled,
 					historyPast: nextPast,
 					historyFuture: nextFuture,
@@ -799,6 +844,182 @@ export const useTimelineStore = create<TimelineStore>()(
 			});
 		},
 
+		setAudioTrackLocked: (trackIndex: number, locked: boolean) => {
+			set((state) => {
+				if (trackIndex >= 0) return state;
+				const prevAudioTrack = getAudioTrackControlState(
+					state.audioTrackStates,
+					trackIndex,
+				);
+				if (prevAudioTrack.locked === locked) return state;
+				const nextAudioTrackStates = {
+					...state.audioTrackStates,
+					[trackIndex]: {
+						...prevAudioTrack,
+						locked,
+					},
+				};
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				const nextSelection = locked
+					? pruneSelectionForTrackLock(state, trackIndex)
+					: {
+							selectedIds: state.selectedIds,
+							primarySelectedId: state.primarySelectedId,
+						};
+				return {
+					audioTrackStates: nextAudioTrackStates,
+					historyPast: nextPast,
+					historyFuture: [],
+					selectedIds: nextSelection.selectedIds,
+					primarySelectedId: nextSelection.primarySelectedId,
+				};
+			});
+		},
+
+		toggleAudioTrackLocked: (trackIndex: number) => {
+			set((state) => {
+				if (trackIndex >= 0) return state;
+				const prevAudioTrack = getAudioTrackControlState(
+					state.audioTrackStates,
+					trackIndex,
+				);
+				const nextLocked = !prevAudioTrack.locked;
+				const nextAudioTrackStates = {
+					...state.audioTrackStates,
+					[trackIndex]: {
+						...prevAudioTrack,
+						locked: nextLocked,
+					},
+				};
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				const nextSelection = nextLocked
+					? pruneSelectionForTrackLock(state, trackIndex)
+					: {
+							selectedIds: state.selectedIds,
+							primarySelectedId: state.primarySelectedId,
+						};
+				return {
+					audioTrackStates: nextAudioTrackStates,
+					historyPast: nextPast,
+					historyFuture: [],
+					selectedIds: nextSelection.selectedIds,
+					primarySelectedId: nextSelection.primarySelectedId,
+				};
+			});
+		},
+
+		setAudioTrackMuted: (trackIndex: number, muted: boolean) => {
+			set((state) => {
+				if (trackIndex >= 0) return state;
+				const prevAudioTrack = getAudioTrackControlState(
+					state.audioTrackStates,
+					trackIndex,
+				);
+				if (prevAudioTrack.muted === muted) return state;
+				const nextAudioTrackStates = {
+					...state.audioTrackStates,
+					[trackIndex]: {
+						...prevAudioTrack,
+						muted,
+					},
+				};
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				return {
+					audioTrackStates: nextAudioTrackStates,
+					historyPast: nextPast,
+					historyFuture: [],
+				};
+			});
+		},
+
+		toggleAudioTrackMuted: (trackIndex: number) => {
+			set((state) => {
+				if (trackIndex >= 0) return state;
+				const prevAudioTrack = getAudioTrackControlState(
+					state.audioTrackStates,
+					trackIndex,
+				);
+				const nextAudioTrackStates = {
+					...state.audioTrackStates,
+					[trackIndex]: {
+						...prevAudioTrack,
+						muted: !prevAudioTrack.muted,
+					},
+				};
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				return {
+					audioTrackStates: nextAudioTrackStates,
+					historyPast: nextPast,
+					historyFuture: [],
+				};
+			});
+		},
+
+		setAudioTrackSolo: (trackIndex: number, solo: boolean) => {
+			set((state) => {
+				if (trackIndex >= 0) return state;
+				const prevAudioTrack = getAudioTrackControlState(
+					state.audioTrackStates,
+					trackIndex,
+				);
+				if (prevAudioTrack.solo === solo) return state;
+				const nextAudioTrackStates = {
+					...state.audioTrackStates,
+					[trackIndex]: {
+						...prevAudioTrack,
+						solo,
+					},
+				};
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				return {
+					audioTrackStates: nextAudioTrackStates,
+					historyPast: nextPast,
+					historyFuture: [],
+				};
+			});
+		},
+
+		toggleAudioTrackSolo: (trackIndex: number) => {
+			set((state) => {
+				if (trackIndex >= 0) return state;
+				const prevAudioTrack = getAudioTrackControlState(
+					state.audioTrackStates,
+					trackIndex,
+				);
+				const nextAudioTrackStates = {
+					...state.audioTrackStates,
+					[trackIndex]: {
+						...prevAudioTrack,
+						solo: !prevAudioTrack.solo,
+					},
+				};
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				return {
+					audioTrackStates: nextAudioTrackStates,
+					historyPast: nextPast,
+					historyFuture: [],
+				};
+			});
+		},
+
 		setCanvasSize: (size: { width: number; height: number }) => {
 			set({ canvasSize: size });
 		},
@@ -809,7 +1030,7 @@ export const useTimelineStore = create<TimelineStore>()(
 
 		getDisplayTime: () => {
 			const { previewTime, currentTime, previewAxisEnabled } = get();
-			return previewAxisEnabled ? previewTime ?? currentTime : currentTime;
+			return previewAxisEnabled ? (previewTime ?? currentTime) : currentTime;
 		},
 
 		getElements: () => {
@@ -945,9 +1166,12 @@ export const useTimelineStore = create<TimelineStore>()(
 );
 
 syncElementIndex(useTimelineStore.getState().elements);
-useTimelineStore.subscribe((state) => state.elements, (elements) => {
-	syncElementIndex(elements);
-});
+useTimelineStore.subscribe(
+	(state) => state.elements,
+	(elements) => {
+		syncElementIndex(elements);
+	},
+);
 
 // 渲染时间：导出时使用导出帧，否则跟随预览/播放
 const resolveRenderTime = (state: TimelineStore): number => {
@@ -969,7 +1193,9 @@ export const useCurrentTime = () => {
 	const seekTo = useTimelineStore((state) => state.seekTo);
 
 	return {
-		currentTime: previewAxisEnabled ? previewTime ?? currentTime : currentTime,
+		currentTime: previewAxisEnabled
+			? (previewTime ?? currentTime)
+			: currentTime,
 		setCurrentTime: seekTo,
 		seekTo,
 	};
@@ -981,7 +1207,7 @@ export const useDisplayTime = () => {
 	const previewAxisEnabled = useTimelineStore(
 		(state) => state.previewAxisEnabled,
 	);
-	return previewAxisEnabled ? previewTime ?? currentTime : currentTime;
+	return previewAxisEnabled ? (previewTime ?? currentTime) : currentTime;
 };
 
 export const useFps = () => {
@@ -1027,7 +1253,6 @@ export const usePreviewAxis = () => {
 		setPreviewAxisEnabled,
 	};
 };
-
 
 export const useElements = () => {
 	const elements = useTimelineStore((state) => state.elements);
@@ -1222,6 +1447,7 @@ export const useRippleEditing = () => {
 
 export const useTracks = () => {
 	const tracks = useTimelineStore((state) => state.tracks);
+	const audioTrackStates = useTimelineStore((state) => state.audioTrackStates);
 	const setTracks = useTimelineStore((state) => state.setTracks);
 	const setTrackHidden = useTimelineStore((state) => state.setTrackHidden);
 	const toggleTrackHidden = useTimelineStore(
@@ -1235,9 +1461,28 @@ export const useTracks = () => {
 	const toggleTrackMuted = useTimelineStore((state) => state.toggleTrackMuted);
 	const setTrackSolo = useTimelineStore((state) => state.setTrackSolo);
 	const toggleTrackSolo = useTimelineStore((state) => state.toggleTrackSolo);
+	const setAudioTrackLocked = useTimelineStore(
+		(state) => state.setAudioTrackLocked,
+	);
+	const toggleAudioTrackLocked = useTimelineStore(
+		(state) => state.toggleAudioTrackLocked,
+	);
+	const setAudioTrackMuted = useTimelineStore(
+		(state) => state.setAudioTrackMuted,
+	);
+	const toggleAudioTrackMuted = useTimelineStore(
+		(state) => state.toggleAudioTrackMuted,
+	);
+	const setAudioTrackSolo = useTimelineStore(
+		(state) => state.setAudioTrackSolo,
+	);
+	const toggleAudioTrackSolo = useTimelineStore(
+		(state) => state.toggleAudioTrackSolo,
+	);
 
 	return {
 		tracks,
+		audioTrackStates,
 		setTracks,
 		setTrackHidden,
 		toggleTrackHidden,
@@ -1247,6 +1492,12 @@ export const useTracks = () => {
 		toggleTrackMuted,
 		setTrackSolo,
 		toggleTrackSolo,
+		setAudioTrackLocked,
+		toggleAudioTrackLocked,
+		setAudioTrackMuted,
+		toggleAudioTrackMuted,
+		setAudioTrackSolo,
+		toggleAudioTrackSolo,
 	};
 };
 
@@ -1254,16 +1505,24 @@ export const useTrackAssignments = () => {
 	const elements = useTimelineStore((state) => state.elements);
 	const setElements = useTimelineStore((state) => state.setElements);
 	const tracks = useTimelineStore((state) => state.tracks);
+	const audioTrackStates = useTimelineStore((state) => state.audioTrackStates);
 	const fps = useTimelineStore((state) => state.fps);
 	const rippleEditingEnabled = useTimelineStore(
 		(state) => state.rippleEditingEnabled,
 	);
 	const { attachments, autoAttach } = useAttachments();
 	const trackLockedMap = useMemo(() => {
-		return new Map(
+		const map = new Map<number, boolean>(
 			tracks.map((track, index) => [index, track.locked ?? false]),
 		);
-	}, [tracks]);
+		for (const trackIndexRaw of Object.keys(audioTrackStates)) {
+			const trackIndex = Number(trackIndexRaw);
+			if (!Number.isFinite(trackIndex)) continue;
+			const state = getAudioTrackControlState(audioTrackStates, trackIndex);
+			map.set(trackIndex, state.locked);
+		}
+		return map;
+	}, [tracks, audioTrackStates]);
 
 	// 基于 elements 计算轨道分配
 	const trackAssignments = useMemo(() => {
@@ -1756,16 +2015,13 @@ export const TimelineProvider = ({
 	// 使用 useLayoutEffect 确保在子组件渲染前执行
 	useLayoutEffect(() => {
 		if (initialElements) {
-			const baseTracks =
-				initialTracks ?? useTimelineStore.getState().tracks;
-			const { tracks, elements } = reconcileTracks(
-				initialElements,
-				baseTracks,
-			);
+			const baseTracks = initialTracks ?? useTimelineStore.getState().tracks;
+			const { tracks, elements } = reconcileTracks(initialElements, baseTracks);
 			useTimelineStore.setState({
 				currentTime: clampFrame(initialCurrentTime ?? 0),
 				elements,
 				tracks,
+				audioTrackStates: {},
 				canvasSize: initialCanvasSize ?? { width: 1920, height: 1080 },
 				fps: normalizeFps(initialFps ?? DEFAULT_FPS),
 				...(settingsState ?? {}),
@@ -1776,6 +2032,7 @@ export const TimelineProvider = ({
 		if (initialTracks) {
 			useTimelineStore.setState({
 				tracks: initialTracks,
+				audioTrackStates: {},
 				...(settingsState ?? {}),
 			});
 			useTimelineStore.getState().resetHistory();
@@ -1789,15 +2046,12 @@ export const TimelineProvider = ({
 	// 后续更新
 	useEffect(() => {
 		if (initialElements) {
-			const baseTracks =
-				initialTracks ?? useTimelineStore.getState().tracks;
-			const { tracks, elements } = reconcileTracks(
-				initialElements,
-				baseTracks,
-			);
+			const baseTracks = initialTracks ?? useTimelineStore.getState().tracks;
+			const { tracks, elements } = reconcileTracks(initialElements, baseTracks);
 			useTimelineStore.setState({
 				elements,
 				tracks,
+				audioTrackStates: {},
 			});
 			useTimelineStore.getState().resetHistory();
 		}
@@ -1807,6 +2061,7 @@ export const TimelineProvider = ({
 		if (!initialElements && initialTracks) {
 			useTimelineStore.setState({
 				tracks: initialTracks,
+				audioTrackStates: {},
 			});
 			useTimelineStore.getState().resetHistory();
 		}
@@ -1838,16 +2093,29 @@ export const TimelineProvider = ({
 
 	const elements = useTimelineStore((state) => state.elements);
 	const tracks = useTimelineStore((state) => state.tracks);
+	const audioTrackStates = useTimelineStore((state) => state.audioTrackStates);
 
 	useEffect(() => {
 		const result = reconcileTracks(elements, tracks);
-		if (result.didChangeElements || result.didChangeTracks) {
+		const nextAudioTrackStates = pruneAudioTrackStates(
+			result.elements,
+			audioTrackStates,
+		);
+		const didChangeAudioTrackStates = nextAudioTrackStates !== audioTrackStates;
+		if (
+			result.didChangeElements ||
+			result.didChangeTracks ||
+			didChangeAudioTrackStates
+		) {
 			useTimelineStore.setState({
 				elements: result.elements,
 				tracks: result.tracks,
+				...(didChangeAudioTrackStates
+					? { audioTrackStates: nextAudioTrackStates }
+					: {}),
 			});
 		}
-	}, [elements, tracks]);
+	}, [elements, tracks, audioTrackStates]);
 
 	// 播放循环
 	useEffect(() => {

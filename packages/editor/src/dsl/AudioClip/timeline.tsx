@@ -1,9 +1,10 @@
+import { AudioWaveformCanvas } from "@/dsl/AudioWaveformCanvas";
 import {
 	useFps,
 	useTimelineScale,
 	useTimelineStore,
 } from "@/editor/contexts/TimelineContext";
-import { AudioWaveformCanvas } from "@/dsl/AudioWaveformCanvas";
+import { isTimelineTrackMuted } from "@/editor/utils/trackAudibility";
 import { createModelSelector } from "../model/registry";
 import type { TimelineProps } from "../model/types";
 import type { AudioClipInternal, AudioClipProps } from "./model";
@@ -45,12 +46,37 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 	const offsetFrames = useTimelineStore(
 		(state) => state.getElementById(id)?.timeline?.offset ?? 0,
 	);
+	const isTrackMuted = useTimelineStore((state) =>
+		isTimelineTrackMuted(
+			state.getElementById(id)?.timeline,
+			state.tracks,
+			state.audioTrackStates,
+		),
+	);
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
 	const { fps: timelineFps } = useFps();
 	const safeFps = Number.isFinite(fps) && fps > 0 ? fps : timelineFps;
+	const containerClassName = isTrackMuted
+		? "absolute inset-0 bg-zinc-700/85 overflow-hidden"
+		: "absolute inset-0 bg-emerald-800/80 overflow-hidden";
+	const waveformColor = isTrackMuted
+		? "rgba(163, 163, 163, 0.9)"
+		: "rgba(16, 185, 129, 0.9)";
+	const labelTextClassName = isTrackMuted
+		? "flex items-center gap-1 text-xs text-zinc-100"
+		: "flex items-center gap-1 text-xs text-emerald-50";
+	const labelDotClassName = isTrackMuted
+		? "size-1.5 rounded-full bg-zinc-300"
+		: "size-1.5 rounded-full bg-emerald-200";
+	const loadingOverlayClassName = isTrackMuted
+		? "absolute inset-0 flex items-center justify-center bg-zinc-200/30 z-20"
+		: "absolute inset-0 flex items-center justify-center bg-emerald-100/30 z-20";
+	const loadingTextClassName = isTrackMuted
+		? "text-xs text-zinc-700"
+		: "text-xs text-emerald-700";
 
 	return (
-		<div className="absolute inset-0 bg-emerald-800/80 overflow-hidden">
+		<div className={containerClassName}>
 			{uri && audioSink && audioDuration > 0 && !hasError && (
 				<AudioWaveformCanvas
 					uri={uri}
@@ -62,20 +88,20 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 					timelineScale={timelineScale}
 					offsetFrames={offsetFrames}
 					scrollLeft={scrollLeft}
-					color="rgba(16, 185, 129, 0.9)"
+					color={waveformColor}
 					className="absolute inset-0"
 				/>
 			)}
 			<div className="absolute inset-x-0 top-0 p-1 z-10">
-				<div className="flex items-center gap-1 text-xs text-emerald-50">
-					<span className="size-1.5 rounded-full bg-emerald-200" />
+				<div className={labelTextClassName}>
+					<span className={labelDotClassName} />
 					<span className="truncate">{name || "Audio"}</span>
 				</div>
 			</div>
 
 			{isLoading && (
-				<div className="absolute inset-0 flex items-center justify-center bg-emerald-100/30 z-20">
-					<div className="text-xs text-emerald-700">Loading...</div>
+				<div className={loadingOverlayClassName}>
+					<div className={loadingTextClassName}>Loading...</div>
 				</div>
 			)}
 			{hasError && (

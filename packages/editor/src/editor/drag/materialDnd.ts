@@ -1,14 +1,26 @@
 import { useDrag } from "@use-gesture/react";
 import { useMemo, useRef } from "react";
-import { TimelineElement, TrackRole } from "@/dsl/types";
-import { clampFrame, secondsToFrames } from "@/utils/timecode";
+import type { TimelineElement, TrackRole } from "@/dsl/types";
 import { toast } from "@/lib/toast";
+import { clampFrame, secondsToFrames } from "@/utils/timecode";
 import {
 	useFps,
 	useTimelineScale,
 	useTimelineStore,
 	useTracks,
 } from "../contexts/TimelineContext";
+import { DEFAULT_TRACK_HEIGHT } from "../timeline/trackConfig";
+import { getAudioTrackControlState } from "../utils/audioTrackState";
+import { getPixelsPerFrame } from "../utils/timelineScale";
+import {
+	getElementRole,
+	getStoredTrackAssignments,
+	getTrackRoleMapFromTracks,
+	hasOverlapOnTrack,
+	isRoleCompatibleWithTrack,
+	MAIN_TRACK_INDEX,
+} from "../utils/trackAssignment";
+import { isTransitionElement } from "../utils/transitions";
 import {
 	calculateAutoScrollSpeed,
 	type DragGhostInfo,
@@ -16,17 +28,6 @@ import {
 	type MaterialDragData,
 	useDragStore,
 } from "./dragStore";
-import { DEFAULT_TRACK_HEIGHT } from "../timeline/trackConfig";
-import { getPixelsPerFrame } from "../utils/timelineScale";
-import {
-	getStoredTrackAssignments,
-	getTrackRoleMapFromTracks,
-	hasOverlapOnTrack,
-	isRoleCompatibleWithTrack,
-	MAIN_TRACK_INDEX,
-	getElementRole,
-} from "../utils/trackAssignment";
-import { isTransitionElement } from "../utils/transitions";
 import {
 	findTimelineDropTargetFromScreenPosition,
 	getPreviewDropTargetFromScreenPosition,
@@ -64,7 +65,7 @@ export function useMaterialDndContext(): MaterialDndContext {
 	const rippleEditingEnabled = useTimelineStore(
 		(state) => state.rippleEditingEnabled,
 	);
-	const { tracks } = useTracks();
+	const { tracks, audioTrackStates } = useTracks();
 	const trackAssignments = useMemo(
 		() => getStoredTrackAssignments(elements),
 		[elements],
@@ -74,15 +75,19 @@ export function useMaterialDndContext(): MaterialDndContext {
 		[tracks],
 	);
 	const trackLockedMap = useMemo(() => {
-		return new Map(
+		const map = new Map<number, boolean>(
 			tracks.map((track, index) => [index, track.locked ?? false]),
 		);
-	}, [tracks]);
+		for (const trackIndexRaw of Object.keys(audioTrackStates)) {
+			const trackIndex = Number(trackIndexRaw);
+			if (!Number.isFinite(trackIndex)) continue;
+			const state = getAudioTrackControlState(audioTrackStates, trackIndex);
+			map.set(trackIndex, state.locked);
+		}
+		return map;
+	}, [tracks, audioTrackStates]);
 	const trackCount = tracks.length || 1;
-	const defaultDurationFrames = useMemo(
-		() => secondsToFrames(5, fps),
-		[fps],
-	);
+	const defaultDurationFrames = useMemo(() => secondsToFrames(5, fps), [fps]);
 
 	return {
 		fps,
@@ -145,7 +150,10 @@ export function resolveMaterialDropTarget(
 	screenX: number,
 	screenY: number,
 ): DropTargetInfo | null {
-	const previewTarget = getPreviewDropTargetFromScreenPosition(screenX, screenY);
+	const previewTarget = getPreviewDropTargetFromScreenPosition(
+		screenX,
+		screenY,
+	);
 	if (previewTarget) {
 		if (state.isTransitionMaterial || state.materialRole === "audio") {
 			return { ...previewTarget, canDrop: false };
@@ -270,7 +278,10 @@ export function resolveMaterialDropTarget(
 	};
 
 	if (state.isTransitionMaterial) {
-		if (baseDropTarget.type === "track" && isTrackLocked(baseDropTarget.trackIndex)) {
+		if (
+			baseDropTarget.type === "track" &&
+			isTrackLocked(baseDropTarget.trackIndex)
+		) {
 			return {
 				zone: "timeline",
 				type: baseDropTarget.type,
@@ -279,7 +290,10 @@ export function resolveMaterialDropTarget(
 				canDrop: false,
 			};
 		}
-		if (baseDropTarget.type === "gap" || !isClipTrack(baseDropTarget.trackIndex)) {
+		if (
+			baseDropTarget.type === "gap" ||
+			!isClipTrack(baseDropTarget.trackIndex)
+		) {
 			return {
 				zone: "timeline",
 				type: baseDropTarget.type,
@@ -309,7 +323,10 @@ export function resolveMaterialDropTarget(
 		};
 	}
 
-	if (baseDropTarget.trackIndex < MAIN_TRACK_INDEX && state.materialRole !== "audio") {
+	if (
+		baseDropTarget.trackIndex < MAIN_TRACK_INDEX &&
+		state.materialRole !== "audio"
+	) {
 		return {
 			zone: "timeline",
 			type: baseDropTarget.type,

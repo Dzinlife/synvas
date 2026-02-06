@@ -1,5 +1,6 @@
 import { useDrag } from "@use-gesture/react";
-import React, {
+import type React from "react";
+import {
 	startTransition,
 	useCallback,
 	useEffect,
@@ -37,6 +38,7 @@ import {
 import { MaterialDragOverlay, useDragStore } from "./drag";
 import { useExternalMaterialDnd } from "./hooks/useExternalMaterialDnd";
 import { TRACK_CONTENT_GAP } from "./timeline/trackConfig";
+import { getAudioTrackControlState } from "./utils/audioTrackState";
 import { finalizeTimelineElements } from "./utils/mainTrackMagnet";
 import { getPixelsPerFrame } from "./utils/timelineScale";
 import { updateElementTime } from "./utils/timelineTime";
@@ -98,20 +100,31 @@ const TimelineEditor = () => {
 	const { trackAssignments, trackCount } = useTrackAssignments();
 	const {
 		tracks,
+		audioTrackStates,
 		toggleTrackHidden,
 		toggleTrackLocked,
 		toggleTrackMuted,
 		toggleTrackSolo,
+		toggleAudioTrackLocked,
+		toggleAudioTrackMuted,
+		toggleAudioTrackSolo,
 	} = useTracks();
 	const { activeDropTarget, dragGhosts, isDragging } = useDragging();
 	const { autoScrollSpeed, autoScrollSpeedY } = useAutoScroll();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
 	const trackLockedMap = useMemo(() => {
-		return new Map(
+		const map = new Map<number, boolean>(
 			tracks.map((track, index) => [index, track.locked ?? false]),
 		);
-	}, [tracks]);
+		for (const trackIndexRaw of Object.keys(audioTrackStates)) {
+			const trackIndex = Number(trackIndexRaw);
+			if (!Number.isFinite(trackIndex)) continue;
+			const state = getAudioTrackControlState(audioTrackStates, trackIndex);
+			map.set(trackIndex, state.locked);
+		}
+		return map;
+	}, [tracks, audioTrackStates]);
 	const deleteSelectedElements = useCallback(() => {
 		if (selectedIds.length === 0) return;
 		setElements((prev) => {
@@ -581,7 +594,12 @@ const TimelineEditor = () => {
 					const elementId = el.dataset.elementId;
 					if (elementId) {
 						const trackIndex = trackAssignments.get(elementId) ?? 0;
-						if (tracks[trackIndex]?.locked) {
+						const trackLocked =
+							trackIndex >= 0
+								? (tracks[trackIndex]?.locked ?? false)
+								: getAudioTrackControlState(audioTrackStates, trackIndex)
+										.locked;
+						if (trackLocked) {
 							continue;
 						}
 						selected.push(elementId);
@@ -591,7 +609,7 @@ const TimelineEditor = () => {
 
 			return selected;
 		},
-		[trackAssignments, tracks],
+		[trackAssignments, tracks, audioTrackStates],
 	);
 
 	const applyMarqueeSelection = useCallback(
@@ -1256,6 +1274,10 @@ const TimelineEditor = () => {
 					const y = (layoutItem?.y ?? 0) + TRACK_CONTENT_GAP / 2;
 					const elementTrackHeight =
 						layoutItem?.height ?? getTrackHeightByRole("audio");
+					const audioTrackState = getAudioTrackControlState(
+						audioTrackStates,
+						trackIndex,
+					);
 					return (
 						<TimelineElement
 							key={element.id}
@@ -1265,8 +1287,8 @@ const TimelineEditor = () => {
 							ratio={ratio}
 							trackHeight={elementTrackHeight}
 							trackCount={trackCount}
-							trackVisible={true}
-							trackLocked={false}
+							trackVisible
+							trackLocked={audioTrackState.locked}
 							updateTimeRange={updateTimeRange}
 						/>
 					);
@@ -1278,6 +1300,7 @@ const TimelineEditor = () => {
 		audioTrackLayoutByIndex,
 		audioTrackIndicesForLayout,
 		audioTracksHeight,
+		audioTrackStates,
 		scrollLeft,
 		ratio,
 		updateTimeRange,
@@ -1322,13 +1345,17 @@ const TimelineEditor = () => {
 	const audioTrackLabels = useMemo(() => {
 		return audioTrackLayout.map((item) => {
 			const label = `音轨 ${Math.abs(item.index)}`;
+			const audioTrackState = getAudioTrackControlState(
+				audioTrackStates,
+				item.index,
+			);
 			const track = {
-				id: `audio-${Math.abs(item.index)}`,
+				id: `audio-${Math.abs(item.index)}-${item.index}`,
 				role: "audio" as const,
 				hidden: false,
-				locked: false,
-				muted: false,
-				solo: false,
+				locked: audioTrackState.locked,
+				muted: audioTrackState.muted,
+				solo: audioTrackState.solo,
 			};
 			return (
 				<TimelineTrackSidebarItem
@@ -1338,10 +1365,19 @@ const TimelineEditor = () => {
 					height={item.height}
 					className="text-emerald-300"
 					labelClassName="text-emerald-300"
+					onToggleLocked={() => toggleAudioTrackLocked(item.index)}
+					onToggleMuted={() => toggleAudioTrackMuted(item.index)}
+					onToggleSolo={() => toggleAudioTrackSolo(item.index)}
 				/>
 			);
 		});
-	}, [audioTrackLayout]);
+	}, [
+		audioTrackLayout,
+		audioTrackStates,
+		toggleAudioTrackLocked,
+		toggleAudioTrackMuted,
+		toggleAudioTrackSolo,
+	]);
 
 	const otherTrackBackgrounds = useMemo(() => {
 		if (otherTrackCount === 0) return null;
@@ -1363,6 +1399,29 @@ const TimelineEditor = () => {
 			);
 		});
 	}, [otherTrackCount, otherTrackLayout, tracks, timelinePaddingLeft]);
+
+	const audioTrackLockedOverlays = useMemo(() => {
+		if (audioTrackLayout.length === 0) return null;
+		return audioTrackLayout.map((item) => {
+			const trackLocked = getAudioTrackControlState(
+				audioTrackStates,
+				item.index,
+			).locked;
+			if (!trackLocked) return null;
+			return (
+				<div
+					key={`audio-track-locked-${item.index}`}
+					className="absolute right-0 z-10 bg-black/10"
+					style={{
+						top: item.y,
+						left: -timelinePaddingLeft,
+						height: item.height,
+						...LOCKED_TRACK_OVERLAY_STYLE,
+					}}
+				/>
+			);
+		});
+	}, [audioTrackLayout, audioTrackStates, timelinePaddingLeft]);
 
 	// 主轨道标签
 	const mainTrackLabel = useMemo(() => {
@@ -1568,6 +1627,7 @@ const TimelineEditor = () => {
 										data-track-content-area="audio"
 										data-content-height={audioTracksHeight}
 									>
+										{audioTrackLockedOverlays}
 										{audioTimelineItems}
 									</div>
 								</div>

@@ -1,11 +1,4 @@
 import {
-	useFps,
-	useTimelineScale,
-	useTimelineStore,
-} from "@/editor/contexts/TimelineContext";
-import { getPixelsPerFrame } from "@/editor/utils/timelineScale";
-import { framesToSeconds } from "@/utils/timecode";
-import {
 	useCallback,
 	useEffect,
 	useEffectEvent,
@@ -13,6 +6,14 @@ import {
 	useRef,
 } from "react";
 import { AudioWaveformCanvas } from "@/dsl/AudioWaveformCanvas";
+import {
+	useFps,
+	useTimelineScale,
+	useTimelineStore,
+} from "@/editor/contexts/TimelineContext";
+import { getPixelsPerFrame } from "@/editor/utils/timelineScale";
+import { isTimelineTrackMuted } from "@/editor/utils/trackAudibility";
+import { framesToSeconds } from "@/utils/timecode";
 import { createModelSelector } from "../model/registry";
 import type { TimelineProps } from "../model/types";
 import {
@@ -81,8 +82,21 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	const timelineOffsetFrames = useTimelineStore(
 		(state) => state.getElementById(id)?.timeline?.offset ?? 0,
 	);
+	const isTrackMuted = useTimelineStore((state) =>
+		isTimelineTrackMuted(
+			state.getElementById(id)?.timeline,
+			state.tracks,
+			state.audioTrackStates,
+		),
+	);
 	const offsetSeconds = framesToSeconds(timelineOffsetFrames, fps);
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
+	const waveformContainerClassName = isTrackMuted
+		? "absolute inset-x-0 bottom-0 h-4 bg-neutral-500/20 overflow-hidden"
+		: "absolute inset-x-0 bottom-0 h-4 bg-blue-500/20 overflow-hidden";
+	const waveformColor = isTrackMuted
+		? "rgba(163, 163, 163, 0.85)"
+		: "rgba(59, 130, 246, 0.9)";
 
 	// 生成预览图（使用全局缓存）
 	const generateThumbnails = useCallback(async () => {
@@ -409,7 +423,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			<div className="absolute inset-y-4 w-full">
 				<canvas ref={canvasRef} className="absolute inset-y-0" />
 			</div>
-			<div className="absolute inset-x-0 bottom-0 h-4 bg-neutral-700/20 overflow-hidden">
+			<div className={waveformContainerClassName}>
 				{audioSink && audioDuration > 0 && uri && (
 					<AudioWaveformCanvas
 						uri={uri}
@@ -421,7 +435,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 						timelineScale={timelineScale}
 						offsetFrames={timelineOffsetFrames}
 						scrollLeft={scrollLeft}
-						color="rgba(255, 255, 255, 0.7)"
+						color={waveformColor}
 						className="absolute inset-0"
 					/>
 				)}

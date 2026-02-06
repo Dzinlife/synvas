@@ -19,6 +19,7 @@ type AudioPlaybackDeps = {
 	getTimeline: () => TimelineMeta | undefined;
 	getFps: () => number;
 	getState: () => AudioPlaybackState;
+	isPlaybackEnabled?: () => boolean;
 };
 
 export type AudioPlaybackController = {
@@ -63,6 +64,7 @@ export const createAudioPlaybackController = (
 	let scheduledSources: AudioBufferSourceNode[] = [];
 	let clipGain: GainNode | null = null;
 	let lastPlaybackTargetTime: number | null = null;
+	const isPlaybackEnabled = () => deps.isPlaybackEnabled?.() ?? true;
 
 	const stopScheduledSources = () => {
 		for (const source of scheduledSources) {
@@ -110,9 +112,7 @@ export const createAudioPlaybackController = (
 				source.buffer = wrapped.buffer;
 				source.connect(clipGain);
 				source.onended = () => {
-					scheduledSources = scheduledSources.filter(
-						(item) => item !== source,
-					);
+					scheduledSources = scheduledSources.filter((item) => item !== source);
 				};
 				scheduledSources.push(source);
 				source.start(targetStart);
@@ -125,6 +125,10 @@ export const createAudioPlaybackController = (
 	};
 
 	const startPlayback = async (timelineTimeSeconds: number): Promise<void> => {
+		if (!isPlaybackEnabled()) {
+			stopPlayback();
+			return;
+		}
 		const { isLoading, hasError, uri, audioSink, audioDuration } =
 			deps.getState();
 		if (isLoading || hasError) return;
@@ -189,6 +193,10 @@ export const createAudioPlaybackController = (
 	};
 
 	const stepPlayback = async (timelineTimeSeconds: number): Promise<void> => {
+		if (!isPlaybackEnabled()) {
+			stopPlayback();
+			return;
+		}
 		if (!Number.isFinite(timelineTimeSeconds)) return;
 		const { isLoading, hasError, uri, audioSink } = deps.getState();
 		if (isLoading || hasError) return;
@@ -244,8 +252,7 @@ export const createAudioPlaybackController = (
 		const audioTargetTime =
 			offsetSeconds + Math.max(0, timelineTimeSeconds - clipStartSeconds);
 		const audioNow =
-			playbackStartAudioTime +
-			(context.currentTime - playbackStartContextTime);
+			playbackStartAudioTime + (context.currentTime - playbackStartContextTime);
 		if (Math.abs(audioNow - audioTargetTime) > 0.2) {
 			stopPlayback();
 			await startPlayback(timelineTimeSeconds);

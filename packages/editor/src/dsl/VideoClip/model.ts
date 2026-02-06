@@ -17,15 +17,13 @@ import {
 	createAudioPlaybackController,
 } from "@/editor/audio/audioPlayback";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { isTimelineTrackAudible } from "@/editor/utils/trackAudibility";
 import {
 	framesToSeconds,
 	framesToTimecode,
 	secondsToFrames,
 } from "@/utils/timecode";
-import type {
-	ComponentModel,
-	ComponentModelStore,
-} from "../model/types";
+import type { ComponentModel, ComponentModelStore } from "../model/types";
 
 // VideoClip Props 类型
 export interface VideoClipProps {
@@ -1058,6 +1056,14 @@ export function createVideoClipModel(
 		getTimeline,
 		getFps: getTimelineFps,
 		getState: getAudioPlaybackState,
+		isPlaybackEnabled: () => {
+			const timelineState = useTimelineStore.getState();
+			return isTimelineTrackAudible(
+				timelineState.getElementById(id)?.timeline,
+				timelineState.tracks,
+				timelineState.audioTrackStates,
+			);
+		},
 	});
 
 	return store;

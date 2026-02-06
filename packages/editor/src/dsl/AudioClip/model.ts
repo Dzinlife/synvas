@@ -4,10 +4,11 @@ import { createStore } from "zustand/vanilla";
 import type { AssetHandle } from "@/dsl/assets/AssetStore";
 import { type AudioAsset, acquireAudioAsset } from "@/dsl/assets/audioAsset";
 import {
-	createAudioPlaybackController,
 	type AudioPlaybackController,
+	createAudioPlaybackController,
 } from "@/editor/audio/audioPlayback";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { isTimelineTrackAudible } from "@/editor/utils/trackAudibility";
 import { secondsToFrames } from "@/utils/timecode";
 import type {
 	ComponentModel,
@@ -255,6 +256,14 @@ export function createAudioClipModel(
 		getTimeline,
 		getFps: getTimelineFps,
 		getState: getAudioPlaybackState,
+		isPlaybackEnabled: () => {
+			const timelineState = useTimelineStore.getState();
+			return isTimelineTrackAudible(
+				timelineState.getElementById(id)?.timeline,
+				timelineState.tracks,
+				timelineState.audioTrackStates,
+			);
+		},
 	});
 
 	return store;
