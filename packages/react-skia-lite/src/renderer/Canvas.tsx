@@ -9,13 +9,8 @@ import {
 	useState,
 } from "react";
 import type {
-	// AnimatedRef,
 	SharedValue,
 } from "../react-native-types";
-
-// import { HAS_REANIMATED_3 } from "../external";
-
-// import Rea from "../external/reanimated/ReanimatedProxy";
 import { Platform } from "../Platform";
 import type {
 	LayoutChangeEvent,
@@ -46,9 +41,6 @@ export interface CanvasRef extends FC<CanvasProps> {
 }
 
 export const useCanvasRef = () => useRef<CanvasRef>(null);
-
-// const useReanimatedFrame = () => {};
-// const measure = null;
 
 const useCanvasRefPriv = useRef<View>;
 
@@ -99,29 +91,6 @@ export const Canvas = ({
 
 	// Root
 	const root = useMemo(() => new SkiaSGRoot(Skia, nativeId), [nativeId]);
-
-	// useReanimatedFrame(() => {
-	// 	"worklet";
-	// 	if (onSize && measure) {
-	// 		const result =
-	// 			// eslint-disable-next-line no-nested-ternary
-	// 			Platform.OS === "web"
-	// 				? // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-	// 					// @ts-expect-error
-	// 					viewRef.current?.canvasRef
-	// 					? // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-	// 						// @ts-expect-error
-	// 						measure(viewRef.current.canvasRef)
-	// 					: { width: 0, height: 0 }
-	// 				: measure(viewRef as AnimatedRef<View>);
-	// 		if (result) {
-	// 			const { width, height } = result;
-	// 			if (onSize.value.width !== width || onSize.value.height !== height) {
-	// 				onSize.value = { width, height };
-	// 			}
-	// 		}
-	// 	}
-	// }, !!onSize);
 
 	// Render effects
 	useLayoutEffect(() => {

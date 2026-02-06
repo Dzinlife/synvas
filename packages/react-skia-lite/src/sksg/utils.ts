@@ -6,8 +6,19 @@ export const isSharedValue = <T = unknown>(
 	value: unknown,
 ): value is SharedValue<T> => {
 	"worklet";
-	// We cannot use `in` operator here because `value` could be a HostObject and therefore we cast.
-	return (value as Record<string, unknown>)?._isReanimatedSharedValue === true;
+	if (typeof value !== "object" || value === null) {
+		return false;
+	}
+	const candidate = value as Record<string, unknown>;
+	if (!("value" in candidate)) {
+		return false;
+	}
+	if (candidate._isSharedValue === true) {
+		return true;
+	}
+	return (
+		typeof candidate.get === "function" || typeof candidate.set === "function"
+	);
 };
 
 export const materialize = <T extends object>(props: T) => {
