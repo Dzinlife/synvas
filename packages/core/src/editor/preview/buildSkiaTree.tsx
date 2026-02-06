@@ -59,7 +59,7 @@ const renderElementNode = (
 		return null;
 	}
 	const TargetRenderer = componentDef.Renderer;
-	return <TargetRenderer id={target.id} {...target.props} />;
+	return <TargetRenderer key={target.id} id={target.id} {...target.props} />;
 };
 
 export const buildSkiaRenderStateCore = async (
@@ -230,6 +230,7 @@ export const buildSkiaRenderStateCore = async (
 		const TransitionRenderer = transitionDef.Renderer;
 		const node = (
 			<TransitionRenderer
+				key={element.id}
 				id={element.id}
 				{...element.props}
 				fromNode={fromPlan.node}

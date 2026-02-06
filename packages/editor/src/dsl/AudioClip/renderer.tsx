@@ -96,17 +96,18 @@ const AudioClipRenderer: React.FC<AudioClipRendererProps> = ({ id }) => {
 		isLoading,
 		isPlaying,
 		renderTimeFrames,
-		stepPlaybackRef,
-		stopPlaybackRef,
 		timeline,
 		uri,
 	]);
 
 	useEffect(() => {
+		const clipId = id;
 		return () => {
+			// 组件实例切换到其他片段时，清理旧片段的播放状态
+			if (!clipId) return;
 			stopPlaybackRef.current();
 		};
-	}, []);
+	}, [id]);
 
 	return null;
 };
