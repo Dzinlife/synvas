@@ -100,7 +100,7 @@ export function createSeaWaveModel(
 	initialProps: SeaWaveProps,
 ): SeaWaveModelStore {
 	const store = createStore<ComponentModel<SeaWaveProps, SeaWaveInternal>>()(
-		subscribeWithSelector((set, get) => ({
+		subscribeWithSelector((set, _get) => ({
 			id,
 			type: "Background",
 			props: {

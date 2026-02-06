@@ -21,9 +21,9 @@ const PreviewContext = createContext({
 	pictureHeight: 1080,
 	canvasWidth: 1920, // canvas 保持与 picture 相同尺寸
 	canvasHeight: 1080,
-	setZoomLevel: (zoomLevel: number) => {},
-	setPictureSize: (pictureSize: { width: number; height: number }) => {},
-	setContainerSize: (containerSize: { width: number; height: number }) => {},
+	setZoomLevel: (_zoomLevel: number) => {},
+	setPictureSize: (_pictureSize: { width: number; height: number }) => {},
+	setContainerSize: (_containerSize: { width: number; height: number }) => {},
 	zoomLevel: 0.5,
 	zoomTransform: "",
 	offsetX: 0,
@@ -36,16 +36,16 @@ const PreviewContext = createContext({
 		initialZoom: 0.5,
 		currentZoom: 0.5,
 	} as PinchState,
-	startPinchZoom: (centerX: number, centerY: number) => {},
-	updatePinchZoom: (scale: number, centerX: number, centerY: number) => {},
+	startPinchZoom: (_centerX: number, _centerY: number) => {},
+	updatePinchZoom: (_scale: number, _centerX: number, _centerY: number) => {},
 	endPinchZoom: () => {},
 	// Pan offset
 	panOffset: { x: 0, y: 0 },
-	setPanOffset: (offset: { x: number; y: number }) => {},
+	setPanOffset: (_offset: { x: number; y: number }) => {},
 	resetPanOffset: () => {},
 	// Canvas ref
 	canvasRef: { current: null } as React.RefObject<CanvasRef | null>,
-	setCanvasRef: (ref: CanvasRef | null) => {},
+	setCanvasRef: (_ref: CanvasRef | null) => {},
 });
 
 const PreviewProvider = ({ children }: { children: React.ReactNode }) => {
@@ -205,17 +205,6 @@ const PreviewProvider = ({ children }: { children: React.ReactNode }) => {
 			};
 		});
 	}, [setZoom, zoomLevel, containerSize, canvasSize, panOffset]);
-
-	// 计算显示尺寸（canvas 尺寸 * zoom）
-	const displayedSize = useMemo(() => {
-		const currentZoom = pinchState.isPinching
-			? pinchState.currentZoom
-			: zoomLevel;
-		return {
-			width: canvasSize.width * currentZoom,
-			height: canvasSize.height * currentZoom,
-		};
-	}, [canvasSize, zoomLevel, pinchState]);
 
 	// 计算基础偏移量（居中）- 基于显示尺寸
 	const baseOffset = useMemo(() => {

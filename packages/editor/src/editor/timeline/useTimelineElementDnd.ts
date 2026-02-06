@@ -2,19 +2,20 @@
  * Timeline element drag-and-drop behavior (single + multi).
  */
 
-import { TimelineElement } from "@/dsl/types";
+import type { TimelineElement } from "@/dsl/types";
 import { useDrag } from "@use-gesture/react";
 import {
 	insertElementIntoMainTrack,
 	insertElementsIntoMainTrackGroup,
 } from "core/editor/utils/mainTrackMagnet";
 import { useCallback, useMemo, useRef } from "react";
-import { DragGhostState, useTimelineStore } from "../contexts/TimelineContext";
+import { type DragGhostState, useTimelineStore } from "../contexts/TimelineContext";
 import { findTimelineDropTargetFromScreenPosition } from "../drag/timelineDropTargets";
 import {
 	finalizeTimelineElements,
 	shiftMainTrackElementsAfter,
 } from "../utils/mainTrackMagnet";
+import { cloneValue, createCopySeed } from "../utils/copyUtils";
 import { applySnap, applySnapForDrag, collectSnapPoints } from "../utils/snap";
 import { updateElementTime } from "../utils/timelineTime";
 import {
@@ -38,7 +39,7 @@ import {
 	SIGNIFICANT_VERTICAL_MOVE_RATIO,
 } from "./index";
 import { getElementHeightForTrack } from "./trackConfig";
-import { ExtendedDropTarget, SnapPoint } from "./types";
+import type { ExtendedDropTarget, SnapPoint } from "./types";
 
 interface UseTimelineElementDndOptions {
 	element: TimelineElement;
@@ -156,9 +157,6 @@ const createGhostFromNode = (
 	};
 };
 
-const createCopySeed = () =>
-	`${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-
 const createTrackId = () => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
 		return crypto.randomUUID();
@@ -166,24 +164,6 @@ const createTrackId = () => {
 	return `track-${Date.now().toString(36)}-${Math.random()
 		.toString(36)
 		.slice(2, 6)}`;
-};
-
-const cloneValue = <T>(value: T): T => {
-	if (value === null || value === undefined) {
-		return value;
-	}
-	if (typeof structuredClone === "function") {
-		try {
-			return structuredClone(value);
-		} catch {
-			// fall through to JSON clone
-		}
-	}
-	try {
-		return JSON.parse(JSON.stringify(value)) as T;
-	} catch {
-		return value;
-	}
 };
 
 const normalizeOffsetFrames = (value: unknown): number => {
@@ -536,7 +516,7 @@ export const useTimelineElementDnd = ({
 	const getCopyId = (sourceId: string) => copyIdMapRef.current.get(sourceId);
 	const createCopyElement = (source: TimelineElement, copyId: string) => {
 		const baseProps = cloneValue(source.props) as Record<string, unknown>;
-		let nextProps = baseProps;
+		const nextProps = baseProps;
 		let nextTransition = source.transition
 			? cloneValue(source.transition)
 			: undefined;

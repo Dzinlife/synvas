@@ -8,12 +8,16 @@ import {
 } from "react";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import { TimelineElement } from "@/dsl/types";
+import type { TimelineElement, TrackRole } from "@/dsl/types";
 import { clampFrame } from "@/utils/timecode";
-import { DropTarget, ExtendedDropTarget, TimelineTrack } from "../timeline/types";
+import type {
+	DropTarget,
+	ExtendedDropTarget,
+	TimelineTrack,
+} from "../timeline/types";
 import { findAttachments } from "../utils/attachments";
 import { finalizeTimelineElements } from "../utils/mainTrackMagnet";
-import { SnapPoint } from "../utils/snap";
+import type { SnapPoint } from "../utils/snap";
 import { updateElementTime } from "../utils/timelineTime";
 import { MAIN_TRACK_ID, reconcileTracks } from "../utils/trackState";
 import { getAudioContext } from "../audio/audioEngine";
@@ -242,6 +246,152 @@ const pruneSelectionForTrackLock = (
 			? state.primarySelectedId
 			: nextSelected[nextSelected.length - 1] ?? null;
 	return { selectedIds: nextSelected, primarySelectedId: nextPrimary };
+};
+
+interface TrackPlacementResult {
+	finalTrack: number;
+	updatedAssignments: Map<string, number>;
+}
+
+const buildTimedEntries = (
+	entries: TimelineElement[],
+	elementId: string,
+	start: number,
+	end: number,
+): TimelineElement[] =>
+	entries.map((el) => {
+		if (el.id !== elementId) return el;
+		return {
+			...el,
+			timeline: { ...el.timeline, start, end },
+		};
+	});
+
+const resolveAudioDropResult = (
+	entries: TimelineElement[],
+	elementId: string,
+	start: number,
+	end: number,
+	dropTarget: DropTarget,
+	assignments: Map<string, number>,
+): TrackPlacementResult => {
+	const targetTrack =
+		dropTarget.trackIndex < MAIN_TRACK_INDEX ? dropTarget.trackIndex : -1;
+	const hasConflict = (trackIndex: number) =>
+		hasRoleConflictOnStoredTrack("audio", trackIndex, entries, elementId) ||
+		hasOverlapOnStoredTrack(start, end, trackIndex, entries, elementId);
+
+	if (dropTarget.type === "gap") {
+		return {
+			finalTrack: targetTrack,
+			updatedAssignments: insertTrackAt(targetTrack, assignments),
+		};
+	}
+
+	if (!hasConflict(targetTrack)) {
+		return {
+			finalTrack: targetTrack,
+			updatedAssignments: assignments,
+		};
+	}
+
+	return {
+		finalTrack: targetTrack,
+		updatedAssignments: insertTrackAt(targetTrack, assignments),
+	};
+};
+
+const resolveTrackPlacementWithStoredAssignments = (args: {
+	entries: TimelineElement[];
+	elementId: string;
+	start: number;
+	end: number;
+	role: TrackRole;
+	dropTarget: DropTarget;
+	assignments: Map<string, number>;
+	originalTrack: number;
+}): TrackPlacementResult => {
+	const {
+		entries,
+		elementId,
+		start,
+		end,
+		role,
+		dropTarget,
+		assignments,
+		originalTrack,
+	} = args;
+	if (role === "audio") {
+		return resolveAudioDropResult(
+			entries,
+			elementId,
+			start,
+			end,
+			dropTarget,
+			assignments,
+		);
+	}
+
+	const timedEntries = buildTimedEntries(entries, elementId, start, end);
+	const maxStoredTrack = Math.max(
+		0,
+		...timedEntries.map((el) => el.timeline.trackIndex ?? 0),
+	);
+	const hasTrackConflict = (trackIndex: number) =>
+		hasRoleConflictOnStoredTrack(role, trackIndex, timedEntries, elementId) ||
+		hasOverlapOnStoredTrack(start, end, trackIndex, timedEntries, elementId);
+
+	if (dropTarget.type === "gap") {
+		const gapTrackIndex = dropTarget.trackIndex;
+		const belowTrack = gapTrackIndex - 1;
+		const aboveTrack = gapTrackIndex;
+		const belowIsDestination =
+			belowTrack >= 0 &&
+			belowTrack !== originalTrack &&
+			!hasTrackConflict(belowTrack);
+		const aboveIsDestination =
+			aboveTrack <= maxStoredTrack &&
+			aboveTrack !== originalTrack &&
+			!hasTrackConflict(aboveTrack);
+
+		if (belowIsDestination) {
+			return {
+				finalTrack: belowTrack,
+				updatedAssignments: assignments,
+			};
+		}
+		if (aboveIsDestination) {
+			return {
+				finalTrack: aboveTrack,
+				updatedAssignments: assignments,
+			};
+		}
+		return {
+			finalTrack: gapTrackIndex,
+			updatedAssignments: insertTrackAt(gapTrackIndex, assignments),
+		};
+	}
+
+	const targetTrack = dropTarget.trackIndex;
+	if (!hasTrackConflict(targetTrack)) {
+		return {
+			finalTrack: targetTrack,
+			updatedAssignments: assignments,
+		};
+	}
+
+	const aboveTrack = targetTrack + 1;
+	if (aboveTrack <= maxStoredTrack && !hasTrackConflict(aboveTrack)) {
+		return {
+			finalTrack: aboveTrack,
+			updatedAssignments: assignments,
+		};
+	}
+
+	return {
+		finalTrack: targetTrack + 1,
+		updatedAssignments: insertTrackAt(targetTrack + 1, assignments),
+	};
 };
 
 export const useTimelineStore = create<TimelineStore>()(
@@ -1128,12 +1278,13 @@ export const useTrackAssignments = () => {
 			setElements((prev) => {
 				const element = prev.find((el) => el.id === elementId);
 				if (!element) return prev;
+				const currentAssignments = getStoredTrackAssignments(prev);
 				const elementRole = getElementRole(element);
 				const resolvedDropTarget = resolveDropTargetForRole(
 					{ type: "track", trackIndex: targetTrack },
 					elementRole,
 					prev,
-					trackAssignments,
+					currentAssignments,
 				);
 				const resolvedTargetTrack = resolvedDropTarget.trackIndex;
 
@@ -1144,7 +1295,7 @@ export const useTrackAssignments = () => {
 					resolvedTargetTrack,
 					elementRole,
 					prev,
-					trackAssignments,
+					currentAssignments,
 					elementId,
 					trackCount,
 				);
@@ -1166,47 +1317,8 @@ export const useTrackAssignments = () => {
 				});
 			});
 		},
-		[setElements, trackAssignments, trackCount, tracks],
+		[setElements, trackCount, tracks],
 	);
-
-	const resolveAudioDropResult = (
-		entries: TimelineElement[],
-		elementId: string,
-		start: number,
-		end: number,
-		dropTarget: DropTarget,
-		assignments: Map<string, number>,
-	) => {
-		const targetTrack =
-			dropTarget.trackIndex < MAIN_TRACK_INDEX ? dropTarget.trackIndex : -1;
-		const hasConflict = (trackIndex: number) =>
-			hasRoleConflictOnStoredTrack(
-				"audio",
-				trackIndex,
-				entries,
-				elementId,
-			) ||
-			hasOverlapOnStoredTrack(start, end, trackIndex, entries, elementId);
-
-		if (dropTarget.type === "gap") {
-			return {
-				finalTrack: targetTrack,
-				updatedAssignments: insertTrackAt(targetTrack, assignments),
-			};
-		}
-
-		if (!hasConflict(targetTrack)) {
-			return {
-				finalTrack: targetTrack,
-				updatedAssignments: assignments,
-			};
-		}
-
-		return {
-			finalTrack: targetTrack,
-			updatedAssignments: insertTrackAt(targetTrack, assignments),
-		};
-	};
 
 	// 更新元素的时间和轨道位置（用于拖拽结束）
 	const updateElementTimeAndTrack = useCallback(
@@ -1224,174 +1336,17 @@ export const useTrackAssignments = () => {
 					prev,
 					currentAssignments,
 				);
-
-				let finalTrack: number;
-				let updatedAssignments: Map<string, number>;
-
-				if (elementRole === "audio") {
-					const audioResult = resolveAudioDropResult(
-						prev,
+				const { finalTrack, updatedAssignments } =
+					resolveTrackPlacementWithStoredAssignments({
+						entries: prev,
 						elementId,
 						start,
 						end,
-						resolvedDropTarget,
-						currentAssignments,
-					);
-					finalTrack = audioResult.finalTrack;
-					updatedAssignments = audioResult.updatedAssignments;
-				} else if (resolvedDropTarget.type === "gap") {
-					// 间隙模式：使用存储的 trackIndex 检查重叠，避免级联重分配问题
-					const gapTrackIndex = resolvedDropTarget.trackIndex;
-					const belowTrack = gapTrackIndex - 1; // 缝隙下方的轨道
-					const aboveTrack = gapTrackIndex; // 缝隙上方的轨道
-
-					const originalTrack = originalElement?.timeline.trackIndex ?? 0;
-
-					// 创建临时元素列表用于检查重叠
-					const tempUpdated = prev.map((el) => {
-						if (el.id === elementId) {
-							return {
-								...el,
-								timeline: { ...el.timeline, start, end },
-							};
-						}
-						return el;
+						role: elementRole,
+						dropTarget: resolvedDropTarget,
+						assignments: currentAssignments,
+						originalTrack: originalElement?.timeline.trackIndex ?? 0,
 					});
-
-					// 计算基于存储 trackIndex 的最大轨道
-					const maxStoredTrack = Math.max(
-						0,
-						...tempUpdated.map((el) => el.timeline.trackIndex ?? 0),
-					);
-
-					// 检查相邻轨道是否可作为新目标（排除原始轨道，因为用户拖到缝隙意味着想移动）
-					const belowIsDestination =
-						belowTrack >= 0 &&
-						belowTrack !== originalTrack &&
-						!hasRoleConflictOnStoredTrack(
-							elementRole,
-							belowTrack,
-							tempUpdated,
-							elementId,
-						) &&
-						!hasOverlapOnStoredTrack(
-							start,
-							end,
-							belowTrack,
-							tempUpdated,
-							elementId,
-						);
-
-					const aboveIsDestination =
-						aboveTrack <= maxStoredTrack &&
-						aboveTrack !== originalTrack &&
-						!hasRoleConflictOnStoredTrack(
-							elementRole,
-							aboveTrack,
-							tempUpdated,
-							elementId,
-						) &&
-						!hasOverlapOnStoredTrack(
-							start,
-							end,
-							aboveTrack,
-							tempUpdated,
-							elementId,
-						);
-
-					if (belowIsDestination) {
-						// 移动到下方轨道
-						finalTrack = belowTrack;
-						updatedAssignments = currentAssignments;
-					} else if (aboveIsDestination) {
-						// 移动到上方轨道
-						finalTrack = aboveTrack;
-						updatedAssignments = currentAssignments;
-					} else {
-						// 间隙模式下没有可用轨道，强制插入新轨道
-						updatedAssignments = insertTrackAt(
-							gapTrackIndex,
-							currentAssignments,
-						);
-						finalTrack = gapTrackIndex;
-					}
-				} else {
-					// 普通模式：使用与 gap 模式一致的逻辑
-					// 只检查当前轨道和上方一级，避免与 gap 模式行为不一致
-					const tempUpdated = prev.map((el) => {
-						if (el.id === elementId) {
-							return {
-								...el,
-								timeline: {
-									...el.timeline,
-									start,
-									end,
-								},
-							};
-						}
-						return el;
-					});
-
-					const targetTrack = resolvedDropTarget.trackIndex;
-					const maxStoredTrack = Math.max(
-						0,
-						...tempUpdated.map((el) => el.timeline.trackIndex ?? 0),
-					);
-
-					// 检查目标轨道是否有重叠
-					const targetHasOverlap =
-						hasRoleConflictOnStoredTrack(
-							elementRole,
-							targetTrack,
-							tempUpdated,
-							elementId,
-						) ||
-						hasOverlapOnStoredTrack(
-							start,
-							end,
-							targetTrack,
-							tempUpdated,
-							elementId,
-						);
-
-					if (!targetHasOverlap) {
-						// 目标轨道没有重叠，直接放入
-						finalTrack = targetTrack;
-						updatedAssignments = currentAssignments;
-					} else {
-						// 目标轨道有重叠，检查上方一级
-						const aboveTrack = targetTrack + 1;
-						const aboveHasOverlap =
-							aboveTrack <= maxStoredTrack &&
-							(hasRoleConflictOnStoredTrack(
-								elementRole,
-								aboveTrack,
-								tempUpdated,
-								elementId,
-							) ||
-								hasOverlapOnStoredTrack(
-									start,
-									end,
-									aboveTrack,
-									tempUpdated,
-									elementId,
-								));
-
-						if (!aboveHasOverlap && aboveTrack <= maxStoredTrack) {
-							// 上方轨道有空位，移动到上方
-							finalTrack = aboveTrack;
-							updatedAssignments = currentAssignments;
-						} else {
-							// 上方也没有空位或不存在，在目标轨道上方创建新轨道
-							// 与 gap 模式一致，只向上查一级
-							updatedAssignments = insertTrackAt(
-								targetTrack + 1,
-								currentAssignments,
-							);
-							finalTrack = targetTrack + 1;
-						}
-					}
-				}
 
 				const targetTrackId = tracks[finalTrack]?.id;
 
@@ -1470,168 +1425,17 @@ export const useTrackAssignments = () => {
 					prev,
 					currentAssignments,
 				);
-
-				let finalTrack: number;
-				let updatedAssignments: Map<string, number>;
-
-				if (elementRole === "audio") {
-					const audioResult = resolveAudioDropResult(
-						prev,
+				const { finalTrack, updatedAssignments } =
+					resolveTrackPlacementWithStoredAssignments({
+						entries: prev,
 						elementId,
 						start,
 						end,
-						resolvedDropTarget,
-						currentAssignments,
-					);
-					finalTrack = audioResult.finalTrack;
-					updatedAssignments = audioResult.updatedAssignments;
-				} else if (resolvedDropTarget.type === "gap") {
-					// 间隙模式：使用存储的 trackIndex 检查重叠，避免级联重分配问题
-					const gapTrackIndex = resolvedDropTarget.trackIndex;
-					const belowTrack = gapTrackIndex - 1; // 缝隙下方的轨道
-					const aboveTrack = gapTrackIndex; // 缝隙上方的轨道
-
-					const originalTrack = originalElement?.timeline.trackIndex ?? 0;
-
-					// 创建临时元素列表用于检查重叠
-					const tempUpdated = prev.map((el) => {
-						if (el.id === elementId) {
-							return {
-								...el,
-								timeline: { ...el.timeline, start, end },
-							};
-						}
-						return el;
+						role: elementRole,
+						dropTarget: resolvedDropTarget,
+						assignments: currentAssignments,
+						originalTrack: originalElement?.timeline.trackIndex ?? 0,
 					});
-
-					// 计算基于存储 trackIndex 的最大轨道
-					const maxStoredTrack = Math.max(
-						0,
-						...tempUpdated.map((el) => el.timeline.trackIndex ?? 0),
-					);
-
-					// 检查相邻轨道是否可作为新目标（排除原始轨道，因为用户拖到缝隙意味着想移动）
-					const belowIsDestination =
-						belowTrack >= 0 &&
-						belowTrack !== originalTrack &&
-						!hasRoleConflictOnStoredTrack(
-							elementRole,
-							belowTrack,
-							tempUpdated,
-							elementId,
-						) &&
-						!hasOverlapOnStoredTrack(
-							start,
-							end,
-							belowTrack,
-							tempUpdated,
-							elementId,
-						);
-
-					const aboveIsDestination =
-						aboveTrack <= maxStoredTrack &&
-						aboveTrack !== originalTrack &&
-						!hasRoleConflictOnStoredTrack(
-							elementRole,
-							aboveTrack,
-							tempUpdated,
-							elementId,
-						) &&
-						!hasOverlapOnStoredTrack(
-							start,
-							end,
-							aboveTrack,
-							tempUpdated,
-							elementId,
-						);
-
-					if (belowIsDestination) {
-						// 移动到下方轨道
-						finalTrack = belowTrack;
-						updatedAssignments = currentAssignments;
-					} else if (aboveIsDestination) {
-						// 移动到上方轨道
-						finalTrack = aboveTrack;
-						updatedAssignments = currentAssignments;
-					} else {
-						// 间隙模式下没有可用轨道，强制插入新轨道
-						updatedAssignments = insertTrackAt(
-							gapTrackIndex,
-							currentAssignments,
-						);
-						finalTrack = gapTrackIndex;
-					}
-				} else {
-					// 普通模式：使用与 gap 模式一致的逻辑
-					const tempUpdated = prev.map((el) => {
-						if (el.id === elementId) {
-							return {
-								...el,
-								timeline: { ...el.timeline, start, end },
-							};
-						}
-						return el;
-					});
-
-					const targetTrack = resolvedDropTarget.trackIndex;
-					const maxStoredTrack = Math.max(
-						0,
-						...tempUpdated.map((el) => el.timeline.trackIndex ?? 0),
-					);
-
-					// 检查目标轨道是否有重叠
-					const targetHasOverlap =
-						hasRoleConflictOnStoredTrack(
-							elementRole,
-							targetTrack,
-							tempUpdated,
-							elementId,
-						) ||
-						hasOverlapOnStoredTrack(
-							start,
-							end,
-							targetTrack,
-							tempUpdated,
-							elementId,
-						);
-
-					if (!targetHasOverlap) {
-						// 目标轨道没有重叠，直接放入
-						finalTrack = targetTrack;
-						updatedAssignments = currentAssignments;
-					} else {
-						// 目标轨道有重叠，检查上方一级
-						const aboveTrack = targetTrack + 1;
-						const aboveHasOverlap =
-							aboveTrack <= maxStoredTrack &&
-							(hasRoleConflictOnStoredTrack(
-								elementRole,
-								aboveTrack,
-								tempUpdated,
-								elementId,
-							) ||
-								hasOverlapOnStoredTrack(
-									start,
-									end,
-									aboveTrack,
-									tempUpdated,
-									elementId,
-								));
-
-						if (!aboveHasOverlap && aboveTrack <= maxStoredTrack) {
-							// 上方轨道有空位，移动到上方
-							finalTrack = aboveTrack;
-							updatedAssignments = currentAssignments;
-						} else {
-							// 上方也没有空位或不存在，在目标轨道上方创建新轨道
-							updatedAssignments = insertTrackAt(
-								targetTrack + 1,
-								currentAssignments,
-							);
-							finalTrack = targetTrack + 1;
-						}
-					}
-				}
 
 				const targetTrackId = tracks[finalTrack]?.id;
 

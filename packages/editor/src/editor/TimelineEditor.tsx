@@ -318,17 +318,7 @@ const TimelineEditor = () => {
 	);
 
 	const scheduleCurrentTime = useCallback(
-		(time: number, options?: { immediate?: boolean }) => {
-			if (options?.immediate) {
-				// 交互拖拽直接 seek，避免播放被延迟
-				if (currentTimeRafRef.current !== null) {
-					window.cancelAnimationFrame(currentTimeRafRef.current);
-					currentTimeRafRef.current = null;
-				}
-				pendingCurrentTimeRef.current = null;
-				seekTo(time);
-				return;
-			}
+		(time: number) => {
 			pendingCurrentTimeRef.current = time;
 			if (currentTimeRafRef.current !== null) return;
 			// 使用 rAF 合并拖拽更新，避免高频 seek 阻塞
@@ -450,9 +440,15 @@ const TimelineEditor = () => {
 			const time = clampFrame(
 				(x - leftColumnWidth - timelinePaddingLeft + scrollLeft) / ratio,
 			);
-			scheduleCurrentTime(time, { immediate: true });
+			scheduleCurrentTime(time);
 		},
-		[leftColumnWidth, ratio, scrollLeft, timelinePaddingLeft, scheduleCurrentTime],
+		[
+			leftColumnWidth,
+			ratio,
+			scrollLeft,
+			timelinePaddingLeft,
+			scheduleCurrentTime,
+		],
 	);
 
 	// 时间尺点击只更新时间，不影响选中状态
@@ -1387,12 +1383,7 @@ const TimelineEditor = () => {
 				style={{ left: left + timelinePaddingLeft }}
 			/>
 		);
-	}, [
-		activeSnapPoint,
-		ratio,
-		scrollLeft,
-		timelinePaddingLeft,
-	]);
+	}, [activeSnapPoint, ratio, scrollLeft, timelinePaddingLeft]);
 
 	return (
 		<div

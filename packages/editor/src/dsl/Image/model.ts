@@ -5,7 +5,6 @@ import { createStore } from "zustand/vanilla";
 import type {
 	ComponentModel,
 	ComponentModelStore,
-	ValidationResult,
 } from "../model/types";
 
 const OPFS_PREFIX = "opfs://";
@@ -170,7 +169,7 @@ export function createImageModel(
 				}));
 			},
 
-			validate: (newProps) => {
+			validate: (_newProps) => {
 				const errors: string[] = [];
 				// Image 组件没有特殊的验证规则
 				return { valid: errors.length === 0, errors };

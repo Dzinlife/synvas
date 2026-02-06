@@ -171,7 +171,6 @@ export function createAudioClipModel(
 					assetHandle = localHandle;
 
 					const { asset } = localHandle;
-					const fps = getTimelineFps();
 					const offsetFrames = getTimelineOffsetFrames();
 					const availableDuration = computeAvailableDurationFrames(
 						asset.duration,

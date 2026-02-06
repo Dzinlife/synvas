@@ -25,7 +25,6 @@ import {
 import type {
 	ComponentModel,
 	ComponentModelStore,
-	ValidationResult,
 } from "../model/types";
 
 // VideoClip Props 类型

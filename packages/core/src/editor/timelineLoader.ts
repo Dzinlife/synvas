@@ -66,12 +66,39 @@ export interface TimelineTrackJSON {
 	solo?: boolean;
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord =>
+	typeof value === "object" && value !== null;
+
+const expectRecord = (value: unknown, path: string): UnknownRecord => {
+	if (!isRecord(value)) {
+		throw new Error(`${path}: must be an object`);
+	}
+	return value;
+};
+
+const isTrackRole = (value: unknown): value is TrackRole =>
+	value === "clip" ||
+	value === "overlay" ||
+	value === "effect" ||
+	value === "audio";
+
+const isNonEmptyString = (value: unknown): value is string =>
+	typeof value === "string" && value.length > 0;
+
+const isIntegerNumber = (value: unknown): value is number =>
+	typeof value === "number" && Number.isInteger(value);
+
+const isFiniteNumber = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value);
+
 /**
  * 从 JSON 字符串加载时间线
  */
 export function loadTimelineFromJSON(jsonString: string): TimelineData {
 	try {
-		const data: TimelineJSON = JSON.parse(jsonString);
+		const data: unknown = JSON.parse(jsonString);
 		return validateTimeline(data);
 	} catch (error) {
 		console.error("Failed to parse timeline JSON:", error);
@@ -84,7 +111,7 @@ export function loadTimelineFromJSON(jsonString: string): TimelineData {
 /**
  * 从 JSON 对象加载时间线
  */
-export function loadTimelineFromObject(data: TimelineJSON): TimelineData {
+export function loadTimelineFromObject(data: unknown): TimelineData {
 	return validateTimeline(data);
 }
 
@@ -133,35 +160,42 @@ export function saveTimelineToObject(
 /**
  * 验证时间线数据
  */
-function validateTimeline(data: TimelineJSON): TimelineData {
-	if (!data.version) {
+function validateTimeline(data: unknown): TimelineData {
+	const timeline = expectRecord(data, "timeline");
+
+	if (!isNonEmptyString(timeline.version)) {
 		throw new Error("Timeline JSON missing version field");
 	}
 
-	if (!Number.isInteger(data.fps) || data.fps <= 0) {
+	if (!isIntegerNumber(timeline.fps) || timeline.fps <= 0) {
 		throw new Error("Timeline JSON missing or invalid fps");
 	}
+	const fps = timeline.fps;
 
+	const canvasRecord = expectRecord(timeline.canvas, "canvas");
 	if (
-		!data.canvas ||
-		typeof data.canvas.width !== "number" ||
-		typeof data.canvas.height !== "number"
+		typeof canvasRecord.width !== "number" ||
+		typeof canvasRecord.height !== "number"
 	) {
 		throw new Error("Timeline JSON missing or invalid canvas size");
 	}
+	const canvas = {
+		width: canvasRecord.width,
+		height: canvasRecord.height,
+	};
 
-	if (!Array.isArray(data.elements)) {
+	if (!Array.isArray(timeline.elements)) {
 		throw new Error("Timeline JSON elements must be an array");
 	}
 
 	return {
-		fps: data.fps,
-		canvas: data.canvas,
-		tracks: validateTracks(data.tracks, "tracks"),
-		transcripts: validateTranscripts(data.transcripts, "transcripts"),
-		settings: validateSettings(data.settings, "settings"),
-		elements: data.elements.map((el, index) =>
-			validateElement(el, index, data.fps),
+		fps,
+		canvas,
+		tracks: validateTracks(timeline.tracks, "tracks"),
+		transcripts: validateTranscripts(timeline.transcripts, "transcripts"),
+		settings: validateSettings(timeline.settings, "settings"),
+		elements: timeline.elements.map((el, index) =>
+			validateElement(el, index, fps),
 		),
 	};
 }
@@ -169,44 +203,46 @@ function validateTimeline(data: TimelineJSON): TimelineData {
 /**
  * 验证单个元素
  */
-function validateElement(el: any, index: number, fps: number): TimelineElement {
+function validateElement(el: unknown, index: number, fps: number): TimelineElement {
 	const path = `elements[${index}]`;
+	const element = expectRecord(el, path);
 
-	if (!el.id || typeof el.id !== "string") {
+	if (!isNonEmptyString(element.id)) {
 		throw new Error(`${path}: missing or invalid 'id' field`);
 	}
 
-	if (!el.type || typeof el.type !== "string") {
+	if (!isNonEmptyString(element.type)) {
 		throw new Error(`${path}: missing or invalid 'type' field`);
 	}
-	if (!ELEMENT_TYPE_VALUES.includes(el.type)) {
-		throw new Error(`${path}.type: unsupported type "${el.type}"`);
+	if (!ELEMENT_TYPE_VALUES.includes(element.type as TimelineElement["type"])) {
+		throw new Error(`${path}.type: unsupported type "${element.type}"`);
 	}
+	const type = element.type as TimelineElement["type"];
 
-	if (!el.component || typeof el.component !== "string") {
+	if (!isNonEmptyString(element.component)) {
 		throw new Error(`${path}: missing or invalid 'component' field`);
 	}
 
-	if (!el.name || typeof el.name !== "string") {
+	if (!isNonEmptyString(element.name)) {
 		throw new Error(`${path}: missing or invalid 'name' field`);
 	}
 
 	// 验证 transform
-	const transform = validateTransform(el.transform, `${path}.transform`);
+	const transform = validateTransform(element.transform, `${path}.transform`);
 
 	// 验证 timeline
 	// 转场允许 0 长度的时间范围
 	const allowZeroDuration = false;
 	const timeline = validateTimelineProps(
-		el.timeline,
+		element.timeline,
 		`${path}.timeline`,
 		fps,
 		allowZeroDuration,
 		{
-			allowNegativeTrackIndex: el.type === "AudioClip",
+			allowNegativeTrackIndex: type === "AudioClip",
 		},
 	);
-	if (el.type === "AudioClip") {
+	if (type === "AudioClip") {
 		if (
 			timeline.trackIndex === undefined ||
 			!Number.isFinite(timeline.trackIndex) ||
@@ -217,21 +253,21 @@ function validateElement(el: any, index: number, fps: number): TimelineElement {
 	}
 
 	// 验证 render (可选)
-	const render = validateRender(el.render || {}, `${path}.render`);
+	const render = validateRender(element.render ?? {}, `${path}.render`);
 
 	// props 可以是任意对象
-	const props = el.props || {};
+	const props = (element.props ?? {}) as TimelineElement["props"];
 
-	const clip = el.clip;
+	const clip = element.clip as TimelineElement["clip"];
 	const transition = validateTransition(
-		el.transition,
+		element.transition,
 		`${path}.transition`,
-		el.type === "Transition",
+		type === "Transition",
 	);
-	if (el.type === "Transition" && !transition) {
+	if (type === "Transition" && !transition) {
 		throw new Error(`${path}.transition: required for Transition element`);
 	}
-	if (el.type === "Transition" && transition) {
+	if (type === "Transition" && transition) {
 		const expectedDuration = timeline.end - timeline.start;
 		if (expectedDuration !== transition.duration) {
 			throw new Error(
@@ -248,10 +284,10 @@ function validateElement(el: any, index: number, fps: number): TimelineElement {
 	}
 
 	return {
-		id: el.id,
-		type: el.type,
-		component: el.component,
-		name: el.name,
+		id: element.id,
+		type,
+		component: element.component,
+		name: element.name,
 		transform,
 		timeline,
 		render,
@@ -262,7 +298,7 @@ function validateElement(el: any, index: number, fps: number): TimelineElement {
 }
 
 function validateTracks(
-	tracks: any,
+	tracks: unknown,
 	path: string,
 ): TimelineTrack[] {
 	if (tracks === undefined) {
@@ -277,7 +313,7 @@ function validateTracks(
 }
 
 function validateTranscripts(
-	transcripts: any,
+	transcripts: unknown,
 	path: string,
 ): TranscriptRecord[] {
 	if (transcripts === undefined) {
@@ -291,156 +327,165 @@ function validateTranscripts(
 	);
 }
 
-function validateTranscript(record: any, path: string): TranscriptRecord {
-	if (!record || typeof record !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
-	if (!record.id || typeof record.id !== "string") {
+function validateTranscript(record: unknown, path: string): TranscriptRecord {
+	const transcript = expectRecord(record, path);
+
+	if (!isNonEmptyString(transcript.id)) {
 		throw new Error(`${path}.id: must be a string`);
 	}
-	const source = validateTranscriptSource(record.source, `${path}.source`);
-	if (typeof record.language !== "string") {
+	const source = validateTranscriptSource(transcript.source, `${path}.source`);
+	if (typeof transcript.language !== "string") {
 		throw new Error(`${path}.language: must be a string`);
 	}
-	if (typeof record.model !== "string") {
+	if (typeof transcript.model !== "string") {
 		throw new Error(`${path}.model: must be a string`);
 	}
+	const model = transcript.model;
 	if (
-		record.model !== "tiny" &&
-		record.model !== "large-v3-turbo"
+		model !== "tiny" &&
+		model !== "large-v3-turbo"
 	) {
 		throw new Error(`${path}.model: must be one of tiny | large-v3-turbo`);
 	}
-	if (!Number.isFinite(record.createdAt)) {
+	if (!isFiniteNumber(transcript.createdAt)) {
 		throw new Error(`${path}.createdAt: must be a number`);
 	}
-	if (!Number.isFinite(record.updatedAt)) {
+	if (!isFiniteNumber(transcript.updatedAt)) {
 		throw new Error(`${path}.updatedAt: must be a number`);
 	}
-	if (!Array.isArray(record.segments)) {
+	const createdAt = transcript.createdAt;
+	const updatedAt = transcript.updatedAt;
+	if (!Array.isArray(transcript.segments)) {
 		throw new Error(`${path}.segments: must be an array`);
 	}
-	const segments = record.segments.map((segment: any, index: number) =>
+	const segments = transcript.segments.map((segment, index) =>
 		validateTranscriptSegment(segment, `${path}.segments[${index}]`),
 	);
 
 	return {
-		id: record.id,
+		id: transcript.id,
 		source,
-		language: record.language,
-		model: record.model,
-		createdAt: record.createdAt,
-		updatedAt: record.updatedAt,
+		language: transcript.language,
+		model,
+		createdAt,
+		updatedAt,
 		segments,
 	};
 }
 
 function validateTranscriptSource(
-	source: any,
+	source: unknown,
 	path: string,
 ): TranscriptRecord["source"] {
-	if (!source || typeof source !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
-	if (source.type !== "opfs-audio") {
+	const sourceRecord = expectRecord(source, path);
+
+	if (sourceRecord.type !== "opfs-audio") {
 		throw new Error(`${path}.type: must be opfs-audio`);
 	}
-	if (typeof source.uri !== "string") {
+	if (typeof sourceRecord.uri !== "string") {
 		throw new Error(`${path}.uri: must be a string`);
 	}
-	if (typeof source.fileName !== "string") {
+	if (typeof sourceRecord.fileName !== "string") {
 		throw new Error(`${path}.fileName: must be a string`);
 	}
-	if (!Number.isFinite(source.duration) || source.duration < 0) {
+	if (!isFiniteNumber(sourceRecord.duration) || sourceRecord.duration < 0) {
 		throw new Error(`${path}.duration: must be a non-negative number`);
 	}
+	const duration = sourceRecord.duration;
 	return {
 		type: "opfs-audio",
-		uri: source.uri,
-		fileName: source.fileName,
-		duration: source.duration,
+		uri: sourceRecord.uri,
+		fileName: sourceRecord.fileName,
+		duration,
 	};
 }
 
 function validateTranscriptSegment(
-	segment: any,
+	segment: unknown,
 	path: string,
 ): TranscriptSegment {
-	if (!segment || typeof segment !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
-	if (!segment.id || typeof segment.id !== "string") {
+	const current = expectRecord(segment, path);
+
+	if (!isNonEmptyString(current.id)) {
 		throw new Error(`${path}.id: must be a string`);
 	}
-	if (!Number.isFinite(segment.start)) {
+	if (!isFiniteNumber(current.start)) {
 		throw new Error(`${path}.start: must be a number`);
 	}
-	if (!Number.isFinite(segment.end)) {
+	if (!isFiniteNumber(current.end)) {
 		throw new Error(`${path}.end: must be a number`);
 	}
-	if (typeof segment.text !== "string") {
+	const start = current.start;
+	const end = current.end;
+	if (typeof current.text !== "string") {
 		throw new Error(`${path}.text: must be a string`);
 	}
-	if (!Array.isArray(segment.words)) {
+	if (!Array.isArray(current.words)) {
 		throw new Error(`${path}.words: must be an array`);
 	}
-	const words = segment.words.map((word: any, index: number) =>
+	const words = current.words.map((word, index) =>
 		validateTranscriptWord(word, `${path}.words[${index}]`),
 	);
 	return {
-		id: segment.id,
-		start: segment.start,
-		end: segment.end,
-		text: segment.text,
+		id: current.id,
+		start,
+		end,
+		text: current.text,
 		words,
 	};
 }
 
-function validateTranscriptWord(word: any, path: string): TranscriptWord {
-	if (!word || typeof word !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
-	if (!word.id || typeof word.id !== "string") {
+function validateTranscriptWord(word: unknown, path: string): TranscriptWord {
+	const current = expectRecord(word, path);
+
+	if (!isNonEmptyString(current.id)) {
 		throw new Error(`${path}.id: must be a string`);
 	}
-	if (typeof word.text !== "string") {
+	if (typeof current.text !== "string") {
 		throw new Error(`${path}.text: must be a string`);
 	}
-	if (!Number.isFinite(word.start)) {
+	if (!isFiniteNumber(current.start)) {
 		throw new Error(`${path}.start: must be a number`);
 	}
-	if (!Number.isFinite(word.end)) {
+	if (!isFiniteNumber(current.end)) {
 		throw new Error(`${path}.end: must be a number`);
 	}
-	if (word.confidence !== undefined && !Number.isFinite(word.confidence)) {
+	const start = current.start;
+	const end = current.end;
+	if (
+		current.confidence !== undefined &&
+		!isFiniteNumber(current.confidence)
+	) {
 		throw new Error(`${path}.confidence: must be a number`);
 	}
+	const confidence = current.confidence;
 	return {
-		id: word.id,
-		text: word.text,
-		start: word.start,
-		end: word.end,
-		...(word.confidence !== undefined ? { confidence: word.confidence } : {}),
+		id: current.id,
+		text: current.text,
+		start,
+		end,
+		...(confidence !== undefined ? { confidence } : {}),
 	};
 }
 
 function validateSettings(
-	settings: any,
+	settings: unknown,
 	path: string,
 ): TimelineSettings {
 	if (settings === undefined) {
 		throw new Error(`${path}: required`);
 	}
-	if (!settings || typeof settings !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
-	const resolveBoolean = (value: any, field: keyof TimelineSettings): boolean => {
+	const current = expectRecord(settings, path);
+	const resolveBoolean = (
+		value: unknown,
+		field: keyof TimelineSettings,
+	): boolean => {
 		if (typeof value !== "boolean") {
 			throw new Error(`${path}.${field}: must be a boolean`);
 		}
 		return value;
 	};
-	const resolveOptionalBoolean = (value: any, field: string) => {
+	const resolveOptionalBoolean = (value: unknown, field: string) => {
 		if (value === undefined) return undefined;
 		if (typeof value !== "boolean") {
 			throw new Error(`${path}.${field}: must be a boolean`);
@@ -448,90 +493,80 @@ function validateSettings(
 		return value;
 	};
 	const rippleEditingEnabled =
-		resolveOptionalBoolean(settings.rippleEditingEnabled, "rippleEditingEnabled") ??
+		resolveOptionalBoolean(current.rippleEditingEnabled, "rippleEditingEnabled") ??
 		resolveOptionalBoolean(
-			settings.mainTrackMagnetEnabled,
+			current.mainTrackMagnetEnabled,
 			"mainTrackMagnetEnabled",
 		);
 	if (rippleEditingEnabled === undefined) {
 		throw new Error(`${path}.rippleEditingEnabled: must be a boolean`);
 	}
 	return {
-		snapEnabled: resolveBoolean(settings.snapEnabled, "snapEnabled"),
-		autoAttach: resolveBoolean(settings.autoAttach, "autoAttach"),
+		snapEnabled: resolveBoolean(current.snapEnabled, "snapEnabled"),
+		autoAttach: resolveBoolean(current.autoAttach, "autoAttach"),
 		rippleEditingEnabled,
 		previewAxisEnabled: resolveBoolean(
-			settings.previewAxisEnabled,
+			current.previewAxisEnabled,
 			"previewAxisEnabled",
 		),
 	};
 }
 
 function validateTrack(
-	track: any,
+	track: unknown,
 	path: string,
 	index: number,
 ): TimelineTrack {
-	if (!track || typeof track !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
+	const current = expectRecord(track, path);
 
-	if (!track.id || typeof track.id !== "string") {
+	if (!isNonEmptyString(current.id)) {
 		throw new Error(`${path}.id: must be a string`);
 	}
 
 	let role: TrackRole = index === 0 ? "clip" : "overlay";
-	if (track.role !== undefined) {
-		if (typeof track.role !== "string") {
-			throw new Error(`${path}.role: must be a string`);
-		}
-		if (
-			track.role !== "clip" &&
-			track.role !== "overlay" &&
-			track.role !== "effect" &&
-			track.role !== "audio"
-		) {
+	if (current.role !== undefined) {
+		if (!isTrackRole(current.role)) {
 			throw new Error(
 				`${path}.role: must be one of clip | overlay | effect | audio`,
 			);
 		}
-		role = track.role as TrackRole;
+		role = current.role;
 	}
 
 	let hidden = false;
-	if (track.hidden !== undefined) {
-		if (typeof track.hidden !== "boolean") {
+	if (current.hidden !== undefined) {
+		if (typeof current.hidden !== "boolean") {
 			throw new Error(`${path}.hidden: must be a boolean`);
 		}
-		hidden = track.hidden;
+		hidden = current.hidden;
 	}
 
 	let locked = false;
-	if (track.locked !== undefined) {
-		if (typeof track.locked !== "boolean") {
+	if (current.locked !== undefined) {
+		if (typeof current.locked !== "boolean") {
 			throw new Error(`${path}.locked: must be a boolean`);
 		}
-		locked = track.locked;
+		locked = current.locked;
 	}
 
 	let muted = false;
-	if (track.muted !== undefined) {
-		if (typeof track.muted !== "boolean") {
+	if (current.muted !== undefined) {
+		if (typeof current.muted !== "boolean") {
 			throw new Error(`${path}.muted: must be a boolean`);
 		}
-		muted = track.muted;
+		muted = current.muted;
 	}
 
 	let solo = false;
-	if (track.solo !== undefined) {
-		if (typeof track.solo !== "boolean") {
+	if (current.solo !== undefined) {
+		if (typeof current.solo !== "boolean") {
 			throw new Error(`${path}.solo: must be a boolean`);
 		}
-		solo = track.solo;
+		solo = current.solo;
 	}
 
 	return {
-		id: track.id,
+		id: current.id,
 		role,
 		hidden,
 		locked,
@@ -559,37 +594,35 @@ function serializeTracks(
 /**
  * 验证 transform 属性
  */
-function validateTransform(transform: any, path: string): TransformMeta {
-	if (!transform || typeof transform !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
+function validateTransform(transform: unknown, path: string): TransformMeta {
+	const current = expectRecord(transform, path);
 
-	if (typeof transform.centerX !== "number") {
+	if (typeof current.centerX !== "number") {
 		throw new Error(`${path}.centerX: must be a number`);
 	}
 
-	if (typeof transform.centerY !== "number") {
+	if (typeof current.centerY !== "number") {
 		throw new Error(`${path}.centerY: must be a number`);
 	}
 
-	if (typeof transform.width !== "number" || transform.width <= 0) {
+	if (typeof current.width !== "number" || current.width <= 0) {
 		throw new Error(`${path}.width: must be a positive number`);
 	}
 
-	if (typeof transform.height !== "number" || transform.height <= 0) {
+	if (typeof current.height !== "number" || current.height <= 0) {
 		throw new Error(`${path}.height: must be a positive number`);
 	}
 
-	if (typeof transform.rotation !== "number") {
+	if (typeof current.rotation !== "number") {
 		throw new Error(`${path}.rotation: must be a number (radians)`);
 	}
 
 	return {
-		centerX: transform.centerX,
-		centerY: transform.centerY,
-		width: transform.width,
-		height: transform.height,
-		rotation: transform.rotation,
+		centerX: current.centerX,
+		centerY: current.centerY,
+		width: current.width,
+		height: current.height,
+		rotation: current.rotation,
 	};
 }
 
@@ -597,99 +630,94 @@ function validateTransform(transform: any, path: string): TransformMeta {
  * 验证 timeline 属性
  */
 function validateTimelineProps(
-	timeline: any,
+	timeline: unknown,
 	path: string,
 	fps: number,
 	allowZeroDuration: boolean = false,
 	options?: { allowNegativeTrackIndex?: boolean },
 ): TimelineMeta {
-	if (!timeline || typeof timeline !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
+	const current = expectRecord(timeline, path);
 
-	if (!Number.isInteger(timeline.start) || timeline.start < 0) {
+	if (!isIntegerNumber(current.start) || current.start < 0) {
 		throw new Error(`${path}.start: must be a non-negative integer`);
 	}
+	const start = current.start;
 
 	if (
-		!Number.isInteger(timeline.end) ||
+		!isIntegerNumber(current.end) ||
 		(allowZeroDuration
-			? timeline.end < timeline.start
-			: timeline.end <= timeline.start)
+			? current.end < start
+			: current.end <= start)
 	) {
 		throw new Error(
 			`${path}.end: must be greater than${allowZeroDuration ? " or equal to" : ""} start`,
 		);
 	}
+	const end = current.end;
 
-	if (typeof timeline.startTimecode !== "string") {
+	if (typeof current.startTimecode !== "string") {
 		throw new Error(`${path}.startTimecode: must be a string`);
 	}
+	const startTimecode = current.startTimecode;
 
-	if (typeof timeline.endTimecode !== "string") {
+	if (typeof current.endTimecode !== "string") {
 		throw new Error(`${path}.endTimecode: must be a string`);
 	}
+	const endTimecode = current.endTimecode;
 
-	const expectedStart = timecodeToFrames(timeline.startTimecode, fps);
-	const expectedEnd = timecodeToFrames(timeline.endTimecode, fps);
-	if (expectedStart !== timeline.start) {
+	const expectedStart = timecodeToFrames(startTimecode, fps);
+	const expectedEnd = timecodeToFrames(endTimecode, fps);
+	if (expectedStart !== start) {
 		throw new Error(`${path}.startTimecode does not match start frame`);
 	}
-	if (expectedEnd !== timeline.end) {
+	if (expectedEnd !== end) {
 		throw new Error(`${path}.endTimecode does not match end frame`);
 	}
 
-	if (timeline.trackIndex !== undefined) {
-		if (typeof timeline.trackIndex !== "number") {
+	let trackIndex: number | undefined;
+	if (current.trackIndex !== undefined) {
+		if (typeof current.trackIndex !== "number") {
 			throw new Error(`${path}.trackIndex: must be a number`);
 		}
-		if (!options?.allowNegativeTrackIndex && timeline.trackIndex < 0) {
+		if (!options?.allowNegativeTrackIndex && current.trackIndex < 0) {
 			throw new Error(`${path}.trackIndex: must be a non-negative number`);
 		}
+		trackIndex = current.trackIndex;
 	}
 
-	if (timeline.offset !== undefined) {
-		if (!Number.isInteger(timeline.offset) || timeline.offset < 0) {
+	let offset: number | undefined;
+	if (current.offset !== undefined) {
+		if (!isIntegerNumber(current.offset) || current.offset < 0) {
 			throw new Error(`${path}.offset: must be a non-negative integer`);
 		}
+		offset = current.offset;
 	}
 
 	let trackId: string | undefined;
-	if (timeline.trackId !== undefined) {
-		if (typeof timeline.trackId !== "string") {
+	if (current.trackId !== undefined) {
+		if (typeof current.trackId !== "string") {
 			throw new Error(`${path}.trackId: must be a string`);
 		}
-		trackId = timeline.trackId;
+		trackId = current.trackId;
 	}
 
 	let role: TrackRole | undefined;
-	if (timeline.role !== undefined) {
-		if (typeof timeline.role !== "string") {
-			throw new Error(`${path}.role: must be a string`);
-		}
-		const normalizedRole = timeline.role;
-		if (
-			normalizedRole !== "clip" &&
-			normalizedRole !== "overlay" &&
-			normalizedRole !== "effect" &&
-			normalizedRole !== "audio"
-		) {
+	if (current.role !== undefined) {
+		if (!isTrackRole(current.role)) {
 			throw new Error(
 				`${path}.role: must be one of clip | overlay | effect | audio`,
 			);
 		}
-		role = normalizedRole as TrackRole;
+		role = current.role;
 	}
 
 	return {
-		start: timeline.start,
-		end: timeline.end,
-		startTimecode: timeline.startTimecode,
-		endTimecode: timeline.endTimecode,
-		...(timeline.offset !== undefined ? { offset: timeline.offset } : {}),
-		...(timeline.trackIndex !== undefined
-			? { trackIndex: timeline.trackIndex }
-			: {}),
+		start,
+		end,
+		startTimecode,
+		endTimecode,
+		...(offset !== undefined ? { offset } : {}),
+		...(trackIndex !== undefined ? { trackIndex } : {}),
 		...(trackId ? { trackId } : {}),
 		...(role ? { role } : {}),
 	};
@@ -721,7 +749,7 @@ function ensureTimecodes(
  * 验证 transition 属性
  */
 function validateTransition(
-	transition: any,
+	transition: unknown,
 	path: string,
 	required: boolean,
 ): TransitionMeta | undefined {
@@ -731,70 +759,71 @@ function validateTransition(
 		}
 		return undefined;
 	}
-	if (!transition || typeof transition !== "object") {
-		throw new Error(`${path}: must be an object`);
-	}
+	const current = expectRecord(transition, path);
 	if (
-		typeof transition.duration !== "number" ||
-		!Number.isInteger(transition.duration) ||
-		transition.duration <= 0
+		typeof current.duration !== "number" ||
+		!Number.isInteger(current.duration) ||
+		current.duration <= 0
 	) {
 		throw new Error(`${path}.duration: must be a positive integer`);
 	}
+	const duration = current.duration;
 	if (
-		typeof transition.boundry !== "number" ||
-		!Number.isInteger(transition.boundry) ||
-		transition.boundry < 0
+		typeof current.boundry !== "number" ||
+		!Number.isInteger(current.boundry) ||
+		current.boundry < 0
 	) {
 		throw new Error(`${path}.boundry: must be a non-negative integer`);
 	}
-	if (typeof transition.fromId !== "string" || transition.fromId.length === 0) {
+	const boundry = current.boundry;
+	if (!isNonEmptyString(current.fromId)) {
 		throw new Error(`${path}.fromId: must be a non-empty string`);
 	}
-	if (typeof transition.toId !== "string" || transition.toId.length === 0) {
+	if (!isNonEmptyString(current.toId)) {
 		throw new Error(`${path}.toId: must be a non-empty string`);
 	}
 	return {
-		duration: transition.duration,
-		boundry: transition.boundry,
-		fromId: transition.fromId,
-		toId: transition.toId,
+		duration,
+		boundry,
+		fromId: current.fromId,
+		toId: current.toId,
 	};
 }
 
 /**
  * 验证 render 属性
  */
-function validateRender(render: any, path: string): RenderMeta {
-	if (!render || typeof render !== "object") {
+function validateRender(render: unknown, path: string): RenderMeta {
+	if (!isRecord(render)) {
 		return {};
 	}
+	const current = render;
 
 	const result: RenderMeta = {};
 
-	if (render.zIndex !== undefined) {
-		if (typeof render.zIndex !== "number") {
+	if (current.zIndex !== undefined) {
+		if (typeof current.zIndex !== "number") {
 			throw new Error(`${path}.zIndex: must be a number`);
 		}
-		result.zIndex = render.zIndex;
+		result.zIndex = current.zIndex;
 	}
 
-	if (render.visible !== undefined) {
-		if (typeof render.visible !== "boolean") {
+	if (current.visible !== undefined) {
+		if (typeof current.visible !== "boolean") {
 			throw new Error(`${path}.visible: must be a boolean`);
 		}
-		result.visible = render.visible;
+		result.visible = current.visible;
 	}
 
-	if (render.opacity !== undefined) {
+	if (current.opacity !== undefined) {
 		if (
-			typeof render.opacity !== "number" ||
-			render.opacity < 0 ||
-			render.opacity > 1
+			typeof current.opacity !== "number" ||
+			current.opacity < 0 ||
+			current.opacity > 1
 		) {
 			throw new Error(`${path}.opacity: must be a number between 0 and 1`);
 		}
-		result.opacity = render.opacity;
+		result.opacity = current.opacity;
 	}
 
 	return result;

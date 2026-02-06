@@ -77,16 +77,6 @@ const AsrDialog = () => {
 	const [lastDurationMs, setLastDurationMs] = useState<number | null>(null);
 	const [backend, setBackend] = useState<"auto" | "gpu" | "cpu">("auto");
 	const isElectron = typeof window !== "undefined" && "aiNleElectron" in window;
-	const platform =
-		typeof window !== "undefined"
-			? (window as Window & { aiNleElectron?: { platform?: string } })
-					.aiNleElectron?.platform
-			: undefined;
-	const isDarwin =
-		platform === "darwin" ||
-		(platform === undefined &&
-			typeof navigator !== "undefined" &&
-			navigator.platform === "MacIntel");
 	const backendOptions = BACKEND_OPTIONS;
 	const model: AsrModelSize = isElectron ? "large-v3-turbo" : "tiny";
 

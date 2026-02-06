@@ -1,4 +1,4 @@
-import { Check, ChevronDown, FolderPlus, Save } from "lucide-react";
+import { Check, FolderPlus, Save } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo } from "react";
 import { useTranscriptStore } from "@/asr/transcriptStore";
 import {

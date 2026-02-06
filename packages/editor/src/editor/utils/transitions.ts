@@ -1,5 +1,4 @@
 import type { TimelineElement } from "@/dsl/types";
-import type { ResolveRole } from "core/editor/utils/trackAssignment";
 import {
 	TRANSITION_TYPE,
 	collectLinkedTransitions as collectLinkedTransitionsCore,
@@ -10,10 +9,7 @@ import {
 	isTransitionElement,
 	reconcileTransitions as reconcileTransitionsCore,
 } from "core/editor/utils/transitions";
-import { getElementRoleFromComponent } from "../timeline/trackConfig";
-
-const resolveRole: ResolveRole = (element: TimelineElement) =>
-	getElementRoleFromComponent(element.component, "clip");
+import { resolveTimelineElementRole } from "./resolveRole";
 
 export {
 	TRANSITION_TYPE,
@@ -28,10 +24,14 @@ export const collectLinkedTransitions = (
 	elements: TimelineElement[],
 	selectedIds: string[],
 ): string[] =>
-	collectLinkedTransitionsCore(elements, selectedIds, { resolveRole });
+	collectLinkedTransitionsCore(elements, selectedIds, {
+		resolveRole: resolveTimelineElementRole,
+	});
 
 export const reconcileTransitions = (
 	elements: TimelineElement[],
 	fps?: number,
 ): TimelineElement[] =>
-	reconcileTransitionsCore(elements, fps, { resolveRole });
+	reconcileTransitionsCore(elements, fps, {
+		resolveRole: resolveTimelineElementRole,
+	});

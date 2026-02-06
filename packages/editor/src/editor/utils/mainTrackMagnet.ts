@@ -1,5 +1,4 @@
 import type { TimelineElement } from "@/dsl/types";
-import type { ResolveRole } from "core/editor/utils/trackAssignment";
 import {
 	compactMainTrackElements as compactMainTrackElementsCore,
 	finalizeTimelineElements as finalizeTimelineElementsCore,
@@ -7,16 +6,13 @@ import {
 	type MainTrackMagnetOptions,
 	type TimelinePostProcessOptions,
 } from "core/editor/utils/mainTrackMagnet";
-import { getElementRoleFromComponent } from "../timeline/trackConfig";
-
-const resolveRole: ResolveRole = (element: TimelineElement) =>
-	getElementRoleFromComponent(element.component, "clip");
+import { resolveTimelineElementRole } from "./resolveRole";
 
 const withResolveRole = (
 	options?: MainTrackMagnetOptions,
 ): MainTrackMagnetOptions => ({
 	...(options ?? {}),
-	resolveRole,
+	resolveRole: resolveTimelineElementRole,
 });
 
 export type { MainTrackMagnetOptions, TimelinePostProcessOptions };

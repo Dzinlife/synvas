@@ -25,21 +25,22 @@ class AssetStore {
 		dispose?: (value: T) => void,
 	): Promise<AssetHandle<T>> {
 		const id = this.getId(kind, key);
-		let entry = this.entries.get(id) as AssetEntry<T> | undefined;
+		let rawEntry = this.entries.get(id);
 
-		if (!entry) {
-			entry = { kind, key, refCount: 0 };
-			this.entries.set(id, entry);
+		if (!rawEntry) {
+			rawEntry = { kind, key, refCount: 0 };
+			this.entries.set(id, rawEntry);
 		}
+		const entry = rawEntry as AssetEntry<T>;
 
 		entry.refCount += 1;
 		entry.releaseWhenReady = false;
-		if (dispose && !entry.dispose) {
-			entry.dispose = dispose;
+		if (dispose && !rawEntry.dispose) {
+			rawEntry.dispose = dispose as (value: unknown) => void;
 		}
 
 		try {
-			if (!entry.value) {
+			if (entry.value === undefined) {
 				if (!entry.promise) {
 					entry.promise = (async () => {
 						const value = await create();
@@ -52,7 +53,7 @@ class AssetStore {
 
 				const value = await entry.promise;
 				if (entry.releaseWhenReady && entry.refCount === 0) {
-					this.disposeEntry(id, entry);
+					this.disposeEntry(id, rawEntry);
 				}
 
 				return {
@@ -99,7 +100,9 @@ class AssetStore {
 
 	private disposeEntry(id: string, entry: AssetEntry<unknown>) {
 		try {
-			entry.dispose?.(entry.value);
+			if (entry.value !== undefined) {
+				entry.dispose?.(entry.value);
+			}
 		} finally {
 			this.entries.delete(id);
 		}

@@ -4,7 +4,7 @@ import {
 	useTimelineStore,
 } from "@/editor/contexts/TimelineContext";
 import { getPixelsPerFrame } from "@/editor/utils/timelineScale";
-import { framesToSeconds, framesToTimecode } from "@/utils/timecode";
+import { framesToSeconds } from "@/utils/timecode";
 import {
 	useCallback,
 	useEffect,
@@ -47,10 +47,6 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	// 订阅 model 状态
 	const uri = useVideoClipSelector(id, (state) => state.props.uri);
 	const reversed = useVideoClipSelector(id, (state) => state.props.reversed);
-	const maxDuration = useVideoClipSelector(
-		id,
-		(state) => state.constraints.maxDuration,
-	);
 	const element = useTimelineStore((state) => state.getElementById(id));
 
 	const isLoading = useVideoClipSelector(

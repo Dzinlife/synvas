@@ -21,15 +21,11 @@ import {
 	isTimeOverlapping,
 	normalizeStoredTrackIndices,
 	normalizeTrackAssignments,
-	type ResolveRole,
 } from "core/editor/utils/trackAssignment";
-import {
-	getElementRoleFromComponent,
-	getTrackConfig,
-} from "../timeline/trackConfig";
+import { getTrackConfig } from "../timeline/trackConfig";
+import { resolveTimelineElementRole } from "./resolveRole";
 
-const resolveRole: ResolveRole = (element: TimelineElement) =>
-	getElementRoleFromComponent(element.component, "clip");
+const resolveRole = resolveTimelineElementRole;
 
 /**
  * 主轨道索引（固定为 0，显示在最底部）

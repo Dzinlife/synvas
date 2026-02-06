@@ -13,7 +13,7 @@ export function createBackdropZoomModel(
 	initialProps: BackdropZoomProps,
 ): BackdropZoomModelStore {
 	return createStore<ComponentModel<BackdropZoomProps>>()(
-		subscribeWithSelector((set, get) => ({
+		subscribeWithSelector((set, _get) => ({
 			id,
 			type: "Filter",
 			props: {

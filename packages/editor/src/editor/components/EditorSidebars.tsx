@@ -124,6 +124,7 @@ const EditorSidebars: React.FC = () => {
 						isOpen={panelOpenState.element}
 						onToggle={() => togglePanel("element")}
 						widthClassName="w-64"
+						headerActions={elementActions}
 					>
 						<ElementSettingsPanel />
 					</SidebarPanel>

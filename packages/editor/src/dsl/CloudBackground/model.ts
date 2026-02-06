@@ -102,7 +102,7 @@ export function createCloudBackgroundModel(
 	const store = createStore<
 		ComponentModel<CloudBackgroundProps, CloudBackgroundInternal>
 	>()(
-		subscribeWithSelector((set, get) => ({
+		subscribeWithSelector((set, _get) => ({
 			id,
 			type: "Background",
 			props: {

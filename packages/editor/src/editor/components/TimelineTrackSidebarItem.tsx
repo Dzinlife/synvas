@@ -67,6 +67,7 @@ const TimelineTrackSidebarItem: React.FC<TimelineTrackSidebarItemProps> = ({
 		>
 			<div className="flex items-center gap-1 w-full">
 				<RoleIcon className={cn("size-3 mr-auto opacity-50", labelClassName)} />
+				<span className="sr-only">{label}</span>
 				<button
 					type="button"
 					className={buildButtonClass(track.hidden, "text-emerald-300")}
