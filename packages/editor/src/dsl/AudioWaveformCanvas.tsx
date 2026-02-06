@@ -1,14 +1,15 @@
 import type { AudioBufferSink } from "mediabunny";
-import React, {
+import type React from "react";
+import {
 	useCallback,
 	useEffect,
 	useEffectEvent,
 	useLayoutEffect,
 	useRef,
 } from "react";
-import { framesToSeconds } from "@/utils/timecode";
-import { getPixelsPerFrame } from "@/editor/utils/timelineScale";
 import { getWaveformThumbnail } from "@/dsl/audioWaveformCache";
+import { getPixelsPerFrame } from "@/editor/utils/timelineScale";
+import { framesToSeconds } from "@/utils/timecode";
 
 type AudioWaveformCanvasProps = {
 	uri?: string;
@@ -22,6 +23,13 @@ type AudioWaveformCanvasProps = {
 	scrollLeft: number;
 	color: string;
 	className?: string;
+};
+
+type LoadedWaveformWindow = {
+	identityKey: string;
+	windowStart: number;
+	windowEnd: number;
+	waveform: HTMLCanvasElement;
 };
 
 export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
@@ -39,20 +47,19 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 }) => {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const renderTokenRef = useRef(0);
-	const lastRenderKeyRef = useRef("");
 	const lastUriRef = useRef<string | null>(null);
 	const scheduleIdRef = useRef<number | null>(null);
+	const loadedWindowRef = useRef<LoadedWaveformWindow | null>(null);
+	const inflightRequestKeyRef = useRef<string | null>(null);
 
 	const getAudioSink = useEffectEvent(() => audioSink);
 	const getAudioDuration = useEffectEvent(() => audioDuration);
 
 	const clipDurationFrames = end - start;
 	const clipDurationSeconds = framesToSeconds(clipDurationFrames, fps);
-	const clipStartSeconds = framesToSeconds(start, fps);
-	const clipEndSeconds = clipStartSeconds + clipDurationSeconds;
 	const offsetSeconds = framesToSeconds(offsetFrames, fps);
 
-	const generateWaveform = useCallback(async () => {
+	const generateWaveform = useCallback(() => {
 		if (!canvasRef.current || !uri || clipDurationSeconds <= 0) return;
 
 		const canvas = canvasRef.current;
@@ -89,15 +96,13 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 				clipWidth,
 				Math.ceil(visibleRight - rect.left),
 			);
+			const visibleWidth = Math.max(0, visibleEndX - visibleStartX);
 			const viewportWidth = viewportRect.width;
 			if (viewportWidth <= 0) return;
+			if (visibleWidth <= 0) return;
 
-			const useViewportWidth = clipWidth > viewportWidth;
-			const canvasOffsetX = useViewportWidth ? visibleStartX : 0;
-			canvasWidth = Math.max(
-				1,
-				Math.ceil(useViewportWidth ? viewportWidth : clipWidth),
-			);
+			const canvasOffsetX = visibleStartX;
+			canvasWidth = Math.max(1, Math.ceil(visibleWidth));
 			if (canvasWidth <= 0 || canvasHeight <= 0) return;
 
 			pixelRatio = Math.max(1, window.devicePixelRatio || 1);
@@ -118,118 +123,160 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 					ctx.setTransform(1, 0, 0, 1, 0, 0);
 					ctx.clearRect(0, 0, canvas.width, canvas.height);
 				}
-				lastRenderKeyRef.current = "";
+				loadedWindowRef.current = null;
+				inflightRequestKeyRef.current = null;
 				return;
 			}
 
-			const pixelsPerSecond =
-				getPixelsPerFrame(fps, timelineScale) * fps;
+			const pixelsPerSecond = getPixelsPerFrame(fps, timelineScale) * fps;
 			const safePixelsPerSecond = Math.max(1e-6, pixelsPerSecond);
-			const waveTileWidth = Math.max(24, Math.round(canvasHeight * 2));
-			const tileDuration = waveTileWidth / safePixelsPerSecond;
-
-			const overscan = waveTileWidth * 2;
-			const renderStartX = Math.max(0, visibleStartX - overscan);
-			const renderEndX = Math.min(clipWidth, visibleEndX + overscan);
-			const renderStartTime =
-				clipStartSeconds + renderStartX / safePixelsPerSecond;
-			const renderEndTime = clipStartSeconds + renderEndX / safePixelsPerSecond;
-			const clipStartIndex = Math.floor(clipStartSeconds / tileDuration);
-			const clipEndIndex = Math.floor(
-				(clipEndSeconds - 1e-6) / tileDuration,
+			const requestStepPx = Math.max(24, Math.round(canvasHeight * 2));
+			const requestOverscanPx = requestStepPx;
+			const requestStartX = Math.max(
+				0,
+				Math.floor(canvasOffsetX / requestStepPx) * requestStepPx -
+					requestOverscanPx,
 			);
-			const startIndex = Math.max(
-				clipStartIndex,
-				Math.floor(renderStartTime / tileDuration),
+			const requestEndX = Math.min(
+				clipWidth,
+				Math.ceil((canvasOffsetX + canvasWidth) / requestStepPx) *
+					requestStepPx +
+					requestOverscanPx,
 			);
-			const endIndex = Math.min(
-				clipEndIndex,
-				Math.ceil(renderEndTime / tileDuration) - 1,
+			const requestWidth = Math.max(1e-6, requestEndX - requestStartX);
+			const viewportSourceStart =
+				offsetSeconds + canvasOffsetX / safePixelsPerSecond;
+			const viewportSourceEnd =
+				offsetSeconds + (canvasOffsetX + canvasWidth) / safePixelsPerSecond;
+			const sourceStart = offsetSeconds + requestStartX / safePixelsPerSecond;
+			const sourceEnd = offsetSeconds + requestEndX / safePixelsPerSecond;
+			if (
+				!Number.isFinite(sourceStart) ||
+				!Number.isFinite(sourceEnd) ||
+				sourceEnd <= sourceStart
+			) {
+				return;
+			}
+			const decodeStart = Math.max(
+				0,
+				Math.min(sourceStart, currentAudioDuration),
 			);
-			if (endIndex < startIndex) return;
-
-			const renderKey = [
+			const decodeEnd = Math.max(0, Math.min(sourceEnd, currentAudioDuration));
+			const identityKey = [
 				uri,
 				start,
 				clipDurationFrames,
 				offsetSeconds,
-				`${clipWidth}x${canvasHeight}`,
-				`${canvasOffsetX}-${canvasWidth}`,
-				pixelRatio,
-				fps,
-				timelineScale,
 				color,
 				currentAudioDuration,
-				`${startIndex}-${endIndex}`,
 			].join("|");
-			if (renderKey === lastRenderKeyRef.current) return;
+			const requestKey = [
+				identityKey,
+				`${requestStartX.toFixed(3)}-${requestEndX.toFixed(3)}`,
+				requestWidth.toFixed(3),
+				canvasHeight,
+				pixelRatio,
+				timelineScale.toFixed(4),
+			].join("|");
 
-			const currentToken = ++renderTokenRef.current;
-			const drawCanvas = document.createElement("canvas");
-			drawCanvas.width = targetWidth;
-			drawCanvas.height = targetHeight;
-			const drawCtx = drawCanvas.getContext("2d");
-			if (!drawCtx) return;
-			drawCtx.setTransform(1, 0, 0, 1, 0, 0);
-			drawCtx.scale(pixelRatio, pixelRatio);
-			drawCtx.imageSmoothingEnabled = false;
-			drawCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-
-			for (let i = startIndex; i <= endIndex; i += 1) {
-				if (renderTokenRef.current !== currentToken) return;
-
-				const tileStartTime = i * tileDuration;
-				const tileEndTime = tileStartTime + tileDuration;
-				const tileStartRelative = tileStartTime - clipStartSeconds;
-				const tileEndRelative = tileEndTime - clipStartSeconds;
-				if (tileEndRelative <= tileStartRelative) continue;
-
-				const sourceStart = offsetSeconds + tileStartRelative;
-				const sourceEnd = offsetSeconds + tileEndRelative;
-				const decodeStart = Math.max(0, Math.min(sourceStart, currentAudioDuration));
-				const decodeEnd = Math.max(0, Math.min(sourceEnd, currentAudioDuration));
-
-				const tileCanvas = await getWaveformThumbnail({
-					uri,
-					windowStart: sourceStart,
-					windowEnd: sourceEnd,
-					decodeStart,
-					decodeEnd,
-					width: waveTileWidth,
-					height: canvasHeight,
-					pixelRatio,
-					audioSink: currentAudioSink,
-					color,
-				});
-				if (renderTokenRef.current !== currentToken) return;
-				if (!tileCanvas) continue;
-
-				const x = tileStartRelative * safePixelsPerSecond - canvasOffsetX;
-				drawCtx.drawImage(
-					tileCanvas,
-					0,
-					0,
-					tileCanvas.width,
-					tileCanvas.height,
-					x,
-					0,
-					waveTileWidth,
-					canvasHeight,
-				);
-			}
-
-			if (renderTokenRef.current !== currentToken) return;
 			if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
 				canvas.width = targetWidth;
 				canvas.height = targetHeight;
 			}
 			canvas.style.width = nextStyleWidth;
 			canvas.style.height = nextStyleHeight;
-			ctx.setTransform(1, 0, 0, 1, 0, 0);
+			ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 			ctx.imageSmoothingEnabled = false;
-			ctx.clearRect(0, 0, canvas.width, canvas.height);
-			ctx.drawImage(drawCanvas, 0, 0);
-			lastRenderKeyRef.current = renderKey;
+			ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+			const loaded = loadedWindowRef.current;
+			let hasFullCoverage = false;
+			let hasEnoughResolution = false;
+			if (loaded && loaded.identityKey === identityKey) {
+				const loadedDuration = loaded.windowEnd - loaded.windowStart;
+				const viewportDuration = viewportSourceEnd - viewportSourceStart;
+				const overlapStart = Math.max(viewportSourceStart, loaded.windowStart);
+				const overlapEnd = Math.min(viewportSourceEnd, loaded.windowEnd);
+				if (overlapEnd > overlapStart) {
+					const sourceScaleX =
+						loaded.waveform.width / Math.max(1e-6, loadedDuration);
+					const sourceCropX =
+						(overlapStart - loaded.windowStart) * sourceScaleX;
+					const sourceCropWidth = Math.max(
+						1,
+						(overlapEnd - overlapStart) * sourceScaleX,
+					);
+					const drawScaleX = canvasWidth / Math.max(1e-6, viewportDuration);
+					const drawX = (overlapStart - viewportSourceStart) * drawScaleX;
+					const drawWidth = (overlapEnd - overlapStart) * drawScaleX;
+					ctx.drawImage(
+						loaded.waveform,
+						sourceCropX,
+						0,
+						sourceCropWidth,
+						loaded.waveform.height,
+						drawX,
+						0,
+						drawWidth,
+						canvasHeight,
+					);
+				}
+				hasFullCoverage =
+					loaded.windowStart <= viewportSourceStart &&
+					loaded.windowEnd >= viewportSourceEnd;
+				const loadedPixelsPerSecond =
+					loaded.waveform.width / Math.max(1e-6, loadedDuration);
+				const targetPixelsPerSecond =
+					(requestWidth * pixelRatio) / Math.max(1e-6, sourceEnd - sourceStart);
+				const resolutionRatio = targetPixelsPerSecond / loadedPixelsPerSecond;
+				hasEnoughResolution = resolutionRatio >= 0.72 && resolutionRatio <= 1.4;
+			}
+
+			const needRefresh = !hasFullCoverage || !hasEnoughResolution;
+			if (needRefresh && inflightRequestKeyRef.current !== requestKey) {
+				inflightRequestKeyRef.current = requestKey;
+				const requestToken = ++renderTokenRef.current;
+				void getWaveformThumbnail({
+					uri,
+					windowStart: sourceStart,
+					windowEnd: sourceEnd,
+					decodeStart,
+					decodeEnd,
+					width: requestWidth,
+					height: canvasHeight,
+					pixelRatio,
+					audioSink: currentAudioSink,
+					color,
+				})
+					.then((waveformCanvas) => {
+						if (!waveformCanvas) return;
+						if (renderTokenRef.current !== requestToken) return;
+						if (inflightRequestKeyRef.current !== requestKey) return;
+						loadedWindowRef.current = {
+							identityKey,
+							windowStart: sourceStart,
+							windowEnd: sourceEnd,
+							waveform: waveformCanvas,
+						};
+						inflightRequestKeyRef.current = null;
+						if (scheduleIdRef.current !== null) {
+							cancelAnimationFrame(scheduleIdRef.current);
+							scheduleIdRef.current = null;
+						}
+						scheduleIdRef.current = requestAnimationFrame(() => {
+							scheduleIdRef.current = null;
+							generateWaveform();
+						});
+					})
+					.catch((error) => {
+						console.error("Failed to request waveform:", error);
+					})
+					.finally(() => {
+						if (inflightRequestKeyRef.current === requestKey) {
+							inflightRequestKeyRef.current = null;
+						}
+					});
+			}
 		} catch (error) {
 			console.error("Failed to render waveform:", error);
 		}
@@ -238,8 +285,6 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 		start,
 		clipDurationSeconds,
 		clipDurationFrames,
-		clipStartSeconds,
-		clipEndSeconds,
 		offsetSeconds,
 		fps,
 		timelineScale,
@@ -255,14 +300,17 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 		}
 		scheduleIdRef.current = requestAnimationFrame(() => {
 			scheduleIdRef.current = null;
-			void generateWaveform();
+			generateWaveform();
 		});
 	}, [generateWaveform]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 这里需要显式依赖滚动和时间参数来触发重绘调度
 	useEffect(() => {
 		if (lastUriRef.current !== uri) {
 			lastUriRef.current = uri ?? null;
-			lastRenderKeyRef.current = "";
+			loadedWindowRef.current = null;
+			inflightRequestKeyRef.current = null;
+			renderTokenRef.current += 1;
 		}
 		scheduleGenerate();
 	}, [
