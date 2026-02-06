@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import type React from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
 	useDragging,
 	usePlaybackControl,
@@ -48,15 +49,89 @@ const CurrentTimeIndicatorCanvas: React.FC<CurrentTimeIndicatorCanvasProps> = ({
 
 		// 绘制红色竖线 - 固定时间（currentTime）
 		const currentX = leftOffset + currentTime * ratio - scrollLeft;
+		const arrowTopY = 2;
+		const arrowHalfWidth = 4;
+		const arrowNeckHalfWidth = 4;
+		const arrowTipY = 20;
+		const cornerRadius = 1.5; // 圆角半径
+
+		// 绘制红线顶部的箭头（带圆角）
+		ctx.strokeStyle = "#ef4444"; // red-500
+		ctx.lineWidth = 1;
+		ctx.lineJoin = "round"; // 线条连接处使用圆角
+		ctx.lineCap = "round"; // 线条端点使用圆角
+		ctx.beginPath();
+
+		// 定义关键点
+		const leftTopX = currentX - arrowHalfWidth;
+		const rightTopX = currentX + arrowHalfWidth;
+		const rightNeckX = currentX + arrowNeckHalfWidth;
+		const leftNeckX = currentX - arrowNeckHalfWidth;
+		const neckY = arrowTipY - 4;
+
+		// 从左上角开始，使用圆角过渡
+		ctx.moveTo(leftTopX + cornerRadius, arrowTopY);
+		ctx.lineTo(rightTopX - cornerRadius, arrowTopY);
+		ctx.quadraticCurveTo(
+			rightTopX,
+			arrowTopY,
+			rightTopX,
+			arrowTopY + cornerRadius,
+		);
+
+		// 右上角到右侧颈部
+		ctx.lineTo(rightNeckX, neckY - cornerRadius);
+		ctx.quadraticCurveTo(
+			rightNeckX,
+			neckY,
+			rightNeckX - cornerRadius * 0.6,
+			neckY,
+		);
+
+		// 右侧颈部到尖端
+		ctx.lineTo(currentX + cornerRadius * 0.4, arrowTipY - cornerRadius);
+		ctx.quadraticCurveTo(
+			currentX,
+			arrowTipY,
+			currentX - cornerRadius * 0.4,
+			arrowTipY - cornerRadius,
+		);
+
+		// 尖端到左侧颈部
+		ctx.lineTo(leftNeckX + cornerRadius * 0.6, neckY);
+		ctx.quadraticCurveTo(leftNeckX, neckY, leftNeckX, neckY - cornerRadius);
+
+		// 左侧颈部到左上角
+		ctx.lineTo(leftTopX, arrowTopY + cornerRadius);
+		ctx.quadraticCurveTo(
+			leftTopX,
+			arrowTopY,
+			leftTopX + cornerRadius,
+			arrowTopY,
+		);
+
+		ctx.closePath();
+		// 填充半透明红色
+		ctx.fillStyle = "rgba(239, 68, 68, 0.3)"; // red-500 with 30% opacity
+		ctx.fill();
+		// 绘制边框
+		ctx.stroke();
+
+		// 绘制红色竖线（从箭头尖端开始）
 		ctx.strokeStyle = "#ef4444"; // red-500
 		ctx.lineWidth = 1;
 		ctx.beginPath();
-		ctx.moveTo(currentX, 0);
+		ctx.moveTo(currentX, arrowTipY);
 		ctx.lineTo(currentX, displayHeight);
 		ctx.stroke();
 
 		// 绘制蓝色竖线 - 预览时间（previewTime，如果存在且非播放/拖拽状态）
-		if (previewAxisEnabled && previewTime !== null && !isPlaying && !isDragging) {
+		if (
+			previewAxisEnabled &&
+			previewTime !== null &&
+			!isPlaying &&
+			!isDragging
+		) {
 			const previewX = leftOffset + previewTime * ratio - scrollLeft;
 			ctx.strokeStyle = "#3b82f6"; // blue-500
 			ctx.lineWidth = 1;
