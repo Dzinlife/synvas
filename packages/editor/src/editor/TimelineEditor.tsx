@@ -117,11 +117,29 @@ const TimelineEditor = () => {
 		setElements((prev) => {
 			const nextElements = prev.filter((el) => !selectedIds.includes(el.id));
 			if (nextElements.length === prev.length) return prev;
+			if (rippleEditingEnabled) {
+				return finalizeTimelineElements(nextElements, {
+					rippleEditingEnabled: true,
+					attachments,
+					autoAttach,
+					fps,
+					trackLockedMap,
+				});
+			}
 			// 删除 clip 后需要清理失效的转场
 			return reconcileTransitions(nextElements, fps);
 		});
 		deselectAll();
-	}, [selectedIds, setElements, deselectAll, fps]);
+	}, [
+		selectedIds,
+		setElements,
+		deselectAll,
+		rippleEditingEnabled,
+		attachments,
+		autoAttach,
+		fps,
+		trackLockedMap,
+	]);
 
 	const rippleEditingRef = useRef(rippleEditingEnabled);
 
