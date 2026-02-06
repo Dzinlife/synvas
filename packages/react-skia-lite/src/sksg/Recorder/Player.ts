@@ -125,7 +125,9 @@ const play = (ctx: DrawingContext, _command: Command) => {
     ctx.canvas.saveLayer(paint);
   } else if (isDrawCommand(command, CommandType.SavePaint)) {
     if (command.props.paint) {
-      ctx.paints.push(command.props.paint);
+      // 自定义 paint 也必须走 savePaint，确保 opacity/paint 栈成对维护
+      ctx.savePaint();
+      ctx.paint.assign(command.props.paint);
     } else {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { standalone } = command as any;
