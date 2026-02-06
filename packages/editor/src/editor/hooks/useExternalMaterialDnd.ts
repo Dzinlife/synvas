@@ -1,6 +1,6 @@
 import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import React, { useCallback, useRef } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import {
 	isAudioFile,
 	readAudioMetadata,

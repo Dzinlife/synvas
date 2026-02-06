@@ -2,7 +2,7 @@ import { useDrag } from "@use-gesture/react";
 import { useMemo, useRef } from "react";
 import { TimelineElement, TrackRole } from "@/dsl/types";
 import { clampFrame, secondsToFrames } from "@/utils/timecode";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import {
 	useFps,
 	useTimelineScale,

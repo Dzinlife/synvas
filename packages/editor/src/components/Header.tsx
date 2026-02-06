@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useEffectEvent } from "react";
 import { Check, ChevronDown, FolderPlus, Save } from "lucide-react";
+import { useEffect, useEffectEvent, useMemo } from "react";
+import { useTranscriptStore } from "@/asr/transcriptStore";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -9,10 +10,9 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useProjectStore } from "@/projects/projectStore";
-import { saveTimelineToObject } from "@/editor/timelineLoader";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
-import { useTranscriptStore } from "@/asr/transcriptStore";
+import { saveTimelineToObject } from "@/editor/timelineLoader";
+import { useProjectStore } from "@/projects/projectStore";
 
 export default function Header() {
 	const status = useProjectStore((state) => state.status);
@@ -66,18 +66,17 @@ export default function Header() {
 
 	const menuDisabled = status !== "ready";
 	const displayName =
-		status === "ready" ? currentProject?.name ?? "未命名项目" : "加载中...";
+		status === "ready" ? (currentProject?.name ?? "未命名项目") : "加载中...";
 
 	return (
 		<header className="flex items-center justify-between px-4 py-3 bg-neutral-900 text-neutral-100 border-b border-neutral-800">
 			<div className="text-sm font-semibold tracking-wide">AI NLE</div>
 			<DropdownMenu>
 				<DropdownMenuTrigger
-					className="flex items-center gap-2 rounded-xl border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm hover:bg-neutral-700 transition-colors max-w-xs"
+					className="max-w-xs justify-between"
 					disabled={menuDisabled}
 				>
 					<span className="truncate max-w-[220px]">{displayName}</span>
-					<ChevronDown className="size-4" />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end">
 					<DropdownMenuItem onClick={handleCreate} disabled={menuDisabled}>
@@ -103,7 +102,7 @@ export default function Header() {
 									<DropdownMenuItem
 										key={project.id}
 										onClick={() => handleSwitch(project.id)}
-										className={isCurrent ? "bg-accent/40" : undefined}
+										className={isCurrent ? "font-medium" : undefined}
 									>
 										{isCurrent ? (
 											<Check className="size-4" />

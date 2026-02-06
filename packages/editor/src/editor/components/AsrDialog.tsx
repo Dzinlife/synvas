@@ -288,7 +288,7 @@ const AsrDialog = () => {
 
 	return (
 		<>
-			<Button size="sm" variant="secondary" onClick={handleTogglePanel}>
+			<Button onClick={handleTogglePanel}>
 				转写
 			</Button>
 			{panelVisible && (
@@ -301,15 +301,13 @@ const AsrDialog = () => {
 						<div className="text-sm font-medium text-white">本地转写</div>
 						<div className="flex items-center gap-2">
 							<Button
-								size="xs"
-								variant="ghost"
+								className="h-8 px-2 text-sm"
 								onClick={() => setCollapsed((prev) => !prev)}
 							>
 								{collapsed ? "展开" : "收起"}
 							</Button>
 							<Button
-								size="xs"
-								variant="ghost"
+								className="h-8 px-2 text-sm"
 								onClick={handleClosePanel}
 								disabled={isRunning}
 							>
@@ -352,6 +350,7 @@ const AsrDialog = () => {
 									<Input
 										id="asr-audio-file"
 										type="file"
+										className="w-full"
 										accept="audio/*"
 										disabled={isRunning}
 										onChange={handleFileChange}
@@ -381,7 +380,7 @@ const AsrDialog = () => {
 								</div>
 								{isElectron && (
 									<div className="grid gap-2">
-										<Label className="text-neutral-400">高级 · 后端</Label>
+										<Label>高级 · 后端</Label>
 										<Select
 											value={
 												backendOptions.some((o) => o.value === backend)
@@ -436,7 +435,7 @@ const AsrDialog = () => {
 								{error && <div className="text-xs text-red-400">{error}</div>}
 								<div className="flex items-center justify-end gap-2">
 									{isRunning ? (
-										<Button variant="destructive" onClick={handleAbort}>
+										<Button onClick={handleAbort}>
 											取消
 										</Button>
 									) : (
