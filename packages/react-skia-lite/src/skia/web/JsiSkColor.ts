@@ -264,8 +264,6 @@ const parseCSSColor = (cssStr: string) => {
     var params = str.substr(op + 1, ep - (op + 1)).split(",");
     var alpha = 1; // To allow case fallthrough.
     switch (fname) {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      //@ts-expect-error
       case "rgba":
         if (params.length !== 4) {
           return null;
@@ -282,8 +280,6 @@ const parseCSSColor = (cssStr: string) => {
           parseCSSInt(params[2]),
           alpha,
         ];
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      //@ts-expect-error
       case "hsla":
         if (params.length !== 4) {
           return null;

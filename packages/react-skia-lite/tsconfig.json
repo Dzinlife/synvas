@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "ESNext.Disposable"],
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "declaration": true,
@@ -21,4 +21,3 @@
   "include": ["src/**/*", "react-native-skia-source-code", "../ai-nle/src/components/progressBlur"],
   "exclude": ["node_modules", "dist"]
 }
-

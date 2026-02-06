@@ -17,6 +17,7 @@ const CommandTypeNames: Record<CommandType, string> = {
   [CommandType.ComposePathEffect]: "ComposePathEffect",
   [CommandType.MaterializePaint]: "MaterializePaint",
   [CommandType.SaveBackdropFilter]: "SaveBackdropFilter",
+  [CommandType.RestoreBackdropFilter]: "RestoreBackdropFilter",
   [CommandType.SaveLayer]: "SaveLayer",
   [CommandType.RestorePaintDeclaration]: "RestorePaintDeclaration",
   [CommandType.DrawBox]: "DrawBox",

@@ -21,9 +21,17 @@ import { JsiSkShader } from "./JsiSkShader";
 
 // https://github.com/google/skia/blob/1f193df9b393d50da39570dab77a0bb5d28ec8ef/modules/canvaskit/htmlcanvas/util.js
 export const toBase64String = (bytes: Uint8Array) => {
-  if (typeof Buffer !== "undefined") {
-    // Are we on node?
-    return Buffer.from(bytes).toString("base64");
+  const nodeBuffer = (
+    globalThis as {
+      Buffer?: {
+        from(input: Uint8Array): {
+          toString(encoding: "base64"): string;
+        };
+      };
+    }
+  ).Buffer;
+  if (nodeBuffer) {
+    return nodeBuffer.from(bytes).toString("base64");
   } else {
     // From https://stackoverflow.com/a/25644409
     // because the naive solution of
