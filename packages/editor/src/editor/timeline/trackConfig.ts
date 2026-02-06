@@ -46,7 +46,7 @@ export const SIGNIFICANT_VERTICAL_MOVE_RATIO = 0.5;
 export const DEFAULT_TRACK_CONFIGS: Record<TrackRole, TrackConfig> = {
 	clip: {
 		role: "clip",
-		height: 72,
+		height: 80,
 		compatibleWith: ["clip"], // 主轨道只能放主要内容
 		canCreateNew: false, // 主轨道不能创建新的
 		minTracks: 1,
@@ -54,7 +54,7 @@ export const DEFAULT_TRACK_CONFIGS: Record<TrackRole, TrackConfig> = {
 	},
 	overlay: {
 		role: "overlay",
-		height: 36,
+		height: 40,
 		compatibleWith: ["overlay"], // 贴纸、水印等可以共存
 		canCreateNew: true,
 		minTracks: 0,
@@ -62,7 +62,7 @@ export const DEFAULT_TRACK_CONFIGS: Record<TrackRole, TrackConfig> = {
 	},
 	effect: {
 		role: "effect",
-		height: 36,
+		height: 40,
 		compatibleWith: ["effect"],
 		canCreateNew: true,
 		minTracks: 0,
@@ -70,7 +70,7 @@ export const DEFAULT_TRACK_CONFIGS: Record<TrackRole, TrackConfig> = {
 	},
 	audio: {
 		role: "audio",
-		height: 36,
+		height: 40,
 		compatibleWith: ["audio"],
 		canCreateNew: true,
 		minTracks: 0,

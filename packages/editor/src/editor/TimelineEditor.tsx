@@ -1222,8 +1222,9 @@ const TimelineEditor = () => {
 			<div
 				className="relative"
 				style={{
-					transform: `translateX(-${scrollLeft}px) translateY(${TRACK_CONTENT_GAP / 2}px)`,
-					height: mainTrackHeight,
+					transform: `translateX(-${scrollLeft}px)`,
+					height: mainTrackHeight - TRACK_CONTENT_GAP / 2,
+					marginTop: TRACK_CONTENT_GAP / 2,
 				}}
 			>
 				{mainTrackElements.map((element) => {
@@ -1486,7 +1487,6 @@ const TimelineEditor = () => {
 				onMouseDown={handleSelectionMouseDown}
 				onMouseUp={handleSelectionMouseUp}
 				onMouseLeave={handleMouseLeave}
-				onClick={handleClick}
 				onDragEnter={handleExternalDragEnter}
 				onDragOver={handleExternalDragOver}
 				onDragLeave={handleExternalDragLeave}
@@ -1540,11 +1540,12 @@ const TimelineEditor = () => {
 								style={{ width: leftColumnWidth }}
 							>
 								<div className="flex-1 flex flex-col justify-end">
-									<div className="mt-1.5">{otherTrackLabels}</div>
+									{otherTrackLabels}
 								</div>
 							</div>
 							{/* 右侧其他轨道时间线内容 */}
 							<div
+								onClick={handleClick}
 								ref={containerRef}
 								data-track-drop-zone="other"
 								data-track-count={otherTrackCount}
@@ -1607,15 +1608,16 @@ const TimelineEditor = () => {
 								className="text-white z-10 pr-px flex flex-col"
 								style={{ width: leftColumnWidth }}
 							>
-								<div className="mt-1.5">{audioTrackLabels}</div>
+								{audioTrackLabels}
 							</div>
 							{/* 右侧音频轨道时间线内容 */}
 							<div
+								onClick={handleClick}
 								data-track-drop-zone="audio"
 								data-track-count={audioTrackIndicesForLayout.length}
 								data-track-heights={audioTrackHeights.join(",")}
 								data-track-height={getTrackHeightByRole("audio")}
-								className="relative flex-1 overflow-x-hidden pt-1.5 flex flex-col"
+								className="relative flex-1 overflow-x-hidden flex flex-col"
 								style={{
 									paddingLeft: leftColumnWidth,
 									marginLeft: -leftColumnWidth,

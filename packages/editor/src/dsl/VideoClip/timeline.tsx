@@ -13,6 +13,7 @@ import {
 } from "@/editor/contexts/TimelineContext";
 import { getPixelsPerFrame } from "@/editor/utils/timelineScale";
 import { isTimelineTrackMuted } from "@/editor/utils/trackAudibility";
+import { cn } from "@/lib/utils";
 import { framesToSeconds } from "@/utils/timecode";
 import { createModelSelector } from "../model/registry";
 import type { TimelineProps } from "../model/types";
@@ -91,12 +92,6 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	);
 	const offsetSeconds = framesToSeconds(timelineOffsetFrames, fps);
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
-	const waveformContainerClassName = isTrackMuted
-		? "absolute inset-x-0 bottom-0 h-4 bg-neutral-500/20 overflow-hidden"
-		: "absolute inset-x-0 bottom-0 h-4 bg-blue-500/20 overflow-hidden";
-	const waveformColor = isTrackMuted
-		? "rgba(163, 163, 163, 0.85)"
-		: "rgba(59, 130, 246, 0.9)";
 
 	// 生成预览图（使用全局缓存）
 	const generateThumbnails = useCallback(async () => {
@@ -210,8 +205,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			const numThumbnails = Math.max(1, Math.ceil(clipWidth / thumbnailWidth));
 			// 预览间隔跟时间线缩放相关，避免随 clip 时长变化抖动
 			const pixelsPerSecond = getPixelsPerFrame(fps, timelineScale) * fps;
-			const previewInterval =
-				thumbnailWidth / Math.max(1e-6, pixelsPerSecond);
+			const previewInterval = thumbnailWidth / Math.max(1e-6, pixelsPerSecond);
 
 			const overscan = thumbnailWidth * 2;
 			const renderStartX = Math.max(0, visibleStartX - overscan);
@@ -393,8 +387,8 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 
 	return (
 		<div className="absolute inset-0 overflow-hidden bg-zinc-700">
-			<div className="absolute inset-x-0 top-0 px-1 pt-px items-center truncate leading-none">
-				{element?.name}
+			<div className="bg-black/20 absolute z-10 top-1 left-1 rounded-xs px-1 flex items-center h-4.5 leading-none backdrop-blur-2xl w-fit max-w-[calc(100%-8px)] min-w-0">
+				<span className="truncate">{element?.name}</span>
 			</div>
 
 			{/* 最大时长指示器 */}
@@ -420,10 +414,15 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			)}
 
 			{/* 缩略图 canvas */}
-			<div className="absolute inset-y-4 w-full">
+			<div className="absolute top-0 bottom-5.5 w-full">
 				<canvas ref={canvasRef} className="absolute inset-y-0" />
 			</div>
-			<div className={waveformContainerClassName}>
+			<div
+				className={cn(
+					"absolute inset-x-0 bottom-0 h-5.5 overflow-hidden",
+					isTrackMuted ? "bg-neutral-500/20" : "bg-blue-500/20",
+				)}
+			>
 				{audioSink && audioDuration > 0 && uri && (
 					<AudioWaveformCanvas
 						uri={uri}
@@ -435,7 +434,11 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 						timelineScale={timelineScale}
 						offsetFrames={timelineOffsetFrames}
 						scrollLeft={scrollLeft}
-						color={waveformColor}
+						color={
+							isTrackMuted
+								? "rgba(163, 163, 163, 0.85)"
+								: "rgba(59, 130, 246, 0.9)"
+						}
 						className="absolute inset-0"
 					/>
 				)}

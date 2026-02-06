@@ -411,8 +411,8 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 			style={{
 				left,
 				width: displayWidth,
-				top: displayY + (isTransition ? elementHeight / 4 + 1 : 0),
-				height: isTransition ? elementHeight / 2 - 2 : elementHeight,
+				top: displayY + (isTransition ? elementHeight / 2 - 14 : 0),
+				height: isTransition ? 28 : elementHeight,
 				// 拖拽时降低透明度，但保持在 DOM 中以维持拖拽手势
 				opacity: trackOpacity * dragOpacity,
 				pointerEvents: trackLocked ? "none" : "auto",
@@ -441,7 +441,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 
 			<div
 				className={cn(
-					"absolute pointer-events-none inset-0 flex justify-between group-hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.3)] rounded group",
+					"absolute pointer-events-none inset-0 flex justify-between shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] group-hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)] rounded group",
 					isSelected && "shadow-[inset_0_0_0_1px_white]!",
 				)}
 			>
