@@ -4,6 +4,7 @@ import {
 	startTransition,
 	useCallback,
 	useEffect,
+	useEffectEvent,
 	useMemo,
 	useRef,
 	useState,
@@ -15,6 +16,9 @@ import { cn } from "@/lib/utils";
 import { clampFrame, framesToTimecode } from "@/utils/timecode";
 import TimelineDragOverlay from "./components/TimelineDragOverlay";
 import TimelineElement from "./components/TimelineElement";
+import TimelineContextMenu, {
+	type TimelineContextMenuAction,
+} from "./components/TimelineContextMenu";
 import TimelineRuler from "./components/TimelineRuler";
 import TimelineToolbar from "./components/TimelineToolbar";
 import TimelineTrackSidebarItem from "./components/TimelineTrackSidebarItem";
@@ -36,10 +40,22 @@ import {
 	useTracks,
 } from "./contexts/TimelineContext";
 import { MaterialDragOverlay, useDragStore } from "./drag";
+import {
+	findTimelineDropTargetFromScreenPosition,
+	getTimelineDropTimeFromScreenX,
+} from "./drag/timelineDropTargets";
 import { useExternalMaterialDnd } from "./hooks/useExternalMaterialDnd";
-import { TRACK_CONTENT_GAP } from "./timeline/trackConfig";
+import {
+	DEFAULT_TRACK_HEIGHT,
+	TRACK_CONTENT_GAP,
+} from "./timeline/trackConfig";
 import { getAudioTrackControlState } from "./utils/audioTrackState";
 import { finalizeTimelineElements } from "./utils/mainTrackMagnet";
+import {
+	buildTimelineClipboardPayload,
+	pasteTimelineClipboardPayload,
+	type TimelineClipboardPayload,
+} from "./utils/timelineClipboard";
 import { getPixelsPerFrame } from "./utils/timelineScale";
 import { updateElementTime } from "./utils/timelineTime";
 import {
@@ -85,6 +101,30 @@ const applyOffsetDelta = (
 	};
 };
 
+interface TimelinePasteTarget {
+	time: number;
+	trackIndex: number;
+	dropType: "track" | "gap";
+}
+
+type TimelineContextMenuState =
+	| { open: false }
+	| {
+			open: true;
+			x: number;
+			y: number;
+			scope: "element";
+			targetIds: string[];
+			primaryId: string | null;
+	  }
+	| {
+			open: true;
+			x: number;
+			y: number;
+			scope: "timeline";
+			pasteTarget: TimelinePasteTarget;
+	  };
+
 const TimelineEditor = () => {
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
 	const setScrollLeft = useTimelineStore((state) => state.setScrollLeft);
@@ -95,7 +135,8 @@ const TimelineEditor = () => {
 	const { fps } = useFps();
 	const { timelineScale } = useTimelineScale();
 	const { elements, setElements } = useElements();
-	const { selectedIds, deselectAll, setSelection } = useMultiSelect();
+	const { selectedIds, primaryId, deselectAll, setSelection } =
+		useMultiSelect();
 	const { activeSnapPoint } = useSnap();
 	const { trackAssignments, trackCount } = useTrackAssignments();
 	const {
@@ -125,34 +166,106 @@ const TimelineEditor = () => {
 		}
 		return map;
 	}, [tracks, audioTrackStates]);
+	const [clipboardPayload, setClipboardPayload] =
+		useState<TimelineClipboardPayload | null>(null);
+	const [contextMenuState, setContextMenuState] =
+		useState<TimelineContextMenuState>({ open: false });
+	const postProcessOptions = useMemo(
+		() => ({
+			rippleEditingEnabled,
+			attachments,
+			autoAttach,
+			fps,
+			trackLockedMap,
+		}),
+		[rippleEditingEnabled, attachments, autoAttach, fps, trackLockedMap],
+	);
+	const closeContextMenu = useCallback(() => {
+		setContextMenuState({ open: false });
+	}, []);
+	const copyElementsByIds = useCallback(
+		(targetIds: string[], targetPrimaryId: string | null) => {
+			const payload = buildTimelineClipboardPayload({
+				elements,
+				selectedIds: targetIds,
+				primaryId: targetPrimaryId,
+			});
+			if (!payload) return null;
+			setClipboardPayload(payload);
+			return payload;
+		},
+		[elements],
+	);
+	const deleteElementsByIds = useCallback(
+		(targetIds: string[]) => {
+			if (targetIds.length === 0) return;
+			const removedSet = new Set(targetIds);
+			setElements((prev) => {
+				const nextElements = prev.filter((el) => !removedSet.has(el.id));
+				if (nextElements.length === prev.length) return prev;
+				if (rippleEditingEnabled) {
+					return finalizeTimelineElements(nextElements, postProcessOptions);
+				}
+				// 删除 clip 后需要清理失效的转场
+				return reconcileTransitions(nextElements, fps);
+			});
+			deselectAll();
+		},
+		[deselectAll, fps, postProcessOptions, rippleEditingEnabled, setElements],
+	);
 	const deleteSelectedElements = useCallback(() => {
 		if (selectedIds.length === 0) return;
-		setElements((prev) => {
-			const nextElements = prev.filter((el) => !selectedIds.includes(el.id));
-			if (nextElements.length === prev.length) return prev;
-			if (rippleEditingEnabled) {
-				return finalizeTimelineElements(nextElements, {
-					rippleEditingEnabled: true,
-					attachments,
-					autoAttach,
-					fps,
-					trackLockedMap,
-				});
+		deleteElementsByIds(selectedIds);
+	}, [deleteElementsByIds, selectedIds]);
+	const cutElementsByIds = useCallback(
+		(targetIds: string[], targetPrimaryId: string | null) => {
+			const payload = copyElementsByIds(targetIds, targetPrimaryId);
+			if (!payload) return;
+			deleteElementsByIds(payload.elements.map((element) => element.id));
+		},
+		[copyElementsByIds, deleteElementsByIds],
+	);
+	const pasteFromClipboard = useCallback(
+		(target: TimelinePasteTarget) => {
+			if (!clipboardPayload) return;
+			const pasteResult = pasteTimelineClipboardPayload({
+				payload: clipboardPayload,
+				elements,
+				targetTime: target.time,
+				targetTrackIndex: target.trackIndex,
+				targetType: target.dropType,
+				postProcessOptions,
+			});
+			setElements(pasteResult.elements);
+			if (pasteResult.insertedIds.length > 0) {
+				setSelection(pasteResult.insertedIds, pasteResult.primaryId);
 			}
-			// 删除 clip 后需要清理失效的转场
-			return reconcileTransitions(nextElements, fps);
-		});
-		deselectAll();
-	}, [
-		selectedIds,
-		setElements,
-		deselectAll,
-		rippleEditingEnabled,
-		attachments,
-		autoAttach,
-		fps,
-		trackLockedMap,
-	]);
+		},
+		[clipboardPayload, elements, postProcessOptions, setElements, setSelection],
+	);
+	const handleElementContextMenu = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>, elementId: string) => {
+			const isSelectedElement = selectedIds.includes(elementId);
+			const targetIds = isSelectedElement ? selectedIds : [elementId];
+			const targetPrimaryId = isSelectedElement
+				? primaryId && selectedIds.includes(primaryId)
+					? primaryId
+					: elementId
+				: elementId;
+			if (!isSelectedElement) {
+				setSelection([elementId], elementId);
+			}
+			setContextMenuState({
+				open: true,
+				x: event.clientX,
+				y: event.clientY,
+				scope: "element",
+				targetIds,
+				primaryId: targetPrimaryId,
+			});
+		},
+		[primaryId, selectedIds, setSelection],
+	);
 
 	const rippleEditingRef = useRef(rippleEditingEnabled);
 
@@ -222,25 +335,60 @@ const TimelineEditor = () => {
 		trackLockedMap,
 	]);
 
-	useEffect(() => {
-		const handleKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Delete" && event.key !== "Backspace") return;
-			if (event.repeat) return;
-			if (
-				event.target instanceof HTMLInputElement ||
-				event.target instanceof HTMLTextAreaElement ||
-				(event.target as HTMLElement | null)?.isContentEditable
-			) {
+	const handleTimelineKeyDown = useEffectEvent((event: KeyboardEvent) => {
+		if (
+			event.target instanceof HTMLInputElement ||
+			event.target instanceof HTMLTextAreaElement ||
+			(event.target as HTMLElement | null)?.isContentEditable
+		) {
+			return;
+		}
+
+		const isModifier = event.metaKey || event.ctrlKey;
+		if (isModifier) {
+			const key = event.key.toLowerCase();
+			if (key === "c") {
+				if (selectedIds.length === 0) return;
+				event.preventDefault();
+				copyElementsByIds(selectedIds, primaryId ?? selectedIds[0] ?? null);
+				closeContextMenu();
 				return;
 			}
-			if (selectedIds.length === 0) return;
-			event.preventDefault();
-			deleteSelectedElements();
-		};
+			if (key === "x") {
+				if (selectedIds.length === 0) return;
+				event.preventDefault();
+				cutElementsByIds(selectedIds, primaryId ?? selectedIds[0] ?? null);
+				closeContextMenu();
+				return;
+			}
+			if (key === "v") {
+				if (!clipboardPayload) return;
+				event.preventDefault();
+				pasteFromClipboard({
+					time: clampFrame(useTimelineStore.getState().getDisplayTime()),
+					trackIndex: clipboardPayload.anchor.trackIndex,
+					dropType: "track",
+				});
+				closeContextMenu();
+				return;
+			}
+		}
 
+		if (event.key !== "Delete" && event.key !== "Backspace") return;
+		if (event.repeat) return;
+		if (selectedIds.length === 0) return;
+		event.preventDefault();
+		deleteSelectedElements();
+		closeContextMenu();
+	});
+
+	useEffect(() => {
+		const handleKeyDown = (event: KeyboardEvent) => {
+			handleTimelineKeyDown(event);
+		};
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [deleteSelectedElements, selectedIds.length]);
+	}, [handleTimelineKeyDown]);
 
 	useEffect(() => {
 		const preventBrowserDrop = (event: DragEvent) => {
@@ -1082,6 +1230,107 @@ const TimelineEditor = () => {
 	const otherTrackCount = Math.max(trackCount - 1, 0);
 	const mainTrackVisible = !(tracks[0]?.hidden ?? false);
 	const mainTrackLocked = tracks[0]?.locked ?? false;
+	const handleTimelineContextMenu = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			const target = event.target as HTMLElement;
+			if (target.closest("[data-timeline-element]")) return;
+			event.preventDefault();
+			if (!target.closest("[data-track-drop-zone]")) {
+				closeContextMenu();
+				return;
+			}
+			const dropTarget = findTimelineDropTargetFromScreenPosition(
+				event.clientX,
+				event.clientY,
+				otherTrackCount,
+				DEFAULT_TRACK_HEIGHT,
+				false,
+			);
+			if (!dropTarget) {
+				closeContextMenu();
+				return;
+			}
+			const dropTime = getTimelineDropTimeFromScreenX(
+				event.clientX,
+				dropTarget.trackIndex,
+				ratio,
+				scrollLeft,
+			);
+			if (dropTime === null) {
+				closeContextMenu();
+				return;
+			}
+			setContextMenuState({
+				open: true,
+				x: event.clientX,
+				y: event.clientY,
+				scope: "timeline",
+				pasteTarget: {
+					time: clampFrame(dropTime),
+					trackIndex: dropTarget.trackIndex,
+					dropType: dropTarget.type,
+				},
+			});
+		},
+		[closeContextMenu, otherTrackCount, ratio, scrollLeft],
+	);
+	const contextMenuActions = useMemo<TimelineContextMenuAction[]>(() => {
+		if (!contextMenuState.open) return [];
+		if (contextMenuState.scope === "element") {
+			const { targetIds, primaryId: targetPrimaryId } = contextMenuState;
+			return [
+				{
+					key: "copy",
+					label: "复制",
+					disabled: targetIds.length === 0,
+					onSelect: () => {
+						copyElementsByIds(targetIds, targetPrimaryId);
+					},
+				},
+				{
+					key: "cut",
+					label: "剪切",
+					disabled: targetIds.length === 0,
+					onSelect: () => {
+						cutElementsByIds(targetIds, targetPrimaryId);
+					},
+				},
+				{
+					key: "delete",
+					label: "删除",
+					danger: true,
+					disabled: targetIds.length === 0,
+					onSelect: () => {
+						deleteElementsByIds(targetIds);
+					},
+				},
+			];
+		}
+
+		const trackLocked =
+			contextMenuState.pasteTarget.dropType === "track" &&
+			(trackLockedMap.get(contextMenuState.pasteTarget.trackIndex) ?? false);
+		const pasteDisabled = !clipboardPayload || trackLocked;
+		return [
+			{
+				key: "paste",
+				label: "粘贴",
+				disabled: pasteDisabled,
+				onSelect: () => {
+					if (pasteDisabled) return;
+					pasteFromClipboard(contextMenuState.pasteTarget);
+				},
+			},
+		];
+	}, [
+		clipboardPayload,
+		contextMenuState,
+		copyElementsByIds,
+		cutElementsByIds,
+		deleteElementsByIds,
+		pasteFromClipboard,
+		trackLockedMap,
+	]);
 
 	const audioTrackIndices = useMemo(() => {
 		if (audioTrackElements.length === 0) return [];
@@ -1159,6 +1408,7 @@ const TimelineEditor = () => {
 							trackVisible={trackVisible}
 							trackLocked={trackLocked}
 							updateTimeRange={updateTimeRange}
+							onRequestContextMenu={handleElementContextMenu}
 						/>
 					);
 				})}
@@ -1169,6 +1419,7 @@ const TimelineEditor = () => {
 		scrollLeft,
 		ratio,
 		updateTimeRange,
+		handleElementContextMenu,
 		trackAssignments,
 		trackCount,
 		otherTrackCount,
@@ -1240,6 +1491,7 @@ const TimelineEditor = () => {
 							trackVisible={mainTrackVisible}
 							trackLocked={mainTrackLocked}
 							updateTimeRange={updateTimeRange}
+							onRequestContextMenu={handleElementContextMenu}
 						/>
 					);
 				})}
@@ -1250,6 +1502,7 @@ const TimelineEditor = () => {
 		scrollLeft,
 		ratio,
 		updateTimeRange,
+		handleElementContextMenu,
 		trackCount,
 		trackLayoutByIndex,
 		otherTracksHeight,
@@ -1291,6 +1544,7 @@ const TimelineEditor = () => {
 							trackVisible
 							trackLocked={audioTrackState.locked}
 							updateTimeRange={updateTimeRange}
+							onRequestContextMenu={handleElementContextMenu}
 						/>
 					);
 				})}
@@ -1305,6 +1559,7 @@ const TimelineEditor = () => {
 		scrollLeft,
 		ratio,
 		updateTimeRange,
+		handleElementContextMenu,
 		trackAssignments,
 		trackCount,
 	]);
@@ -1491,6 +1746,7 @@ const TimelineEditor = () => {
 				onDragOver={handleExternalDragOver}
 				onDragLeave={handleExternalDragLeave}
 				onDrop={handleExternalDrop}
+				onContextMenu={handleTimelineContextMenu}
 			>
 				{selectionBox && selectionBox.width > 0 && selectionBox.height > 0 && (
 					<div
@@ -1652,6 +1908,13 @@ const TimelineEditor = () => {
 				/>
 			</div>
 			<MaterialDragOverlay />
+			<TimelineContextMenu
+				open={contextMenuState.open}
+				x={contextMenuState.open ? contextMenuState.x : 0}
+				y={contextMenuState.open ? contextMenuState.y : 0}
+				actions={contextMenuActions}
+				onClose={closeContextMenu}
+			/>
 		</div>
 	);
 };

@@ -55,6 +55,10 @@ interface TimelineElementProps {
 		end: number,
 		options?: { offsetDelta?: number },
 	) => void;
+	onRequestContextMenu?: (
+		event: React.MouseEvent<HTMLDivElement>,
+		elementId: string,
+	) => void;
 }
 
 // ============================================================================
@@ -238,6 +242,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 	trackVisible = true,
 	trackLocked = false,
 	updateTimeRange,
+	onRequestContextMenu,
 }) => {
 	const { id, timeline } = element;
 	const isTransition = isTransitionElement(element);
@@ -378,6 +383,15 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 		},
 		[id, select, toggleSelect, trackLocked],
 	);
+	const handleContextMenu = useCallback(
+		(e: React.MouseEvent<HTMLDivElement>) => {
+			if (trackLocked) return;
+			e.preventDefault();
+			e.stopPropagation();
+			onRequestContextMenu?.(e, id);
+		},
+		[id, onRequestContextMenu, trackLocked],
+	);
 
 	// 判断当前元素是否正在被拖拽
 	const isBeingDragged = dragGhosts.some((ghost) => ghost.elementId === id);
@@ -418,6 +432,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 				pointerEvents: trackLocked ? "none" : "auto",
 			}}
 			onClick={handleClick}
+			onContextMenu={handleContextMenu}
 		>
 			{isTransition ? null : (
 				<div
