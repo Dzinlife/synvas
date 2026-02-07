@@ -40,7 +40,7 @@ export const parseUnit = (
 	// 处理百分比
 	if (typeof value === "string" && value.endsWith("%")) {
 		const percent = parseFloat(value);
-		if (isNaN(percent) || reference === undefined) {
+		if (Number.isNaN(percent) || reference === undefined) {
 			return 0;
 		}
 		return (percent / 100) * reference;
@@ -48,7 +48,7 @@ export const parseUnit = (
 
 	// 处理普通数值字符串
 	const num = parseFloat(value);
-	return isNaN(num) ? 0 : num;
+	return Number.isNaN(num) ? 0 : num;
 };
 
 /**
@@ -73,7 +73,7 @@ export const parseRotate = (rotate?: string | number): number => {
 		} else {
 			// 如果不是 "deg" 格式，尝试直接解析为数字（假设是度数）
 			const num = parseFloat(rotate);
-			degrees = isNaN(num) ? 0 : num;
+			degrees = Number.isNaN(num) ? 0 : num;
 		}
 	}
 

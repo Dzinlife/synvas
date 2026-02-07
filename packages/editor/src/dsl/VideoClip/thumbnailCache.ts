@@ -1,5 +1,5 @@
-import { EncodedPacketSink } from "mediabunny";
 import type { CanvasSink, Input } from "mediabunny";
+import { EncodedPacketSink } from "mediabunny";
 
 const THUMBNAIL_CACHE_LIMIT = 800;
 const KEYFRAME_TIME_CACHE_LIMIT = 2000;

@@ -10,7 +10,11 @@ const createId = (prefix: string): string => {
 };
 
 const buildSegmentText = (words: TranscriptWord[]): string => {
-	return words.map((word) => word.text).join("").replace(/\s+/g, " ").trim();
+	return words
+		.map((word) => word.text)
+		.join("")
+		.replace(/\s+/g, " ")
+		.trim();
 };
 
 export function buildSegmentsFromWords(
@@ -76,4 +80,3 @@ export function buildSegmentsFromWords(
 	flush();
 	return segments;
 }
-

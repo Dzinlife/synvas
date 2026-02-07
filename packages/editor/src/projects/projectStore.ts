@@ -1,19 +1,19 @@
 import { create } from "zustand";
 import {
+	loadTimelineFromObject,
+	type TimelineData,
+	type TimelineJSON,
+} from "@/editor/timelineLoader";
+import {
 	buildAutoProjectName,
 	buildEmptyTimeline,
 	getAllProjects,
 	getCurrentProjectId,
 	getProject,
+	type ProjectRecord,
 	putProject,
 	setCurrentProjectId,
-	type ProjectRecord,
 } from "./projectDb";
-import {
-	loadTimelineFromObject,
-	type TimelineData,
-	type TimelineJSON,
-} from "@/editor/timelineLoader";
 
 export interface ProjectSummary {
 	id: string;
@@ -45,9 +45,7 @@ const sortProjectRecords = (records: ProjectRecord[]): ProjectRecord[] => {
 	});
 };
 
-const sortProjectSummaries = (
-	projects: ProjectSummary[],
-): ProjectSummary[] => {
+const sortProjectSummaries = (projects: ProjectSummary[]): ProjectSummary[] => {
 	return [...projects].sort((a, b) => {
 		if (a.updatedAt !== b.updatedAt) {
 			return b.updatedAt - a.updatedAt;

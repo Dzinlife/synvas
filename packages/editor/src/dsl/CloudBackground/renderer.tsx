@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 import { Fill, Group, Rect, Shader, Skia } from "react-skia-lite";
-import { useFps, useRenderTime, useTimelineStore } from "@/editor/contexts/TimelineContext";
+import {
+	useFps,
+	useRenderTime,
+	useTimelineStore,
+} from "@/editor/contexts/TimelineContext";
 import { framesToSeconds } from "@/utils/timecode";
 import { createModelSelector } from "../model/registry";
 import { parseStartEndSchema } from "../startEndSchema";
@@ -11,8 +15,10 @@ interface CloudBackgroundRendererProps extends CloudBackgroundProps {
 	id: string;
 }
 
-const useCloudBackgroundSelector =
-	createModelSelector<CloudBackgroundProps, CloudBackgroundInternal>();
+const useCloudBackgroundSelector = createModelSelector<
+	CloudBackgroundProps,
+	CloudBackgroundInternal
+>();
 
 const CloudBackgroundRenderer: React.FC<CloudBackgroundRendererProps> = ({
 	id,

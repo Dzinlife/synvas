@@ -1,5 +1,5 @@
-import type { CanvasRef } from "react-skia-lite";
 import { exportCanvasAsImage as exportCanvasAsImageCore } from "core/dsl/export";
+import type { CanvasRef } from "react-skia-lite";
 import { modelRegistry } from "./model/registry";
 
 /**

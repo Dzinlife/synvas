@@ -1,5 +1,5 @@
-import type { TimelineElement } from "@/dsl/types";
 import type { ResolveRole } from "core/editor/utils/trackAssignment";
+import type { TimelineElement } from "@/dsl/types";
 import { getElementRoleFromComponent } from "../timeline/trackConfig";
 
 /**

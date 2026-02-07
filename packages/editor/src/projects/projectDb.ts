@@ -1,4 +1,4 @@
-import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import { type DBSchema, type IDBPDatabase, openDB } from "idb";
 import type { TimelineJSON } from "@/editor/timelineLoader";
 
 export interface ProjectRecord {
@@ -95,9 +95,7 @@ export const getCurrentProjectId = async (): Promise<string | null> => {
 	return meta?.value ?? null;
 };
 
-export const setCurrentProjectId = async (
-	id: string | null,
-): Promise<void> => {
+export const setCurrentProjectId = async (id: string | null): Promise<void> => {
 	const db = await openProjectDb();
 	await db.put(META_STORE, {
 		key: CURRENT_PROJECT_KEY,

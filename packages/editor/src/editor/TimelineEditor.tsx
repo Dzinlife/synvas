@@ -14,11 +14,11 @@ import type { TimelineElement as TimelineElementType } from "@/dsl/types";
 import TimeIndicatorCanvas from "@/editor/components/TimeIndicatorCanvas";
 import { cn } from "@/lib/utils";
 import { clampFrame, framesToTimecode } from "@/utils/timecode";
-import TimelineDragOverlay from "./components/TimelineDragOverlay";
-import TimelineElement from "./components/TimelineElement";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
 } from "./components/TimelineContextMenu";
+import TimelineDragOverlay from "./components/TimelineDragOverlay";
+import TimelineElement from "./components/TimelineElement";
 import TimelineRuler from "./components/TimelineRuler";
 import TimelineToolbar from "./components/TimelineToolbar";
 import TimelineTrackSidebarItem from "./components/TimelineTrackSidebarItem";
@@ -56,11 +56,6 @@ import {
 	pasteTimelineClipboardPayload,
 	type TimelineClipboardPayload,
 } from "./utils/timelineClipboard";
-import {
-	detachVideoClipAudio,
-	isVideoSourceAudioMuted,
-	restoreVideoClipAudio,
-} from "./utils/videoClipAudioSeparation";
 import { getPixelsPerFrame } from "./utils/timelineScale";
 import { updateElementTime } from "./utils/timelineTime";
 import {
@@ -68,6 +63,11 @@ import {
 	getTrackHeightByRole,
 } from "./utils/trackAssignment";
 import { reconcileTransitions } from "./utils/transitions";
+import {
+	detachVideoClipAudio,
+	isVideoSourceAudioMuted,
+	restoreVideoClipAudio,
+} from "./utils/videoClipAudioSeparation";
 
 const formatTimecode = (frames: number, fps: number) => {
 	return framesToTimecode(frames, fps);
@@ -82,7 +82,9 @@ const shouldUpdateOffset = (element: TimelineElementType): boolean => {
 	return element.type === "VideoClip" || element.type === "AudioClip";
 };
 
-const getVideoClipUri = (element: TimelineElementType | undefined): string | null => {
+const getVideoClipUri = (
+	element: TimelineElementType | undefined,
+): string | null => {
 	if (!element || element.type !== "VideoClip") return null;
 	const uri = (element.props as { uri?: unknown } | undefined)?.uri;
 	if (typeof uri !== "string" || uri.length === 0) return null;

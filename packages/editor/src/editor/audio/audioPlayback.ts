@@ -185,14 +185,13 @@ export const createAudioPlaybackController = (
 						const start =
 							typeof startCandidate === "number" &&
 							Number.isFinite(startCandidate)
-							? startCandidate
-							: clipStartSeconds;
+								? startCandidate
+								: clipStartSeconds;
 						const endCandidate = inputWindow?.end;
 						const end =
-							typeof endCandidate === "number" &&
-							Number.isFinite(endCandidate)
-							? endCandidate
-							: clipEndSeconds;
+							typeof endCandidate === "number" && Number.isFinite(endCandidate)
+								? endCandidate
+								: clipEndSeconds;
 						return { start, end: Math.max(start, end) };
 					})();
 

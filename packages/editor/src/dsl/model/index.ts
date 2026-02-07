@@ -1,3 +1,3 @@
-export * from "./types";
-export * from "./registry";
 export { ModelManager } from "./ModelManager";
+export * from "./registry";
+export * from "./types";

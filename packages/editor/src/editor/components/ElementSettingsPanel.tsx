@@ -1,7 +1,8 @@
+import type React from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useModel, useModelSelectorSafe } from "@/dsl/model";
+import { useModelSafe, useModelSelectorSafe } from "@/dsl/model";
 import { framesToTimecode } from "@/utils/timecode";
-import React, { useEffect, useMemo, useState } from "react";
 import {
 	useElements,
 	useFps,
@@ -13,24 +14,30 @@ const ElementSettingsPanel: React.FC = () => {
 	const { setElements } = useElements();
 	const { fps } = useFps();
 	const [name, setName] = useState("");
+	const nameInputId = useId();
 
 	// 同步选中元素的 name 到本地状态
 	useEffect(() => {
 		if (selectedElement) {
 			setName(selectedElement.name || "");
 		}
-	}, [selectedElement?.id, selectedElement?.name]);
+	}, [selectedElement?.id, selectedElement?.name, selectedElement]);
 
 	const durationFrames = useMemo(() => {
 		if (!selectedElement) return 0;
 		return selectedElement.timeline.end - selectedElement.timeline.start;
-	}, [selectedElement?.timeline.end, selectedElement?.timeline.start]);
+	}, [
+		selectedElement?.timeline.end,
+		selectedElement?.timeline.start,
+		selectedElement,
+	]);
 
 	const constraints = useModelSelectorSafe(
 		selectedElement?.id,
 		(state) => state.constraints,
 		{},
 	);
+	const selectedModel = useModelSafe(selectedElement?.id ?? "");
 
 	const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (!selectedElement) return;
@@ -52,8 +59,14 @@ const ElementSettingsPanel: React.FC = () => {
 	return (
 		<div className="space-y-3">
 			<div>
-				<label className="block text-xs text-neutral-400 mb-1">Name</label>
+				<label
+					htmlFor={nameInputId}
+					className="block text-xs text-neutral-400 mb-1"
+				>
+					Name
+				</label>
 				<input
+					id={nameInputId}
 					type="text"
 					value={name}
 					onChange={handleNameChange}
@@ -100,8 +113,7 @@ const ElementSettingsPanel: React.FC = () => {
 					<div>
 						<Button
 							onClick={() => {
-								const model = useModel(selectedElement.id);
-								console.log(model.getState());
+								console.log(selectedModel?.getState());
 							}}
 						>
 							log internal

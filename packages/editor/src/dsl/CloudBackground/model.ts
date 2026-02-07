@@ -15,8 +15,10 @@ export interface CloudBackgroundInternal {
 	isReady: boolean;
 }
 
-export type CloudBackgroundModelStore =
-	ComponentModelStore<CloudBackgroundProps, CloudBackgroundInternal>;
+export type CloudBackgroundModelStore = ComponentModelStore<
+	CloudBackgroundProps,
+	CloudBackgroundInternal
+>;
 
 const CLOUD_SHADER_CODE = `
 uniform float iTime;

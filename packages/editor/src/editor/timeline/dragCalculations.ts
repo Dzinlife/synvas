@@ -3,22 +3,22 @@
  * 提取拖拽过程中的核心计算逻辑
  */
 
-import { TimelineElement } from "@/dsl/types";
-import {
-	DropTarget,
-	DropTargetType,
-	TimeRange,
-	isTimeOverlapping,
-} from "./types";
-import {
-	GAP_THRESHOLD,
-	SIGNIFICANT_VERTICAL_MOVE_RATIO,
-	DEFAULT_ELEMENT_HEIGHT,
-} from "./trackConfig";
+import type { TimelineElement } from "@/dsl/types";
 import {
 	getElementRole,
 	hasRoleConflictOnStoredTrack,
 } from "../utils/trackAssignment";
+import {
+	DEFAULT_ELEMENT_HEIGHT,
+	GAP_THRESHOLD,
+	SIGNIFICANT_VERTICAL_MOVE_RATIO,
+} from "./trackConfig";
+import {
+	type DropTarget,
+	type DropTargetType,
+	isTimeOverlapping,
+	type TimeRange,
+} from "./types";
 
 // ============================================================================
 // 拖拽目标计算
@@ -30,7 +30,7 @@ import {
 export function calculateDropTarget(
 	y: number,
 	trackHeight: number,
-	totalTracks: number
+	totalTracks: number,
 ): DropTarget {
 	const trackFromTop = Math.floor(y / trackHeight);
 	const positionInTrack = y % trackHeight;
@@ -67,7 +67,7 @@ export function calculateDropTarget(
  */
 export function hasSignificantVerticalMove(
 	deltaY: number,
-	trackHeight: number
+	trackHeight: number,
 ): boolean {
 	return Math.abs(deltaY) > trackHeight * SIGNIFICANT_VERTICAL_MOVE_RATIO;
 }
@@ -77,7 +77,7 @@ export function hasSignificantVerticalMove(
  */
 export function calculateCenterY(
 	topY: number,
-	elementHeight: number = DEFAULT_ELEMENT_HEIGHT
+	elementHeight: number = DEFAULT_ELEMENT_HEIGHT,
 ): number {
 	return topY + elementHeight / 2;
 }
@@ -93,7 +93,7 @@ export function hasOverlapOnTrack(
 	timeRange: TimeRange,
 	trackIndex: number,
 	elements: TimelineElement[],
-	excludeId?: string
+	excludeId?: string,
 ): boolean {
 	for (const el of elements) {
 		if (el.id === excludeId) continue;
@@ -121,7 +121,7 @@ export function findAvailableTrack(
 	startTrack: number,
 	elements: TimelineElement[],
 	excludeId: string,
-	maxTrack: number
+	maxTrack: number,
 ): number {
 	const currentElement = elements.find((el) => el.id === excludeId);
 	if (currentElement?.type === "Transition") {
@@ -155,18 +155,17 @@ export function calculateFinalTrack(
 	timeRange: TimeRange,
 	elements: TimelineElement[],
 	elementId: string,
-	originalTrackIndex: number
+	originalTrackIndex: number,
 ): FinalTrackResult {
 	const element = elements.find((el) => el.id === elementId);
 	const elementRole = element ? getElementRole(element) : "overlay";
 	const maxStoredTrack = Math.max(
 		0,
-		...elements.map((el) => el.timeline.trackIndex ?? 0)
+		...elements.map((el) => el.timeline.trackIndex ?? 0),
 	);
 
 	if (elementRole === "audio") {
-		const targetTrack =
-			dropTarget.trackIndex < 0 ? dropTarget.trackIndex : -1;
+		const targetTrack = dropTarget.trackIndex < 0 ? dropTarget.trackIndex : -1;
 		const hasConflict = (trackIndex: number) =>
 			hasRoleConflictOnStoredTrack(
 				elementRole,
@@ -206,7 +205,7 @@ export function calculateFinalTrack(
 			elementId,
 			originalTrackIndex,
 			maxStoredTrack,
-			elementRole
+			elementRole,
 		);
 	}
 
@@ -216,7 +215,7 @@ export function calculateFinalTrack(
 		elements,
 		elementId,
 		maxStoredTrack,
-		elementRole
+		elementRole,
 	);
 }
 
@@ -230,7 +229,7 @@ function calculateFinalTrackForGap(
 	elementId: string,
 	originalTrackIndex: number,
 	maxStoredTrack: number,
-	elementRole: ReturnType<typeof getElementRole>
+	elementRole: ReturnType<typeof getElementRole>,
 ): FinalTrackResult {
 	const gapTrackIndex = dropTarget.trackIndex;
 	const belowTrack = gapTrackIndex - 1;
@@ -241,14 +240,24 @@ function calculateFinalTrackForGap(
 	const belowHasSpace =
 		belowTrack >= 0 &&
 		belowTrack !== originalTrackIndex &&
-		!hasRoleConflictOnStoredTrack(elementRole, belowTrack, elements, elementId) &&
+		!hasRoleConflictOnStoredTrack(
+			elementRole,
+			belowTrack,
+			elements,
+			elementId,
+		) &&
 		!hasOverlapOnTrack(timeRange, belowTrack, elements, elementId);
 
 	// 检查上方轨道是否有空位
 	const aboveHasSpace =
 		aboveTrack <= maxStoredTrack &&
 		aboveTrack !== originalTrackIndex &&
-		!hasRoleConflictOnStoredTrack(elementRole, aboveTrack, elements, elementId) &&
+		!hasRoleConflictOnStoredTrack(
+			elementRole,
+			aboveTrack,
+			elements,
+			elementId,
+		) &&
 		!hasOverlapOnTrack(timeRange, aboveTrack, elements, elementId);
 
 	if (belowHasSpace) {
@@ -284,14 +293,18 @@ function calculateFinalTrackForTrack(
 	elements: TimelineElement[],
 	elementId: string,
 	maxStoredTrack: number,
-	elementRole: ReturnType<typeof getElementRole>
+	elementRole: ReturnType<typeof getElementRole>,
 ): FinalTrackResult {
 	const targetTrack = dropTarget.trackIndex;
 
 	// 检查目标轨道是否有重叠
 	const targetHasOverlap =
-		hasRoleConflictOnStoredTrack(elementRole, targetTrack, elements, elementId) ||
-		hasOverlapOnTrack(timeRange, targetTrack, elements, elementId);
+		hasRoleConflictOnStoredTrack(
+			elementRole,
+			targetTrack,
+			elements,
+			elementId,
+		) || hasOverlapOnTrack(timeRange, targetTrack, elements, elementId);
 
 	if (!targetHasOverlap) {
 		return {
@@ -305,7 +318,12 @@ function calculateFinalTrackForTrack(
 	const aboveTrack = targetTrack + 1;
 	const aboveHasOverlap =
 		aboveTrack <= maxStoredTrack &&
-		(hasRoleConflictOnStoredTrack(elementRole, aboveTrack, elements, elementId) ||
+		(hasRoleConflictOnStoredTrack(
+			elementRole,
+			aboveTrack,
+			elements,
+			elementId,
+		) ||
 			hasOverlapOnTrack(timeRange, aboveTrack, elements, elementId));
 
 	if (!aboveHasOverlap && aboveTrack <= maxStoredTrack) {
@@ -370,7 +388,7 @@ export interface DragCalculationResult {
  * 计算拖拽结果
  */
 export function calculateDragResult(
-	params: DragCalculationParams
+	params: DragCalculationParams,
 ): DragCalculationResult {
 	const {
 		deltaX,
@@ -404,7 +422,7 @@ export function calculateDragResult(
 		dropTarget = calculateDropTarget(
 			Math.max(0, centerY),
 			trackHeight,
-			trackCount
+			trackCount,
 		);
 	} else {
 		// 垂直移动不显著，保持原轨道
@@ -430,7 +448,7 @@ export function calculateDragResult(
  * 直接基于存储的 trackIndex 压缩，不重新分配
  */
 export function normalizeTrackIndices(
-	elements: TimelineElement[]
+	elements: TimelineElement[],
 ): Map<string, number> {
 	// 收集所有使用中的轨道索引
 	const usedTracks = new Set<number>();
@@ -462,7 +480,7 @@ export function normalizeTrackIndices(
  */
 export function insertTrackAt(
 	insertAt: number,
-	elements: TimelineElement[]
+	elements: TimelineElement[],
 ): Map<string, number> {
 	const result = new Map<string, number>();
 

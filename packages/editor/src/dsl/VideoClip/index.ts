@@ -10,12 +10,7 @@ export const VideoClipDefinition: DSLComponentDefinition<VideoClipProps> = {
 	component: "video-clip",
 	createModel: createVideoClipModel,
 	Renderer: VideoClipRenderer,
-	prepareRenderFrame: async ({
-		element,
-		displayTime,
-		fps,
-		modelStore,
-	}) => {
+	prepareRenderFrame: async ({ element, displayTime, fps, modelStore }) => {
 		await modelStore?.getState()?.prepareFrame?.({
 			element,
 			displayTime,

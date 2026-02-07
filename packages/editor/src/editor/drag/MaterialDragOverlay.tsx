@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import { createPortal } from "react-dom";
 import { secondsToFrames } from "@/utils/timecode";
 import { useFps, useTimelineScale } from "../contexts/TimelineContext";
@@ -89,7 +89,9 @@ const MaterialDropIndicator: React.FC = () => {
 			? (dragData.duration as number)
 			: fallbackDurationFrames;
 	const elementWidth = materialDurationFrames * ratio;
-	const transitionHead = getTransitionDurationParts(materialDurationFrames).head;
+	const transitionHead = getTransitionDurationParts(
+		materialDurationFrames,
+	).head;
 
 	let targetZone: HTMLElement | null = null;
 	let screenX = 0;

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranscriptStore } from "@/asr/transcriptStore";
 import type { TranscriptRecord } from "@/asr/types";
 import {
@@ -7,7 +8,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { useEffect, useMemo, useRef, useState } from "react";
 
 const formatTime = (seconds: number): string => {
 	if (!Number.isFinite(seconds) || seconds < 0) return "00:00";

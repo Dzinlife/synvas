@@ -1,7 +1,7 @@
 "use client";
 
-import * as React from "react";
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
+import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -21,6 +21,14 @@ function Slider({
 		}
 		return [0];
 	}, [value, defaultValue]);
+	const thumbKeys = React.useMemo(() => {
+		const counts = new Map<number, number>();
+		return values.map((thumbValue) => {
+			const count = (counts.get(thumbValue) ?? 0) + 1;
+			counts.set(thumbValue, count);
+			return `thumb-${thumbValue}-${count}`;
+		});
+	}, [values]);
 
 	return (
 		<SliderPrimitive.Root defaultValue={defaultValue} value={value} {...props}>
@@ -32,10 +40,10 @@ function Slider({
 			>
 				<SliderPrimitive.Track className="h-1 w-full rounded bg-gray-200 shadow-[inset_0_0_0_1px] shadow-gray-200 select-none">
 					<SliderPrimitive.Indicator className="rounded bg-gray-700 select-none" />
-					{values.map((_, index) => (
+					{thumbKeys.map((thumbKey) => (
 						<SliderPrimitive.Thumb
-							key={index}
-							className="size-4 rounded-full bg-white outline outline-1 outline-gray-300 select-none has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-blue-800"
+							key={thumbKey}
+							className="size-4 rounded-full bg-white outline outline-gray-300 select-none has-focus-visible:outline-2 has-focus-visible:outline-blue-800"
 						/>
 					))}
 				</SliderPrimitive.Track>

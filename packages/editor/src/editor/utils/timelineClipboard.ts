@@ -1,8 +1,8 @@
 import type { TimelineElement } from "@/dsl/types";
 import { cloneValue, createCopySeed } from "./copyUtils";
 import {
-	type TimelinePostProcessOptions,
 	finalizeTimelineElements,
+	type TimelinePostProcessOptions,
 } from "./mainTrackMagnet";
 import {
 	findAvailableTrack,

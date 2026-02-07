@@ -1,14 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import type React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranscriptStore } from "@/asr/transcriptStore";
 import { Toaster } from "@/components/ui/toast";
 import { ModelManager } from "@/dsl/model";
+import { useProjectStore } from "@/projects/projectStore";
 import EditorSidebars from "./components/EditorSidebars";
 import PreviewProvider from "./contexts/PreviewProvider";
 import { TimelineProvider } from "./contexts/TimelineContext";
 import PreviewEditor from "./PreviewEditor";
 import TimelineEditor from "./TimelineEditor";
-import { useProjectStore } from "@/projects/projectStore";
-import { useTranscriptStore } from "@/asr/transcriptStore";
 
 // 导入所有组件以触发注册
 import "@/dsl/BackdropZoom";
@@ -79,7 +80,9 @@ const EditorContent: React.FC = () => {
 				style={{ height: timelineMaxHeight }}
 			>
 				{/* 拖拽手柄 */}
-				<div
+				<button
+					type="button"
+					aria-label="调整时间线高度"
 					className="h-1.5 cursor-ns-resize bg-neutral-700 hover:bg-neutral-600 active:bg-blue-500 transition-colors shrink-0"
 					onMouseDown={handleResizeMouseDown}
 				/>

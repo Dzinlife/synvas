@@ -59,11 +59,9 @@ const resolveTransitionDuration = (
 const PixelShaderTransitionRenderer: React.FC<
 	PixelShaderTransitionRendererProps
 > = ({ id, fromNode, toNode, progress }) => {
-	if (!fromNode && !toNode) return null;
-
 	const currentTimeFrames = useRenderTime();
-	const transitionElement = useTimelineStore(
-		(state) => state.getElementById(id)!,
+	const transitionElement = useTimelineStore((state) =>
+		state.getElementById(id),
 	);
 	const canvasSize = useTimelineStore((state) => state.canvasSize);
 
@@ -86,6 +84,7 @@ const PixelShaderTransitionRenderer: React.FC<
 			return null;
 		}
 	}, []);
+	if (!fromNode && !toNode) return null;
 
 	if (!shaderSource || !toNode) {
 		return (

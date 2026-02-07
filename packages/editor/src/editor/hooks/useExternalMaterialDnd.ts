@@ -1,6 +1,6 @@
 import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
-import React, { useCallback, useRef } from "react";
-import { toast } from "@/lib/toast";
+import type React from "react";
+import { useCallback, useRef } from "react";
 import {
 	isAudioFile,
 	readAudioMetadata,
@@ -11,6 +11,7 @@ import type {
 	TrackRole,
 } from "@/dsl/types";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
+import { toast } from "@/lib/toast";
 import { useProjectStore } from "@/projects/projectStore";
 import { clampFrame } from "@/utils/timecode";
 import {
@@ -848,7 +849,7 @@ export function useExternalMaterialDnd({
 				setElements((prev) => {
 					let nextElements = prev;
 					let nextStart = clampFrame(resolvedDropTarget.time ?? 0);
-					let targetTrackIndex = resolvedDropTarget.trackIndex ?? 0;
+					const targetTrackIndex = resolvedDropTarget.trackIndex ?? 0;
 					let targetType: "track" | "gap" = resolvedDropTarget.type ?? "track";
 
 					const postProcessOptions = {
@@ -1068,7 +1069,7 @@ export function useExternalMaterialDnd({
 			setElements((prev) => {
 				let nextElements = prev;
 				let nextStart = clampFrame(resolvedDropTarget.time ?? 0);
-				let targetTrackIndex = resolvedDropTarget.trackIndex ?? 0;
+				const targetTrackIndex = resolvedDropTarget.trackIndex ?? 0;
 				let targetType: "track" | "gap" = resolvedDropTarget.type ?? "track";
 
 				const postProcessOptions = {

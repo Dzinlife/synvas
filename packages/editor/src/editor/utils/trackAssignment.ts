@@ -1,12 +1,9 @@
-import type { TimelineElement, TrackRole } from "@/dsl/types";
 import type { DropTarget } from "core/editor/timeline/types";
-import type { TimelineTrack } from "../timeline/types";
 import {
-	MAIN_TRACK_INDEX,
-	assignTracks as assignTracksCore,
 	applyTrackAssignments as applyTrackAssignmentsCore,
-	findAvailableTrack as findAvailableTrackCore,
+	assignTracks as assignTracksCore,
 	findAvailableStoredTrack,
+	findAvailableTrack as findAvailableTrackCore,
 	getElementRole as getElementRoleCore,
 	getStoredTrackAssignments,
 	getTrackCount,
@@ -19,10 +16,13 @@ import {
 	insertTrackAt,
 	isRoleCompatibleWithTrack,
 	isTimeOverlapping,
+	MAIN_TRACK_INDEX,
 	normalizeStoredTrackIndices,
 	normalizeTrackAssignments,
 } from "core/editor/utils/trackAssignment";
+import type { TimelineElement, TrackRole } from "@/dsl/types";
 import { getTrackConfig } from "../timeline/trackConfig";
+import type { TimelineTrack } from "../timeline/types";
 import { resolveTimelineElementRole } from "./resolveRole";
 
 const resolveRole = resolveTimelineElementRole;
@@ -100,8 +100,7 @@ export function buildTrackLayout(tracks: TimelineTrack[]): TrackLayoutItem[] {
 
 	for (let i = tracks.length - 1; i >= 0; i--) {
 		const track = tracks[i];
-		const role =
-			track?.role ?? (i === MAIN_TRACK_INDEX ? "clip" : "overlay");
+		const role = track?.role ?? (i === MAIN_TRACK_INDEX ? "clip" : "overlay");
 		const height = getTrackHeightByRole(role);
 		layout.push({
 			index: i,
@@ -427,9 +426,7 @@ export function resolveDropTargetForRole(
 ): DropTarget {
 	if (role === "audio") {
 		const targetTrack =
-			dropTarget.trackIndex < MAIN_TRACK_INDEX
-				? dropTarget.trackIndex
-				: -1;
+			dropTarget.trackIndex < MAIN_TRACK_INDEX ? dropTarget.trackIndex : -1;
 		if (dropTarget.type === "gap") {
 			return { type: "gap", trackIndex: targetTrack };
 		}

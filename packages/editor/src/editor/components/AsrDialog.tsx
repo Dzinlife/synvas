@@ -342,7 +342,6 @@ const AsrDialog = () => {
 								<div className="grid gap-2">
 									<Label htmlFor="asr-audio-file">音频文件</Label>
 									<Input
-										id="asr-audio-file"
 										type="file"
 										className="w-full"
 										accept="audio/*"

@@ -44,9 +44,7 @@ async function loadLottieAnimation(
 		const manifest = JSON.parse(manifestText);
 
 		const activeAnimationId =
-			manifest.activeAnimationId ||
-			(manifest.animations && manifest.animations[0]?.id) ||
-			null;
+			manifest.activeAnimationId || manifest.animations?.[0]?.id || null;
 
 		if (!activeAnimationId) {
 			throw new Error("No active animation found in dotLottie file");
@@ -85,7 +83,7 @@ async function loadLottieAnimation(
 			assets = {};
 			const assetPromises: Promise<void>[] = [];
 			zip.forEach((relativePath, file) => {
-				if (!file.dir && relativePath.startsWith(imageDirName + "/")) {
+				if (!file.dir && relativePath.startsWith(`${imageDirName}/`)) {
 					assetPromises.push(
 						(async () => {
 							const imageData = await file.async("uint8array");

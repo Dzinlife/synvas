@@ -1,6 +1,11 @@
-import React, { useMemo } from "react";
+import type React from "react";
+import { useMemo } from "react";
 import { Fill, Group, Rect, Shader, Skia } from "react-skia-lite";
-import { useFps, useRenderTime, useTimelineStore } from "@/editor/contexts/TimelineContext";
+import {
+	useFps,
+	useRenderTime,
+	useTimelineStore,
+} from "@/editor/contexts/TimelineContext";
 import { framesToSeconds } from "@/utils/timecode";
 import { createModelSelector } from "../model/registry";
 import { parseStartEndSchema } from "../startEndSchema";
@@ -11,12 +16,9 @@ interface SeaWaveRendererProps extends SeaWaveProps {
 	id: string;
 }
 
-const useSeaWaveSelector =
-	createModelSelector<SeaWaveProps, SeaWaveInternal>();
+const useSeaWaveSelector = createModelSelector<SeaWaveProps, SeaWaveInternal>();
 
-const SeaWaveRenderer: React.FC<SeaWaveRendererProps> = ({
-	id,
-}) => {
+const SeaWaveRenderer: React.FC<SeaWaveRendererProps> = ({ id }) => {
 	const currentTime = useRenderTime();
 	const { fps } = useFps();
 

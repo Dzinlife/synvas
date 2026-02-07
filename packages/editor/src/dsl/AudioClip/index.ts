@@ -1,6 +1,6 @@
 import type { DSLComponentDefinition } from "../model/componentRegistry";
 import { componentRegistry } from "../model/componentRegistry";
-import { createAudioClipModel, type AudioClipProps } from "./model";
+import { type AudioClipProps, createAudioClipModel } from "./model";
 import AudioClipRenderer from "./renderer";
 import { AudioClipTimeline } from "./timeline";
 

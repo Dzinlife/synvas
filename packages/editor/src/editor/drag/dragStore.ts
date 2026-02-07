@@ -14,12 +14,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 export type DragSourceType = "timeline" | "material-library" | "external-file";
 
 /** 素材类型 */
-export type MaterialType =
-	| "image"
-	| "video"
-	| "audio"
-	| "text"
-	| "transition";
+export type MaterialType = "image" | "video" | "audio" | "text" | "transition";
 
 /** 拖拽数据：来自素材库 */
 export interface MaterialDragData {

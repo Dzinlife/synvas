@@ -1,5 +1,5 @@
+import type { TimelineElement } from "@/dsl/types";
 import type { SnapPoint } from "@/editor/timeline/types";
-import { TimelineElement } from "@/dsl/types";
 
 export const SNAP_THRESHOLD_PX = 10;
 

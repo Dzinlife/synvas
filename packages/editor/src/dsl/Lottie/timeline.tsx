@@ -7,9 +7,7 @@ interface LottieTimelineProps extends TimelineProps {
 }
 
 export const LottieTimeline: React.FC<LottieTimelineProps> = ({ id }) => {
-	const name = useTimelineStore(
-		(state) => state.getElementById(id)?.name,
-	);
+	const name = useTimelineStore((state) => state.getElementById(id)?.name);
 
 	return (
 		<div className="absolute inset-0 p-1">

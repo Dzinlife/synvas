@@ -1,27 +1,30 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Slider } from "@/components/ui/slider";
-import type { TimelineElement } from "@/dsl/types";
 import { exportCanvasAsImage } from "@/dsl/export";
+import type { TimelineElement } from "@/dsl/types";
 import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import { cn } from "@/lib/utils";
 import { clampFrame } from "@/utils/timecode";
 import { usePreview } from "../contexts/PreviewProvider";
-import AsrDialog from "./AsrDialog";
 import {
 	useAttachments,
 	useElements,
 	useFps,
-	useRippleEditing,
 	useMultiSelect,
 	usePlaybackControl,
 	usePreviewAxis,
+	useRippleEditing,
 	useSnap,
 	useTimelineHistory,
 	useTimelineScale,
 	useTimelineStore,
 } from "../contexts/TimelineContext";
 import { updateElementTime } from "../utils/timelineTime";
-import { isTransitionElement, reconcileTransitions } from "../utils/transitions";
+import {
+	isTransitionElement,
+	reconcileTransitions,
+} from "../utils/transitions";
+import AsrDialog from "./AsrDialog";
 
 const isSplittableClip = (element: TimelineElement) =>
 	element.type === "VideoClip" || element.type === "AudioClip";
@@ -99,8 +102,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const [isVideoExporting, setIsVideoExporting] = useState(false);
 	const { snapEnabled, setSnapEnabled } = useSnap();
 	const { autoAttach, setAutoAttach } = useAttachments();
-	const { rippleEditingEnabled, setRippleEditingEnabled } =
-		useRippleEditing();
+	const { rippleEditingEnabled, setRippleEditingEnabled } = useRippleEditing();
 	const { previewAxisEnabled, setPreviewAxisEnabled } = usePreviewAxis();
 	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { canUndo, canRedo, undo, redo } = useTimelineHistory();
@@ -259,12 +261,14 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 				</button>
 			</div>
 			<button
+				type="button"
 				onClick={togglePlay}
 				className="w-8 h-8 flex items-center justify-center rounded bg-neutral-700 hover:bg-neutral-600 text-white"
 			>
 				{isPlaying ? "⏸" : "▶"}
 			</button>
 			<button
+				type="button"
 				onClick={handleSplit}
 				disabled={!splitCandidate}
 				className={cn(
@@ -280,6 +284,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			{/* 开关按钮组 */}
 			<div className="flex items-center gap-2 ml-4">
 				<button
+					type="button"
 					onClick={() => setSnapEnabled(!snapEnabled)}
 					className={cn(
 						"px-2 py-1 text-xs rounded transition-colors",
@@ -292,6 +297,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 					吸附
 				</button>
 				<button
+					type="button"
 					onClick={() => setAutoAttach(!autoAttach)}
 					className={cn(
 						"px-2 py-1 text-xs rounded transition-colors",
@@ -304,6 +310,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 					联动
 				</button>
 				<button
+					type="button"
 					onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
 					className={cn(
 						"px-2 py-1 text-xs rounded transition-colors",
@@ -316,6 +323,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 					波纹编辑
 				</button>
 				<button
+					type="button"
 					onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}
 					className={cn(
 						"px-2 py-1 text-xs rounded transition-colors",
@@ -330,7 +338,6 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			</div>
 			<div className="flex items-center gap-2">
 				<Slider
-					id="timeline-scale"
 					min={0.01}
 					max={10}
 					step={0.1}
@@ -342,6 +349,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			<div className="flex-1" />
 			<AsrDialog />
 			<button
+				type="button"
 				onClick={handleExport}
 				disabled={isExporting || isVideoExporting}
 				className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white"
@@ -349,6 +357,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 				{isExporting ? "Exporting..." : "Export"}
 			</button>
 			<button
+				type="button"
 				onClick={handleExportVideo}
 				disabled={isExporting || isVideoExporting}
 				className="px-3 py-1 text-sm rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white"

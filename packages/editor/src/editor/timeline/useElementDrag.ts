@@ -5,10 +5,10 @@
 
 import { useDrag } from "@use-gesture/react";
 import { useRef } from "react";
-import { TimelineElement } from "@/dsl/types";
+import type { TimelineElement } from "@/dsl/types";
 import { calculateDragResult, calculateFinalTrack } from "./dragCalculations";
 import { getElementHeightForTrack } from "./trackConfig";
-import { DropTarget, ExtendedDropTarget, SnapPoint } from "./types";
+import type { DropTarget, ExtendedDropTarget, SnapPoint } from "./types";
 
 // ============================================================================
 // 类型定义

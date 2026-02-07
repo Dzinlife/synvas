@@ -1,11 +1,11 @@
-import type { TimelineElement } from "@/dsl/types";
 import {
 	compactMainTrackElements as compactMainTrackElementsCore,
 	finalizeTimelineElements as finalizeTimelineElementsCore,
-	shiftMainTrackElementsAfter as shiftMainTrackElementsAfterCore,
 	type MainTrackMagnetOptions,
+	shiftMainTrackElementsAfter as shiftMainTrackElementsAfterCore,
 	type TimelinePostProcessOptions,
 } from "core/editor/utils/mainTrackMagnet";
+import type { TimelineElement } from "@/dsl/types";
 import { resolveTimelineElementRole } from "./resolveRole";
 
 const withResolveRole = (
@@ -27,10 +27,7 @@ export const finalizeTimelineElements = (
 	elements: TimelineElement[],
 	options?: TimelinePostProcessOptions,
 ): TimelineElement[] =>
-	finalizeTimelineElementsCore(
-		elements,
-		withResolveRole(options),
-	);
+	finalizeTimelineElementsCore(elements, withResolveRole(options));
 
 export const shiftMainTrackElementsAfter = (
 	elements: TimelineElement[],

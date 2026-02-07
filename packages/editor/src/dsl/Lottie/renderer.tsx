@@ -1,6 +1,10 @@
 import { useCallback } from "react";
 import { Group, Rect, Skottie } from "react-skia-lite";
-import { useFps, useRenderTime, useTimelineStore } from "@/editor/contexts/TimelineContext";
+import {
+	useFps,
+	useRenderTime,
+	useTimelineStore,
+} from "@/editor/contexts/TimelineContext";
 import { framesToSeconds } from "@/utils/timecode";
 import { createModelSelector } from "../model/registry";
 import { useRenderLayout } from "../useRenderLayout";

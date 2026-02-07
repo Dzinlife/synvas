@@ -3,15 +3,16 @@
  * 用于展示可拖拽的素材（图片、视频等）
  */
 
-import { ElementType, TimelineElement, TrackRole } from "@/dsl/types";
+import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
+import type React from "react";
+import { useCallback } from "react";
+import { componentRegistry } from "@/dsl/model/componentRegistry";
+import type { ElementType, TimelineElement, TrackRole } from "@/dsl/types";
 import {
 	clampFrame,
 	framesToTimecode,
 	secondsToFrames,
 } from "@/utils/timecode";
-import { componentRegistry } from "@/dsl/model/componentRegistry";
-import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
-import React, { useCallback } from "react";
 import {
 	useAttachments,
 	useFps,
@@ -281,8 +282,9 @@ const buildMaterialItems = (): MaterialItem[] => {
 				type: definition.type,
 				meta: {
 					defaultProps:
-						(definition.meta.defaultProps as Record<string, unknown> | undefined) ??
-						undefined,
+						(definition.meta.defaultProps as
+							| Record<string, unknown>
+							| undefined) ?? undefined,
 				},
 			},
 			preset,
@@ -615,19 +617,17 @@ const MaterialLibrary: React.FC = () => {
 	);
 
 	return (
-		<>
-			<div className="space-y-2">
-				{materials.map((item) => (
-					<MaterialCard
-						key={item.id}
-						item={item}
-						onTimelineDrop={handleTimelineDrop}
-						onPreviewDrop={handlePreviewDrop}
-						dndContext={dndContext}
-					/>
-				))}
-			</div>
-		</>
+		<div className="space-y-2">
+			{materials.map((item) => (
+				<MaterialCard
+					key={item.id}
+					item={item}
+					onTimelineDrop={handleTimelineDrop}
+					onPreviewDrop={handlePreviewDrop}
+					dndContext={dndContext}
+				/>
+			))}
+		</div>
 	);
 };
 

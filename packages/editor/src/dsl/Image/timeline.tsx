@@ -11,13 +11,8 @@ const useImageSelector = createModelSelector<ImageProps, ImageInternal>();
 
 export const ImageTimeline: React.FC<ImageTimelineProps> = ({ id }) => {
 	// 订阅 model 状态
-	const uri = useImageSelector(
-		id,
-		(state) => state.props.uri,
-	);
-	const name = useTimelineStore(
-		(state) => state.getElementById(id)?.name,
-	);
+	const uri = useImageSelector(id, (state) => state.props.uri);
+	const name = useTimelineStore((state) => state.getElementById(id)?.name);
 
 	return (
 		<div className="absolute inset-0 p-1 bg-indigo-700">

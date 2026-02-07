@@ -5,7 +5,7 @@
 
 import { componentRegistry } from "@/dsl/model/componentRegistry";
 import type { TrackRole } from "@/dsl/types";
-import { TrackConfig, TrackInstance } from "./types";
+import type { TrackConfig, TrackInstance } from "./types";
 
 // ============================================================================
 // 默认轨道配置

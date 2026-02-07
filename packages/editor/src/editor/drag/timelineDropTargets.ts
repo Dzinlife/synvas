@@ -1,7 +1,10 @@
 import { clampFrame } from "@/utils/timecode";
 import { DEFAULT_TRACK_HEIGHT } from "../timeline/trackConfig";
-import { DropTarget } from "../timeline/types";
-import { GAP_THRESHOLD, getDropTargetFromHeights } from "../utils/trackAssignment";
+import type { DropTarget } from "../timeline/types";
+import {
+	GAP_THRESHOLD,
+	getDropTargetFromHeights,
+} from "../utils/trackAssignment";
 
 export function parseTrackHeights(value?: string): number[] {
 	if (!value) return [];
@@ -186,10 +189,7 @@ export function findTimelineDropTargetFromScreenPosition(
 			}
 
 			const trackFromTop = Math.floor(contentRelativeY / zoneTrackHeight);
-			const clamped = Math.max(
-				0,
-				Math.min(audioTrackCount - 1, trackFromTop),
-			);
+			const clamped = Math.max(0, Math.min(audioTrackCount - 1, trackFromTop));
 			const positionInTrack = contentRelativeY - clamped * zoneTrackHeight;
 			const isInUpperGap = positionInTrack < GAP_THRESHOLD;
 			const isInLowerGap = positionInTrack > zoneTrackHeight - GAP_THRESHOLD;

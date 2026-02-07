@@ -1,9 +1,9 @@
+import type { RendererPrepareFrameContext } from "core/dsl/model/types";
 import {
 	type BuildSkiaDeps,
 	buildSkiaRenderStateCore,
 	buildSkiaTreeCore,
 } from "core/editor/preview/buildSkiaTree";
-import type { RendererPrepareFrameContext } from "core/dsl/model/types";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { renderNodeToPicture } from "@/dsl/Transition/picture";
 import { isTransitionElement } from "@/editor/utils/transitions";

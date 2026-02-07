@@ -1,6 +1,7 @@
 import type React from "react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo } from "react";
+import type { SkPicture } from "react-skia-lite";
 import {
 	FilterMode,
 	Group,
@@ -9,7 +10,6 @@ import {
 	Skia,
 	TileMode,
 } from "react-skia-lite";
-import type { SkPicture } from "react-skia-lite";
 import type { TimelineElement } from "@/dsl/types";
 import {
 	useRenderTime,
@@ -70,8 +70,8 @@ const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 	id,
 }) => {
 	const currentTimeFrames = useRenderTime();
-	const transitionElement = useTimelineStore(
-		(state) => state.getElementById(id)!,
+	const transitionElement = useTimelineStore((state) =>
+		state.getElementById(id),
 	);
 
 	const canvasSize = useTimelineStore((state) => state.canvasSize);
@@ -157,7 +157,9 @@ const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 		return () => {
 			if (!paintBundle) return;
 			paintBundle.shader.dispose();
-			paintBundle.children.forEach((child) => child.dispose());
+			paintBundle.children.forEach((child) => {
+				child.dispose();
+			});
 			paintBundle.paint.dispose();
 		};
 	}, [paintBundle]);

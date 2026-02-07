@@ -8,7 +8,11 @@ import {
 	Output,
 	WavOutputFormat,
 } from "mediabunny";
-import { DEFAULT_TARGET_SAMPLE_RATE, mixToMono, resampleToTarget } from "./audioProcessing";
+import {
+	DEFAULT_TARGET_SAMPLE_RATE,
+	mixToMono,
+	resampleToTarget,
+} from "./audioProcessing";
 
 export async function exportWav16kMonoFromFile(options: {
 	file: File;
@@ -50,11 +54,12 @@ export async function exportWav16kMonoFromFile(options: {
 	output.addAudioTrack(source);
 	await output.start();
 
-	let failed = false;
+	let primaryError: unknown = null;
 	try {
 		// buffers() 需要 duration 参数；这里通过 computeDuration 拿一个尽可能准确的值。
 		const duration = await input.computeDuration();
-		const totalDuration = Number.isFinite(duration) && duration > 0 ? duration : 1;
+		const totalDuration =
+			Number.isFinite(duration) && duration > 0 ? duration : 1;
 
 		for await (const wrappedBuffer of audioSink.buffers(0, totalDuration)) {
 			if (signal.aborted) {
@@ -81,15 +86,20 @@ export async function exportWav16kMonoFromFile(options: {
 			await source.add(outBuffer);
 		}
 	} catch (error) {
-		failed = true;
-		throw error;
-	} finally {
-		// 确保输出流被关闭；如果主流程已失败，忽略 finalize 的二次错误以保留原始异常。
-		try {
-			await output.finalize();
-		} catch (error) {
-			if (!failed) throw error;
+		primaryError = error;
+	}
+
+	// 确保输出流被关闭；如果主流程已失败，忽略 finalize 的二次错误以保留原始异常。
+	try {
+		await output.finalize();
+	} catch (error) {
+		if (!primaryError) {
+			primaryError = error;
 		}
+	}
+
+	if (primaryError) {
+		throw primaryError;
 	}
 
 	if (!target.buffer) {

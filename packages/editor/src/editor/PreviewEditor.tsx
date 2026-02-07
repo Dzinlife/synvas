@@ -28,7 +28,6 @@ import { SkiaPreviewCanvas } from "./preview/SkiaPreviewCanvas";
 import { usePreviewCoordinates } from "./preview/usePreviewCoordinates";
 import { usePreviewInteractions } from "./preview/usePreviewInteractions";
 
-
 const Preview = () => {
 	const renderElementsRef = useRef<TimelineElement[]>([]);
 	const { tracks } = useTracks();

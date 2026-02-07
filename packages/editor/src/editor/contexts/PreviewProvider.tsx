@@ -315,7 +315,6 @@ const PreviewProvider = ({ children }: { children: React.ReactNode }) => {
 		updatePinchZoom,
 		endPinchZoom,
 		panOffset,
-		setPanOffset,
 		resetPanOffset,
 		setCanvasRef,
 	]);

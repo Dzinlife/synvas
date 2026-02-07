@@ -44,10 +44,14 @@ export const resampleToTarget = async (
 ): Promise<Float32Array> => {
 	if (sourceRate === targetRate) return monoSamples;
 
+	type OfflineAudioContextConstructor = typeof OfflineAudioContext;
 	const OfflineAudioContextImpl =
 		globalThis.OfflineAudioContext ||
-		(globalThis as unknown as { webkitOfflineAudioContext?: any })
-			.webkitOfflineAudioContext;
+		(
+			globalThis as typeof globalThis & {
+				webkitOfflineAudioContext?: OfflineAudioContextConstructor;
+			}
+		).webkitOfflineAudioContext;
 
 	// 在大多数现代浏览器/Chromium 中可用；不可用时退化为线性插值重采样。
 	if (!OfflineAudioContextImpl) {

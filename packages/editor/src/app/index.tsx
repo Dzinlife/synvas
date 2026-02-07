@@ -1,5 +1,5 @@
-import Header from "@/components/Header";
 import { lazy, Suspense } from "react";
+import Header from "@/components/Header";
 
 const Editor = lazy(() => import("@/editor/index"));
 

@@ -1,6 +1,6 @@
+import type { RendererPrepareFrameContext } from "core/dsl/model/types";
 import type React from "react";
 import type { ElementType, TrackRole } from "../types";
-import type { RendererPrepareFrameContext } from "core/dsl/model/types";
 import type { ComponentModelStore } from "./types";
 
 /**
