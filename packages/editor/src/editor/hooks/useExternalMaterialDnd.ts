@@ -10,6 +10,8 @@ import type {
 	TimelineElement as TimelineElementType,
 	TrackRole,
 } from "@/dsl/types";
+import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
+import { useProjectStore } from "@/projects/projectStore";
 import { clampFrame } from "@/utils/timecode";
 import {
 	useAttachments,
@@ -60,9 +62,6 @@ const IMAGE_EXTENSIONS = new Set([
 	"psd",
 ]);
 
-const OPFS_ROOT_DIR = "ai-nle";
-const OPFS_IMAGE_DIR = "images";
-const OPFS_PREFIX = "opfs://";
 const DEFAULT_IMAGE_WIDTH = 1920;
 const DEFAULT_IMAGE_HEIGHT = 1080;
 const FILE_PREFIX = "file://";
@@ -136,40 +135,6 @@ const resolveExternalFileUrl = (file: File): string | null => {
 	return filePath ? buildFileUrlFromPath(filePath) : null;
 };
 
-const normalizeFileName = (name: string): string => {
-	const clean = name.trim();
-	if (!clean) return `image-${Date.now()}.png`;
-	return clean.replace(/[\\/:*?"<>|]/g, "-");
-};
-
-const buildOpfsPath = (fileName: string): string => {
-	return `${OPFS_PREFIX}${OPFS_ROOT_DIR}/${OPFS_IMAGE_DIR}/${fileName}`;
-};
-
-const writeImageToOpfs = async (
-	file: File,
-): Promise<{ uri: string; fileName: string }> => {
-	if (!("storage" in navigator) || !("getDirectory" in navigator.storage)) {
-		throw new Error("OPFS 不可用");
-	}
-	const root = await navigator.storage.getDirectory();
-	const appDir = await root.getDirectoryHandle(OPFS_ROOT_DIR, {
-		create: true,
-	});
-	const imageDir = await appDir.getDirectoryHandle(OPFS_IMAGE_DIR, {
-		create: true,
-	});
-	const safeName = `${Date.now()}-${normalizeFileName(file.name)}`;
-	const fileHandle = await imageDir.getFileHandle(safeName, { create: true });
-	const writable = await fileHandle.createWritable();
-	try {
-		await writable.write(file);
-	} finally {
-		await writable.close();
-	}
-	return { uri: buildOpfsPath(safeName), fileName: safeName };
-};
-
 const readImageMetadata = async (
 	file: File,
 ): Promise<{ width: number; height: number }> => {
@@ -212,6 +177,7 @@ export function useExternalMaterialDnd({
 	scrollAreaRef,
 	verticalScrollRef,
 }: UseExternalMaterialDndOptions) {
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const { fps } = useFps();
 	const { currentTime } = useCurrentTime();
 	const { setElements } = useElements();
@@ -340,10 +306,13 @@ export function useExternalMaterialDnd({
 				}
 				return fileUrl;
 			}
-			const { uri } = await writeAudioToOpfs(file);
+			if (!currentProjectId) {
+				throw new Error("当前项目不存在，无法写入 OPFS");
+			}
+			const { uri } = await writeAudioToOpfs(file, currentProjectId);
 			return uri;
 		},
-		[isElectron],
+		[isElectron, currentProjectId],
 	);
 
 	const resolveExternalImageUri = useCallback(
@@ -355,10 +324,17 @@ export function useExternalMaterialDnd({
 				}
 				return fileUrl;
 			}
-			const { uri } = await writeImageToOpfs(file);
+			if (!currentProjectId) {
+				throw new Error("当前项目不存在，无法写入 OPFS");
+			}
+			const { uri } = await writeProjectFileToOpfs(
+				file,
+				currentProjectId,
+				"images",
+			);
 			return uri;
 		},
-		[isElectron],
+		[isElectron, currentProjectId],
 	);
 
 	const resolveExternalDropTarget = useCallback(
@@ -980,7 +956,10 @@ export function useExternalMaterialDnd({
 			}[] = [];
 			for (const file of videoFiles) {
 				try {
-					const uri = await resolveExternalVideoUri(file);
+					if (!currentProjectId) {
+						throw new Error("当前项目不存在，无法写入 OPFS");
+					}
+					const uri = await resolveExternalVideoUri(file, currentProjectId);
 					const metadata = await readVideoMetadata(file).catch(() =>
 						getFallbackVideoMetadata(),
 					);
@@ -1203,6 +1182,7 @@ export function useExternalMaterialDnd({
 			trackLockedMap,
 			resolveExternalAudioUri,
 			resolveExternalImageUri,
+			currentProjectId,
 		],
 	);
 

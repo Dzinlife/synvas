@@ -385,6 +385,9 @@ function validateTranscriptSource(
 	if (typeof sourceRecord.uri !== "string") {
 		throw new Error(`${path}.uri: must be a string`);
 	}
+	if (!sourceRecord.uri.startsWith("opfs://projects/")) {
+		throw new Error(`${path}.uri: must start with opfs://projects/`);
+	}
 	if (typeof sourceRecord.fileName !== "string") {
 		throw new Error(`${path}.fileName: must be a string`);
 	}

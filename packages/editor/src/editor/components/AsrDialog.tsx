@@ -17,6 +17,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { useProjectStore } from "@/projects/projectStore";
 
 const createId = (prefix: string): string => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -64,6 +65,7 @@ const AsrDialog = () => {
 	const updateTranscript = useTranscriptStore(
 		(state) => state.updateTranscript,
 	);
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const [open, setOpen] = useState(false);
 	const [file, setFile] = useState<File | null>(null);
 	const [language, setLanguage] = useState("zh");
@@ -166,7 +168,10 @@ const AsrDialog = () => {
 				signal: controller.signal,
 			});
 			const metadata = await readAudioMetadata(file);
-			const { uri, fileName } = await writeAudioToOpfs(file);
+			if (!currentProjectId) {
+				throw new Error("当前项目不存在，无法写入 OPFS");
+			}
+			const { uri, fileName } = await writeAudioToOpfs(file, currentProjectId);
 			const now = Date.now();
 			const transcriptId = createId("transcript");
 			const record: TranscriptRecord = {
@@ -243,6 +248,7 @@ const AsrDialog = () => {
 		addTranscript,
 		asrClient,
 		backend,
+		currentProjectId,
 		file,
 		isElectron,
 		isRunning,
@@ -278,9 +284,7 @@ const AsrDialog = () => {
 
 	return (
 		<>
-			<Button onClick={handleTogglePanel}>
-				转写
-			</Button>
+			<Button onClick={handleTogglePanel}>转写</Button>
 			{panelVisible && (
 				<div
 					className={`fixed left-1/2 z-30 -translate-x-1/2 rounded-2xl [corner-shape:superellipse(1.1)] border border-white/10 bg-neutral-900/95 shadow-2xl backdrop-blur-xl transition-all ${
@@ -425,9 +429,7 @@ const AsrDialog = () => {
 								{error && <div className="text-xs text-red-400">{error}</div>}
 								<div className="flex items-center justify-end gap-2">
 									{isRunning ? (
-										<Button onClick={handleAbort}>
-											取消
-										</Button>
+										<Button onClick={handleAbort}>取消</Button>
 									) : (
 										<Button onClick={handleStart} disabled={!file}>
 											开始转写

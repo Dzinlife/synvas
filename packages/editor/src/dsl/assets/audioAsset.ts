@@ -5,6 +5,7 @@ import {
 	StreamSource,
 	UrlSource,
 } from "mediabunny";
+import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
 import { type AssetHandle, assetStore } from "./AssetStore";
 
 const DEFAULT_MAX_CACHE_SIZE = 200;
@@ -47,21 +48,6 @@ const FILE_PREFIX = "file://";
 
 const isElectronEnv = (): boolean => {
 	return typeof window !== "undefined" && "aiNleElectron" in window;
-};
-
-const resolveOpfsFile = async (uri: string): Promise<File> => {
-	const rawPath = uri.slice(OPFS_PREFIX.length);
-	const parts = rawPath.split("/").filter(Boolean);
-	if (parts.length === 0) {
-		throw new Error("OPFS 路径为空");
-	}
-	const root = await navigator.storage.getDirectory();
-	let current: FileSystemDirectoryHandle = root;
-	for (let i = 0; i < parts.length - 1; i += 1) {
-		current = await current.getDirectoryHandle(parts[i]);
-	}
-	const fileHandle = await current.getFileHandle(parts[parts.length - 1]);
-	return fileHandle.getFile();
 };
 
 const resolveFilePathFromUri = (uri: string): string | null => {
@@ -137,7 +123,7 @@ const createAudioAsset = async (uri: string): Promise<AudioAsset> => {
 		});
 	} else if (uri.startsWith(OPFS_PREFIX)) {
 		// OPFS 文件需要转成 objectURL 供解码器读取
-		const file = await resolveOpfsFile(uri);
+		const file = await resolveProjectOpfsFile(uri);
 		const sourceUrl = URL.createObjectURL(file);
 		source = new UrlSource(sourceUrl);
 		releaseSource = () => {

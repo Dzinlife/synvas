@@ -1,6 +1,5 @@
-const OPFS_ROOT_DIR = "ai-nle";
-const OPFS_VIDEO_DIR = "videos";
-const OPFS_PREFIX = "opfs://";
+import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
+
 const FILE_PREFIX = "file://";
 
 const DEFAULT_VIDEO_WIDTH = 1920;
@@ -81,7 +80,10 @@ const buildFileUrlFromPath = (rawPath: string): string => {
 	return `${FILE_PREFIX}${encoded}`;
 };
 
-export async function resolveExternalVideoUri(file: File): Promise<string> {
+export async function resolveExternalVideoUri(
+	file: File,
+	projectId: string,
+): Promise<string> {
 	if (isElectronEnv()) {
 		const filePath = getFilePath(file) ?? getElectronFilePath(file);
 		if (!filePath) {
@@ -89,42 +91,20 @@ export async function resolveExternalVideoUri(file: File): Promise<string> {
 		}
 		return buildFileUrlFromPath(filePath);
 	}
-	const { uri } = await writeVideoToOpfs(file);
+	const { uri } = await writeVideoToOpfs(file, projectId);
 	return uri;
 }
 
-const normalizeFileName = (name: string): string => {
-	const clean = name.trim();
-	if (!clean) return `video-${Date.now()}.mp4`;
-	return clean.replace(/[\\/:*?"<>|]/g, "-");
-};
-
-const buildOpfsPath = (fileName: string): string => {
-	return `${OPFS_PREFIX}${OPFS_ROOT_DIR}/${OPFS_VIDEO_DIR}/${fileName}`;
-};
-
 export async function writeVideoToOpfs(
 	file: File,
+	projectId: string,
 ): Promise<{ uri: string; fileName: string }> {
-	if (!("storage" in navigator) || !("getDirectory" in navigator.storage)) {
-		throw new Error("OPFS 不可用");
-	}
-	const root = await navigator.storage.getDirectory();
-	const appDir = await root.getDirectoryHandle(OPFS_ROOT_DIR, {
-		create: true,
-	});
-	const videoDir = await appDir.getDirectoryHandle(OPFS_VIDEO_DIR, {
-		create: true,
-	});
-	const safeName = `${Date.now()}-${normalizeFileName(file.name)}`;
-	const fileHandle = await videoDir.getFileHandle(safeName, { create: true });
-	const writable = await fileHandle.createWritable();
-	try {
-		await writable.write(file);
-	} finally {
-		await writable.close();
-	}
-	return { uri: buildOpfsPath(safeName), fileName: safeName };
+	const { uri, fileName } = await writeProjectFileToOpfs(
+		file,
+		projectId,
+		"videos",
+	);
+	return { uri, fileName };
 }
 
 export async function readVideoMetadata(

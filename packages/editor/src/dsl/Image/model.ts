@@ -2,28 +2,11 @@ import type { SkImage } from "react-skia-lite";
 import { Skia } from "react-skia-lite";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
-import type {
-	ComponentModel,
-	ComponentModelStore,
-} from "../model/types";
+import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
+import type { ComponentModel, ComponentModelStore } from "../model/types";
 
 const OPFS_PREFIX = "opfs://";
 const FILE_PREFIX = "file://";
-
-const resolveOpfsFile = async (uri: string): Promise<File> => {
-	const rawPath = uri.slice(OPFS_PREFIX.length);
-	const parts = rawPath.split("/").filter(Boolean);
-	if (parts.length === 0) {
-		throw new Error("OPFS 路径为空");
-	}
-	const root = await navigator.storage.getDirectory();
-	let current: FileSystemDirectoryHandle = root;
-	for (let i = 0; i < parts.length - 1; i += 1) {
-		current = await current.getDirectoryHandle(parts[i]);
-	}
-	const fileHandle = await current.getFileHandle(parts[parts.length - 1]);
-	return fileHandle.getFile();
-};
 
 const resolveFilePathFromUri = (uri: string): string | null => {
 	if (!uri.startsWith(FILE_PREFIX)) return null;
@@ -92,7 +75,7 @@ export function createImageModel(
 		try {
 			let bytes: Uint8Array;
 			if (uri.startsWith(OPFS_PREFIX)) {
-				const file = await resolveOpfsFile(uri);
+				const file = await resolveProjectOpfsFile(uri);
 				const data = await file.arrayBuffer();
 				bytes = new Uint8Array(data);
 			} else if (uri.startsWith(FILE_PREFIX)) {

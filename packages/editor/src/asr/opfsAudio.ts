@@ -1,6 +1,4 @@
-const OPFS_ROOT_DIR = "ai-nle";
-const OPFS_AUDIO_DIR = "audios";
-const OPFS_PREFIX = "opfs://";
+import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 
 const AUDIO_EXTENSIONS = new Set([
 	"mp3",
@@ -35,38 +33,16 @@ export function isAudioFile(file: File): boolean {
 	return AUDIO_EXTENSIONS.has(ext);
 }
 
-const normalizeFileName = (name: string): string => {
-	const clean = name.trim();
-	if (!clean) return `audio-${Date.now()}.wav`;
-	return clean.replace(/[\\/:*?"<>|]/g, "-");
-};
-
-const buildOpfsPath = (fileName: string): string => {
-	return `${OPFS_PREFIX}${OPFS_ROOT_DIR}/${OPFS_AUDIO_DIR}/${fileName}`;
-};
-
 export async function writeAudioToOpfs(
 	file: File,
+	projectId: string,
 ): Promise<{ uri: string; fileName: string }> {
-	if (!("storage" in navigator) || !("getDirectory" in navigator.storage)) {
-		throw new Error("OPFS 不可用");
-	}
-	const root = await navigator.storage.getDirectory();
-	const appDir = await root.getDirectoryHandle(OPFS_ROOT_DIR, {
-		create: true,
-	});
-	const audioDir = await appDir.getDirectoryHandle(OPFS_AUDIO_DIR, {
-		create: true,
-	});
-	const safeName = `${Date.now()}-${normalizeFileName(file.name)}`;
-	const fileHandle = await audioDir.getFileHandle(safeName, { create: true });
-	const writable = await fileHandle.createWritable();
-	try {
-		await writable.write(file);
-	} finally {
-		await writable.close();
-	}
-	return { uri: buildOpfsPath(safeName), fileName: safeName };
+	const { uri, fileName } = await writeProjectFileToOpfs(
+		file,
+		projectId,
+		"audios",
+	);
+	return { uri, fileName };
 }
 
 export async function readAudioMetadata(
