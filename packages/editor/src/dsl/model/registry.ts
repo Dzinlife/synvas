@@ -7,10 +7,7 @@ import type {
 
 // Model 注册表（单例）
 class ModelRegistryClass {
-	private models = new Map<
-		string,
-		ComponentModelStore<Record<string, unknown>, Record<string, unknown>>
-	>();
+	private models = new Map<string, ComponentModelStore<any, any>>();
 	private listeners = new Set<() => void>();
 
 	// 注册 model
@@ -60,10 +57,7 @@ class ModelRegistryClass {
 	}
 
 	// 获取快照（用于 useSyncExternalStore）
-	getSnapshot(): Map<
-		string,
-		ComponentModelStore<Record<string, unknown>, Record<string, unknown>>
-	> {
+	getSnapshot(): Map<string, ComponentModelStore<any, any>> {
 		return this.models;
 	}
 
@@ -87,7 +81,9 @@ export const modelRegistry = new ModelRegistryClass();
 export function useModel<
 	P = Record<string, unknown>,
 	Internal = Record<string, unknown>,
->(id: string): ComponentModelStore<P, Internal> {
+>(
+	id: string,
+): ComponentModelStore<P, Internal> {
 	const store = modelRegistry.get<P, Internal>(id);
 	if (!store) {
 		throw new Error(`Model not found: ${id}`);
@@ -101,7 +97,9 @@ export function useModel<
 export function useModelSafe<
 	P = Record<string, unknown>,
 	Internal = Record<string, unknown>,
->(id: string): ComponentModelStore<P, Internal> | undefined {
+>(
+	id: string,
+): ComponentModelStore<P, Internal> | undefined {
 	return modelRegistry.get<P, Internal>(id);
 }
 
@@ -111,7 +109,9 @@ export function useModelSafe<
 export function useModelState<
 	P = Record<string, unknown>,
 	Internal = Record<string, unknown>,
->(id: string): ComponentModel<P, Internal> {
+>(
+	id: string,
+): ComponentModel<P, Internal> {
 	const store = useModel<P, Internal>(id);
 
 	return useSyncExternalStore(
@@ -163,12 +163,17 @@ export function useModelSelector<
 	);
 }
 
-export function createModelSelector<P, Internal = Record<string, unknown>>() {
-	return <T>(
+export function createModelSelector<
+	P,
+	Internal = Record<string, unknown>,
+>() {
+	return function <T>(
 		id: string,
 		selector: (state: ComponentModel<P, Internal>) => T,
 		equalityFn?: (a: T, b: T) => boolean,
-	): T => useModelSelector<P, Internal, T>(id, selector, equalityFn);
+	): T {
+		return useModelSelector<P, Internal, T>(id, selector, equalityFn);
+	};
 }
 
 /**
@@ -214,9 +219,7 @@ export function useModelSelectorSafe<
 				}
 			}
 			return () => {
-				unsubs.forEach((unsub) => {
-					unsub();
-				});
+				unsubs.forEach((unsub) => unsub());
 			};
 		},
 		[id, selector, equalityFn],
