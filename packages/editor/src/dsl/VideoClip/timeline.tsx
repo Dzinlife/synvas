@@ -13,6 +13,7 @@ import {
 } from "@/editor/contexts/TimelineContext";
 import { getPixelsPerFrame } from "@/editor/utils/timelineScale";
 import { isTimelineTrackMuted } from "@/editor/utils/trackAudibility";
+import { isVideoSourceAudioMuted } from "@/editor/utils/videoClipAudioSeparation";
 import { cn } from "@/lib/utils";
 import { framesToSeconds } from "@/utils/timecode";
 import { createModelSelector } from "../model/registry";
@@ -50,6 +51,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	const uri = useVideoClipSelector(id, (state) => state.props.uri);
 	const reversed = useVideoClipSelector(id, (state) => state.props.reversed);
 	const element = useTimelineStore((state) => state.getElementById(id));
+	const isSourceAudioMuted = isVideoSourceAudioMuted(element);
 
 	const isLoading = useVideoClipSelector(
 		id,
@@ -414,35 +416,42 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			)}
 
 			{/* 缩略图 canvas */}
-			<div className="absolute top-0 bottom-5.5 w-full">
-				<canvas ref={canvasRef} className="absolute inset-y-0" />
-			</div>
 			<div
 				className={cn(
-					"absolute inset-x-0 bottom-0 h-5.5 overflow-hidden",
-					isTrackMuted ? "bg-neutral-500/20" : "bg-blue-500/20",
+					"absolute top-0 w-full",
+					isSourceAudioMuted ? "bottom-0" : "bottom-5.5",
 				)}
 			>
-				{audioSink && audioDuration > 0 && uri && (
-					<AudioWaveformCanvas
-						uri={uri}
-						audioSink={audioSink}
-						audioDuration={audioDuration}
-						start={start}
-						end={end}
-						fps={fps}
-						timelineScale={timelineScale}
-						offsetFrames={timelineOffsetFrames}
-						scrollLeft={scrollLeft}
-						color={
-							isTrackMuted
-								? "rgba(163, 163, 163, 0.85)"
-								: "rgba(59, 130, 246, 0.9)"
-						}
-						className="absolute inset-0"
-					/>
-				)}
+				<canvas ref={canvasRef} className="absolute inset-y-0" />
 			</div>
+			{!isSourceAudioMuted && (
+				<div
+					className={cn(
+						"absolute inset-x-0 bottom-0 h-5.5 overflow-hidden",
+						isTrackMuted ? "bg-neutral-500/20" : "bg-blue-500/20",
+					)}
+				>
+					{audioSink && audioDuration > 0 && uri && (
+						<AudioWaveformCanvas
+							uri={uri}
+							audioSink={audioSink}
+							audioDuration={audioDuration}
+							start={start}
+							end={end}
+							fps={fps}
+							timelineScale={timelineScale}
+							offsetFrames={timelineOffsetFrames}
+							scrollLeft={scrollLeft}
+							color={
+								isTrackMuted
+									? "rgba(163, 163, 163, 0.85)"
+									: "rgba(59, 130, 246, 0.9)"
+							}
+							className="absolute inset-0"
+						/>
+					)}
+				</div>
+			)}
 		</div>
 	);
 };

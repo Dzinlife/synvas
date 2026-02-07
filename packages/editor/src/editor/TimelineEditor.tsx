@@ -56,6 +56,11 @@ import {
 	pasteTimelineClipboardPayload,
 	type TimelineClipboardPayload,
 } from "./utils/timelineClipboard";
+import {
+	detachVideoClipAudio,
+	isVideoSourceAudioMuted,
+	restoreVideoClipAudio,
+} from "./utils/videoClipAudioSeparation";
 import { getPixelsPerFrame } from "./utils/timelineScale";
 import { updateElementTime } from "./utils/timelineTime";
 import {
@@ -75,6 +80,13 @@ const normalizeOffsetFrames = (value: unknown): number => {
 
 const shouldUpdateOffset = (element: TimelineElementType): boolean => {
 	return element.type === "VideoClip" || element.type === "AudioClip";
+};
+
+const getVideoClipUri = (element: TimelineElementType | undefined): string | null => {
+	if (!element || element.type !== "VideoClip") return null;
+	const uri = (element.props as { uri?: unknown } | undefined)?.uri;
+	if (typeof uri !== "string" || uri.length === 0) return null;
+	return uri;
 };
 
 const LOCKED_TRACK_OVERLAY_STYLE: React.CSSProperties = {
@@ -1278,7 +1290,7 @@ const TimelineEditor = () => {
 		if (!contextMenuState.open) return [];
 		if (contextMenuState.scope === "element") {
 			const { targetIds, primaryId: targetPrimaryId } = contextMenuState;
-			return [
+			const actions: TimelineContextMenuAction[] = [
 				{
 					key: "copy",
 					label: "复制",
@@ -1305,6 +1317,40 @@ const TimelineEditor = () => {
 					},
 				},
 			];
+			const targetElement =
+				targetIds.length === 1
+					? elements.find((element) => element.id === targetIds[0])
+					: undefined;
+			const isSingleVideo = targetElement?.type === "VideoClip";
+			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
+			const videoUri = getVideoClipUri(targetElement);
+			if (isSingleVideo) {
+				const isActionDisabled = !videoUri;
+				actions.splice(2, 0, {
+					key: isSourceMuted ? "restore-audio" : "detach-audio",
+					label: isSourceMuted ? "还原音频" : "分离音频",
+					disabled: isActionDisabled,
+					onSelect: () => {
+						if (isActionDisabled) return;
+						setElements((prev) => {
+							const updated = isSourceMuted
+								? restoreVideoClipAudio({
+										elements: prev,
+										videoId: targetElement.id,
+									})
+								: detachVideoClipAudio({
+										elements: prev,
+										videoId: targetElement.id,
+										fps,
+										trackLockedMap,
+									});
+							if (updated === prev) return prev;
+							return finalizeTimelineElements(updated, postProcessOptions);
+						});
+					},
+				});
+			}
+			return actions;
 		}
 
 		const trackLocked =
@@ -1328,7 +1374,11 @@ const TimelineEditor = () => {
 		copyElementsByIds,
 		cutElementsByIds,
 		deleteElementsByIds,
+		elements,
+		fps,
 		pasteFromClipboard,
+		postProcessOptions,
+		setElements,
 		trackLockedMap,
 	]);
 

@@ -63,24 +63,14 @@ export interface RenderLayout {
 }
 
 /**
- * Clip 元信息（仅用于模型层元数据）
+ * Clip 元信息（仅记录非默认状态）
  */
-export type ClipKind = "video" | "audio";
-
-export interface VideoClipMeta {
-	kind: "video";
-	audio: {
-		enabled: boolean;
-		splitAudioClipId?: string;
-	};
-}
-
-export interface AudioClipMeta {
-	kind: "audio";
+export interface ClipMeta {
+	/** 分离出来的音频来源 VideoClip */
 	sourceVideoClipId?: string;
+	/** VideoClip 是否静音源音频；仅静音时写入 true */
+	muteSourceAudio?: true;
 }
-
-export type ClipMeta = VideoClipMeta | AudioClipMeta;
 
 export const ELEMENT_TYPE_VALUES = [
 	"VideoClip",

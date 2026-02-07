@@ -1,0 +1,257 @@
+import type { TimelineElement } from "../../dsl/types";
+import { clampFrame, framesToTimecode } from "../../utils/timecode";
+
+const MAIN_TRACK_INDEX = 0;
+
+const createElementId = () => {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return crypto.randomUUID();
+	}
+	return `clip-${Date.now().toString(36)}-${Math.random()
+		.toString(36)
+		.slice(2, 6)}`;
+};
+
+const getVideoUri = (element: TimelineElement): string | null => {
+	if (element.type !== "VideoClip") return null;
+	const uri = (element.props as { uri?: unknown } | undefined)?.uri;
+	if (typeof uri !== "string" || uri.length === 0) return null;
+	return uri;
+};
+
+const buildAudioTimelineMeta = (
+	video: TimelineElement,
+	trackIndex: number,
+	fps: number,
+) => {
+	const start = clampFrame(video.timeline.start);
+	const end = clampFrame(video.timeline.end);
+	const offset = video.timeline.offset;
+	return {
+		start,
+		end,
+		startTimecode: framesToTimecode(start, fps),
+		endTimecode: framesToTimecode(end, fps),
+		...(offset !== undefined ? { offset: clampFrame(offset) } : {}),
+		trackIndex,
+		role: "audio" as const,
+	};
+};
+
+const isLegacyVideoSourceAudioMuted = (
+	clip: TimelineElement["clip"] | undefined,
+): boolean => {
+	if (!clip) return false;
+	const legacy = clip as unknown as {
+		kind?: unknown;
+		audio?: { enabled?: unknown };
+	};
+	return legacy.kind === "video" && legacy.audio?.enabled === false;
+};
+
+const getTrackIndex = (element: TimelineElement): number => {
+	return element.timeline.trackIndex ?? MAIN_TRACK_INDEX;
+};
+
+const isTimeOverlapping = (
+	start1: number,
+	end1: number,
+	start2: number,
+	end2: number,
+): boolean => {
+	return start1 < end2 && end1 > start2;
+};
+
+const hasRoleConflictOnAudioTrack = (
+	trackIndex: number,
+	elements: TimelineElement[],
+): boolean => {
+	for (const element of elements) {
+		if (element.type === "Transition") continue;
+		if (getTrackIndex(element) !== trackIndex) continue;
+		if (element.type !== "AudioClip") {
+			return true;
+		}
+	}
+	return false;
+};
+
+const hasOverlapOnTrack = (
+	start: number,
+	end: number,
+	trackIndex: number,
+	elements: TimelineElement[],
+): boolean => {
+	for (const element of elements) {
+		if (element.type === "Transition") continue;
+		if (getTrackIndex(element) !== trackIndex) continue;
+		if (
+			isTimeOverlapping(
+				start,
+				end,
+				element.timeline.start,
+				element.timeline.end,
+			)
+		) {
+			return true;
+		}
+	}
+	return false;
+};
+
+const findAvailableAudioTrack = (
+	start: number,
+	end: number,
+	targetTrack: number,
+	elements: TimelineElement[],
+): number => {
+	let minTrack = targetTrack;
+	for (const element of elements) {
+		minTrack = Math.min(minTrack, getTrackIndex(element));
+	}
+
+	for (let track = targetTrack; track >= minTrack; track -= 1) {
+		if (hasRoleConflictOnAudioTrack(track, elements)) continue;
+		if (!hasOverlapOnTrack(start, end, track, elements)) {
+			return track;
+		}
+	}
+
+	return minTrack - 1;
+};
+
+const resolveAudioTrack = (
+	video: TimelineElement,
+	elements: TimelineElement[],
+	trackLockedMap?: Map<number, boolean>,
+): number => {
+	let targetTrack = -1;
+	let candidateTrack = -1;
+	let guard = 0;
+
+	while (guard < 256) {
+		candidateTrack = findAvailableAudioTrack(
+			video.timeline.start,
+			video.timeline.end,
+			targetTrack,
+			elements,
+		);
+		if (!trackLockedMap?.get(candidateTrack)) {
+			return candidateTrack;
+		}
+		targetTrack = Math.min(targetTrack - 1, candidateTrack - 1);
+		guard += 1;
+	}
+
+	return candidateTrack;
+};
+
+export const isVideoSourceAudioMuted = (
+	element: TimelineElement | undefined | null,
+): boolean => {
+	if (!element || element.type !== "VideoClip") return false;
+	return (
+		element.clip?.muteSourceAudio === true ||
+		isLegacyVideoSourceAudioMuted(element.clip)
+	);
+};
+
+export const setVideoSourceAudioMuted = (
+	element: TimelineElement,
+	muted: boolean,
+): TimelineElement => {
+	if (element.type !== "VideoClip") return element;
+	if (muted) {
+		if (
+			element.clip?.muteSourceAudio === true &&
+			Object.keys(element.clip).length === 1
+		) {
+			return element;
+		}
+		return {
+			...element,
+			clip: {
+				muteSourceAudio: true,
+			},
+		};
+	}
+	if (!element.clip) return element;
+	return {
+		...element,
+		clip: undefined,
+	};
+};
+
+export interface DetachVideoClipAudioOptions {
+	elements: TimelineElement[];
+	videoId: string;
+	fps: number;
+	trackLockedMap?: Map<number, boolean>;
+}
+
+export const detachVideoClipAudio = ({
+	elements,
+	videoId,
+	fps,
+	trackLockedMap,
+}: DetachVideoClipAudioOptions): TimelineElement[] => {
+	const videoIndex = elements.findIndex((element) => element.id === videoId);
+	if (videoIndex < 0) return elements;
+	const videoElement = elements[videoIndex];
+	if (videoElement.type !== "VideoClip") return elements;
+	const uri = getVideoUri(videoElement);
+	if (!uri) return elements;
+
+	const mutedVideo = setVideoSourceAudioMuted(videoElement, true);
+	const nextElements = [...elements];
+	nextElements[videoIndex] = mutedVideo;
+
+	const audioElementId = createElementId();
+	const audioTrackIndex = resolveAudioTrack(
+		videoElement,
+		nextElements,
+		trackLockedMap,
+	);
+
+	const audioElement: TimelineElement = {
+		id: audioElementId,
+		type: "AudioClip",
+		component: "audio-clip",
+		name: videoElement.name ? `${videoElement.name} 音频` : "分离音频",
+		props: {
+			uri,
+		},
+		transform: {
+			...videoElement.transform,
+		},
+		timeline: buildAudioTimelineMeta(videoElement, audioTrackIndex, fps),
+		render: {
+			zIndex: 0,
+			visible: true,
+			opacity: 1,
+		},
+		clip: {
+			sourceVideoClipId: videoElement.id,
+		},
+	};
+
+	return [...nextElements, audioElement];
+};
+
+export interface RestoreVideoClipAudioOptions {
+	elements: TimelineElement[];
+	videoId: string;
+}
+
+export const restoreVideoClipAudio = ({
+	elements,
+	videoId,
+}: RestoreVideoClipAudioOptions): TimelineElement[] => {
+	const target = elements.find((element) => element.id === videoId);
+	if (!target || target.type !== "VideoClip") return elements;
+	const restored = setVideoSourceAudioMuted(target, false);
+	if (restored === target) return elements;
+	return elements.map((element) =>
+		element.id === videoId ? restored : element,
+	);
+};

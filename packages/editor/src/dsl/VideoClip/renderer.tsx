@@ -6,7 +6,9 @@ import {
 	useRenderTime,
 	useTimelineStore,
 } from "@/editor/contexts/TimelineContext";
+import { isVideoSourceAudioMuted } from "@/editor/utils/videoClipAudioSeparation";
 import { framesToSeconds } from "@/utils/timecode";
+import { useTimelineAudioPlayback } from "../hooks/useTimelineAudioPlayback";
 import { createModelSelector } from "../model/registry";
 import { useRenderLayout } from "../useRenderLayout";
 import {
@@ -56,6 +58,9 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	const { fps } = useFps();
 	const { isPlaying } = usePlaybackControl();
 	const isExporting = useTimelineStore((state) => state.isExporting);
+	const isSourceAudioMuted = useTimelineStore((state) =>
+		isVideoSourceAudioMuted(state.getElementById(id)),
+	);
 
 	// 直接从 TimelineStore 读取元素的 timeline 数据
 	const timeline = useTimelineStore(
@@ -124,16 +129,6 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	const wasPlayingRef = useRef(false);
 	const lastVideoTimeRef = useRef<number | null>(null);
 	const wasExportingRef = useRef(false);
-	const stepAudioPlaybackRef = useRef(stepAudioPlayback);
-	const stopAudioPlaybackRef = useRef(stopAudioPlayback);
-
-	useEffect(() => {
-		stepAudioPlaybackRef.current = stepAudioPlayback;
-	}, [stepAudioPlayback]);
-
-	useEffect(() => {
-		stopAudioPlaybackRef.current = stopAudioPlayback;
-	}, [stopAudioPlayback]);
 
 	useEffect(() => {
 		// sink 切换后重置播放状态，确保重新启动流式播放
@@ -215,51 +210,16 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 		isExporting,
 	]);
 
-	useEffect(() => {
-		if (isExporting) {
-			stopAudioPlaybackRef.current();
-			return;
-		}
-		if (
-			isLoading ||
-			hasError ||
-			!props.uri ||
-			audioDuration <= 0 ||
-			!timeline
-		) {
-			stopAudioPlaybackRef.current();
-			return;
-		}
-
-		const safeFps = Number.isFinite(fps) && fps > 0 ? Math.round(fps) : 30;
-		const clipStartSeconds = framesToSeconds(timeline.start ?? 0, safeFps);
-		const clipEndSeconds = framesToSeconds(timeline.end ?? 0, safeFps);
-
-		if (isPlaying) {
-			const currentSeconds = framesToSeconds(currentTimeFrames, safeFps);
-			if (
-				currentSeconds < clipStartSeconds ||
-				currentSeconds >= clipEndSeconds
-			) {
-				stopAudioPlaybackRef.current();
-				return;
-			}
-			stepAudioPlaybackRef.current(currentSeconds);
-			return;
-		}
-
-		stopAudioPlaybackRef.current();
-	}, [
-		audioDuration,
-		currentTimeFrames,
-		fps,
-		hasError,
-		isExporting,
+	useTimelineAudioPlayback({
+		id,
+		uri: props.uri,
 		isLoading,
-		isPlaying,
-		props.uri,
-		timeline,
-	]);
+		hasError,
+		audioDuration,
+		enabled: !isSourceAudioMuted,
+		stepPlayback: stepAudioPlayback,
+		stopPlayback: stopAudioPlayback,
+	});
 
 	useEffect(() => {
 		if (isExporting) {
@@ -289,7 +249,6 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 				}
 			}
 			stopPlayback();
-			stopAudioPlaybackRef.current();
 		};
 	}, [id, isPlaying, isExporting, stopPlayback]);
 

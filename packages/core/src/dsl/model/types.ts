@@ -1,10 +1,5 @@
 import type { ReactNode } from "react";
-import type {
-	AudioClipMeta,
-	ClipMeta,
-	TimelineElement,
-	VideoClipMeta,
-} from "../types";
+import type { ClipMeta, TimelineElement } from "../types";
 
 export type PrepareFrameContext = {
 	element: TimelineElement;
@@ -89,7 +84,7 @@ export interface TimelineProps {
 	fps: number;
 }
 
-export type { ClipMeta, VideoClipMeta, AudioClipMeta };
+export type { ClipMeta };
 
-export type VideoClipModel = VideoClipMeta;
-export type AudioClipModel = AudioClipMeta;
+export type VideoClipModel = ClipMeta;
+export type AudioClipModel = ClipMeta;
