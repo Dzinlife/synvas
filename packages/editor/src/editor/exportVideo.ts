@@ -1,4 +1,7 @@
-import { exportTimelineAsVideoCore } from "core/editor/exportVideo";
+import {
+	exportTimelineAsVideoCore,
+	type ExportElementAudioSource,
+} from "core/editor/exportVideo";
 import { modelRegistry } from "@/dsl/model/registry";
 import type { TimelineElement } from "@/dsl/types";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
@@ -16,6 +19,27 @@ const waitForStaticModelsReady = async (elements: TimelineElement[]) => {
 		}
 	}
 	await Promise.all(promises);
+};
+
+type ExportAudioModelInternal = {
+	audioSink?: ExportElementAudioSource["audioSink"];
+	audioDuration?: number;
+};
+
+const getExportAudioSourceByElementId = (
+	elementId: string,
+): ExportElementAudioSource | null => {
+	const store = modelRegistry.get(elementId);
+	if (!store) return null;
+	const internal = store.getState().internal as ExportAudioModelInternal;
+	if (!internal.audioSink) return null;
+	if (!Number.isFinite(internal.audioDuration) || (internal.audioDuration ?? 0) <= 0) {
+		return null;
+	}
+	return {
+		audioSink: internal.audioSink,
+		audioDuration: internal.audioDuration ?? 0,
+	};
 };
 
 export const exportTimelineAsVideo = async (options?: {
@@ -66,6 +90,10 @@ export const exportTimelineAsVideo = async (options?: {
 			filename: options?.filename,
 			buildSkiaRenderState,
 			getModelStore: (id) => modelRegistry.get(id),
+			audio: {
+				audioTrackStates: timelineState.audioTrackStates,
+				getAudioSourceByElementId: getExportAudioSourceByElementId,
+			},
 			waitForReady: () => waitForStaticModelsReady(elements),
 			onFrame: (frame) => {
 				timelineState.setExportTime(frame);

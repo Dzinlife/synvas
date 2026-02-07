@@ -1,4 +1,4 @@
-import { resolveTransitionFrameState } from "../../../../core/src/editor/preview/transitionFrameState";
+import { resolveTransitionFrameState } from "core/editor/preview/transitionFrameState";
 import type { TransitionAudioCurve } from "../../dsl/Transition/model";
 import type { TimelineElement, TimelineMeta } from "../../dsl/types";
 import type { TimelineTrack } from "../timeline/types";

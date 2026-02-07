@@ -5,7 +5,7 @@ import type { TimelineMeta } from "../../dsl/types";
 import {
 	type AudioMixClip,
 	buildTransitionAudioMixPlan,
-} from "./transitionAudioMix";
+} from "core/editor/audio/transitionAudioMix";
 
 const FPS = 30;
 

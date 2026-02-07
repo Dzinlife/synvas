@@ -1,5 +1,6 @@
 import type { TimelineElement } from "../../dsl/types";
 import { clampFrame, framesToTimecode } from "../../utils/timecode";
+import { isVideoSourceAudioMuted as isVideoSourceAudioMutedCore } from "core/editor/utils/videoSourceAudio";
 
 const MAIN_TRACK_INDEX = 0;
 
@@ -36,17 +37,6 @@ const buildAudioTimelineMeta = (
 		trackIndex,
 		role: "audio" as const,
 	};
-};
-
-const isLegacyVideoSourceAudioMuted = (
-	clip: TimelineElement["clip"] | undefined,
-): boolean => {
-	if (!clip) return false;
-	const legacy = clip as unknown as {
-		kind?: unknown;
-		audio?: { enabled?: unknown };
-	};
-	return legacy.kind === "video" && legacy.audio?.enabled === false;
 };
 
 const getTrackIndex = (element: TimelineElement): number => {
@@ -149,11 +139,7 @@ const resolveAudioTrack = (
 export const isVideoSourceAudioMuted = (
 	element: TimelineElement | undefined | null,
 ): boolean => {
-	if (!element || element.type !== "VideoClip") return false;
-	return (
-		element.clip?.muteSourceAudio === true ||
-		isLegacyVideoSourceAudioMuted(element.clip)
-	);
+	return isVideoSourceAudioMutedCore(element);
 };
 
 export const setVideoSourceAudioMuted = (
