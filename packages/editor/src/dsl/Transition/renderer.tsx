@@ -46,9 +46,7 @@ const clampProgress = (value: number): number => {
 
 const DEFAULT_TRANSITION_DURATION = 15;
 
-const resolveTransitionDuration = (
-	element: TimelineElement | undefined,
-): number => {
+const resolveTransitionDuration = (element: TimelineElement | null): number => {
 	if (!element) return DEFAULT_TRANSITION_DURATION;
 	const metaDuration = element.transition?.duration;
 	const timelineDuration = element.timeline.end - element.timeline.start;
@@ -77,7 +75,7 @@ const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 	const canvasSize = useTimelineStore((state) => state.canvasSize);
 	const start = transitionElement?.timeline.start ?? 0;
 	const transitionDuration = resolveTransitionDuration(transitionElement);
-	const boundary = getTransitionBoundary(transitionElement);
+	const boundary = getTransitionBoundary(transitionElement!);
 
 	const computedProgress =
 		transitionDuration > 0

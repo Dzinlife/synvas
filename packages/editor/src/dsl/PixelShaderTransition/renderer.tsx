@@ -40,9 +40,7 @@ const clampProgress = (value: number): number => {
 
 const DEFAULT_TRANSITION_DURATION = 15;
 
-const resolveTransitionDuration = (
-	element: TimelineElement | undefined,
-): number => {
+const resolveTransitionDuration = (element: TimelineElement | null): number => {
 	if (!element) return DEFAULT_TRANSITION_DURATION;
 	const metaDuration = element.transition?.duration;
 
@@ -84,7 +82,6 @@ const PixelShaderTransitionRenderer: React.FC<
 			return null;
 		}
 	}, []);
-	if (!fromNode && !toNode) return null;
 
 	if (!shaderSource || !toNode) {
 		return (

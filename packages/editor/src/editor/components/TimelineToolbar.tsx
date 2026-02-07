@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import { exportCanvasAsImage } from "@/dsl/export";
 import type { TimelineElement } from "@/dsl/types";
