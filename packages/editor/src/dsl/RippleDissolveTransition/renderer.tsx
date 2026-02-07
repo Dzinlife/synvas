@@ -134,7 +134,9 @@ half4 main(float2 xy) {
   float frontier = easedT + waveBend + flutter + edgeNoise;
   float feather = softness * featherScale + featherBias;
   float rawMask = smoothstep(radius - feather, radius + feather, frontier);
-  float mask = clamp(mix(t, rawMask, transitionEnvelope), 0.0, 1.0);
+  float baseMask = smoothstep(envelopeInEnd, envelopeOutStart, t);
+  float maskBlend = transitionEnvelope * transitionEnvelope;
+  float mask = clamp(mix(baseMask, rawMask, maskBlend), 0.0, 1.0);
 
   float edgeDistance = abs(frontier - radius);
   float edgeBand = (1.0 - smoothstep(0.0, feather * edgeBandScale, edgeDistance)) * transitionEnvelope;
