@@ -162,16 +162,10 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 				Math.min(sourceStart, currentAudioDuration),
 			);
 			const decodeEnd = Math.max(0, Math.min(sourceEnd, currentAudioDuration));
-			const identityKey = [
-				uri,
-				start,
-				clipDurationFrames,
-				offsetSeconds,
-				color,
-				currentAudioDuration,
-			].join("|");
+			const identityKey = [uri, color, currentAudioDuration].join("|");
 			const requestKey = [
 				identityKey,
+				`${sourceStart.toFixed(6)}-${sourceEnd.toFixed(6)}`,
 				`${requestStartX.toFixed(3)}-${requestEndX.toFixed(3)}`,
 				requestWidth.toFixed(3),
 				canvasHeight,
@@ -282,9 +276,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 		}
 	}, [
 		uri,
-		start,
 		clipDurationSeconds,
-		clipDurationFrames,
 		offsetSeconds,
 		fps,
 		timelineScale,

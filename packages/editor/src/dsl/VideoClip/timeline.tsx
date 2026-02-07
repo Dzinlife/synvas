@@ -4,6 +4,7 @@ import {
 	useEffectEvent,
 	useLayoutEffect,
 	useRef,
+	useState,
 } from "react";
 import { AudioWaveformCanvas } from "@/dsl/AudioWaveformCanvas";
 import {
@@ -38,6 +39,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	id,
 	start,
 	end,
+	offsetFrames,
 }) => {
 	const { fps } = useFps();
 	const { timelineScale } = useTimelineScale();
@@ -88,9 +90,17 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 
 	const clipDurationFrames = end - start;
 	const clipDurationSeconds = framesToSeconds(clipDurationFrames, fps);
-	const timelineOffsetFrames = useTimelineStore(
+	const storeOffsetFrames = useTimelineStore(
 		(state) => state.getElementById(id)?.timeline?.offset ?? 0,
 	);
+	const timelineOffsetFrames = offsetFrames ?? storeOffsetFrames;
+	const isOffsetPreviewing = offsetFrames !== undefined;
+	const [renderedOffsetFrames, setRenderedOffsetFrames] = useState(
+		timelineOffsetFrames,
+	);
+	const pixelsPerFrame = getPixelsPerFrame(fps, timelineScale);
+	const pendingOffsetShiftPx =
+		(renderedOffsetFrames - timelineOffsetFrames) * pixelsPerFrame;
 	const isTrackMuted = useTimelineStore((state) =>
 		isTimelineTrackMuted(
 			state.getElementById(id)?.timeline,
@@ -298,6 +308,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			}
 			if (didDraw) {
 				lastRenderKeyRef.current = renderKey;
+				setRenderedOffsetFrames(timelineOffsetFrames);
 			}
 		} catch (err) {
 			console.error("Failed to generate thumbnails:", err);
@@ -330,6 +341,9 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	]);
 
 	const scheduleGenerate = useCallback(() => {
+		if (isOffsetPreviewing) {
+			return;
+		}
 		if (scheduleIdRef.current !== null) {
 			cancelAnimationFrame(scheduleIdRef.current);
 			scheduleIdRef.current = null;
@@ -338,12 +352,13 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			scheduleIdRef.current = null;
 			void generateThumbnails();
 		});
-	}, [generateThumbnails]);
+	}, [generateThumbnails, isOffsetPreviewing]);
 
 	useEffect(() => {
 		if (lastUriRef.current !== uri) {
 			lastUriRef.current = uri ?? null;
 			lastRenderKeyRef.current = "";
+			setRenderedOffsetFrames(timelineOffsetFrames);
 		}
 		scheduleGenerate();
 	}, [
@@ -427,6 +442,12 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 					"absolute top-0 w-full",
 					shouldShowWaveform ? "bottom-5.5" : "bottom-0",
 				)}
+				style={{
+					transform:
+						pendingOffsetShiftPx === 0
+							? undefined
+							: `translateX(${pendingOffsetShiftPx}px)`,
+				}}
 			>
 				<canvas ref={canvasRef} className="absolute inset-y-0" />
 			</div>

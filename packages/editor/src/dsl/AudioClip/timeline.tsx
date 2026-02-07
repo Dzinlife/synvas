@@ -23,6 +23,7 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 	start,
 	end,
 	fps,
+	offsetFrames,
 }) => {
 	const { timelineScale } = useTimelineScale();
 	const name = useTimelineStore((state) => state.getElementById(id)?.name);
@@ -43,9 +44,10 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 		id,
 		(state) => state.constraints.hasError ?? false,
 	);
-	const offsetFrames = useTimelineStore(
+	const storeOffsetFrames = useTimelineStore(
 		(state) => state.getElementById(id)?.timeline?.offset ?? 0,
 	);
+	const effectiveOffsetFrames = offsetFrames ?? storeOffsetFrames;
 	const isTrackMuted = useTimelineStore((state) =>
 		isTimelineTrackMuted(
 			state.getElementById(id)?.timeline,
@@ -86,7 +88,7 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 					end={end}
 					fps={safeFps}
 					timelineScale={timelineScale}
-					offsetFrames={offsetFrames}
+					offsetFrames={effectiveOffsetFrames}
 					scrollLeft={scrollLeft}
 					color={waveformColor}
 					className="absolute inset-0"

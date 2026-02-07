@@ -89,6 +89,7 @@ interface UseTimelineElementDndOptions {
 	setLocalStartTime: (time: number | null) => void;
 	setLocalEndTime: (time: number | null) => void;
 	setLocalTrackY: (y: number | null) => void;
+	setLocalOffsetFrames: (offsetFrames: number | null) => void;
 	setLocalTransitionDuration: (duration: number | null) => void;
 	stopAutoScroll: () => void;
 	updateAutoScrollFromPosition: (
@@ -345,6 +346,7 @@ export const useTimelineElementDnd = ({
 	setLocalStartTime,
 	setLocalEndTime,
 	setLocalTrackY,
+	setLocalOffsetFrames,
 	setLocalTransitionDuration,
 	stopAutoScroll,
 	updateAutoScrollFromPosition,
@@ -678,6 +680,7 @@ export const useTimelineElementDnd = ({
 						select(element.id);
 					}
 					setIsDragging(true);
+					setLocalOffsetFrames(null);
 					transitionDurationRef.current = transitionDuration;
 				}
 
@@ -719,6 +722,7 @@ export const useTimelineElementDnd = ({
 					select(element.id);
 				}
 				setIsDragging(true);
+				setLocalOffsetFrames(null);
 				dragRefs.current.initialStart = dragRefs.current.currentStart;
 				dragRefs.current.initialEnd = dragRefs.current.currentEnd;
 				dragRefs.current.initialOffset = getElementOffsetFrames(element) ?? 0;
@@ -782,6 +786,7 @@ export const useTimelineElementDnd = ({
 				if (last) {
 					setIsDragging(false);
 					setActiveSnapPoint(null);
+					setLocalOffsetFrames(null);
 					if (Math.abs(mx) > 0) {
 						const delta = newEnd - dragRefs.current.initialEnd;
 						const offsetDelta = previewStart - dragRefs.current.initialStart;
@@ -808,6 +813,16 @@ export const useTimelineElementDnd = ({
 					}
 				} else {
 					setLocalStartTime(previewStart);
+					if (supportsOffset) {
+						const previewOffset = Math.max(
+							0,
+							dragRefs.current.initialOffset +
+								(previewStart - dragRefs.current.initialStart),
+						);
+						setLocalOffsetFrames(previewOffset);
+					} else {
+						setLocalOffsetFrames(null);
+					}
 					setActiveSnapPoint(snapPoint);
 				}
 				return;
@@ -875,6 +890,7 @@ export const useTimelineElementDnd = ({
 			if (last) {
 				setIsDragging(false);
 				setActiveSnapPoint(null);
+				setLocalOffsetFrames(null);
 				if (Math.abs(mx) > 0) {
 					const offsetDelta = newStart - dragRefs.current.initialStart;
 					updateTimeRange(element.id, newStart, dragRefs.current.initialEnd, {
@@ -883,6 +899,16 @@ export const useTimelineElementDnd = ({
 				}
 			} else {
 				setLocalStartTime(newStart);
+				if (supportsOffset) {
+					const previewOffset = Math.max(
+						0,
+						dragRefs.current.initialOffset +
+							(newStart - dragRefs.current.initialStart),
+					);
+					setLocalOffsetFrames(previewOffset);
+				} else {
+					setLocalOffsetFrames(null);
+				}
 				setActiveSnapPoint(snapPoint);
 			}
 		},
@@ -901,6 +927,7 @@ export const useTimelineElementDnd = ({
 						select(element.id);
 					}
 					setIsDragging(true);
+					setLocalOffsetFrames(null);
 					transitionDurationRef.current = transitionDuration;
 				}
 
@@ -939,6 +966,7 @@ export const useTimelineElementDnd = ({
 			if (first) {
 				event?.stopPropagation();
 				setIsDragging(true);
+				setLocalOffsetFrames(null);
 				dragRefs.current.initialStart = dragRefs.current.currentStart;
 				dragRefs.current.initialEnd = dragRefs.current.currentEnd;
 			}
@@ -1068,6 +1096,7 @@ export const useTimelineElementDnd = ({
 			if (first) {
 				event?.stopPropagation();
 				setIsDragging(true);
+				setLocalOffsetFrames(null);
 				const baseSelectedIds = selectedIds.includes(element.id)
 					? selectedIds
 					: [element.id];
@@ -1750,6 +1779,7 @@ export const useTimelineElementDnd = ({
 					if (shouldUseRippleEditingMulti) {
 						setLocalStartTime(null);
 						setLocalEndTime(null);
+						setLocalOffsetFrames(null);
 						const dropStartForRippleEditing = groupSpanStart;
 
 						setElements((prev) =>
@@ -2227,6 +2257,7 @@ export const useTimelineElementDnd = ({
 				if (shouldUseRippleEditing) {
 					setLocalStartTime(null);
 					setLocalEndTime(null);
+					setLocalOffsetFrames(null);
 					if (Math.abs(mx) > 0 || Math.abs(my) > 0) {
 						const dropStartForRippleEditing =
 							getMainTrackDropStart(
@@ -2299,6 +2330,7 @@ export const useTimelineElementDnd = ({
 					setLocalStartTime(newStart);
 					setLocalEndTime(newEnd);
 					setLocalTrackY(newY);
+					setLocalOffsetFrames(null);
 				}
 				setActiveSnapPoint(shouldUseRippleEditing ? null : snapPoint);
 

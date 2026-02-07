@@ -104,6 +104,7 @@ interface ElementContentProps {
 	startTimecode: string;
 	endTimecode: string;
 	fps: number;
+	offsetFrames?: number;
 }
 
 const ElementContent: React.FC<ElementContentProps> = ({
@@ -113,6 +114,7 @@ const ElementContent: React.FC<ElementContentProps> = ({
 	startTimecode,
 	endTimecode,
 	fps,
+	offsetFrames,
 }) => {
 	const { id, type, props, component } = element;
 	const definition = componentRegistry.get(component);
@@ -131,6 +133,7 @@ const ElementContent: React.FC<ElementContentProps> = ({
 					startTimecode={startTimecode}
 					endTimecode={endTimecode}
 					fps={fps}
+					offsetFrames={offsetFrames}
 				/>
 			</div>
 		);
@@ -179,6 +182,7 @@ interface LocalDragState {
 	startTime: number | null;
 	endTime: number | null;
 	trackY: number | null;
+	offsetFrames: number | null;
 }
 
 function useLocalDragState(
@@ -191,12 +195,18 @@ function useLocalDragState(
 		startTime: null,
 		endTime: null,
 		trackY: null,
+		offsetFrames: null,
 	});
 
 	// 当基础值变化且不在拖拽时，重置本地状态
 	useEffect(() => {
 		if (!isDraggingRef.current) {
-			setLocalState({ startTime: null, endTime: null, trackY: null });
+			setLocalState({
+				startTime: null,
+				endTime: null,
+				trackY: null,
+				offsetFrames: null,
+			});
 		}
 	}, [baseStartTime, baseEndTime, baseTrackY]);
 
@@ -212,8 +222,17 @@ function useLocalDragState(
 		setLocalState((prev) => ({ ...prev, trackY: y }));
 	}, []);
 
+	const setLocalOffsetFrames = useCallback((offsetFrames: number | null) => {
+		setLocalState((prev) => ({ ...prev, offsetFrames }));
+	}, []);
+
 	const resetLocalState = useCallback(() => {
-		setLocalState({ startTime: null, endTime: null, trackY: null });
+		setLocalState({
+			startTime: null,
+			endTime: null,
+			trackY: null,
+			offsetFrames: null,
+		});
 	}, []);
 
 	return {
@@ -221,9 +240,11 @@ function useLocalDragState(
 		localStartTime: localState.startTime,
 		localEndTime: localState.endTime,
 		localTrackY: localState.trackY,
+		localOffsetFrames: localState.offsetFrames,
 		setLocalStartTime,
 		setLocalEndTime,
 		setLocalTrackY,
+		setLocalOffsetFrames,
 		resetLocalState,
 	};
 }
@@ -275,10 +296,16 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 		localStartTime,
 		localEndTime,
 		localTrackY,
+		localOffsetFrames,
 		setLocalStartTime,
 		setLocalEndTime,
 		setLocalTrackY,
-	} = useLocalDragState(timeline.start, timeline.end, trackY);
+		setLocalOffsetFrames,
+	} = useLocalDragState(
+		timeline.start,
+		timeline.end,
+		trackY,
+	);
 	const [localTransitionDuration, setLocalTransitionDuration] = useState<
 		number | null
 	>(null);
@@ -361,6 +388,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 		setLocalStartTime,
 		setLocalEndTime,
 		setLocalTrackY,
+		setLocalOffsetFrames,
 		setLocalTransitionDuration,
 		stopAutoScroll,
 		updateAutoScrollFromPosition,
@@ -450,6 +478,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 						startTimecode={startTimecode}
 						endTimecode={endTimecode}
 						fps={fps}
+						offsetFrames={localOffsetFrames ?? undefined}
 					/>
 				</div>
 			)}
