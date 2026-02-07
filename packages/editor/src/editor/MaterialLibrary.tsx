@@ -195,6 +195,19 @@ const MATERIAL_PRESETS: Record<string, MaterialPreset> = {
 		thumbnailUrl: buildSvgThumbnail("FILTER", "#0ea5e9"),
 		props: { hue: 30, saturation: 0.3, brightness: 0.1, contrast: 0.2 },
 	},
+	"filter/halation": {
+		type: "image",
+		name: "胶片光晕",
+		thumbnailUrl: buildSvgThumbnail("HALATION", "#be123c"),
+		props: {
+			intensity: 0.45,
+			threshold: 0.78,
+			radius: 8,
+			diffusion: 0.55,
+			warmness: 0.6,
+			chromaticShift: 1.2,
+		},
+	},
 	"background/cloud": {
 		type: "image",
 		name: "云层背景",

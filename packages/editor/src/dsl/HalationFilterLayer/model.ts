@@ -1,0 +1,73 @@
+import { subscribeWithSelector } from "zustand/middleware";
+import { createStore } from "zustand/vanilla";
+import type { ComponentModel, ComponentModelStore } from "../model/types";
+
+export interface HalationFilterLayerProps {
+	intensity?: number;
+	threshold?: number;
+	radius?: number;
+	diffusion?: number;
+	warmness?: number;
+	chromaticShift?: number;
+	shape?: "circle" | "rect";
+	cornerRadius?: number;
+}
+
+export type HalationFilterLayerModelStore =
+	ComponentModelStore<HalationFilterLayerProps>;
+
+export function createHalationFilterLayerModel(
+	id: string,
+	initialProps: HalationFilterLayerProps,
+): HalationFilterLayerModelStore {
+	return createStore<ComponentModel<HalationFilterLayerProps>>()(
+		subscribeWithSelector((set, _get) => ({
+			id,
+			type: "Filter",
+			props: {
+				intensity: 0.45,
+				threshold: 0.78,
+				radius: 8,
+				diffusion: 0.55,
+				warmness: 0.6,
+				chromaticShift: 1.2,
+				shape: "rect",
+				cornerRadius: 0,
+				...initialProps,
+			},
+			constraints: {
+				canTrimStart: true,
+				canTrimEnd: true,
+			},
+			internal: {},
+
+			setProps: (partial) => {
+				set((state) => ({
+					...state,
+					props: { ...state.props, ...partial },
+				}));
+				return { valid: true, errors: [] };
+			},
+
+			setConstraints: (partial) => {
+				set((state) => ({
+					...state,
+					constraints: { ...state.constraints, ...partial },
+				}));
+			},
+
+			setInternal: (partial) => {
+				set((state) => ({
+					...state,
+					internal: { ...state.internal, ...partial },
+				}));
+			},
+
+			validate: () => ({ valid: true, errors: [] }),
+
+			init: () => {},
+
+			dispose: () => {},
+		})),
+	);
+}

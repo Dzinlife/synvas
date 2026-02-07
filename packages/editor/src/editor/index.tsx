@@ -17,6 +17,7 @@ import "@/dsl/AudioClip";
 import "@/dsl/VideoClip";
 import "@/dsl/CloudBackground";
 import "@/dsl/ColorFilterLayer";
+import "@/dsl/HalationFilterLayer";
 import "@/dsl/Image";
 import "@/dsl/Lottie";
 import "@/dsl/SeaWave";
