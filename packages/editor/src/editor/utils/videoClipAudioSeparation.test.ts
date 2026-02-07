@@ -71,6 +71,18 @@ describe("videoClipAudioSeparation", () => {
 		expect(updatedVideo?.clip).toEqual({ muteSourceAudio: true });
 	});
 
+	it("无源音轨时不会执行分离", () => {
+		const video = createVideoElement("video-1");
+		const elements = [video];
+		const next = detachVideoClipAudio({
+			elements,
+			videoId: video.id,
+			fps: 30,
+			hasSourceAudioTrack: false,
+		});
+		expect(next).toBe(elements);
+	});
+
 	it("重复分离会每次新增一条 AudioClip", () => {
 		const video = createVideoElement("video-1");
 		const first = detachVideoClipAudio({

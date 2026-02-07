@@ -76,6 +76,12 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 		id,
 		(state) => state.internal.audioDuration,
 	);
+	const hasSourceAudioTrack = useVideoClipSelector(
+		id,
+		(state) => state.internal.hasSourceAudioTrack,
+	);
+	const shouldShowWaveform =
+		!isSourceAudioMuted && hasSourceAudioTrack !== false;
 
 	const getVideoSink = useEffectEvent(() => videoSink);
 	const getInput = useEffectEvent(() => input);
@@ -419,19 +425,19 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 			<div
 				className={cn(
 					"absolute top-0 w-full",
-					isSourceAudioMuted ? "bottom-0" : "bottom-5.5",
+					shouldShowWaveform ? "bottom-5.5" : "bottom-0",
 				)}
 			>
 				<canvas ref={canvasRef} className="absolute inset-y-0" />
 			</div>
-			{!isSourceAudioMuted && (
+			{shouldShowWaveform && (
 				<div
 					className={cn(
 						"absolute inset-x-0 bottom-0 h-5.5 overflow-hidden",
 						isTrackMuted ? "bg-neutral-500/20" : "bg-blue-500/20",
 					)}
 				>
-					{audioSink && audioDuration > 0 && uri && (
+					{audioSink && uri && (
 						<AudioWaveformCanvas
 							uri={uri}
 							audioSink={audioSink}

@@ -173,6 +173,7 @@ export interface DetachVideoClipAudioOptions {
 	videoId: string;
 	fps: number;
 	trackLockedMap?: Map<number, boolean>;
+	hasSourceAudioTrack?: boolean;
 }
 
 export const detachVideoClipAudio = ({
@@ -180,6 +181,7 @@ export const detachVideoClipAudio = ({
 	videoId,
 	fps,
 	trackLockedMap,
+	hasSourceAudioTrack,
 }: DetachVideoClipAudioOptions): TimelineElement[] => {
 	const videoIndex = elements.findIndex((element) => element.id === videoId);
 	if (videoIndex < 0) return elements;
@@ -187,6 +189,7 @@ export const detachVideoClipAudio = ({
 	if (videoElement.type !== "VideoClip") return elements;
 	const uri = getVideoUri(videoElement);
 	if (!uri) return elements;
+	if (hasSourceAudioTrack === false) return elements;
 
 	const mutedVideo = setVideoSourceAudioMuted(videoElement, true);
 	const nextElements = [...elements];

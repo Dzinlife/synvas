@@ -45,6 +45,7 @@ export interface VideoClipInternal {
 	playbackEpoch: number;
 	audioSink: AudioBufferSink | null;
 	audioDuration: number;
+	hasSourceAudioTrack: boolean | null;
 	// 缩略图（用于时间线预览）
 	thumbnailCanvas: HTMLCanvasElement | null;
 	// 帧缓存
@@ -742,6 +743,7 @@ export function createVideoClipModel(
 				playbackEpoch: 0,
 				audioSink: null,
 				audioDuration: 0,
+				hasSourceAudioTrack: null,
 				thumbnailCanvas: null,
 				frameCache: fallbackFrameCache,
 				seekToTime,
@@ -974,11 +976,13 @@ export function createVideoClipModel(
 						audioAssetHandle = localAudioHandle;
 
 						const audioSink = localAudioHandle.asset.createAudioSink();
+						const audioDuration = localAudioHandle?.asset.duration ?? 0;
 						set((state) => ({
 							internal: {
 								...state.internal,
 								audioSink,
-								audioDuration: localAudioHandle?.asset.duration ?? 0,
+								audioDuration,
+								hasSourceAudioTrack: audioDuration > 0,
 							},
 						}));
 					} catch (_error) {
@@ -997,6 +1001,7 @@ export function createVideoClipModel(
 								...state.internal,
 								audioSink: null,
 								audioDuration: 0,
+								hasSourceAudioTrack: false,
 							},
 						}));
 					}
@@ -1051,6 +1056,7 @@ export function createVideoClipModel(
 				internal.input = null;
 				internal.audioSink = null;
 				internal.audioDuration = 0;
+				internal.hasSourceAudioTrack = null;
 			},
 
 			waitForReady: () => {

@@ -10,6 +10,7 @@ import {
 	useState,
 } from "react";
 import { ProgressiveBlur } from "@/components/ui/progressive-blur";
+import { modelRegistry } from "@/dsl/model/registry";
 import type { TimelineElement as TimelineElementType } from "@/dsl/types";
 import TimeIndicatorCanvas from "@/editor/components/TimeIndicatorCanvas";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,22 @@ const getVideoClipUri = (
 	const uri = (element.props as { uri?: unknown } | undefined)?.uri;
 	if (typeof uri !== "string" || uri.length === 0) return null;
 	return uri;
+};
+
+const getVideoClipHasSourceAudioTrack = (
+	element: TimelineElementType | undefined,
+): boolean => {
+	if (!element || element.type !== "VideoClip") return false;
+	const model = modelRegistry.get(element.id);
+	if (!model) {
+		return true;
+	}
+	const internal = (
+		model.getState() as {
+			internal?: { hasSourceAudioTrack?: unknown };
+		}
+	).internal;
+	return internal?.hasSourceAudioTrack !== false;
 };
 
 const LOCKED_TRACK_OVERLAY_STYLE: React.CSSProperties = {
@@ -1325,8 +1342,9 @@ const TimelineEditor = () => {
 					: undefined;
 			const isSingleVideo = targetElement?.type === "VideoClip";
 			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
+			const hasSourceAudioTrack = getVideoClipHasSourceAudioTrack(targetElement);
 			const videoUri = getVideoClipUri(targetElement);
-			if (isSingleVideo) {
+			if (isSingleVideo && hasSourceAudioTrack) {
 				const isActionDisabled = !videoUri;
 				actions.splice(2, 0, {
 					key: isSourceMuted ? "restore-audio" : "detach-audio",
@@ -1345,6 +1363,7 @@ const TimelineEditor = () => {
 										videoId: targetElement.id,
 										fps,
 										trackLockedMap,
+										hasSourceAudioTrack,
 									});
 							if (updated === prev) return prev;
 							return finalizeTimelineElements(updated, postProcessOptions);
