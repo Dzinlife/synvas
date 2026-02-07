@@ -6,6 +6,11 @@ import type {
 } from "../../dsl/model/types";
 import type { TimelineElement } from "../../dsl/types";
 import type { TimelineTrack } from "../timeline/types";
+import {
+	resolveTransitionFrameState as resolveTransitionFrameStateCore,
+	type ActiveTransitionFrameState,
+	type TransitionFrameState,
+} from "./transitionFrameState";
 
 type RenderPlan = {
 	node: React.ReactNode | null;
@@ -27,6 +32,9 @@ type ResolvedComponent = {
 		context: RendererPrepareFrameContext,
 	) => Promise<void> | void;
 };
+
+export type { ActiveTransitionFrameState, TransitionFrameState };
+export { resolveTransitionFrameState } from "./transitionFrameState";
 
 export type BuildSkiaDeps = {
 	resolveComponent: (componentId: string) => ResolvedComponent | undefined;
@@ -98,43 +106,27 @@ export const buildSkiaRenderStateCore = async (
 	const canRenderTransitionPictures = Boolean(transitionPictureSize);
 	const isTransitionElement =
 		deps.isTransitionElement ?? defaultIsTransitionElement;
-
-	const isActiveTransition = (element: TimelineElement): boolean => {
-		if (!isTransitionElement(element)) return false;
-		const trackIndex = getTrackIndexForElement(element);
-		if (tracks[trackIndex]?.hidden) return false;
-		const transitionStart = element.timeline.start;
-		const transitionEnd = element.timeline.end;
-		if (displayTime < transitionStart || displayTime >= transitionEnd) {
-			return false;
-		}
-		const { fromId, toId } = element.transition ?? {};
-		if (!fromId || !toId) return false;
-		const fromElement = elementsById.get(fromId);
-		const toElement = elementsById.get(toId);
-		if (!fromElement || !toElement) return false;
-		if (isTransitionElement(fromElement) || isTransitionElement(toElement)) {
-			return false;
-		}
-		return true;
-	};
+	const transitionFrameState = resolveTransitionFrameStateCore({
+		elements,
+		displayTime,
+		tracks,
+		getTrackIndexForElement,
+		isTransitionElement,
+	});
+	const activeTransitionIds = new Set(
+		transitionFrameState.activeTransitions.map((item) => item.id),
+	);
+	const transitionHiddenIds = new Set(transitionFrameState.hiddenElementIds);
 
 	const visibleCandidates = elements.filter((el) => {
 		const trackIndex = getTrackIndexForElement(el);
 		if (tracks[trackIndex]?.hidden) return false;
 		const { start = 0, end = Infinity } = el.timeline;
 		if (isTransitionElement(el)) {
-			return isActiveTransition(el);
+			return activeTransitionIds.has(el.id);
 		}
 		return displayTime >= start && displayTime < end;
 	});
-	const transitionHiddenIds = new Set<string>();
-	for (const element of visibleCandidates) {
-		if (!isTransitionElement(element)) continue;
-		const { fromId, toId } = element.transition ?? {};
-		if (fromId) transitionHiddenIds.add(fromId);
-		if (toId) transitionHiddenIds.add(toId);
-	}
 	const visibleElements = visibleCandidates.filter((el) => {
 		if (isTransitionElement(el)) return true;
 		return !transitionHiddenIds.has(el.id);
@@ -269,6 +261,7 @@ export const buildSkiaRenderStateCore = async (
 		children,
 		orderedElements,
 		visibleElements,
+		transitionFrameState,
 		ready,
 		dispose,
 	};

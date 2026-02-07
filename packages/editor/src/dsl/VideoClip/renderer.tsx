@@ -6,9 +6,7 @@ import {
 	useRenderTime,
 	useTimelineStore,
 } from "@/editor/contexts/TimelineContext";
-import { isVideoSourceAudioMuted } from "@/editor/utils/videoClipAudioSeparation";
 import { framesToSeconds } from "@/utils/timecode";
-import { useTimelineAudioPlayback } from "../hooks/useTimelineAudioPlayback";
 import { createModelSelector } from "../model/registry";
 import { useRenderLayout } from "../useRenderLayout";
 import {
@@ -58,9 +56,6 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	const { fps } = useFps();
 	const { isPlaying } = usePlaybackControl();
 	const isExporting = useTimelineStore((state) => state.isExporting);
-	const isSourceAudioMuted = useTimelineStore((state) =>
-		isVideoSourceAudioMuted(state.getElementById(id)),
-	);
 
 	// 直接从 TimelineStore 读取元素的 timeline 数据
 	const timeline = useTimelineStore(
@@ -112,25 +107,13 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 		id,
 		(state) => state.internal.stopPlayback,
 	);
-	const audioDuration = useVideoClipSelector(
-		id,
-		(state) => state.internal.audioDuration,
-	);
-	const stepAudioPlayback = useVideoClipSelector(
-		id,
-		(state) => state.internal.stepAudioPlayback,
-	);
-	const stopAudioPlayback = useVideoClipSelector(
-		id,
-		(state) => state.internal.stopAudioPlayback,
-	);
-
 	// 跟踪播放状态
 	const wasPlayingRef = useRef(false);
 	const lastVideoTimeRef = useRef<number | null>(null);
 	const wasExportingRef = useRef(false);
 
 	useEffect(() => {
+		void playbackEpoch;
 		// sink 切换后重置播放状态，确保重新启动流式播放
 		wasPlayingRef.current = false;
 		lastVideoTimeRef.current = null;
@@ -209,17 +192,6 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 		stopPlayback,
 		isExporting,
 	]);
-
-	useTimelineAudioPlayback({
-		id,
-		uri: props.uri,
-		isLoading,
-		hasError,
-		audioDuration,
-		enabled: !isSourceAudioMuted,
-		stepPlayback: stepAudioPlayback,
-		stopPlayback: stopAudioPlayback,
-	});
 
 	useEffect(() => {
 		if (isExporting) {

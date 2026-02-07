@@ -5,6 +5,8 @@ import type { AssetHandle } from "@/dsl/assets/AssetStore";
 import { type AudioAsset, acquireAudioAsset } from "@/dsl/assets/audioAsset";
 import {
 	type AudioPlaybackController,
+	type AudioPlaybackMixInstruction,
+	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
 } from "@/editor/audio/audioPlayback";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
@@ -26,7 +28,11 @@ export interface AudioClipInternal {
 	audioDuration: number;
 	isReady: boolean;
 	playbackEpoch: number;
-	stepPlayback: (seconds: number) => Promise<void>;
+	stepPlayback: (input: AudioPlaybackStepInput) => Promise<void>;
+	setPlaybackGain: (gain: number) => void;
+	applyAudioMix: (
+		instruction: AudioPlaybackMixInstruction | null,
+	) => Promise<void>;
 	stopPlayback: () => void;
 }
 
@@ -84,13 +90,27 @@ export function createAudioClipModel(
 		};
 	};
 
-	const stepPlayback = async (timelineTimeSeconds: number): Promise<void> => {
+	const stepPlayback = async (input: AudioPlaybackStepInput): Promise<void> => {
 		if (!audioPlayback) return;
-		await audioPlayback.stepPlayback(timelineTimeSeconds);
+		await audioPlayback.stepPlayback(input);
+	};
+
+	const setPlaybackGain = (gain: number) => {
+		audioPlayback?.setGain(gain);
 	};
 
 	const stopPlayback = () => {
 		audioPlayback?.stopPlayback();
+	};
+
+	const applyAudioMix = async (
+		instruction: AudioPlaybackMixInstruction | null,
+	): Promise<void> => {
+		if (!instruction) {
+			stopPlayback();
+			return;
+		}
+		await stepPlayback(instruction);
 	};
 
 	const store = createStore<
@@ -112,6 +132,8 @@ export function createAudioClipModel(
 				isReady: false,
 				playbackEpoch: 0,
 				stepPlayback,
+				setPlaybackGain,
+				applyAudioMix,
 				stopPlayback,
 			} satisfies AudioClipInternal,
 

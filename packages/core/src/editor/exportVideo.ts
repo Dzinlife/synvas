@@ -192,7 +192,13 @@ export const exportTimelineAsVideoCore = async (
 		for (let frame = startFrame; frame < endFrame; frame += 1) {
 			options.onFrame?.(frame);
 
-			const { children, ready, dispose } =
+			const {
+				children,
+				ready,
+				dispose,
+				// 预留给后续导出音频混音；当前导出链路暂不消费。
+				transitionFrameState,
+			} =
 				await options.buildSkiaRenderState({
 						elements: options.elements,
 						displayTime: frame,
@@ -207,6 +213,7 @@ export const exportTimelineAsVideoCore = async (
 							prepareTransitionPictures: true,
 						},
 					});
+			void transitionFrameState;
 
 			await ready;
 

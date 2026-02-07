@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { TimelineAudioMixManager } from "@/editor/audio/TimelineAudioMixManager";
 import { useElements } from "@/editor/contexts/TimelineContext";
 import type { TimelineElement } from "../types";
 import { componentRegistry } from "./componentRegistry";
@@ -96,8 +97,8 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 
 			if (store) {
 				const state = store.getState();
-				const currentProps = state.props as any;
-				const newProps = element.props;
+				const currentProps = state.props as Record<string, unknown>;
+				const newProps = element.props as Record<string, unknown>;
 
 				// 检查 props 是否有变化（简单的浅比较）
 				const propsChanged = Object.keys(newProps).some(
@@ -122,5 +123,10 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 		};
 	}, []);
 
-	return <>{children}</>;
+	return (
+		<>
+			<TimelineAudioMixManager />
+			{children}
+		</>
+	);
 };

@@ -22,8 +22,24 @@ type AudioPlaybackDeps = {
 	isPlaybackEnabled?: () => boolean;
 };
 
+export type AudioPlaybackRange = {
+	start: number;
+	end: number;
+};
+
+export type AudioPlaybackMixInstruction = {
+	timelineTimeSeconds: number;
+	gain?: number;
+	activeWindow?: AudioPlaybackRange;
+	sourceTime?: number;
+	sourceRange?: AudioPlaybackRange;
+};
+
+export type AudioPlaybackStepInput = number | AudioPlaybackMixInstruction;
+
 export type AudioPlaybackController = {
-	stepPlayback: (timelineTimeSeconds: number) => Promise<void>;
+	stepPlayback: (input: AudioPlaybackStepInput) => Promise<void>;
+	setGain: (gain: number) => void;
 	stopPlayback: () => void;
 	dispose: () => void;
 };
@@ -32,6 +48,16 @@ const DEFAULT_FPS = 30;
 const PLAYBACK_BACK_JUMP_FRAMES = 3;
 const PLAYBACK_LOOKAHEAD_SECONDS = 2;
 const PLAYBACK_LOOKAHEAD_POLL_MS = 120;
+const DEFAULT_GAIN = 1;
+const GAIN_RAMP_SECONDS = 0.02;
+
+type ResolvedPlaybackInput = {
+	timelineTimeSeconds: number;
+	gain: number;
+	activeWindow: AudioPlaybackRange;
+	sourceTime: number;
+	sourceRange: AudioPlaybackRange;
+};
 
 const normalizeOffsetFrames = (offset?: number): number => {
 	if (!Number.isFinite(offset ?? NaN)) return 0;
@@ -49,6 +75,32 @@ const sleep = (ms: number) =>
 		setTimeout(resolve, ms);
 	});
 
+const clampRange = (
+	range: AudioPlaybackRange,
+	minValue: number,
+	maxValue: number,
+): AudioPlaybackRange => {
+	const start = Math.min(
+		maxValue,
+		Math.max(minValue, Number.isFinite(range.start) ? range.start : minValue),
+	);
+	const end = Math.min(
+		maxValue,
+		Math.max(start, Number.isFinite(range.end) ? range.end : maxValue),
+	);
+	return { start, end };
+};
+
+const clampValue = (value: number, start: number, end: number): number => {
+	if (!Number.isFinite(value)) return start;
+	return Math.min(end, Math.max(start, value));
+};
+
+const normalizeGain = (value: number | undefined): number => {
+	if (!Number.isFinite(value)) return DEFAULT_GAIN;
+	return Math.max(0, value ?? DEFAULT_GAIN);
+};
+
 export const createAudioPlaybackController = (
 	deps: AudioPlaybackDeps,
 ): AudioPlaybackController => {
@@ -65,6 +117,104 @@ export const createAudioPlaybackController = (
 	let clipGain: GainNode | null = null;
 	let lastPlaybackTargetTime: number | null = null;
 	const isPlaybackEnabled = () => deps.isPlaybackEnabled?.() ?? true;
+
+	const ensureClipGainNode = (): GainNode | null => {
+		if (clipGain) return clipGain;
+		clipGain = createClipGain();
+		return clipGain;
+	};
+
+	const setGainInternal = (
+		gainValue: number,
+		contextOverride?: AudioContext | null,
+	) => {
+		const gainNode = ensureClipGainNode();
+		if (!gainNode) return;
+		const context = contextOverride ?? getAudioContext();
+		if (!context) return;
+
+		const safeGain = normalizeGain(gainValue);
+		const now = context.currentTime;
+		try {
+			gainNode.gain.cancelScheduledValues(now);
+			gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+			gainNode.gain.linearRampToValueAtTime(safeGain, now + GAIN_RAMP_SECONDS);
+		} catch {
+			gainNode.gain.value = safeGain;
+		}
+	};
+
+	const resolvePlaybackInput = (
+		input: AudioPlaybackStepInput,
+		timeline: TimelineMeta,
+		fps: number,
+		audioDuration: number,
+	): ResolvedPlaybackInput => {
+		const timelineTimeSeconds =
+			typeof input === "number" ? input : input.timelineTimeSeconds;
+		const clipStartSeconds = framesToSeconds(timeline.start ?? 0, fps);
+		const clipEndSeconds = framesToSeconds(timeline.end ?? 0, fps);
+		const clipDurationSeconds = Math.max(0, clipEndSeconds - clipStartSeconds);
+		const offsetSeconds = framesToSeconds(
+			normalizeOffsetFrames(timeline.offset),
+			fps,
+		);
+
+		const fallbackSourceRange = clampRange(
+			{
+				start: offsetSeconds,
+				end: offsetSeconds + clipDurationSeconds,
+			},
+			0,
+			audioDuration,
+		);
+		const sourceRange =
+			typeof input === "number"
+				? fallbackSourceRange
+				: clampRange(
+						input.sourceRange ?? fallbackSourceRange,
+						0,
+						audioDuration,
+					);
+		const activeWindow =
+			typeof input === "number"
+				? { start: clipStartSeconds, end: clipEndSeconds }
+				: (() => {
+						const { activeWindow: inputWindow } = input;
+						const startCandidate = inputWindow?.start;
+						const start =
+							typeof startCandidate === "number" &&
+							Number.isFinite(startCandidate)
+							? startCandidate
+							: clipStartSeconds;
+						const endCandidate = inputWindow?.end;
+						const end =
+							typeof endCandidate === "number" &&
+							Number.isFinite(endCandidate)
+							? endCandidate
+							: clipEndSeconds;
+						return { start, end: Math.max(start, end) };
+					})();
+
+		const fallbackSourceTime =
+			offsetSeconds + Math.max(0, timelineTimeSeconds - clipStartSeconds);
+		const sourceTime = clampValue(
+			typeof input === "number"
+				? fallbackSourceTime
+				: (input.sourceTime ?? fallbackSourceTime),
+			sourceRange.start,
+			sourceRange.end,
+		);
+
+		return {
+			timelineTimeSeconds,
+			gain:
+				typeof input === "number" ? DEFAULT_GAIN : normalizeGain(input.gain),
+			activeWindow,
+			sourceTime,
+			sourceRange,
+		};
+	};
 
 	const stopScheduledSources = () => {
 		for (const source of scheduledSources) {
@@ -124,7 +274,9 @@ export const createAudioPlaybackController = (
 		}
 	};
 
-	const startPlayback = async (timelineTimeSeconds: number): Promise<void> => {
+	const startPlayback = async (
+		playbackInput: ResolvedPlaybackInput,
+	): Promise<void> => {
 		if (!isPlaybackEnabled()) {
 			stopPlayback();
 			return;
@@ -137,31 +289,26 @@ export const createAudioPlaybackController = (
 		const context = await ensureAudioContext();
 		if (!context) return;
 
-		if (!clipGain) {
-			clipGain = createClipGain();
-		}
-		if (!clipGain) return;
+		const gainNode = ensureClipGainNode();
+		if (!gainNode) return;
+		setGainInternal(playbackInput.gain, context);
 
 		const timeline = deps.getTimeline();
 		if (!timeline) return;
 
-		const fps = resolveFps(deps.getFps);
-		const clipStartSeconds = framesToSeconds(timeline.start ?? 0, fps);
-		const clipDurationSeconds = framesToSeconds(
-			timeline.end - timeline.start,
-			fps,
+		if (playbackInput.sourceRange.start >= playbackInput.sourceRange.end)
+			return;
+
+		const audioStart = clampValue(
+			playbackInput.sourceTime,
+			playbackInput.sourceRange.start,
+			playbackInput.sourceRange.end,
 		);
-		const offsetSeconds = framesToSeconds(
-			normalizeOffsetFrames(timeline.offset),
-			fps,
+		const audioEnd = clampValue(
+			playbackInput.sourceRange.end,
+			playbackInput.sourceRange.start,
+			audioDuration,
 		);
-		const safeDurationSeconds = Math.max(
-			0,
-			Math.min(audioDuration - offsetSeconds, clipDurationSeconds),
-		);
-		const audioStart =
-			offsetSeconds + Math.max(0, timelineTimeSeconds - clipStartSeconds);
-		const audioEnd = offsetSeconds + safeDurationSeconds;
 
 		if (!Number.isFinite(audioStart) || !Number.isFinite(audioEnd)) return;
 		if (audioStart >= audioEnd) return;
@@ -192,34 +339,48 @@ export const createAudioPlaybackController = (
 		stopScheduledSources();
 	};
 
-	const stepPlayback = async (timelineTimeSeconds: number): Promise<void> => {
+	const stepPlayback = async (input: AudioPlaybackStepInput): Promise<void> => {
 		if (!isPlaybackEnabled()) {
 			stopPlayback();
 			return;
 		}
-		if (!Number.isFinite(timelineTimeSeconds)) return;
+
+		const timeline = deps.getTimeline();
+		if (!timeline) return;
+		const fps = resolveFps(deps.getFps);
 		const { isLoading, hasError, uri, audioSink } = deps.getState();
 		if (isLoading || hasError) return;
 		if (!uri || !audioSink) return;
 
-		const timeline = deps.getTimeline();
-		if (!timeline) return;
+		const { audioDuration } = deps.getState();
+		if (!Number.isFinite(audioDuration) || audioDuration <= 0) return;
 
-		const fps = resolveFps(deps.getFps);
-		const clipStartSeconds = framesToSeconds(timeline.start ?? 0, fps);
-		const clipEndSeconds = framesToSeconds(timeline.end ?? 0, fps);
+		const playbackInput = resolvePlaybackInput(
+			input,
+			timeline,
+			fps,
+			audioDuration,
+		);
+		if (!Number.isFinite(playbackInput.timelineTimeSeconds)) return;
+
+		if (playbackInput.activeWindow.start >= playbackInput.activeWindow.end) {
+			stopPlayback();
+			return;
+		}
 		if (
-			timelineTimeSeconds < clipStartSeconds ||
-			timelineTimeSeconds >= clipEndSeconds
+			playbackInput.timelineTimeSeconds < playbackInput.activeWindow.start ||
+			playbackInput.timelineTimeSeconds >= playbackInput.activeWindow.end
 		) {
 			stopPlayback();
 			return;
 		}
 
+		setGainInternal(playbackInput.gain);
+
 		const backJumpSeconds = PLAYBACK_BACK_JUMP_FRAMES / fps;
 		if (!isPlaybackActive) {
-			await startPlayback(timelineTimeSeconds);
-			lastPlaybackTargetTime = timelineTimeSeconds;
+			await startPlayback(playbackInput);
+			lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
 			return;
 		}
 
@@ -230,37 +391,41 @@ export const createAudioPlaybackController = (
 			playbackStartContextTime === null
 		) {
 			stopPlayback();
-			await startPlayback(timelineTimeSeconds);
-			lastPlaybackTargetTime = timelineTimeSeconds;
+			await startPlayback(playbackInput);
+			lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
 			return;
 		}
 
 		if (
 			lastPlaybackTargetTime !== null &&
-			timelineTimeSeconds < lastPlaybackTargetTime - backJumpSeconds
+			playbackInput.timelineTimeSeconds <
+				lastPlaybackTargetTime - backJumpSeconds
 		) {
 			stopPlayback();
-			await startPlayback(timelineTimeSeconds);
-			lastPlaybackTargetTime = timelineTimeSeconds;
+			await startPlayback(playbackInput);
+			lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
 			return;
 		}
 
-		const offsetSeconds = framesToSeconds(
-			normalizeOffsetFrames(timeline.offset),
-			fps,
+		const audioTargetTime = clampValue(
+			playbackInput.sourceTime,
+			playbackInput.sourceRange.start,
+			playbackInput.sourceRange.end,
 		);
-		const audioTargetTime =
-			offsetSeconds + Math.max(0, timelineTimeSeconds - clipStartSeconds);
 		const audioNow =
 			playbackStartAudioTime + (context.currentTime - playbackStartContextTime);
 		if (Math.abs(audioNow - audioTargetTime) > 0.2) {
 			stopPlayback();
-			await startPlayback(timelineTimeSeconds);
-			lastPlaybackTargetTime = timelineTimeSeconds;
+			await startPlayback(playbackInput);
+			lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
 			return;
 		}
 
-		lastPlaybackTargetTime = timelineTimeSeconds;
+		lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
+	};
+
+	const setGain = (gain: number) => {
+		setGainInternal(gain);
 	};
 
 	const dispose = () => {
@@ -275,6 +440,7 @@ export const createAudioPlaybackController = (
 
 	return {
 		stepPlayback,
+		setGain,
 		stopPlayback,
 		dispose,
 	};

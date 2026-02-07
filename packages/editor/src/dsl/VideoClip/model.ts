@@ -14,6 +14,8 @@ import { acquireVideoAsset, type VideoAsset } from "@/dsl/assets/videoAsset";
 import type { TimelineElement } from "@/dsl/types";
 import {
 	type AudioPlaybackController,
+	type AudioPlaybackMixInstruction,
+	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
 } from "@/editor/audio/audioPlayback";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
@@ -58,7 +60,13 @@ export interface VideoClipInternal {
 	// 停止流式播放
 	stopPlayback: () => void;
 	// 音频播放步进
-	stepAudioPlayback: (timelineTime: number) => Promise<void>;
+	stepAudioPlayback: (input: AudioPlaybackStepInput) => Promise<void>;
+	// 音频播放增益
+	setAudioPlaybackGain: (gain: number) => void;
+	// 音频混音桥接
+	applyAudioMix: (
+		instruction: AudioPlaybackMixInstruction | null,
+	) => Promise<void>;
 	// 停止音频播放
 	stopAudioPlayback: () => void;
 }
@@ -543,14 +551,28 @@ export function createVideoClipModel(
 	};
 
 	const stepAudioPlayback = async (
-		timelineTimeSeconds: number,
+		input: AudioPlaybackStepInput,
 	): Promise<void> => {
 		if (!audioPlayback) return;
-		await audioPlayback.stepPlayback(timelineTimeSeconds);
+		await audioPlayback.stepPlayback(input);
+	};
+
+	const setAudioPlaybackGain = (gain: number) => {
+		audioPlayback?.setGain(gain);
 	};
 
 	const stopAudioPlayback = () => {
 		audioPlayback?.stopPlayback();
+	};
+
+	const applyAudioMix = async (
+		instruction: AudioPlaybackMixInstruction | null,
+	): Promise<void> => {
+		if (!instruction) {
+			stopAudioPlayback();
+			return;
+		}
+		await stepAudioPlayback(instruction);
 	};
 
 	// Seek 到指定时间的方法（用于拖动/跳转）
@@ -728,6 +750,8 @@ export function createVideoClipModel(
 				stepPlayback,
 				stopPlayback,
 				stepAudioPlayback,
+				setAudioPlaybackGain,
+				applyAudioMix,
 				stopAudioPlayback,
 			} satisfies VideoClipInternal,
 
@@ -957,7 +981,7 @@ export function createVideoClipModel(
 								audioDuration: localAudioHandle?.asset.duration ?? 0,
 							},
 						}));
-					} catch (error) {
+					} catch (_error) {
 						localAudioHandle?.release();
 						if (audioAssetHandle === localAudioHandle) {
 							audioAssetHandle = null;
