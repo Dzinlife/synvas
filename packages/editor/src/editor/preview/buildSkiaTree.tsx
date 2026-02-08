@@ -38,7 +38,10 @@ export const buildKonvaTree = (
 		const { start = 0, end = Infinity } = element.timeline;
 		const trackIndex = element.timeline.trackIndex ?? 0;
 		const trackHidden = tracks[trackIndex]?.hidden ?? false;
-		return !trackHidden && displayTime >= start && displayTime < end;
+		const renderVisible = element.render?.visible !== false;
+		return (
+			renderVisible && !trackHidden && displayTime >= start && displayTime < end
+		);
 	});
 	return sortByTrackIndex(
 		visibleElements.filter(

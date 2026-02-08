@@ -2,10 +2,7 @@ import type { TimelineElement } from "core/dsl/types";
 import type Konva from "konva";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
-import {
-	renderLayoutToTopLeft,
-	transformMetaToRenderLayout,
-} from "@/dsl/layout";
+import { transformMetaToRenderLayout } from "@/dsl/layout";
 import type { PinchState } from "../contexts/PreviewProvider";
 import type { CanvasConvertOptions } from "./utils";
 
@@ -14,6 +11,7 @@ export interface LabelLayerProps {
 	elements: TimelineElement[];
 	selectedIds: string[];
 	stageRef: React.RefObject<Konva.Stage | null>;
+	groupProxyRef?: React.RefObject<Konva.Rect | null>;
 	canvasConvertOptions: CanvasConvertOptions;
 	offsetX: number;
 	offsetY: number;
@@ -32,6 +30,7 @@ export const LabelLayer: React.FC<LabelLayerProps> = ({
 	elements,
 	selectedIds,
 	stageRef,
+	groupProxyRef,
 	canvasConvertOptions,
 	offsetX,
 	offsetY,
@@ -76,11 +75,40 @@ export const LabelLayer: React.FC<LabelLayerProps> = ({
 		> = {};
 
 		if (selectedIds.length > 1) {
-			if (
+			const groupNode = groupProxyRef?.current;
+			if (groupNode && groupNode.width() > 0 && groupNode.height() > 0) {
+				const absoluteMatrix = groupNode.getAbsoluteTransform().copy();
+				const origin = absoluteMatrix.point({ x: 0, y: 0 });
+				const xAxisEnd = absoluteMatrix.point({ x: groupNode.width(), y: 0 });
+				const yAxisEnd = absoluteMatrix.point({ x: 0, y: groupNode.height() });
+				const center = absoluteMatrix.point({
+					x: groupNode.width() / 2,
+					y: groupNode.height() / 2,
+				});
+				const screenWidth = Math.hypot(
+					xAxisEnd.x - origin.x,
+					xAxisEnd.y - origin.y,
+				);
+				const screenHeight = Math.hypot(
+					yAxisEnd.x - origin.x,
+					yAxisEnd.y - origin.y,
+				);
+				const rotation = absoluteMatrix.decompose().rotation;
+				positions["group-selection"] = {
+					screenX: center.x,
+					screenY: center.y,
+					screenWidth,
+					screenHeight,
+					canvasWidth: screenWidth / effectiveZoom,
+					canvasHeight: screenHeight / effectiveZoom,
+					rotation,
+				};
+			} else if (
 				groupProxyBox &&
 				groupProxyBox.width > 0 &&
 				groupProxyBox.height > 0
 			) {
+				// 回退到缓存框，避免 group node 尚未挂载时 label 消失
 				positions["group-selection"] = {
 					screenX: groupProxyBox.x,
 					screenY: groupProxyBox.y,
@@ -105,64 +133,55 @@ export const LabelLayer: React.FC<LabelLayerProps> = ({
 
 			if (!node) {
 				if (!el.transform) return;
-				// 如果找不到节点，使用 transform 计算的位置并转换到屏幕坐标
+				// 如果找不到节点，基于元素中心点与尺寸回退
 				const renderLayout = transformMetaToRenderLayout(
 					el.transform,
 					canvasConvertOptions.picture,
 					canvasConvertOptions.canvas,
 				);
-				const { x, y, width, height } = renderLayoutToTopLeft(renderLayout);
-				const screenX = x * effectiveZoom + offsetX;
-				const screenY = y * effectiveZoom + offsetY;
-				const screenWidth = width * effectiveZoom;
-				const screenHeight = height * effectiveZoom;
+				const screenX = renderLayout.cx * effectiveZoom + offsetX;
+				const screenY = renderLayout.cy * effectiveZoom + offsetY;
+				const screenWidth = renderLayout.w * effectiveZoom;
+				const screenHeight = renderLayout.h * effectiveZoom;
 
 				positions[el.id] = {
-					screenX: screenX + screenWidth / 2,
-					screenY: screenY + screenHeight / 2,
+					screenX,
+					screenY,
 					screenWidth,
 					screenHeight,
-					canvasWidth: width,
-					canvasHeight: height,
-					rotation: 0,
+					canvasWidth: renderLayout.w,
+					canvasHeight: renderLayout.h,
+					rotation: (renderLayout.rotation * 180) / Math.PI,
 				};
 				return;
 			}
 
-			// 从 Konva 节点获取实际位置和尺寸（Stage/屏幕坐标系）
-			const stageX = node.x();
-			const stageY = node.y();
-			const stageWidth = node.width() * node.scaleX();
-			const stageHeight = node.height() * node.scaleY();
-			const rotation = node.rotation();
+			// 从 Konva 节点矩阵获取实际中心点、尺寸与旋转
+			const absoluteMatrix = node.getAbsoluteTransform().copy();
+			const origin = absoluteMatrix.point({ x: 0, y: 0 });
+			const xAxisEnd = absoluteMatrix.point({ x: node.width(), y: 0 });
+			const yAxisEnd = absoluteMatrix.point({ x: 0, y: node.height() });
+			const center = absoluteMatrix.point({
+				x: node.width() / 2,
+				y: node.height() / 2,
+			});
+			const stageWidth = Math.hypot(
+				xAxisEnd.x - origin.x,
+				xAxisEnd.y - origin.y,
+			);
+			const stageHeight = Math.hypot(
+				yAxisEnd.x - origin.x,
+				yAxisEnd.y - origin.y,
+			);
+			const rotation = absoluteMatrix.decompose().rotation;
 
 			// 画布尺寸（用于显示）
 			const canvasWidth = stageWidth / effectiveZoom;
 			const canvasHeight = stageHeight / effectiveZoom;
 
-			// 获取 offset
-			const nodeOffsetX = node.offsetX() || 0;
-			const nodeOffsetY = node.offsetY() || 0;
-
-			// 计算旋转中心点 - Stage 坐标
-			const rotationCenterX = stageX + nodeOffsetX;
-			const rotationCenterY = stageY + nodeOffsetY;
-
-			// 计算未旋转时中心点相对于旋转中心的偏移（Stage 尺寸）
-			const centerOffsetX = stageWidth / 2 - nodeOffsetX;
-			const centerOffsetY = stageHeight / 2 - nodeOffsetY;
-
-			const rotationRad = (rotation * Math.PI) / 180;
-			const cos = Math.cos(rotationRad);
-			const sin = Math.sin(rotationRad);
-			const rotatedCenterX =
-				rotationCenterX + centerOffsetX * cos - centerOffsetY * sin;
-			const rotatedCenterY =
-				rotationCenterY + centerOffsetX * sin + centerOffsetY * cos;
-
 			positions[el.id] = {
-				screenX: rotatedCenterX,
-				screenY: rotatedCenterY,
+				screenX: center.x,
+				screenY: center.y,
 				screenWidth: stageWidth,
 				screenHeight: stageHeight,
 				canvasWidth,
@@ -176,6 +195,7 @@ export const LabelLayer: React.FC<LabelLayerProps> = ({
 		elements,
 		selectedIds,
 		stageRef,
+		groupProxyRef,
 		canvasConvertOptions,
 		pinchState,
 		zoomLevel,

@@ -101,11 +101,10 @@ export const resolveTransformToRenderLayout = (
 	pixelRatio = 1,
 ): RenderLayout => {
 	const size = resolveTransformSize(transform);
-	const anchor = transform.anchor;
 
-	// 锚点坐标转左上角坐标（项目画布坐标系）
-	const projectTopLeftX = transform.position.x - size.width * anchor.x;
-	const projectTopLeftY = transform.position.y - size.height * anchor.y;
+	// position 语义为元素中心坐标
+	const projectTopLeftX = transform.position.x - size.width / 2;
+	const projectTopLeftY = transform.position.y - size.height / 2;
 
 	// 计算缩放比例（从项目画布到渲染画布）
 	const scaleX = (canvas.width / picture.width) * pixelRatio;
@@ -142,9 +141,17 @@ export const renderLayoutToTopLeft = (
 	rotation: number;
 } => {
 	const { cx, cy, w, h, rotation } = layout;
+	const halfWidth = w / 2;
+	const halfHeight = h / 2;
+	const cos = Math.cos(rotation);
+	const sin = Math.sin(rotation);
+	const centerOffsetX = halfWidth * cos - halfHeight * sin;
+	const centerOffsetY = halfWidth * sin + halfHeight * cos;
 	return {
-		x: cx - w / 2,
-		y: cy - h / 2,
+		// 这里返回 Konva 语义下的“旋转基点左上角坐标”
+		// Konva 默认以节点左上角为旋转原点，因此需要把中心坐标反解为 top-left
+		x: cx - centerOffsetX,
+		y: cy - centerOffsetY,
 		width: w,
 		height: h,
 		rotation,

@@ -1,11 +1,7 @@
 import type { TimelineElement, TransformMeta } from "core/dsl/types";
-import type Konva from "konva";
+import Konva from "konva";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-	renderLayoutToTopLeft,
-	transformMetaToRenderLayout,
-} from "@/dsl/layout";
-import { getTransformSize } from "@/dsl/transform";
+import { transformMetaToRenderLayout } from "@/dsl/layout";
 import {
 	useMultiSelect,
 	useSnap,
@@ -34,12 +30,10 @@ type SnapComputeOptions = {
 };
 
 type TransformBase = {
-	stageWidth: number;
-	stageHeight: number;
 	canvasWidth: number;
 	canvasHeight: number;
-	scaleX: number;
-	scaleY: number;
+	localWidth: number;
+	localHeight: number;
 	effectiveZoom: number;
 	elementScaleX: number;
 	elementScaleY: number;
@@ -68,29 +62,27 @@ type Point = {
 };
 
 type GroupElementSnapshot = {
-	topLeft: Point;
-	width: number;
-	height: number;
-	rotation: number;
+	matrix: Konva.Transform;
+	localWidth: number;
+	localHeight: number;
+	elementScaleX: number;
+	elementScaleY: number;
 };
 
 type GroupTransformSnapshot = {
-	center: Point;
-	rotation: number;
-	scaleX: number;
-	scaleY: number;
-	transform: Konva.Transform;
+	groupMatrix: Konva.Transform;
 	elements: Record<string, GroupElementSnapshot>;
 };
 
-const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-const toDegrees = (radians: number) => (radians * 180) / Math.PI;
+const DEG_TO_RAD = Math.PI / 180;
+const RAD_TO_DEG = 180 / Math.PI;
 const POSITION_QUANTUM = 1e-6;
 const SIZE_QUANTUM = 1e-6;
 const SCALE_QUANTUM = 1e-6;
 const ROTATION_QUANTUM = 1e-6;
 const POSITION_INTEGER_SNAP_EPSILON = 1e-3;
 const SCALE_EPSILON = 1e-6;
+const ROTATION_DEG_EPSILON = 1e-3;
 const MIN_TRANSFORM_SIZE_STAGE = 5;
 const GUIDE_LOCK_EPSILON = 0.5;
 
@@ -121,6 +113,98 @@ const hasTransform = (
 	element: TimelineElement | null | undefined,
 ): element is TransformableTimelineElement => {
 	return Boolean(element?.transform);
+};
+
+type RectMatrixFrame = {
+	matrix: Konva.Transform;
+	width: number;
+	height: number;
+};
+
+const createCenterRectMatrix = (
+	center: Point,
+	width: number,
+	height: number,
+	rotationDeg: number,
+): RectMatrixFrame => {
+	const matrix = new Konva.Transform();
+	matrix.translate(center.x, center.y);
+	matrix.rotate(rotationDeg * DEG_TO_RAD);
+	matrix.translate(-width / 2, -height / 2);
+	return {
+		matrix,
+		width,
+		height,
+	};
+};
+
+const getRectCornersFromMatrix = (
+	matrix: Konva.Transform,
+	width: number,
+	height: number,
+): Point[] => {
+	return [
+		matrix.point({ x: 0, y: 0 }),
+		matrix.point({ x: width, y: 0 }),
+		matrix.point({ x: width, y: height }),
+		matrix.point({ x: 0, y: height }),
+	];
+};
+
+const getBoundingBoxFromPoints = (points: Point[]): CanvasRect => {
+	if (points.length === 0) {
+		return { x: 0, y: 0, width: 0, height: 0 };
+	}
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	points.forEach((point) => {
+		minX = Math.min(minX, point.x);
+		minY = Math.min(minY, point.y);
+		maxX = Math.max(maxX, point.x);
+		maxY = Math.max(maxY, point.y);
+	});
+	return {
+		x: minX,
+		y: minY,
+		width: Math.max(0, maxX - minX),
+		height: Math.max(0, maxY - minY),
+	};
+};
+
+const getMatrixMetrics = (
+	matrix: Konva.Transform,
+	localWidth: number,
+	localHeight: number,
+) => {
+	const origin = matrix.point({ x: 0, y: 0 });
+	const xAxisEnd = matrix.point({ x: localWidth, y: 0 });
+	const yAxisEnd = matrix.point({ x: 0, y: localHeight });
+	const center = matrix.point({ x: localWidth / 2, y: localHeight / 2 });
+	const decompose = matrix.decompose();
+	return {
+		center,
+		width: Math.hypot(xAxisEnd.x - origin.x, xAxisEnd.y - origin.y),
+		height: Math.hypot(yAxisEnd.x - origin.x, yAxisEnd.y - origin.y),
+		rotationDeg: decompose.rotation,
+	};
+};
+
+const createWorldToLocalMatrix = (
+	center: Point,
+	rotationDeg: number,
+): Konva.Transform => {
+	const matrix = new Konva.Transform();
+	matrix.rotate(-rotationDeg * DEG_TO_RAD);
+	matrix.translate(-center.x, -center.y);
+	return matrix;
+};
+
+const resolveRotationMagnitude = (rotationDeg: number): number => {
+	if (!Number.isFinite(rotationDeg)) return 0;
+	const normalized = ((rotationDeg % 360) + 360) % 360;
+	return Math.min(normalized, Math.abs(normalized - 360));
 };
 
 const quantize = (value: number, quantum: number): number => {
@@ -423,12 +507,13 @@ export const usePreviewInteractions = ({
 	const initialSelectedIdsRef = useRef<string[]>([]);
 	const selectionRectRef = useRef(selectionRect);
 	const dragSelectedIdsRef = useRef<string[]>([]);
-	const dragInitialPositionsRef = useRef<
-		Record<string, { x: number; y: number }>
-	>({});
-	const dragSourcePositionsRef = useRef<
-		Record<string, { x: number; y: number }>
-	>({});
+	const dragInitialCentersRef = useRef<Record<string, { x: number; y: number }>>(
+		{},
+	);
+	const dragSourceCentersRef = useRef<Record<string, { x: number; y: number }>>(
+		{},
+	);
+	const dragInitialBoundsRef = useRef<CanvasRect | null>(null);
 	const [snapGuides, setSnapGuides] = useState<SnapGuides>({
 		vertical: [],
 		horizontal: [],
@@ -594,30 +679,58 @@ export const usePreviewInteractions = ({
 		}
 	}, [selectedIds]);
 
-	const getElementCanvasBox = useCallback(
-		(el: TimelineElement): CanvasRect => {
-			if (!el.transform) {
-				return {
-					x: 0,
-					y: 0,
-					width: 0,
-					height: 0,
-				};
-			}
+	const resolveElementCanvasFrame = useCallback(
+		(element: TransformableTimelineElement): RectMatrixFrame => {
 			const renderLayout = transformMetaToRenderLayout(
-				el.transform,
+				element.transform,
 				canvasConvertOptions.picture,
 				canvasConvertOptions.canvas,
 			);
-			const { x, y, width, height } = renderLayoutToTopLeft(renderLayout);
-			return {
-				x,
-				y,
-				width,
-				height,
-			};
+			return createCenterRectMatrix(
+				{
+					x: renderLayout.cx,
+					y: renderLayout.cy,
+				},
+				renderLayout.w,
+				renderLayout.h,
+				renderLayout.rotation * RAD_TO_DEG,
+			);
 		},
 		[canvasConvertOptions],
+	);
+
+	const resolveElementStageFrame = useCallback(
+		(
+			element: TransformableTimelineElement,
+			effectiveZoom = getEffectiveZoom(),
+		): RectMatrixFrame => {
+			const canvasFrame = resolveElementCanvasFrame(element);
+			const center = canvasFrame.matrix.point({
+				x: canvasFrame.width / 2,
+				y: canvasFrame.height / 2,
+			});
+			const { stageX, stageY } = canvasToStageCoords(center.x, center.y);
+			return createCenterRectMatrix(
+				{ x: stageX, y: stageY },
+				canvasFrame.width * effectiveZoom,
+				canvasFrame.height * effectiveZoom,
+				canvasFrame.matrix.decompose().rotation,
+			);
+		},
+		[resolveElementCanvasFrame, canvasToStageCoords, getEffectiveZoom],
+	);
+
+	const getElementCanvasBox = useCallback(
+		(el: TimelineElement): CanvasRect => {
+			if (!hasTransform(el)) {
+				return { x: 0, y: 0, width: 0, height: 0 };
+			}
+			const frame = resolveElementCanvasFrame(el);
+			return getBoundingBoxFromPoints(
+				getRectCornersFromMatrix(frame.matrix, frame.width, frame.height),
+			);
+		},
+		[resolveElementCanvasFrame],
 	);
 
 	const projectGuidesToStage = useCallback(
@@ -665,108 +778,51 @@ export const usePreviewInteractions = ({
 		}
 
 		const effectiveZoom = getEffectiveZoom();
-		const corners: Point[] = [];
-
-		selectedElements.forEach((el) => {
-			const renderLayout = transformMetaToRenderLayout(
-				el.transform,
-				canvasConvertOptions.picture,
-				canvasConvertOptions.canvas,
-			);
-			const { x, y, width, height, rotation } =
-				renderLayoutToTopLeft(renderLayout);
-			const { stageX: topLeftX, stageY: topLeftY } = canvasToStageCoords(x, y);
-			const stageWidth = width * effectiveZoom;
-			const stageHeight = height * effectiveZoom;
-			const cos = Math.cos(rotation);
-			const sin = Math.sin(rotation);
-
-			corners.push(
-				{ x: topLeftX, y: topLeftY },
-				{ x: topLeftX + stageWidth * cos, y: topLeftY + stageWidth * sin },
-				{
-					x: topLeftX + stageWidth * cos - stageHeight * sin,
-					y: topLeftY + stageWidth * sin + stageHeight * cos,
-				},
-				{
-					x: topLeftX - stageHeight * sin,
-					y: topLeftY + stageHeight * cos,
-				},
+		const stageCorners: Point[] = [];
+		selectedElements.forEach((element) => {
+			const stageFrame = resolveElementStageFrame(element, effectiveZoom);
+			stageCorners.push(
+				...getRectCornersFromMatrix(
+					stageFrame.matrix,
+					stageFrame.width,
+					stageFrame.height,
+				),
 			);
 		});
-
-		if (corners.length === 0) {
+		if (stageCorners.length === 0) {
 			return null;
 		}
 
-		let groupCenter = groupCenterRef.current;
-		if (!groupCenter) {
-			let minX = Infinity;
-			let minY = Infinity;
-			let maxX = -Infinity;
-			let maxY = -Infinity;
-
-			corners.forEach((corner) => {
-				minX = Math.min(minX, corner.x);
-				minY = Math.min(minY, corner.y);
-				maxX = Math.max(maxX, corner.x);
-				maxY = Math.max(maxY, corner.y);
-			});
-
-			groupCenter = {
-				x: (minX + maxX) / 2,
-				y: (minY + maxY) / 2,
+		const axisBounds = getBoundingBoxFromPoints(stageCorners);
+		const groupCenter =
+			groupCenterRef.current ?? {
+				x: axisBounds.x + axisBounds.width / 2,
+				y: axisBounds.y + axisBounds.height / 2,
 			};
-			groupCenterRef.current = groupCenter;
-		}
-
-		const rotation = groupRotationRef.current;
-		const cos = Math.cos(-rotation);
-		const sin = Math.sin(-rotation);
-		let minX = Infinity;
-		let minY = Infinity;
-		let maxX = -Infinity;
-		let maxY = -Infinity;
-
-		corners.forEach((corner) => {
-			const dx = corner.x - groupCenter.x;
-			const dy = corner.y - groupCenter.y;
-			const localX = dx * cos - dy * sin;
-			const localY = dx * sin + dy * cos;
-			minX = Math.min(minX, localX);
-			minY = Math.min(minY, localY);
-			maxX = Math.max(maxX, localX);
-			maxY = Math.max(maxY, localY);
-		});
-
+		const rotationDeg = groupRotationRef.current;
+		const worldToLocal = createWorldToLocalMatrix(groupCenter, rotationDeg);
+		const localCorners = stageCorners.map((corner) => worldToLocal.point(corner));
+		const localBounds = getBoundingBoxFromPoints(localCorners);
 		const localCenter = {
-			x: (minX + maxX) / 2,
-			y: (minY + maxY) / 2,
+			x: localBounds.x + localBounds.width / 2,
+			y: localBounds.y + localBounds.height / 2,
 		};
-		const cosForward = Math.cos(rotation);
-		const sinForward = Math.sin(rotation);
-		const nextCenter = {
-			x:
-				groupCenter.x + localCenter.x * cosForward - localCenter.y * sinForward,
-			y:
-				groupCenter.y + localCenter.x * sinForward + localCenter.y * cosForward,
-		};
-
+		const localToWorld = worldToLocal.copy().invert();
+		const nextCenter = localToWorld.point(localCenter);
 		groupCenterRef.current = nextCenter;
 
 		return {
 			x: nextCenter.x,
 			y: nextCenter.y,
-			width: Math.max(0, maxX - minX),
-			height: Math.max(0, maxY - minY),
-			rotation: toDegrees(rotation),
+			width: localBounds.width,
+			height: localBounds.height,
+			rotation: rotationDeg,
 		};
 	}, [
-		canvasConvertOptions,
-		canvasToStageCoords,
-		getEffectiveZoom,
 		renderElements,
 		selectedIds,
+		getEffectiveZoom,
+		resolveElementStageFrame,
 	]);
 
 	useEffect(() => {
@@ -846,7 +902,9 @@ export const usePreviewInteractions = ({
 		suppressDragEndRef.current.clear();
 		dragHasMovedRef.current = false;
 		dragLastCanvasRef.current = null;
-		dragSourcePositionsRef.current = {};
+		dragSourceCentersRef.current = {};
+		dragInitialCentersRef.current = {};
+		dragInitialBoundsRef.current = null;
 		dragHistorySnapshotRef.current = null;
 	}, []);
 
@@ -866,13 +924,16 @@ export const usePreviewInteractions = ({
 		snapshots.forEach((source, sourceId) => {
 			const node = stage.findOne(`.element-${sourceId}`) as Konva.Node | null;
 			if (!node) return;
-			const { x, y } = getElementCanvasBox(source);
-			const { stageX, stageY } = canvasToStageCoords(x, y);
+			if (!source.transform) return;
+			const { stageX, stageY } = canvasToStageCoords(
+				source.transform.position.x,
+				source.transform.position.y,
+			);
 			node.position({ x: stageX, y: stageY });
 		});
 
 		stage.batchDraw();
-	}, [getElementCanvasBox, canvasToStageCoords]);
+	}, [canvasToStageCoords]);
 
 	const handleMouseDown = useCallback((id: string) => {
 		setDraggingId(id);
@@ -897,17 +958,14 @@ export const usePreviewInteractions = ({
 			}
 
 			const currentElements = useTimelineStore.getState().elements;
-			const positions: Record<string, { x: number; y: number }> = {};
+			const centers: Record<string, { x: number; y: number }> = {};
 			for (const el of currentElements) {
 				if (!nextSelectedIds.includes(el.id)) continue;
 				if (!el.transform) continue;
-				const renderLayout = transformMetaToRenderLayout(
-					el.transform,
-					canvasConvertOptions.picture,
-					canvasConvertOptions.canvas,
-				);
-				const { x, y } = renderLayoutToTopLeft(renderLayout);
-				positions[el.id] = { x, y };
+				centers[el.id] = {
+					x: el.transform.position.x,
+					y: el.transform.position.y,
+				};
 			}
 
 			const isCopyDragStart = Boolean(
@@ -915,10 +973,12 @@ export const usePreviewInteractions = ({
 			);
 			copyModeRef.current = isCopyDragStart;
 			dragHasMovedRef.current = false;
-			dragSourcePositionsRef.current = isCopyDragStart ? positions : {};
+			dragSourceCentersRef.current = isCopyDragStart ? centers : {};
+			dragInitialBoundsRef.current = null;
 
 			let dragSelectedIds = nextSelectedIds;
-			let dragPositions: Record<string, { x: number; y: number }> = {};
+			let dragCenters: Record<string, { x: number; y: number }> = {};
+			let boundsSourceIds = nextSelectedIds;
 			let draggingIndicatorId = id;
 
 			if (isCopyDragStart) {
@@ -958,13 +1018,13 @@ export const usePreviewInteractions = ({
 				// 拖拽结束后再切换选择到副本
 				// dragSelectedIds 存储副本 ID，用于在 handleDrag 中更新副本元素
 				dragSelectedIds = [...copyIds];
-				// dragPositions 存储副本 ID -> 源元素初始位置的映射
 				nextSelectedIds.forEach((sourceId) => {
 					const copyId = nextMap.get(sourceId);
-					const position = positions[sourceId];
-					if (!copyId || !position) return;
-					dragPositions[copyId] = position;
+					const center = centers[sourceId];
+					if (!copyId || !center) return;
+					dragCenters[copyId] = center;
 				});
+				boundsSourceIds = nextSelectedIds;
 
 				// 不切换选择，保持源元素被选中（Transformer 绑定到源节点）
 				draggingIndicatorId = id; // 继续使用源元素 ID
@@ -976,11 +1036,34 @@ export const usePreviewInteractions = ({
 				copySourceIdsRef.current = [];
 				copySourceSnapshotsRef.current = new Map();
 				dragAnchorIdRef.current = id;
-				dragPositions = positions;
+				dragCenters = centers;
+				boundsSourceIds = dragSelectedIds;
+			}
+
+			let minX = Infinity;
+			let minY = Infinity;
+			let maxX = -Infinity;
+			let maxY = -Infinity;
+			boundsSourceIds.forEach((selectedId) => {
+				const element = currentElements.find((el) => el.id === selectedId);
+				if (!element) return;
+				const box = getElementCanvasBox(element);
+				minX = Math.min(minX, box.x);
+				minY = Math.min(minY, box.y);
+				maxX = Math.max(maxX, box.x + box.width);
+				maxY = Math.max(maxY, box.y + box.height);
+			});
+			if (minX !== Infinity) {
+				dragInitialBoundsRef.current = {
+					x: minX,
+					y: minY,
+					width: Math.max(0, maxX - minX),
+					height: Math.max(0, maxY - minY),
+				};
 			}
 
 			dragSelectedIdsRef.current = dragSelectedIds;
-			dragInitialPositionsRef.current = dragPositions;
+			dragInitialCentersRef.current = dragCenters;
 
 			setDraggingId(draggingIndicatorId);
 			setHoveredId(draggingIndicatorId); // 拖拽开始时保持 hover 状态
@@ -988,26 +1071,24 @@ export const usePreviewInteractions = ({
 		[
 			selectedIds,
 			setSelection,
-			canvasConvertOptions,
 			captureHistorySnapshot,
 			setElementsWithoutHistory,
+			getElementCanvasBox,
 		],
 	);
 
 	const applyDragToElements = useCallback(
-		(canvasX: number, canvasY: number, anchorId?: string) => {
+		(canvasCenterX: number, canvasCenterY: number, anchorId?: string) => {
 			const dragSelectedIds = dragSelectedIdsRef.current;
-			const initialPositions = dragInitialPositionsRef.current;
+			const initialCenters = dragInitialCentersRef.current;
 			const dragAnchorId = anchorId ?? dragAnchorIdRef.current;
 			if (!dragAnchorId) return false;
 
-			const isMultiDrag =
-				dragSelectedIds.length > 1 && dragSelectedIds.includes(dragAnchorId);
-			const draggedInitial = initialPositions[dragAnchorId];
-			if (isMultiDrag && !draggedInitial) return false;
+			const anchorInitialCenter = initialCenters[dragAnchorId];
+			if (!anchorInitialCenter) return false;
 
-			const deltaX = draggedInitial ? canvasX - draggedInitial.x : 0;
-			const deltaY = draggedInitial ? canvasY - draggedInitial.y : 0;
+			const deltaX = canvasCenterX - anchorInitialCenter.x;
+			const deltaY = canvasCenterY - anchorInitialCenter.y;
 
 			const currentElements = useTimelineStore.getState().elements;
 			let didChange = false;
@@ -1016,39 +1097,15 @@ export const usePreviewInteractions = ({
 				if (!isDragged) return el;
 				if (!el.transform) return el;
 				const transform = el.transform;
-				const initial = initialPositions[el.id];
-				if (isMultiDrag && initial && draggedInitial) {
-					const nextCanvasX = initial.x + deltaX;
-					const nextCanvasY = initial.y + deltaY;
-					const size = getTransformSize(transform);
-					const updatedTransform = quantizeTransform({
-						...transform,
-						position: {
-							...transform.position,
-							x: nextCanvasX + size.width * transform.anchor.x,
-							y: nextCanvasY + size.height * transform.anchor.y,
-						},
-					});
-					if (!isTransformChanged(transform, updatedTransform)) {
-						return el;
-					}
-					didChange = true;
-					return {
-						...el,
-						transform: updatedTransform,
-					};
-				}
+				const initialCenter = initialCenters[el.id];
+				if (!initialCenter) return el;
 
-				// 使用 el.id 而不是 el.props.id
-				if (el.id !== dragAnchorId) return el;
-
-				const size = getTransformSize(transform);
 				const updatedTransform = quantizeTransform({
 					...transform,
 					position: {
 						...transform.position,
-						x: canvasX + size.width * transform.anchor.x,
-						y: canvasY + size.height * transform.anchor.y,
+						x: initialCenter.x + deltaX,
+						y: initialCenter.y + deltaY,
 					},
 				});
 				if (!isTransformChanged(transform, updatedTransform)) {
@@ -1070,119 +1127,79 @@ export const usePreviewInteractions = ({
 
 	const handleDrag = useCallback(
 		(id: string, e: Konva.KonvaEventObject<DragEvent>) => {
-			const node = e.target;
+			const node = e.target as Konva.Node;
 			const stageX = node.x();
 			const stageY = node.y();
 			const effectiveZoom = getEffectiveZoom();
-			const stageWidth = node.width() * node.scaleX();
-			const stageHeight = node.height() * node.scaleY();
 			const { canvasX: rawCanvasX, canvasY: rawCanvasY } = stageToCanvasCoords(
 				stageX,
 				stageY,
 			);
 
 			const dragSelectedIds = dragSelectedIdsRef.current;
-			const initialPositions = dragInitialPositionsRef.current;
+			const initialCenters = dragInitialCentersRef.current;
 			const dragAnchorId = dragAnchorIdRef.current ?? id;
-			const isMultiDrag =
-				dragSelectedIds.length > 1 && dragSelectedIds.includes(dragAnchorId);
-			const draggedInitial = initialPositions[dragAnchorId];
+			const draggedInitialCenter = initialCenters[dragAnchorId];
+			if (!draggedInitialCenter) return;
 
-			const currentElements = useTimelineStore.getState().elements;
-			let adjustedCanvasX = rawCanvasX;
-			let adjustedCanvasY = rawCanvasY;
-
+			let deltaCanvasX = rawCanvasX - draggedInitialCenter.x;
+			let deltaCanvasY = rawCanvasY - draggedInitialCenter.y;
 			if (snapEnabled) {
-				let movingBox: CanvasRect = {
-					x: rawCanvasX,
-					y: rawCanvasY,
-					width: stageWidth / effectiveZoom,
-					height: stageHeight / effectiveZoom,
-				};
-
-				if (isMultiDrag && draggedInitial) {
-					let minX = Infinity;
-					let minY = Infinity;
-					let maxX = -Infinity;
-					let maxY = -Infinity;
-
-					dragSelectedIds.forEach((selectedId) => {
-						const element = currentElements.find((el) => el.id === selectedId);
-						if (!hasTransform(element)) return;
-
-						const renderLayout = transformMetaToRenderLayout(
-							element.transform,
-							canvasConvertOptions.picture,
-							canvasConvertOptions.canvas,
-						);
-						const { x, y, width, height } = renderLayoutToTopLeft(renderLayout);
-						const initial = initialPositions[selectedId];
-						const baseX = initial?.x ?? x;
-						const baseY = initial?.y ?? y;
-						minX = Math.min(minX, baseX);
-						minY = Math.min(minY, baseY);
-						maxX = Math.max(maxX, baseX + width);
-						maxY = Math.max(maxY, baseY + height);
-					});
-
-					if (minX !== Infinity) {
-						const deltaCanvasX = rawCanvasX - draggedInitial.x;
-						const deltaCanvasY = rawCanvasY - draggedInitial.y;
-						movingBox = {
-							x: minX + deltaCanvasX,
-							y: minY + deltaCanvasY,
-							width: maxX - minX,
-							height: maxY - minY,
-						};
-					}
+				const initialBounds = dragInitialBoundsRef.current;
+				if (initialBounds) {
+					const movingBox: CanvasRect = {
+						x: initialBounds.x + deltaCanvasX,
+						y: initialBounds.y + deltaCanvasY,
+						width: initialBounds.width,
+						height: initialBounds.height,
+					};
+					// In copy mode, keep source elements as snap guides.
+					const snapExcludeIds = dragSelectedIds;
+					const snapThreshold =
+						SNAP_GUIDE_THRESHOLD / Math.max(effectiveZoom, 1e-6);
+					const snapResult = computeSnapResult(
+						movingBox,
+						snapExcludeIds,
+						snapThreshold,
+					);
+					deltaCanvasX += snapResult.deltaX;
+					deltaCanvasY += snapResult.deltaY;
+					setSnapGuides(projectGuidesToStage(snapResult.guides));
+				} else {
+					clearSnapGuides();
 				}
-
-				// In copy mode, keep source elements as snap guides.
-				const snapExcludeIds = dragSelectedIds;
-				const snapThreshold =
-					SNAP_GUIDE_THRESHOLD / Math.max(effectiveZoom, 1e-6);
-				const snapResult = computeSnapResult(
-					movingBox,
-					snapExcludeIds,
-					snapThreshold,
-				);
-				adjustedCanvasX += snapResult.deltaX;
-				adjustedCanvasY += snapResult.deltaY;
-				setSnapGuides(projectGuidesToStage(snapResult.guides));
 			} else {
 				clearSnapGuides();
 			}
 
+			const adjustedCanvasX = draggedInitialCenter.x + deltaCanvasX;
+			const adjustedCanvasY = draggedInitialCenter.y + deltaCanvasY;
 			const { stageX: adjustedStageX, stageY: adjustedStageY } =
 				canvasToStageCoords(adjustedCanvasX, adjustedCanvasY);
 			if (adjustedStageX !== stageX || adjustedStageY !== stageY) {
 				node.position({ x: adjustedStageX, y: adjustedStageY });
 			}
 
-			const canvasX = adjustedCanvasX;
-			const canvasY = adjustedCanvasY;
-			dragLastCanvasRef.current = { canvasX, canvasY };
+			dragLastCanvasRef.current = {
+				canvasX: adjustedCanvasX,
+				canvasY: adjustedCanvasY,
+			};
 
-			if (draggedInitial) {
-				const deltaX = canvasX - draggedInitial.x;
-				const deltaY = canvasY - draggedInitial.y;
-				if (deltaX !== 0 || deltaY !== 0) {
-					dragHasMovedRef.current = true;
-				}
+			if (deltaCanvasX !== 0 || deltaCanvasY !== 0) {
+				dragHasMovedRef.current = true;
 			}
 
 			// 在多选拖拽时，直接更新所有选中节点的 Konva 位置
 			// 这可以防止 Transformer 与元素位置不同步导致的抖动
-			if (isMultiDrag && draggedInitial) {
+			const isMultiDrag = dragSelectedIds.length > 1;
+			if (isMultiDrag) {
 				const stage = node.getStage();
-				const deltaCanvasX = canvasX - draggedInitial.x;
-				const deltaCanvasY = canvasY - draggedInitial.y;
 
 				if (copyModeRef.current) {
 					const sourceIds = copySourceIdsRef.current;
-					const sourcePositions = dragSourcePositionsRef.current;
+					const sourceCenters = dragSourceCentersRef.current;
 					sourceIds.forEach((sourceId) => {
-						const initial = sourcePositions[sourceId];
+						const initial = sourceCenters[sourceId];
 						if (!initial) return;
 
 						const otherNode = stage?.findOne(
@@ -1199,7 +1216,7 @@ export const usePreviewInteractions = ({
 				} else {
 					dragSelectedIds.forEach((selectedId) => {
 						if (selectedId === dragAnchorId) return; // 锚点节点已经更新
-						const initial = initialPositions[selectedId];
+						const initial = initialCenters[selectedId];
 						if (!initial) return;
 
 						const otherNode = stage?.findOne(
@@ -1216,13 +1233,12 @@ export const usePreviewInteractions = ({
 				}
 			}
 
-			applyDragToElements(canvasX, canvasY, dragAnchorId);
+			applyDragToElements(adjustedCanvasX, adjustedCanvasY, dragAnchorId);
 		},
 		[
 			stageToCanvasCoords,
 			snapEnabled,
 			getEffectiveZoom,
-			canvasConvertOptions,
 			canvasToStageCoords,
 			computeSnapResult,
 			clearSnapGuides,
@@ -1357,44 +1373,43 @@ export const usePreviewInteractions = ({
 	const snapshotGroupTransform = useCallback(
 		(node: Konva.Rect) => {
 			groupTransformingRef.current = true;
-			const baseCenter = { x: node.x(), y: node.y() };
-			const baseRotation = toRadians(node.rotation());
-			const baseScaleX = node.scaleX() || 1;
-			const baseScaleY = node.scaleY() || 1;
-			const baseTransform = node.getAbsoluteTransform().copy();
+			const groupMatrix = node.getAbsoluteTransform().copy();
 			const elements: Record<string, GroupElementSnapshot> = {};
+			const stage = node.getStage();
+			const currentElements = useTimelineStore.getState().elements;
 
 			selectedIds.forEach((id) => {
-				const element = renderElementsRef.current.find((el) => el.id === id);
+				const element = currentElements.find((el) => el.id === id);
 				if (!hasTransform(element)) return;
 
-				const renderLayout = transformMetaToRenderLayout(
-					element.transform,
-					canvasConvertOptions.picture,
-					canvasConvertOptions.canvas,
-				);
-				const { x, y, width, height, rotation } =
-					renderLayoutToTopLeft(renderLayout);
-				const { stageX, stageY } = canvasToStageCoords(x, y);
+				const stageNode = stage?.findOne(`.element-${id}`) as Konva.Rect | null;
+				if (stageNode) {
+					elements[id] = {
+						matrix: stageNode.getAbsoluteTransform().copy(),
+						localWidth: stageNode.width(),
+						localHeight: stageNode.height(),
+						elementScaleX: element.transform.scale.x,
+						elementScaleY: element.transform.scale.y,
+					};
+					return;
+				}
 
+				const stageFrame = resolveElementStageFrame(element);
 				elements[id] = {
-					topLeft: { x: stageX, y: stageY },
-					width,
-					height,
-					rotation,
+					matrix: stageFrame.matrix,
+					localWidth: stageFrame.width,
+					localHeight: stageFrame.height,
+					elementScaleX: element.transform.scale.x,
+					elementScaleY: element.transform.scale.y,
 				};
 			});
 
 			groupTransformSnapshotRef.current = {
-				center: baseCenter,
-				rotation: baseRotation,
-				scaleX: baseScaleX,
-				scaleY: baseScaleY,
-				transform: baseTransform,
+				groupMatrix,
 				elements,
 			};
 		},
-		[canvasConvertOptions, canvasToStageCoords, renderElementsRef, selectedIds],
+		[selectedIds, resolveElementStageFrame],
 	);
 
 	const handleGroupTransformStart = useCallback(
@@ -1418,17 +1433,10 @@ export const usePreviewInteractions = ({
 			const snapshot = groupTransformSnapshotRef.current;
 			if (!snapshot) return;
 
-			const currentCenter = { x: node.x(), y: node.y() };
-			const currentRotation = toRadians(node.rotation());
-			const currentScaleX = node.scaleX() || 1;
-			const currentScaleY = node.scaleY() || 1;
-			const currentTransform = node.getAbsoluteTransform().copy();
-			const inverseBase = snapshot.transform.copy().invert();
-			const deltaTransform = currentTransform.copy().multiply(inverseBase);
-
-			const deltaRotation = currentRotation - snapshot.rotation;
-			const scaleX = currentScaleX / snapshot.scaleX;
-			const scaleY = currentScaleY / snapshot.scaleY;
+			const currentGroupMatrix = node.getAbsoluteTransform().copy();
+			const inverseBase = snapshot.groupMatrix.copy().invert();
+			const deltaTransform = currentGroupMatrix.copy().multiply(inverseBase);
+			const effectiveZoom = Math.max(getEffectiveZoom(), SCALE_EPSILON);
 
 			const currentElements = useTimelineStore.getState().elements;
 			let didChange = false;
@@ -1438,30 +1446,34 @@ export const usePreviewInteractions = ({
 				if (!el.transform) return el;
 				const transform = el.transform;
 
-				const nextTopLeft = deltaTransform.point(base.topLeft);
-				const { canvasX: nextLeft, canvasY: nextTop } = stageToCanvasCoords(
-					nextTopLeft.x,
-					nextTopLeft.y,
+				const nextMatrix = deltaTransform.copy().multiply(base.matrix);
+				const nextMetrics = getMatrixMetrics(
+					nextMatrix,
+					base.localWidth,
+					base.localHeight,
 				);
-				const nextWidth = base.width * scaleX;
-				const nextHeight = base.height * scaleY;
-				const nextRotation = base.rotation + deltaRotation;
+				const { canvasX: nextCenterX, canvasY: nextCenterY } = stageToCanvasCoords(
+					nextMetrics.center.x,
+					nextMetrics.center.y,
+				);
+				const nextWidth = nextMetrics.width / effectiveZoom;
+				const nextHeight = nextMetrics.height / effectiveZoom;
 				const nextScaleX = resolveScaleFromSize(
 					nextWidth,
 					transform.baseSize.width,
-					transform.scale.x,
+					base.elementScaleX,
 				);
 				const nextScaleY = resolveScaleFromSize(
 					nextHeight,
 					transform.baseSize.height,
-					transform.scale.y,
+					base.elementScaleY,
 				);
 				const updatedTransform = quantizeTransform({
 					...transform,
 					position: {
 						...transform.position,
-						x: nextLeft + nextWidth * transform.anchor.x,
-						y: nextTop + nextHeight * transform.anchor.y,
+						x: nextCenterX,
+						y: nextCenterY,
 					},
 					scale: {
 						x: nextScaleX,
@@ -1469,7 +1481,7 @@ export const usePreviewInteractions = ({
 					},
 					rotation: {
 						...transform.rotation,
-						value: toDegrees(nextRotation),
+						value: nextMetrics.rotationDeg,
 					},
 				});
 				if (!isTransformChanged(transform, updatedTransform)) {
@@ -1487,11 +1499,11 @@ export const usePreviewInteractions = ({
 				setElementsWithoutHistory(newElements);
 				groupTransformHasChangedRef.current = true;
 			}
-			groupRotationRef.current = currentRotation;
-			groupCenterRef.current = currentCenter;
+			groupRotationRef.current = node.rotation();
+			groupCenterRef.current = { x: node.x(), y: node.y() };
 			setGroupProxyBox({
-				x: currentCenter.x,
-				y: currentCenter.y,
+				x: node.x(),
+				y: node.y(),
 				width: node.width(),
 				height: node.height(),
 				rotation: node.rotation(),
@@ -1500,6 +1512,7 @@ export const usePreviewInteractions = ({
 		[
 			captureHistorySnapshot,
 			snapshotGroupTransform,
+			getEffectiveZoom,
 			stageToCanvasCoords,
 			setElementsWithoutHistory,
 		],
@@ -1517,7 +1530,7 @@ export const usePreviewInteractions = ({
 				node.height(node.height() * scaleY);
 			}
 
-			groupRotationRef.current = toRadians(node.rotation());
+			groupRotationRef.current = node.rotation();
 			groupCenterRef.current = { x: node.x(), y: node.y() };
 			groupTransformSnapshotRef.current = null;
 			groupTransformingRef.current = false;
@@ -1541,7 +1554,7 @@ export const usePreviewInteractions = ({
 	// 处理 transform 事件（实时更新）
 	const handleTransformStart = useCallback(
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
-			const node = e.target as Konva.Node;
+			const node = e.target as Konva.Rect;
 			transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
 			transformHasChangedRef.current[id] = false;
 			const element = useTimelineStore
@@ -1563,18 +1576,17 @@ export const usePreviewInteractions = ({
 				}
 			}
 			const effectiveZoom = getEffectiveZoom();
-			const baseScaleX = node.scaleX() || 1;
-			const baseScaleY = node.scaleY() || 1;
-			const baseStageWidth = node.width() * baseScaleX;
-			const baseStageHeight = node.height() * baseScaleY;
+			const baseMetrics = getMatrixMetrics(
+				node.getAbsoluteTransform().copy(),
+				node.width(),
+				node.height(),
+			);
 
 			transformBaseRef.current[id] = {
-				stageWidth: baseStageWidth,
-				stageHeight: baseStageHeight,
-				canvasWidth: baseStageWidth / effectiveZoom,
-				canvasHeight: baseStageHeight / effectiveZoom,
-				scaleX: baseScaleX,
-				scaleY: baseScaleY,
+				canvasWidth: baseMetrics.width / effectiveZoom,
+				canvasHeight: baseMetrics.height / effectiveZoom,
+				localWidth: node.width(),
+				localHeight: node.height(),
 				effectiveZoom,
 				elementScaleX: element?.transform?.scale.x ?? 1,
 				elementScaleY: element?.transform?.scale.y ?? 1,
@@ -1591,7 +1603,7 @@ export const usePreviewInteractions = ({
 
 	const handleTransform = useCallback(
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
-			const node = e.target as Konva.Node;
+			const node = e.target as Konva.Rect;
 			if (!transformHistorySnapshotsRef.current[id]) {
 				transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
 				transformHasChangedRef.current[id] = false;
@@ -1599,21 +1611,20 @@ export const usePreviewInteractions = ({
 			let base = transformBaseRef.current[id];
 			if (!base) {
 				const effectiveZoom = getEffectiveZoom();
-				const baseScaleX = node.scaleX() || 1;
-				const baseScaleY = node.scaleY() || 1;
-				const baseStageWidth = node.width() * baseScaleX;
-				const baseStageHeight = node.height() * baseScaleY;
 				const element = useTimelineStore
 					.getState()
 					.elements.find((el) => el.id === id);
+				const baseMetrics = getMatrixMetrics(
+					node.getAbsoluteTransform().copy(),
+					node.width(),
+					node.height(),
+				);
 
 				base = {
-					stageWidth: baseStageWidth,
-					stageHeight: baseStageHeight,
-					canvasWidth: baseStageWidth / effectiveZoom,
-					canvasHeight: baseStageHeight / effectiveZoom,
-					scaleX: baseScaleX,
-					scaleY: baseScaleY,
+					canvasWidth: baseMetrics.width / effectiveZoom,
+					canvasHeight: baseMetrics.height / effectiveZoom,
+					localWidth: node.width(),
+					localHeight: node.height(),
 					effectiveZoom,
 					elementScaleX: element?.transform?.scale.x ?? 1,
 					elementScaleY: element?.transform?.scale.y ?? 1,
@@ -1622,19 +1633,16 @@ export const usePreviewInteractions = ({
 				transformBaseRef.current[id] = base;
 			}
 
-			const stageX = node.x();
-			const stageY = node.y();
-			const stageWidthScaled = node.width() * node.scaleX();
-			const stageHeightScaled = node.height() * node.scaleY();
-			const cachedCanvasBox = transformCanvasBoxRef.current[id];
-			const fallbackCanvasPos = stageToCanvasCoords(stageX, stageY);
-			const canvasX = cachedCanvasBox?.x ?? fallbackCanvasPos.canvasX;
-			const canvasY = cachedCanvasBox?.y ?? fallbackCanvasPos.canvasY;
-			const pictureWidthScaled =
-				cachedCanvasBox?.width ?? stageWidthScaled / base.effectiveZoom;
-			const pictureHeightScaled =
-				cachedCanvasBox?.height ?? stageHeightScaled / base.effectiveZoom;
-			const rotationDegrees = node.rotation();
+			const currentMetrics = getMatrixMetrics(
+				node.getAbsoluteTransform().copy(),
+				node.width(),
+				node.height(),
+			);
+			const pictureWidthScaled = currentMetrics.width / base.effectiveZoom;
+			const pictureHeightScaled = currentMetrics.height / base.effectiveZoom;
+			const { canvasX: canvasCenterX, canvasY: canvasCenterY } =
+				stageToCanvasCoords(currentMetrics.center.x, currentMetrics.center.y);
+			const rotationDegrees = currentMetrics.rotationDeg;
 			const activeAnchor =
 				base.activeAnchor ??
 				transformerRef.current?.getActiveAnchor?.() ??
@@ -1646,6 +1654,23 @@ export const usePreviewInteractions = ({
 				if (el.id !== id) return el;
 				if (!el.transform) return el;
 				const transform = el.transform;
+				if (activeAnchor === "rotater") {
+					const updatedTransform = quantizeTransform({
+						...transform,
+						rotation: {
+							...transform.rotation,
+							value: rotationDegrees,
+						},
+					});
+					if (!isTransformChanged(transform, updatedTransform)) {
+						return el;
+					}
+					didChange = true;
+					return {
+						...el,
+						transform: updatedTransform,
+					};
+				}
 
 				let nextScaleX = resolveScaleFromSize(
 					pictureWidthScaled,
@@ -1673,14 +1698,12 @@ export const usePreviewInteractions = ({
 				} else if (isVerticalResizeAnchor(activeAnchor)) {
 					nextScaleX = base.elementScaleX;
 				}
-				const nextWidth = transform.baseSize.width * Math.abs(nextScaleX);
-				const nextHeight = transform.baseSize.height * Math.abs(nextScaleY);
 				const updatedTransform = quantizeTransform({
 					...transform,
 					position: {
 						...transform.position,
-						x: canvasX + nextWidth * transform.anchor.x,
-						y: canvasY + nextHeight * transform.anchor.y,
+						x: canvasCenterX,
+						y: canvasCenterY,
 					},
 					scale: {
 						x: nextScaleX,
@@ -1717,30 +1740,31 @@ export const usePreviewInteractions = ({
 	// 处理 transform 结束事件
 	const handleTransformEnd = useCallback(
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
-			const node = e.target as Konva.Node;
+			const node = e.target as Konva.Rect;
 			const base = transformBaseRef.current[id];
-
-			const stageWidthScaled = node.width() * node.scaleX();
-			const stageHeightScaled = node.height() * node.scaleY();
+			const metricsBeforeReset = getMatrixMetrics(
+				node.getAbsoluteTransform().copy(),
+				node.width(),
+				node.height(),
+			);
 
 			// 重置 scale，更新 width 和 height
+			const stageWidthScaled = node.width() * node.scaleX();
+			const stageHeightScaled = node.height() * node.scaleY();
 			node.scaleX(1);
 			node.scaleY(1);
 			node.width(stageWidthScaled);
 			node.height(stageHeightScaled);
 
-			const stageX = node.x();
-			const stageY = node.y();
-			const cachedCanvasBox = transformCanvasBoxRef.current[id];
-			const fallbackCanvasPos = stageToCanvasCoords(stageX, stageY);
-			const canvasX = cachedCanvasBox?.x ?? fallbackCanvasPos.canvasX;
-			const canvasY = cachedCanvasBox?.y ?? fallbackCanvasPos.canvasY;
 			const effectiveZoom = base?.effectiveZoom ?? getEffectiveZoom();
-			const pictureWidthScaled =
-				cachedCanvasBox?.width ?? stageWidthScaled / effectiveZoom;
-			const pictureHeightScaled =
-				cachedCanvasBox?.height ?? stageHeightScaled / effectiveZoom;
-			const rotationDegrees = node.rotation();
+			const pictureWidthScaled = metricsBeforeReset.width / effectiveZoom;
+			const pictureHeightScaled = metricsBeforeReset.height / effectiveZoom;
+			const { canvasX: canvasCenterX, canvasY: canvasCenterY } =
+				stageToCanvasCoords(
+					metricsBeforeReset.center.x,
+					metricsBeforeReset.center.y,
+				);
+			const rotationDegrees = metricsBeforeReset.rotationDeg;
 			const activeAnchor =
 				base?.activeAnchor ??
 				transformerRef.current?.getActiveAnchor?.() ??
@@ -1752,6 +1776,23 @@ export const usePreviewInteractions = ({
 				if (el.id !== id) return el;
 				if (!el.transform) return el;
 				const transform = el.transform;
+				if (activeAnchor === "rotater") {
+					const updatedTransform = quantizeTransform({
+						...transform,
+						rotation: {
+							...transform.rotation,
+							value: rotationDegrees,
+						},
+					});
+					if (!isTransformChanged(transform, updatedTransform)) {
+						return el;
+					}
+					didChange = true;
+					return {
+						...el,
+						transform: updatedTransform,
+					};
+				}
 
 				let nextScaleX = resolveScaleFromSize(
 					pictureWidthScaled,
@@ -1779,14 +1820,12 @@ export const usePreviewInteractions = ({
 				} else if (isVerticalResizeAnchor(activeAnchor)) {
 					nextScaleX = base?.elementScaleX ?? transform.scale.x;
 				}
-				const nextWidth = transform.baseSize.width * Math.abs(nextScaleX);
-				const nextHeight = transform.baseSize.height * Math.abs(nextScaleY);
 				const updatedTransform = quantizeTransform({
 					...transform,
 					position: {
 						...transform.position,
-						x: canvasX + nextWidth * transform.anchor.x,
-						y: canvasY + nextHeight * transform.anchor.y,
+						x: canvasCenterX,
+						y: canvasCenterY,
 					},
 					scale: {
 						x: nextScaleX,
@@ -1907,20 +1946,7 @@ export const usePreviewInteractions = ({
 
 			const selected: string[] = [];
 			renderElements.forEach((el) => {
-				if (!el.transform) return;
-				const renderLayout = transformMetaToRenderLayout(
-					el.transform,
-					canvasConvertOptions.picture,
-					canvasConvertOptions.canvas,
-				);
-				const { x, y, width, height } = renderLayoutToTopLeft(renderLayout);
-
-				const elBox = {
-					x,
-					y,
-					width,
-					height,
-				};
+				const elBox = getElementCanvasBox(el);
 
 				if (
 					selBox.x < elBox.x + elBox.width &&
@@ -1934,7 +1960,7 @@ export const usePreviewInteractions = ({
 
 			return selected;
 		},
-		[renderElements, canvasConvertOptions],
+		[renderElements, getElementCanvasBox],
 	);
 
 	const applyMarqueeSelection = useCallback(
@@ -2026,6 +2052,22 @@ export const usePreviewInteractions = ({
 			const effectiveZoom = Math.max(getEffectiveZoom(), SCALE_EPSILON);
 			const minSizeCanvas = MIN_TRANSFORM_SIZE_STAGE / effectiveZoom;
 			const snapThreshold = SNAP_GUIDE_THRESHOLD / effectiveZoom;
+			const rotationMagnitude = resolveRotationMagnitude(
+				Number.isFinite(newBox.rotation) ? newBox.rotation : oldBox.rotation,
+			);
+
+			// 旋转场景下直接使用 Konva 的原生缩放约束，确保对向锚点保持固定
+			// 当前轴对齐 box 约束逻辑仅适用于无旋转场景
+			if (rotationMagnitude > ROTATION_DEG_EPSILON) {
+				if (
+					newBox.width < MIN_TRANSFORM_SIZE_STAGE ||
+					newBox.height < MIN_TRANSFORM_SIZE_STAGE
+				) {
+					return oldBox;
+				}
+				clearSnapGuides();
+				return newBox;
+			}
 
 			const toCanvasBox = (box: TransformerBox): CanvasRect => {
 				const { canvasX, canvasY } = stageToCanvasCoords(box.x, box.y);

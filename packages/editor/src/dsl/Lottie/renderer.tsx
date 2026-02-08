@@ -7,7 +7,6 @@ import {
 } from "@/editor/contexts/TimelineContext";
 import { framesToSeconds } from "@/utils/timecode";
 import { createModelSelector } from "../model/registry";
-import { useRenderLayout } from "../useRenderLayout";
 import type { LottieInternal, LottieProps } from "./model";
 
 interface LottieRendererProps extends LottieProps {
@@ -31,17 +30,11 @@ const Lottie: React.FC<LottieRendererProps> = ({
 	const timeline = useTimelineStore(
 		(state) => state.getElementById(id)?.timeline,
 	);
-
-	// 将中心坐标转换为左上角坐标
-	const {
-		cx,
-		cy,
-		w: width,
-		h: height,
-		rotation: rotate = 0,
-	} = useRenderLayout(id);
-	const x = cx - width / 2;
-	const y = cy - height / 2;
+	const transform = useTimelineStore(
+		(state) => state.getElementById(id)?.transform,
+	);
+	const width = transform?.baseSize.width ?? 0;
+	const height = transform?.baseSize.height ?? 0;
 
 	// 从 model 获取动画和状态
 	const animation = useLottieSelector(id, (state) => state.internal.animation);
@@ -104,12 +97,10 @@ const Lottie: React.FC<LottieRendererProps> = ({
 		return (
 			<Group>
 				<Rect
-					x={x}
-					y={y}
+					x={0}
+					y={0}
 					width={width}
 					height={height}
-					transform={[{ rotate: rotate ?? 0 }]}
-					origin={{ x, y }}
 					color={hasError ? "rgba(255, 0, 0, 0.3)" : "transparent"}
 				/>
 			</Group>
@@ -134,19 +125,11 @@ const Lottie: React.FC<LottieRendererProps> = ({
 
 	return (
 		<Group>
-			<Rect
-				x={x}
-				y={y}
-				width={width}
-				height={height}
-				transform={[{ rotate: rotate ?? 0 }]}
-				color="transparent"
-				origin={{ x, y }}
-			>
+			<Rect x={0} y={0} width={width} height={height} color="transparent">
 				<Group
 					transform={[
-						{ translateX: x + offsetX },
-						{ translateY: y + offsetY },
+						{ translateX: offsetX },
+						{ translateY: offsetY },
 						{ scale },
 					]}
 				>

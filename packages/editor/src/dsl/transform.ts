@@ -17,8 +17,8 @@ export const createTransformMeta = ({
 	height,
 	anchorX = 0.5,
 	anchorY = 0.5,
-	positionX = width * anchorX,
-	positionY = height * anchorY,
+	positionX = width / 2,
+	positionY = height / 2,
 }: CreateTransformMetaOptions): TransformMeta => {
 	return {
 		schema: "v2",

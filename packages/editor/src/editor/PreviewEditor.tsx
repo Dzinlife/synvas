@@ -18,7 +18,6 @@ import {
 } from "react-konva";
 import type { CanvasRef } from "react-skia-lite";
 import {
-	renderLayoutToTopLeft,
 	transformMetaToRenderLayout,
 } from "@/dsl/layout";
 import { usePreview } from "./contexts/PreviewProvider";
@@ -467,6 +466,7 @@ const Preview = () => {
 					elements={renderElements}
 					selectedIds={selectedIds}
 					stageRef={stageRef}
+					groupProxyRef={groupProxyRef}
 					canvasConvertOptions={canvasConvertOptions}
 					offsetX={offsetX}
 					offsetY={offsetY}
@@ -562,16 +562,17 @@ const Preview = () => {
 							canvasConvertOptions.picture,
 							canvasConvertOptions.canvas,
 						);
-						const {
-							x: canvasX,
-							y: canvasY,
-							width: canvasWidth_el,
-							height: canvasHeight_el,
-							rotation: rotate,
-						} = renderLayoutToTopLeft(renderLayout);
+						const canvasCenterX = renderLayout.cx;
+						const canvasCenterY = renderLayout.cy;
+						const canvasWidth_el = renderLayout.w;
+						const canvasHeight_el = renderLayout.h;
+						const rotate = renderLayout.rotation;
 
 						// 将画布坐标转换为 Stage 坐标
-						const { stageX, stageY } = canvasToStageCoords(canvasX, canvasY);
+						const { stageX, stageY } = canvasToStageCoords(
+							canvasCenterX,
+							canvasCenterY,
+						);
 
 						// 将画布尺寸转换为 Stage 尺寸
 						const effectiveZoom = pinchState.isPinching
@@ -599,6 +600,8 @@ const Preview = () => {
 									y={stageY}
 									width={stageWidth}
 									height={stageHeight}
+									offsetX={stageWidth / 2}
+									offsetY={stageHeight / 2}
 									fill="transparent"
 									stroke={
 										isSelected

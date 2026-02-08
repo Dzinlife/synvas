@@ -8,7 +8,6 @@ import {
 } from "@/editor/contexts/TimelineContext";
 import { framesToSeconds } from "@/utils/timecode";
 import { createModelSelector } from "../model/registry";
-import { useRenderLayout } from "../useRenderLayout";
 import {
 	calculateVideoTime,
 	type VideoClipInternal,
@@ -61,17 +60,11 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	const timeline = useTimelineStore(
 		(state) => state.getElementById(id)?.timeline,
 	);
-
-	// 将中心坐标转换为左上角坐标
-	const {
-		cx,
-		cy,
-		w: width,
-		h: height,
-		rotation: rotate = 0,
-	} = useRenderLayout(id);
-	const x = cx - width / 2;
-	const y = cy - height / 2;
+	const transform = useTimelineStore(
+		(state) => state.getElementById(id)?.transform,
+	);
+	const width = transform?.baseSize.width ?? 0;
+	const height = transform?.baseSize.height ?? 0;
 
 	// 订阅需要的状态
 	const isLoading = useVideoClipSelector(
@@ -228,7 +221,7 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	if (isLoading) {
 		return (
 			<Group>
-				<Rect x={x} y={y} width={width} height={height} color="#e5e7eb" />
+				<Rect x={0} y={0} width={width} height={height} color="#e5e7eb" />
 			</Group>
 		);
 	}
@@ -237,7 +230,7 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	if (hasError) {
 		return (
 			<Group>
-				<Rect x={x} y={y} width={width} height={height} color="#fee2e2" />
+				<Rect x={0} y={0} width={width} height={height} color="#fee2e2" />
 			</Group>
 		);
 	}
@@ -246,20 +239,18 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	return (
 		<Group>
 			<Rect
-				x={x}
-				y={y}
+				x={0}
+				y={0}
 				width={width}
 				height={height}
 				color={currentFrame ? undefined : "transparent"}
-				transform={[{ rotate }]}
-				origin={{ x, y }}
 			>
 				{currentFrame && (
 					<ImageShader
 						image={currentFrame}
 						fit="contain"
-						x={x}
-						y={y}
+						x={0}
+						y={0}
 						width={width}
 						height={height}
 					/>

@@ -1,5 +1,5 @@
 import React from "react";
-import { Fill, type SkPicture } from "react-skia-lite";
+import { Fill, Group, Skia, type SkPicture } from "react-skia-lite";
 import type {
 	ComponentModelStore,
 	RendererPrepareFrameContext,
@@ -48,6 +48,89 @@ export type BuildSkiaDeps = {
 
 const defaultIsTransitionElement = (element: TimelineElement): boolean =>
 	element.type === "Transition";
+const FILTER_ELEMENT_TYPE = "Filter";
+
+const resolveFiniteNumber = (value: unknown, fallback: number): number => {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return fallback;
+	}
+	return value;
+};
+
+const clamp01 = (value: number): number => {
+	if (!Number.isFinite(value)) return 0;
+	return Math.min(1, Math.max(0, value));
+};
+
+const resolveElementVisible = (element: TimelineElement): boolean =>
+	element.render?.visible !== false;
+
+const resolveElementOpacity = (element: TimelineElement): number =>
+	clamp01(resolveFiniteNumber(element.render?.opacity, 1));
+
+const wrapWithTransform = (
+	node: NonNullable<React.ReactNode>,
+	target: TimelineElement,
+): NonNullable<React.ReactNode> => {
+	const transform = target.transform;
+	if (!transform) return node;
+	const baseWidth = Math.max(
+		0,
+		resolveFiniteNumber(transform.baseSize.width, 0),
+	);
+	const baseHeight = Math.max(
+		0,
+		resolveFiniteNumber(transform.baseSize.height, 0),
+	);
+	const anchorX =
+		clamp01(resolveFiniteNumber(transform.anchor.x, 0.5)) * baseWidth;
+	const anchorY =
+		clamp01(resolveFiniteNumber(transform.anchor.y, 0.5)) * baseHeight;
+	const centerX = baseWidth * 0.5;
+	const centerY = baseHeight * 0.5;
+	const anchorOffsetX = anchorX - centerX;
+	const anchorOffsetY = anchorY - centerY;
+	const positionX = resolveFiniteNumber(transform.position.x, 0);
+	const positionY = resolveFiniteNumber(transform.position.y, 0);
+	const scaleX = resolveFiniteNumber(transform.scale.x, 1);
+	const scaleY = resolveFiniteNumber(transform.scale.y, 1);
+	const rotate =
+		(resolveFiniteNumber(transform.rotation.value, 0) * Math.PI) / 180;
+	const matrix = Skia.Matrix();
+
+	// position 定义为元素中心；anchor 的正反位移在渲染阶段抵消，避免修改 anchor 导致元素平移
+	matrix.translate(positionX, positionY);
+	matrix.translate(-anchorOffsetX, -anchorOffsetY);
+	matrix.rotate(rotate);
+	matrix.scale(scaleX, scaleY);
+	matrix.translate(anchorOffsetX, anchorOffsetY);
+	matrix.translate(-centerX, -centerY);
+
+	return <Group matrix={matrix}>{node}</Group>;
+};
+
+const wrapElementNode = ({
+	target,
+	node,
+	isTransitionElement,
+}: {
+	target: TimelineElement;
+	node: React.ReactNode | null;
+	isTransitionElement: (element: TimelineElement) => boolean;
+}): React.ReactNode | null => {
+	if (node === null || node === undefined || node === false) return null;
+
+	let wrapped: NonNullable<React.ReactNode> = node;
+	if (!isTransitionElement(target) && target.type !== FILTER_ELEMENT_TYPE) {
+		wrapped = wrapWithTransform(wrapped, target);
+	}
+
+	const opacity = resolveElementOpacity(target);
+	if (opacity !== 1) {
+		wrapped = <Group opacity={opacity}>{wrapped}</Group>;
+	}
+	return wrapped;
+};
 
 const renderElementNode = (
 	target: TimelineElement,
@@ -88,7 +171,10 @@ export const buildSkiaRenderStateCore = async (
 	},
 	deps: BuildSkiaDeps,
 ) => {
-	const elementsById = new Map(elements.map((el) => [el.id, el] as const));
+	const visibleElementsForRender = elements.filter(resolveElementVisible);
+	const elementsById = new Map(
+		visibleElementsForRender.map((el) => [el.id, el] as const),
+	);
 	const isExporting = prepare?.isExporting ?? false;
 	const fps = prepare?.fps ?? 0;
 	const canvasSize = prepare?.canvasSize;
@@ -107,7 +193,7 @@ export const buildSkiaRenderStateCore = async (
 	const isTransitionElement =
 		deps.isTransitionElement ?? defaultIsTransitionElement;
 	const transitionFrameState = resolveTransitionFrameStateCore({
-		elements,
+		elements: visibleElementsForRender,
 		displayTime,
 		tracks,
 		getTrackIndexForElement,
@@ -118,7 +204,7 @@ export const buildSkiaRenderStateCore = async (
 	);
 	const transitionHiddenIds = new Set(transitionFrameState.hiddenElementIds);
 
-	const visibleCandidates = elements.filter((el) => {
+	const visibleCandidates = visibleElementsForRender.filter((el) => {
 		const trackIndex = getTrackIndexForElement(el);
 		if (tracks[trackIndex]?.hidden) return false;
 		const { start = 0, end = Infinity } = el.timeline;
@@ -158,7 +244,11 @@ export const buildSkiaRenderStateCore = async (
 		target: TimelineElement,
 		shouldPrepare: boolean,
 	): RenderPlan => {
-		const content = renderElementNode(target, deps);
+		const content = wrapElementNode({
+			target,
+			node: renderElementNode(target, deps),
+			isTransitionElement,
+		});
 		// 转场渲染需要 picture 时，提前准备帧避免画面停在旧帧
 		const ready = shouldPrepare
 			? runPrepareRenderFrame(target, undefined, !isExporting)
@@ -220,7 +310,7 @@ export const buildSkiaRenderStateCore = async (
 			}
 		}
 		const TransitionRenderer = transitionDef.Renderer;
-		const node = (
+		const transitionNode = (
 			<TransitionRenderer
 				key={element.id}
 				id={element.id}
@@ -231,6 +321,11 @@ export const buildSkiaRenderStateCore = async (
 				toPicture={toPicture}
 			/>
 		);
+		const node = wrapElementNode({
+			target: element,
+			node: transitionNode,
+			isTransitionElement,
+		});
 		const ready = Promise.all([
 			elementReady,
 			runPrepareRenderFrame(element, {

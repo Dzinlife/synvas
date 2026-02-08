@@ -1,6 +1,6 @@
 import { Group, ImageShader, Rect } from "react-skia-lite";
+import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import { createModelSelector } from "../model/registry";
-import { useRenderLayout } from "../useRenderLayout";
 import type { ImageInternal, ImageProps } from "./model";
 
 interface ImageRendererProps extends ImageProps {
@@ -10,11 +10,11 @@ interface ImageRendererProps extends ImageProps {
 const useImageSelector = createModelSelector<ImageProps, ImageInternal>();
 
 const ImageRenderer: React.FC<ImageRendererProps> = ({ id }) => {
-	const renderLayout = useRenderLayout(id);
-	// 将中心坐标转换为左上角坐标
-	const { cx, cy, w: width, h: height, rotation: rotate = 0 } = renderLayout;
-	const x = cx - width / 2;
-	const y = cy - height / 2;
+	const transform = useTimelineStore(
+		(state) => state.getElementById(id)?.transform,
+	);
+	const width = transform?.baseSize.width ?? 0;
+	const height = transform?.baseSize.height ?? 0;
 
 	// 订阅需要的状态
 	const isLoading = useImageSelector(
@@ -31,7 +31,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ id }) => {
 	if (isLoading) {
 		return (
 			<Group>
-				<Rect x={x} y={y} width={width} height={height} color="#e5e7eb" />
+				<Rect x={0} y={0} width={width} height={height} color="#e5e7eb" />
 			</Group>
 		);
 	}
@@ -40,7 +40,7 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ id }) => {
 	if (hasError) {
 		return (
 			<Group>
-				<Rect x={x} y={y} width={width} height={height} color="#fee2e2" />
+				<Rect x={0} y={0} width={width} height={height} color="#fee2e2" />
 			</Group>
 		);
 	}
@@ -48,20 +48,13 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ id }) => {
 	// 正常渲染
 	return (
 		<Group>
-			<Rect
-				x={x}
-				y={y}
-				width={width}
-				height={height}
-				transform={[{ rotate }]}
-				origin={{ x, y }}
-			>
+			<Rect x={0} y={0} width={width} height={height}>
 				{image && (
 					<ImageShader
 						image={image}
 						fit="contain"
-						x={x}
-						y={y}
+						x={0}
+						y={0}
 						width={width}
 						height={height}
 					/>
