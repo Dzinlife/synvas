@@ -133,7 +133,6 @@ export const ELEMENT_TYPE_VALUES = [
 	"Caption",
 	"Text",
 	"Image",
-	"Background",
 ] as const;
 
 export type ElementType = (typeof ELEMENT_TYPE_VALUES)[number];

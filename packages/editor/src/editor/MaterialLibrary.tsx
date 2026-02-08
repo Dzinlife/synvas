@@ -209,16 +209,6 @@ const MATERIAL_PRESETS: Record<string, MaterialPreset> = {
 			chromaticShift: 1.2,
 		},
 	},
-	"background/cloud": {
-		type: "image",
-		name: "云层背景",
-		thumbnailUrl: buildSvgThumbnail("CLOUD", "#38bdf8"),
-	},
-	"background/sea-wave": {
-		type: "image",
-		name: "海浪背景",
-		thumbnailUrl: buildSvgThumbnail("SEA", "#1e40af"),
-	},
 	"transition/crossfade": {
 		type: "transition",
 		name: "Crossfade",
