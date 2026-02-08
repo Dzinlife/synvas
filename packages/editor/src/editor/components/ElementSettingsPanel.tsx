@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useModelSafe, useModelSelectorSafe } from "@/dsl/model";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
+import { getTransformSize } from "@/dsl/transform";
 import { framesToTimecode } from "@/utils/timecode";
 import {
 	useElements,
@@ -81,6 +82,7 @@ const ElementSettingsPanel: React.FC = () => {
 	if (!selectedElement) {
 		return <div className="text-xs text-neutral-500">未选中元素</div>;
 	}
+	const transformSize = getTransformSize(selectedElement.transform);
 
 	return (
 		<div className="space-y-3">
@@ -123,18 +125,24 @@ const ElementSettingsPanel: React.FC = () => {
 						End: {selectedElement.timeline.end}f (
 						{selectedElement.timeline.endTimecode})
 					</div>
-					<div>
-						Duration: {durationFrames}f ({framesToTimecode(durationFrames, fps)}
-						)
-					</div>
-					<div>Transform:</div>
-					<div>CenterX: {selectedElement.transform.centerX}</div>
-					<div>CenterY: {selectedElement.transform.centerY}</div>
-					<div>Width: {selectedElement.transform.width}</div>
-					<div>Height: {selectedElement.transform.height}</div>
-					<div>Rotation: {selectedElement.transform.rotation}</div>
-					<div>
-						Max Duration:{" "}
+						<div>
+							Duration: {durationFrames}f ({framesToTimecode(durationFrames, fps)}
+							)
+						</div>
+						<div>Transform:</div>
+						<div>PositionX: {selectedElement.transform.position.x}</div>
+						<div>PositionY: {selectedElement.transform.position.y}</div>
+						<div>AnchorX: {selectedElement.transform.anchor.x}</div>
+						<div>AnchorY: {selectedElement.transform.anchor.y}</div>
+						<div>BaseWidth: {selectedElement.transform.baseSize.width}</div>
+						<div>BaseHeight: {selectedElement.transform.baseSize.height}</div>
+						<div>ScaleX: {selectedElement.transform.scale.x}</div>
+						<div>ScaleY: {selectedElement.transform.scale.y}</div>
+						<div>Width: {transformSize.width}</div>
+						<div>Height: {transformSize.height}</div>
+						<div>Rotation(deg): {selectedElement.transform.rotation.value}</div>
+						<div>
+							Max Duration:{" "}
 						{constraints.maxDuration !== undefined
 							? `${constraints.maxDuration}f (${framesToTimecode(
 									constraints.maxDuration,

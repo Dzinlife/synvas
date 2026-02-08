@@ -292,8 +292,8 @@ export function getPreviewDropTargetFromScreenPosition(
 
 	return {
 		zone: "preview",
-		canvasX: topLeftX - pictureWidth / 2,
-		canvasY: topLeftY - pictureHeight / 2,
+		canvasX: topLeftX,
+		canvasY: topLeftY,
 		canDrop: isInBounds,
 	};
 }

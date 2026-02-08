@@ -1,12 +1,6 @@
 import { Input } from "@/components/ui/input";
-import {
-	NumberField,
-	NumberFieldDecrement,
-	NumberFieldGroup,
-	NumberFieldIncrement,
-	NumberFieldInput,
-} from "@/components/ui/number-field";
 import { Slider } from "@/components/ui/slider";
+import { getTransformSize } from "@/dsl/transform";
 import type { DSLComponentSettingProps } from "../model/componentRegistry";
 import {
 	HALATION_FILTER_DEFAULT_PROPS,
@@ -28,13 +22,6 @@ const resolveNumber = (
 		return clampNumber(fallback, min, max);
 	}
 	return clampNumber(value, min, max);
-};
-
-const getStepPrecision = (step: number): number => {
-	const stepText = step.toString();
-	const dotIndex = stepText.indexOf(".");
-	if (dotIndex < 0) return 0;
-	return stepText.length - dotIndex - 1;
 };
 
 interface NumberControlProps {
@@ -132,9 +119,10 @@ export const HalationFilterLayerSetting: React.FC<
 		element.props.shape === "circle" || element.props.shape === "rect"
 			? element.props.shape
 			: HALATION_FILTER_DEFAULT_PROPS.shape;
+	const transformSize = getTransformSize(element.transform);
 	const cornerRadiusMax = Math.max(
 		0,
-		Math.min(element.transform.width, element.transform.height) / 2,
+		Math.min(transformSize.width, transformSize.height) / 2,
 	);
 	const cornerRadius = resolveNumber(
 		element.props.cornerRadius,

@@ -4,7 +4,8 @@ import {
 	renderLayoutToTopLeft,
 	transformMetaToRenderLayout,
 } from "@/dsl/layout";
-import type { TimelineElement } from "@/dsl/types";
+import { getTransformSize } from "@/dsl/transform";
+import type { TimelineElement, TransformMeta } from "@/dsl/types";
 import {
 	useMultiSelect,
 	useSnap,
@@ -40,6 +41,9 @@ type TransformBase = {
 	scaleX: number;
 	scaleY: number;
 	effectiveZoom: number;
+	elementScaleX: number;
+	elementScaleY: number;
+	activeAnchor: string | null;
 };
 
 type SelectionRect = {
@@ -81,13 +85,150 @@ type GroupTransformSnapshot = {
 
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 const toDegrees = (radians: number) => (radians * 180) / Math.PI;
+const POSITION_QUANTUM = 1e-6;
+const SIZE_QUANTUM = 1e-6;
+const SCALE_QUANTUM = 1e-6;
+const ROTATION_QUANTUM = 1e-6;
+const POSITION_INTEGER_SNAP_EPSILON = 1e-4;
+const SCALE_EPSILON = 1e-6;
+const MIN_TRANSFORM_SIZE_STAGE = 5;
+const GUIDE_LOCK_EPSILON = 0.5;
+
+type CanvasRect = {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+};
+
+type SnapGuideValues = {
+	x: number[];
+	y: number[];
+};
+
+type EdgeMoveState = {
+	left: boolean;
+	right: boolean;
+	top: boolean;
+	bottom: boolean;
+};
+
+const quantize = (value: number, quantum: number): number => {
+	if (!Number.isFinite(value)) return 0;
+	return Math.round(value / quantum) * quantum;
+};
+
+const snapNearInteger = (value: number): number => {
+	const rounded = Math.round(value);
+	if (Math.abs(value - rounded) <= POSITION_INTEGER_SNAP_EPSILON) {
+		return rounded;
+	}
+	return value;
+};
+
+const quantizeCanvasRect = (rect: CanvasRect): CanvasRect => {
+	return {
+		x: snapNearInteger(quantize(rect.x, POSITION_QUANTUM)),
+		y: snapNearInteger(quantize(rect.y, POSITION_QUANTUM)),
+		width: Math.max(0, quantize(rect.width, SIZE_QUANTUM)),
+		height: Math.max(0, quantize(rect.height, SIZE_QUANTUM)),
+	};
+};
+
+const quantizeTransform = (transform: TransformMeta): TransformMeta => {
+	return {
+		...transform,
+		position: {
+			...transform.position,
+			x: snapNearInteger(quantize(transform.position.x, POSITION_QUANTUM)),
+			y: snapNearInteger(quantize(transform.position.y, POSITION_QUANTUM)),
+		},
+		scale: {
+			x: quantize(transform.scale.x, SCALE_QUANTUM),
+			y: quantize(transform.scale.y, SCALE_QUANTUM),
+		},
+		rotation: {
+			...transform.rotation,
+			value: quantize(transform.rotation.value, ROTATION_QUANTUM),
+		},
+	};
+};
+
+const resolveScaleFromSize = (
+	nextSize: number,
+	baseSize: number,
+	previousScale: number,
+) => {
+	if (!Number.isFinite(baseSize) || Math.abs(baseSize) < SCALE_EPSILON) {
+		return previousScale;
+	}
+	const sign = previousScale < 0 ? -1 : 1;
+	return sign * (nextSize / baseSize);
+};
+
+const isHorizontalResizeAnchor = (anchor: string | null): boolean => {
+	return anchor === "middle-left" || anchor === "middle-right";
+};
+
+const isVerticalResizeAnchor = (anchor: string | null): boolean => {
+	return (
+		anchor === "top-center" ||
+		anchor === "bottom-center" ||
+		anchor === "middle-top" ||
+		anchor === "middle-bottom"
+	);
+};
+
+const isCornerResizeAnchor = (anchor: string | null): boolean => {
+	return (
+		anchor === "top-left" ||
+		anchor === "top-right" ||
+		anchor === "bottom-left" ||
+		anchor === "bottom-right"
+	);
+};
+
+const resolveUniformScale = (params: {
+	nextWidth: number;
+	nextHeight: number;
+	baseWidth: number;
+	baseHeight: number;
+	previousScaleX: number;
+	previousScaleY: number;
+}): { scaleX: number; scaleY: number } => {
+	const {
+		nextWidth,
+		nextHeight,
+		baseWidth,
+		baseHeight,
+		previousScaleX,
+		previousScaleY,
+	} = params;
+
+	const candidates: number[] = [];
+	if (Number.isFinite(baseWidth) && Math.abs(baseWidth) >= SCALE_EPSILON) {
+		candidates.push(Math.abs(nextWidth / baseWidth));
+	}
+	if (Number.isFinite(baseHeight) && Math.abs(baseHeight) >= SCALE_EPSILON) {
+		candidates.push(Math.abs(nextHeight / baseHeight));
+	}
+	const magnitude =
+		candidates.length > 0
+			? candidates.reduce((sum, value) => sum + value, 0) / candidates.length
+			: Math.max(Math.abs(previousScaleX), Math.abs(previousScaleY));
+	const signX = previousScaleX < 0 ? -1 : 1;
+	const signY = previousScaleY < 0 ? -1 : 1;
+
+	return {
+		scaleX: signX * magnitude,
+		scaleY: signY * magnitude,
+	};
+};
 
 export interface UsePreviewInteractionsOptions {
 	renderElements: TimelineElement[];
 	renderElementsRef: React.MutableRefObject<TimelineElement[]>;
 	canvasConvertOptions: CanvasConvertOptions;
-	pictureWidth: number;
-	pictureHeight: number;
 	canvasWidth: number;
 	canvasHeight: number;
 	getEffectiveZoom: () => number;
@@ -129,6 +270,49 @@ const findNearestGuide = (
 	return best;
 };
 
+const snapValueToGuide = (
+	value: number,
+	guides: number[],
+	epsilon: number,
+): number => {
+	const nearest = findNearestGuide([value], guides);
+	if (nearest.line === null || nearest.distance > epsilon) {
+		return value;
+	}
+	return nearest.line;
+};
+
+const lockFixedEdgesToGuides = (
+	box: CanvasRect,
+	moved: EdgeMoveState,
+	guides: SnapGuideValues,
+): CanvasRect => {
+	let left = box.x;
+	let right = box.x + box.width;
+	let top = box.y;
+	let bottom = box.y + box.height;
+
+	if (!moved.left) {
+		left = snapValueToGuide(left, guides.x, GUIDE_LOCK_EPSILON);
+	}
+	if (!moved.right) {
+		right = snapValueToGuide(right, guides.x, GUIDE_LOCK_EPSILON);
+	}
+	if (!moved.top) {
+		top = snapValueToGuide(top, guides.y, GUIDE_LOCK_EPSILON);
+	}
+	if (!moved.bottom) {
+		bottom = snapValueToGuide(bottom, guides.y, GUIDE_LOCK_EPSILON);
+	}
+
+	return {
+		x: left,
+		y: top,
+		width: Math.max(0, right - left),
+		height: Math.max(0, bottom - top),
+	};
+};
+
 const createCopyElement = (source: TimelineElement, copyId: string) => ({
 	...source,
 	id: copyId,
@@ -143,8 +327,6 @@ export const usePreviewInteractions = ({
 	renderElements,
 	renderElementsRef,
 	canvasConvertOptions,
-	pictureWidth,
-	pictureHeight,
 	canvasWidth,
 	canvasHeight,
 	getEffectiveZoom,
@@ -167,6 +349,7 @@ export const usePreviewInteractions = ({
 	const stageRef = useRef<Konva.Stage | null>(null);
 	const transformerRef = useRef<Konva.Transformer | null>(null);
 	const transformBaseRef = useRef<Record<string, TransformBase>>({});
+	const transformCanvasBoxRef = useRef<Record<string, CanvasRect>>({});
 	const groupProxyRef = useRef<Konva.Rect | null>(null);
 	const groupTransformSnapshotRef = useRef<GroupTransformSnapshot | null>(null);
 	const groupTransformingRef = useRef(false);
@@ -301,37 +484,58 @@ export const usePreviewInteractions = ({
 		}
 	}, [selectedIds]);
 
-	const getElementStageBox = useCallback(
-		(el: TimelineElement) => {
+	const getElementCanvasBox = useCallback(
+		(el: TimelineElement): CanvasRect => {
 			const renderLayout = transformMetaToRenderLayout(
 				el.transform,
 				canvasConvertOptions.picture,
 				canvasConvertOptions.canvas,
 			);
 			const { x, y, width, height } = renderLayoutToTopLeft(renderLayout);
-			const { stageX, stageY } = canvasToStageCoords(x, y);
-			const effectiveZoom = getEffectiveZoom();
-
 			return {
-				x: stageX,
-				y: stageY,
-				width: width * effectiveZoom,
-				height: height * effectiveZoom,
+				x,
+				y,
+				width,
+				height,
 			};
 		},
-		[canvasConvertOptions, canvasToStageCoords, getEffectiveZoom],
+		[canvasConvertOptions],
 	);
 
-	const getCanvasStageRect = useCallback(() => {
-		const effectiveZoom = getEffectiveZoom();
-		const { stageX, stageY } = canvasToStageCoords(0, 0);
-		return {
-			x: stageX,
-			y: stageY,
-			width: canvasWidth * effectiveZoom,
-			height: canvasHeight * effectiveZoom,
-		};
-	}, [canvasToStageCoords, canvasWidth, canvasHeight, getEffectiveZoom]);
+	const projectGuidesToStage = useCallback(
+		(guides: SnapGuides): SnapGuides => {
+			return {
+				vertical: guides.vertical.map((x) => canvasToStageCoords(x, 0).stageX),
+				horizontal: guides.horizontal.map(
+					(y) => canvasToStageCoords(0, y).stageY,
+				),
+			};
+		},
+		[canvasToStageCoords],
+	);
+
+	const getSnapGuideValues = useCallback(
+		(excludeIds: string[]): SnapGuideValues => {
+			const guideX: number[] = [];
+			const guideY: number[] = [];
+
+			renderElementsRef.current.forEach((el) => {
+				if (excludeIds.includes(el.id)) return;
+				const box = getElementCanvasBox(el);
+				guideX.push(box.x, box.x + box.width / 2, box.x + box.width);
+				guideY.push(box.y, box.y + box.height / 2, box.y + box.height);
+			});
+
+			guideX.push(0, canvasWidth / 2, canvasWidth);
+			guideY.push(0, canvasHeight / 2, canvasHeight);
+
+			return {
+				x: guideX,
+				y: guideY,
+			};
+		},
+		[getElementCanvasBox, renderElementsRef, canvasWidth, canvasHeight],
+	);
 
 	const computeGroupProxyBox = useCallback((): TransformerBox | null => {
 		const selectedElements = renderElements.filter((el) =>
@@ -463,31 +667,15 @@ export const usePreviewInteractions = ({
 
 	const computeSnapResult = useCallback(
 		(
-			movingBox: { x: number; y: number; width: number; height: number },
+			movingBox: CanvasRect,
 			excludeIds: string[],
+			threshold: number,
 			options?: SnapComputeOptions,
+			guideValues?: SnapGuideValues,
 		) => {
-			const guideX: number[] = [];
-			const guideY: number[] = [];
-
-			renderElementsRef.current.forEach((el) => {
-				if (excludeIds.includes(el.id)) return;
-				const box = getElementStageBox(el);
-				guideX.push(box.x, box.x + box.width / 2, box.x + box.width);
-				guideY.push(box.y, box.y + box.height / 2, box.y + box.height);
-			});
-
-			const canvasStageRect = getCanvasStageRect();
-			guideX.push(
-				canvasStageRect.x,
-				canvasStageRect.x + canvasStageRect.width / 2,
-				canvasStageRect.x + canvasStageRect.width,
-			);
-			guideY.push(
-				canvasStageRect.y,
-				canvasStageRect.y + canvasStageRect.height / 2,
-				canvasStageRect.y + canvasStageRect.height,
-			);
+			const guides = guideValues ?? getSnapGuideValues(excludeIds);
+			const guideX = guides.x;
+			const guideY = guides.y;
 
 			const movingX = options?.movingX ?? [
 				movingBox.x,
@@ -505,26 +693,22 @@ export const usePreviewInteractions = ({
 
 			return {
 				deltaX:
-					bestX.line !== null && bestX.distance <= SNAP_GUIDE_THRESHOLD
-						? bestX.delta
-						: 0,
+					bestX.line !== null && bestX.distance <= threshold ? bestX.delta : 0,
 				deltaY:
-					bestY.line !== null && bestY.distance <= SNAP_GUIDE_THRESHOLD
-						? bestY.delta
-						: 0,
+					bestY.line !== null && bestY.distance <= threshold ? bestY.delta : 0,
 				guides: {
 					vertical:
-						bestX.line !== null && bestX.distance <= SNAP_GUIDE_THRESHOLD
+						bestX.line !== null && bestX.distance <= threshold
 							? [bestX.line]
 							: [],
 					horizontal:
-						bestY.line !== null && bestY.distance <= SNAP_GUIDE_THRESHOLD
+						bestY.line !== null && bestY.distance <= threshold
 							? [bestY.line]
 							: [],
 				},
 			};
 		},
-		[getElementStageBox, getCanvasStageRect, renderElementsRef],
+		[getSnapGuideValues],
 	);
 
 	const getTrackIndexForElement = useCallback(
@@ -562,12 +746,13 @@ export const usePreviewInteractions = ({
 		snapshots.forEach((source, sourceId) => {
 			const node = stage.findOne(`.element-${sourceId}`) as Konva.Node | null;
 			if (!node) return;
-			const { x, y } = getElementStageBox(source);
-			node.position({ x, y });
+			const { x, y } = getElementCanvasBox(source);
+			const { stageX, stageY } = canvasToStageCoords(x, y);
+			node.position({ x: stageX, y: stageY });
 		});
 
 		stage.batchDraw();
-	}, [getElementStageBox]);
+	}, [getElementCanvasBox, canvasToStageCoords]);
 
 	const handleMouseDown = useCallback((id: string) => {
 		setDraggingId(id);
@@ -706,39 +891,44 @@ export const usePreviewInteractions = ({
 				if (isMultiDrag && isDragged && initial && draggedInitial) {
 					const nextCanvasX = initial.x + deltaX;
 					const nextCanvasY = initial.y + deltaY;
-
-					const updatedTransform = {
+					const size = getTransformSize(el.transform);
+					const updatedTransform = quantizeTransform({
 						...el.transform,
-						centerX: nextCanvasX + el.transform.width / 2 - pictureWidth / 2,
-						centerY: nextCanvasY + el.transform.height / 2 - pictureHeight / 2,
-					};
+						position: {
+							...el.transform.position,
+							x: nextCanvasX + size.width * el.transform.anchor.x,
+							y: nextCanvasY + size.height * el.transform.anchor.y,
+						},
+					});
 
 					return {
 						...el,
 						transform: updatedTransform,
-						props: { ...el.props, left: nextCanvasX, top: nextCanvasY },
 					};
 				}
 
 				// 使用 el.id 而不是 el.props.id
 				if (!isDragged || el.id !== dragAnchorId) return el;
 
-				const updatedTransform = {
+				const size = getTransformSize(el.transform);
+				const updatedTransform = quantizeTransform({
 					...el.transform,
-					centerX: canvasX + el.transform.width / 2 - pictureWidth / 2,
-					centerY: canvasY + el.transform.height / 2 - pictureHeight / 2,
-				};
+					position: {
+						...el.transform.position,
+						x: canvasX + size.width * el.transform.anchor.x,
+						y: canvasY + size.height * el.transform.anchor.y,
+					},
+				});
 
 				return {
 					...el,
 					transform: updatedTransform,
-					props: { ...el.props, left: canvasX, top: canvasY },
 				};
 			});
 
 			useTimelineStore.setState({ elements: newElements });
 		},
-		[pictureWidth, pictureHeight],
+		[],
 	);
 
 	const handleDrag = useCallback(
@@ -746,8 +936,13 @@ export const usePreviewInteractions = ({
 			const node = e.target;
 			const stageX = node.x();
 			const stageY = node.y();
+			const effectiveZoom = getEffectiveZoom();
 			const stageWidth = node.width() * node.scaleX();
 			const stageHeight = node.height() * node.scaleY();
+			const { canvasX: rawCanvasX, canvasY: rawCanvasY } = stageToCanvasCoords(
+				stageX,
+				stageY,
+			);
 
 			const dragSelectedIds = dragSelectedIdsRef.current;
 			const initialPositions = dragInitialPositionsRef.current;
@@ -757,19 +952,18 @@ export const usePreviewInteractions = ({
 			const draggedInitial = initialPositions[dragAnchorId];
 
 			const currentElements = useTimelineStore.getState().elements;
-			let adjustedStageX = stageX;
-			let adjustedStageY = stageY;
+			let adjustedCanvasX = rawCanvasX;
+			let adjustedCanvasY = rawCanvasY;
 
 			if (snapEnabled) {
-				let movingBox = {
-					x: stageX,
-					y: stageY,
-					width: stageWidth,
-					height: stageHeight,
+				let movingBox: CanvasRect = {
+					x: rawCanvasX,
+					y: rawCanvasY,
+					width: stageWidth / effectiveZoom,
+					height: stageHeight / effectiveZoom,
 				};
 
 				if (isMultiDrag && draggedInitial) {
-					const effectiveZoom = getEffectiveZoom();
 					let minX = Infinity;
 					let minY = Infinity;
 					let maxX = -Infinity;
@@ -788,27 +982,18 @@ export const usePreviewInteractions = ({
 						const initial = initialPositions[selectedId];
 						const baseX = initial?.x ?? x;
 						const baseY = initial?.y ?? y;
-						const { stageX: elementStageX, stageY: elementStageY } =
-							canvasToStageCoords(baseX, baseY);
-						const elementStageWidth = width * effectiveZoom;
-						const elementStageHeight = height * effectiveZoom;
-
-						minX = Math.min(minX, elementStageX);
-						minY = Math.min(minY, elementStageY);
-						maxX = Math.max(maxX, elementStageX + elementStageWidth);
-						maxY = Math.max(maxY, elementStageY + elementStageHeight);
+						minX = Math.min(minX, baseX);
+						minY = Math.min(minY, baseY);
+						maxX = Math.max(maxX, baseX + width);
+						maxY = Math.max(maxY, baseY + height);
 					});
 
 					if (minX !== Infinity) {
-						const {
-							stageX: draggedInitialStageX,
-							stageY: draggedInitialStageY,
-						} = canvasToStageCoords(draggedInitial.x, draggedInitial.y);
-						const deltaStageX = stageX - draggedInitialStageX;
-						const deltaStageY = stageY - draggedInitialStageY;
+						const deltaCanvasX = rawCanvasX - draggedInitial.x;
+						const deltaCanvasY = rawCanvasY - draggedInitial.y;
 						movingBox = {
-							x: minX + deltaStageX,
-							y: minY + deltaStageY,
+							x: minX + deltaCanvasX,
+							y: minY + deltaCanvasY,
 							width: maxX - minX,
 							height: maxY - minY,
 						};
@@ -817,24 +1002,28 @@ export const usePreviewInteractions = ({
 
 				// In copy mode, keep source elements as snap guides.
 				const snapExcludeIds = dragSelectedIds;
-				const snapResult = computeSnapResult(movingBox, snapExcludeIds);
-				adjustedStageX += snapResult.deltaX;
-				adjustedStageY += snapResult.deltaY;
-				setSnapGuides(snapResult.guides);
+				const snapThreshold =
+					SNAP_GUIDE_THRESHOLD / Math.max(effectiveZoom, 1e-6);
+				const snapResult = computeSnapResult(
+					movingBox,
+					snapExcludeIds,
+					snapThreshold,
+				);
+				adjustedCanvasX += snapResult.deltaX;
+				adjustedCanvasY += snapResult.deltaY;
+				setSnapGuides(projectGuidesToStage(snapResult.guides));
 			} else {
 				clearSnapGuides();
 			}
 
+			const { stageX: adjustedStageX, stageY: adjustedStageY } =
+				canvasToStageCoords(adjustedCanvasX, adjustedCanvasY);
 			if (adjustedStageX !== stageX || adjustedStageY !== stageY) {
 				node.position({ x: adjustedStageX, y: adjustedStageY });
 			}
 
-			// 将 Stage 坐标转换为画布坐标
-			// 由于 canvas = picture 尺寸，canvas 坐标即 picture 坐标
-			const { canvasX, canvasY } = stageToCanvasCoords(
-				adjustedStageX,
-				adjustedStageY,
-			);
+			const canvasX = adjustedCanvasX;
+			const canvasY = adjustedCanvasY;
 			dragLastCanvasRef.current = { canvasX, canvasY };
 
 			if (draggedInitial) {
@@ -894,8 +1083,6 @@ export const usePreviewInteractions = ({
 		},
 		[
 			stageToCanvasCoords,
-			pictureWidth,
-			pictureHeight,
 			snapEnabled,
 			getEffectiveZoom,
 			canvasConvertOptions,
@@ -903,6 +1090,7 @@ export const usePreviewInteractions = ({
 			computeSnapResult,
 			clearSnapGuides,
 			applyDragToElements,
+			projectGuidesToStage,
 		],
 	);
 
@@ -1023,7 +1211,7 @@ export const usePreviewInteractions = ({
 			shiftPressedRef.current ? [0, 45, 90, 135, 180, 225, 270, 315] : [],
 		);
 		transformerRef.current.getLayer()?.batchDraw();
-	}, [selectedIds, renderElements, groupProxyBox]);
+	}, [selectedIds, renderElements]);
 
 	const snapshotGroupTransform = useCallback(
 		(node: Konva.Rect) => {
@@ -1110,27 +1298,36 @@ export const usePreviewInteractions = ({
 				const nextWidth = base.width * scaleX;
 				const nextHeight = base.height * scaleY;
 				const nextRotation = base.rotation + deltaRotation;
-				const nextCenterX = nextLeft + nextWidth / 2;
-				const nextCenterY = nextTop + nextHeight / 2;
+				const nextScaleX = resolveScaleFromSize(
+					nextWidth,
+					el.transform.baseSize.width,
+					el.transform.scale.x,
+				);
+				const nextScaleY = resolveScaleFromSize(
+					nextHeight,
+					el.transform.baseSize.height,
+					el.transform.scale.y,
+				);
+				const updatedTransform = quantizeTransform({
+					...el.transform,
+					position: {
+						...el.transform.position,
+						x: nextLeft + nextWidth * el.transform.anchor.x,
+						y: nextTop + nextHeight * el.transform.anchor.y,
+					},
+					scale: {
+						x: nextScaleX,
+						y: nextScaleY,
+					},
+					rotation: {
+						...el.transform.rotation,
+						value: toDegrees(nextRotation),
+					},
+				});
 
 				return {
 					...el,
-					transform: {
-						centerX: nextCenterX - pictureWidth / 2,
-						centerY: nextCenterY - pictureHeight / 2,
-						width: nextWidth,
-						height: nextHeight,
-						rotation: nextRotation,
-					},
-					props: {
-						...el.props,
-						left: nextLeft,
-						top: nextTop,
-						width: nextWidth,
-						height: nextHeight,
-						rotate: `${toDegrees(nextRotation)}deg`,
-						rotation: nextRotation,
-					},
+					transform: updatedTransform,
 				};
 			});
 
@@ -1145,7 +1342,7 @@ export const usePreviewInteractions = ({
 				rotation: node.rotation(),
 			});
 		},
-		[pictureHeight, pictureWidth, snapshotGroupTransform, stageToCanvasCoords],
+		[snapshotGroupTransform, stageToCanvasCoords],
 	);
 
 	const handleGroupTransformEnd = useCallback(
@@ -1180,6 +1377,10 @@ export const usePreviewInteractions = ({
 	const handleTransformStart = useCallback(
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
 			const node = e.target as Konva.Node;
+			const element = useTimelineStore
+				.getState()
+				.elements.find((el) => el.id === id);
+			delete transformCanvasBoxRef.current[id];
 			if ("altKey" in e.evt) {
 				const eventAltPressed = Boolean((e.evt as MouseEvent).altKey);
 				if (eventAltPressed !== altPressedRef.current) {
@@ -1208,6 +1409,9 @@ export const usePreviewInteractions = ({
 				scaleX: baseScaleX,
 				scaleY: baseScaleY,
 				effectiveZoom,
+				elementScaleX: element?.transform.scale.x ?? 1,
+				elementScaleY: element?.transform.scale.y ?? 1,
+				activeAnchor: transformerRef.current?.getActiveAnchor?.() ?? null,
 			};
 		},
 		[
@@ -1227,6 +1431,9 @@ export const usePreviewInteractions = ({
 				const baseScaleY = node.scaleY() || 1;
 				const baseStageWidth = node.width() * baseScaleX;
 				const baseStageHeight = node.height() * baseScaleY;
+				const element = useTimelineStore
+					.getState()
+					.elements.find((el) => el.id === id);
 
 				base = {
 					stageWidth: baseStageWidth,
@@ -1236,65 +1443,89 @@ export const usePreviewInteractions = ({
 					scaleX: baseScaleX,
 					scaleY: baseScaleY,
 					effectiveZoom,
+					elementScaleX: element?.transform.scale.x ?? 1,
+					elementScaleY: element?.transform.scale.y ?? 1,
+					activeAnchor: transformerRef.current?.getActiveAnchor?.() ?? null,
 				};
 				transformBaseRef.current[id] = base;
 			}
 
-			const scaleX = node.scaleX() / base.scaleX;
-			const scaleY = node.scaleY() / base.scaleY;
-
 			const stageX = node.x();
 			const stageY = node.y();
-			// 缩放后的尺寸（在 Stage 坐标系中）
-			const stageWidth_scaled = base.stageWidth * scaleX;
-			const stageHeight_scaled = base.stageHeight * scaleY;
-
-			// 将 Stage 坐标转换为画布/picture 坐标
-			const { canvasX, canvasY } = stageToCanvasCoords(stageX, stageY);
-
-			// 将 Stage 尺寸转换为画布/picture 尺寸
-			const pictureWidth_scaled = stageWidth_scaled / base.effectiveZoom;
-			const pictureHeight_scaled = stageHeight_scaled / base.effectiveZoom;
-
-			// 只更新元素状态，不修改节点（让 Transformer 继续工作）
+			const stageWidthScaled = node.width() * node.scaleX();
+			const stageHeightScaled = node.height() * node.scaleY();
+			const cachedCanvasBox = transformCanvasBoxRef.current[id];
+			const fallbackCanvasPos = stageToCanvasCoords(stageX, stageY);
+			const canvasX = cachedCanvasBox?.x ?? fallbackCanvasPos.canvasX;
+			const canvasY = cachedCanvasBox?.y ?? fallbackCanvasPos.canvasY;
+			const pictureWidthScaled =
+				cachedCanvasBox?.width ?? stageWidthScaled / base.effectiveZoom;
+			const pictureHeightScaled =
+				cachedCanvasBox?.height ?? stageHeightScaled / base.effectiveZoom;
 			const rotationDegrees = node.rotation();
-			const rotationRadians = (rotationDegrees * Math.PI) / 180;
+			const activeAnchor =
+				base.activeAnchor ??
+				transformerRef.current?.getActiveAnchor?.() ??
+				null;
 
-			// 直接使用 setState 确保更新被触发
 			const currentElements = useTimelineStore.getState().elements;
 			const newElements = currentElements.map((el) => {
-				// 使用 el.id 而不是 el.props.id
 				if (el.id !== id) return el;
 
-				// 更新 transform（使用画布中心坐标系统）
-				// canvasX/Y 是左上角坐标（相对于画布左上角）
-				// 需要转换为中心坐标（相对于画布中心）
-				const updatedTransform = {
-					centerX: canvasX + pictureWidth_scaled / 2 - pictureWidth / 2,
-					centerY: canvasY + pictureHeight_scaled / 2 - pictureHeight / 2,
-					width: pictureWidth_scaled,
-					height: pictureHeight_scaled,
-					rotation: rotationRadians,
-				};
+				let nextScaleX = resolveScaleFromSize(
+					pictureWidthScaled,
+					el.transform.baseSize.width,
+					base.elementScaleX,
+				);
+				let nextScaleY = resolveScaleFromSize(
+					pictureHeightScaled,
+					el.transform.baseSize.height,
+					base.elementScaleY,
+				);
+				if (isCornerResizeAnchor(activeAnchor)) {
+					const uniformScale = resolveUniformScale({
+						nextWidth: pictureWidthScaled,
+						nextHeight: pictureHeightScaled,
+						baseWidth: el.transform.baseSize.width,
+						baseHeight: el.transform.baseSize.height,
+						previousScaleX: base.elementScaleX,
+						previousScaleY: base.elementScaleY,
+					});
+					nextScaleX = uniformScale.scaleX;
+					nextScaleY = uniformScale.scaleY;
+				} else if (isHorizontalResizeAnchor(activeAnchor)) {
+					nextScaleY = base.elementScaleY;
+				} else if (isVerticalResizeAnchor(activeAnchor)) {
+					nextScaleX = base.elementScaleX;
+				}
+				const nextWidth = el.transform.baseSize.width * Math.abs(nextScaleX);
+				const nextHeight = el.transform.baseSize.height * Math.abs(nextScaleY);
+				const updatedTransform = quantizeTransform({
+					...el.transform,
+					position: {
+						...el.transform.position,
+						x: canvasX + nextWidth * el.transform.anchor.x,
+						y: canvasY + nextHeight * el.transform.anchor.y,
+					},
+					scale: {
+						x: nextScaleX,
+						y: nextScaleY,
+					},
+					rotation: {
+						...el.transform.rotation,
+						value: rotationDegrees,
+					},
+				});
 
 				return {
 					...el,
 					transform: updatedTransform,
-					props: {
-						...el.props,
-						left: canvasX,
-						top: canvasY,
-						width: pictureWidth_scaled,
-						height: pictureHeight_scaled,
-						rotate: `${rotationDegrees}deg`,
-						rotation: rotationRadians,
-					},
 				};
 			});
 
 			useTimelineStore.setState({ elements: newElements });
 		},
-		[stageToCanvasCoords, getEffectiveZoom, pictureWidth, pictureHeight],
+		[stageToCanvasCoords, getEffectiveZoom],
 	);
 
 	// 处理 transform 结束事件
@@ -1302,54 +1533,81 @@ export const usePreviewInteractions = ({
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
 			const node = e.target as Konva.Node;
 			const base = transformBaseRef.current[id];
-			const baseScaleX = base?.scaleX ?? 1;
-			const baseScaleY = base?.scaleY ?? 1;
-			const scaleX = node.scaleX() / baseScaleX;
-			const scaleY = node.scaleY() / baseScaleY;
+
+			const stageWidthScaled = node.width() * node.scaleX();
+			const stageHeightScaled = node.height() * node.scaleY();
 
 			// 重置 scale，更新 width 和 height
 			node.scaleX(1);
 			node.scaleY(1);
+			node.width(stageWidthScaled);
+			node.height(stageHeightScaled);
 
 			const stageX = node.x();
 			const stageY = node.y();
-			// 缩放后的尺寸（在 Stage 坐标系中）
-			const baseStageWidth = base?.stageWidth ?? node.width() * baseScaleX;
-			const baseStageHeight = base?.stageHeight ?? node.height() * baseScaleY;
-			const stageWidth_scaled = baseStageWidth * scaleX;
-			const stageHeight_scaled = baseStageHeight * scaleY;
-
-			// 将 Stage 坐标转换为画布/picture 坐标
-			const { canvasX, canvasY } = stageToCanvasCoords(stageX, stageY);
-
-			// 将 Stage 尺寸转换为画布/picture 尺寸
+			const cachedCanvasBox = transformCanvasBoxRef.current[id];
+			const fallbackCanvasPos = stageToCanvasCoords(stageX, stageY);
+			const canvasX = cachedCanvasBox?.x ?? fallbackCanvasPos.canvasX;
+			const canvasY = cachedCanvasBox?.y ?? fallbackCanvasPos.canvasY;
 			const effectiveZoom = base?.effectiveZoom ?? getEffectiveZoom();
-			const pictureWidth_scaled = stageWidth_scaled / effectiveZoom;
-			const pictureHeight_scaled = stageHeight_scaled / effectiveZoom;
-
-			// 更新节点的 width 和 height（使用 Stage 坐标系的尺寸）
-			node.width(stageWidth_scaled);
-			node.height(stageHeight_scaled);
-
+			const pictureWidthScaled =
+				cachedCanvasBox?.width ?? stageWidthScaled / effectiveZoom;
+			const pictureHeightScaled =
+				cachedCanvasBox?.height ?? stageHeightScaled / effectiveZoom;
 			const rotationDegrees = node.rotation();
-			const rotationRadians = (rotationDegrees * Math.PI) / 180;
+			const activeAnchor =
+				base?.activeAnchor ??
+				transformerRef.current?.getActiveAnchor?.() ??
+				null;
 
-			// 直接使用 setState 确保更新被触发
 			const currentElements = useTimelineStore.getState().elements;
 			const newElements = currentElements.map((el) => {
-				// 使用 el.id 而不是 el.props.id
 				if (el.id !== id) return el;
 
-				// 更新 transform（使用画布中心坐标系统）
-				// canvasX/Y 是左上角坐标（相对于画布左上角）
-				// 需要转换为中心坐标（相对于画布中心）
-				const updatedTransform = {
-					centerX: canvasX + pictureWidth_scaled / 2 - pictureWidth / 2,
-					centerY: canvasY + pictureHeight_scaled / 2 - pictureHeight / 2,
-					width: pictureWidth_scaled,
-					height: pictureHeight_scaled,
-					rotation: rotationRadians,
-				};
+				let nextScaleX = resolveScaleFromSize(
+					pictureWidthScaled,
+					el.transform.baseSize.width,
+					base?.elementScaleX ?? el.transform.scale.x,
+				);
+				let nextScaleY = resolveScaleFromSize(
+					pictureHeightScaled,
+					el.transform.baseSize.height,
+					base?.elementScaleY ?? el.transform.scale.y,
+				);
+				if (isCornerResizeAnchor(activeAnchor)) {
+					const uniformScale = resolveUniformScale({
+						nextWidth: pictureWidthScaled,
+						nextHeight: pictureHeightScaled,
+						baseWidth: el.transform.baseSize.width,
+						baseHeight: el.transform.baseSize.height,
+						previousScaleX: base?.elementScaleX ?? el.transform.scale.x,
+						previousScaleY: base?.elementScaleY ?? el.transform.scale.y,
+					});
+					nextScaleX = uniformScale.scaleX;
+					nextScaleY = uniformScale.scaleY;
+				} else if (isHorizontalResizeAnchor(activeAnchor)) {
+					nextScaleY = base?.elementScaleY ?? el.transform.scale.y;
+				} else if (isVerticalResizeAnchor(activeAnchor)) {
+					nextScaleX = base?.elementScaleX ?? el.transform.scale.x;
+				}
+				const nextWidth = el.transform.baseSize.width * Math.abs(nextScaleX);
+				const nextHeight = el.transform.baseSize.height * Math.abs(nextScaleY);
+				const updatedTransform = quantizeTransform({
+					...el.transform,
+					position: {
+						...el.transform.position,
+						x: canvasX + nextWidth * el.transform.anchor.x,
+						y: canvasY + nextHeight * el.transform.anchor.y,
+					},
+					scale: {
+						x: nextScaleX,
+						y: nextScaleY,
+					},
+					rotation: {
+						...el.transform.rotation,
+						value: rotationDegrees,
+					},
+				});
 
 				return {
 					...el,
@@ -1358,17 +1616,11 @@ export const usePreviewInteractions = ({
 			});
 
 			useTimelineStore.setState({ elements: newElements });
-
 			delete transformBaseRef.current[id];
+			delete transformCanvasBoxRef.current[id];
 			clearSnapGuides();
 		},
-		[
-			stageToCanvasCoords,
-			getEffectiveZoom,
-			pictureWidth,
-			pictureHeight,
-			clearSnapGuides,
-		],
+		[stageToCanvasCoords, getEffectiveZoom, clearSnapGuides],
 	);
 
 	// 处理点击事件，支持选择/取消选择
@@ -1564,42 +1816,89 @@ export const usePreviewInteractions = ({
 				return newBox;
 			}
 
+			const effectiveZoom = Math.max(getEffectiveZoom(), SCALE_EPSILON);
+			const minSizeCanvas = MIN_TRANSFORM_SIZE_STAGE / effectiveZoom;
+			const snapThreshold = SNAP_GUIDE_THRESHOLD / effectiveZoom;
+
+			const toCanvasBox = (box: TransformerBox): CanvasRect => {
+				const { canvasX, canvasY } = stageToCanvasCoords(box.x, box.y);
+				return {
+					x: canvasX,
+					y: canvasY,
+					width: box.width / effectiveZoom,
+					height: box.height / effectiveZoom,
+				};
+			};
+
+			const toStageBox = (box: CanvasRect): TransformerBox => {
+				const { stageX, stageY } = canvasToStageCoords(box.x, box.y);
+				return {
+					...newBox,
+					x: stageX,
+					y: stageY,
+					width: box.width * effectiveZoom,
+					height: box.height * effectiveZoom,
+				};
+			};
+
 			const isCornerAnchor =
 				activeAnchor === "top-left" ||
 				activeAnchor === "top-right" ||
 				activeAnchor === "bottom-left" ||
 				activeAnchor === "bottom-right";
+			const oldCanvasBox = toCanvasBox(oldBox);
+			const newCanvasBox = toCanvasBox(newBox);
+			const guideValues = getSnapGuideValues(selectedIds);
+			const persistAndProjectBox = (box: CanvasRect): TransformerBox => {
+				const quantizedBox = quantizeCanvasRect(box);
+				if (selectedIds.length === 1) {
+					const singleId = selectedIds[0];
+					if (singleId) {
+						transformCanvasBoxRef.current[singleId] = quantizedBox;
+					}
+				}
+				return toStageBox(quantizedBox);
+			};
+			const cornerMoved: EdgeMoveState = (() => {
+				switch (activeAnchor) {
+					case "top-left":
+						return { left: true, right: false, top: true, bottom: false };
+					case "top-right":
+						return { left: false, right: true, top: true, bottom: false };
+					case "bottom-left":
+						return { left: true, right: false, top: false, bottom: true };
+					case "bottom-right":
+						return { left: false, right: true, top: false, bottom: true };
+					default:
+						return { left: true, right: true, top: true, bottom: true };
+				}
+			})();
 
 			const getFixedCorner = () => {
 				switch (activeAnchor) {
 					case "top-left":
 						return {
-							x: oldBox.x + oldBox.width,
-							y: oldBox.y + oldBox.height,
+							x: oldCanvasBox.x + oldCanvasBox.width,
+							y: oldCanvasBox.y + oldCanvasBox.height,
 						};
 					case "top-right":
 						return {
-							x: oldBox.x,
-							y: oldBox.y + oldBox.height,
+							x: oldCanvasBox.x,
+							y: oldCanvasBox.y + oldCanvasBox.height,
 						};
 					case "bottom-left":
 						return {
-							x: oldBox.x + oldBox.width,
-							y: oldBox.y,
+							x: oldCanvasBox.x + oldCanvasBox.width,
+							y: oldCanvasBox.y,
 						};
 					case "bottom-right":
-						return { x: oldBox.x, y: oldBox.y };
+						return { x: oldCanvasBox.x, y: oldCanvasBox.y };
 					default:
-						return { x: oldBox.x, y: oldBox.y };
+						return { x: oldCanvasBox.x, y: oldCanvasBox.y };
 				}
 			};
 
-			const getMovingCorner = (box: {
-				x: number;
-				y: number;
-				width: number;
-				height: number;
-			}) => {
+			const getMovingCorner = (box: CanvasRect) => {
 				switch (activeAnchor) {
 					case "top-left":
 						return { x: box.x, y: box.y };
@@ -1617,8 +1916,11 @@ export const usePreviewInteractions = ({
 			const buildCornerBox = (
 				desiredCorner: { x: number; y: number },
 				snapAxis: "x" | "y" | null,
-			) => {
-				const ratio = oldBox.height === 0 ? 1 : oldBox.width / oldBox.height;
+			): CanvasRect => {
+				const ratio =
+					oldCanvasBox.height === 0
+						? 1
+						: oldCanvasBox.width / oldCanvasBox.height;
 				const fixed = getFixedCorner();
 				const widthFromCorner = Math.abs(desiredCorner.x - fixed.x);
 				const heightFromCorner = Math.abs(desiredCorner.y - fixed.y);
@@ -1634,21 +1936,21 @@ export const usePreviewInteractions = ({
 					width = height * ratio;
 				} else {
 					const denom =
-						oldBox.width * oldBox.width + oldBox.height * oldBox.height;
+						oldCanvasBox.width * oldCanvasBox.width +
+						oldCanvasBox.height * oldCanvasBox.height;
 					const scale =
 						denom === 0
 							? 1
-							: (oldBox.width * widthFromCorner +
-									oldBox.height * heightFromCorner) /
+							: (oldCanvasBox.width * widthFromCorner +
+									oldCanvasBox.height * heightFromCorner) /
 								denom;
-					width = oldBox.width * scale;
-					height = oldBox.height * scale;
+					width = oldCanvasBox.width * scale;
+					height = oldCanvasBox.height * scale;
 				}
 
 				switch (activeAnchor) {
 					case "top-left":
 						return {
-							...newBox,
 							x: fixed.x - width,
 							y: fixed.y - height,
 							width,
@@ -1656,7 +1958,6 @@ export const usePreviewInteractions = ({
 						};
 					case "top-right":
 						return {
-							...newBox,
 							x: fixed.x,
 							y: fixed.y - height,
 							width,
@@ -1664,7 +1965,6 @@ export const usePreviewInteractions = ({
 						};
 					case "bottom-left":
 						return {
-							...newBox,
 							x: fixed.x - width,
 							y: fixed.y,
 							width,
@@ -1672,43 +1972,53 @@ export const usePreviewInteractions = ({
 						};
 					case "bottom-right":
 						return {
-							...newBox,
 							x: fixed.x,
 							y: fixed.y,
 							width,
 							height,
 						};
 					default:
-						return newBox;
+						return newCanvasBox;
 				}
 			};
 
-			let baseBox = newBox;
+			let baseBox = newCanvasBox;
 			if (isCornerAnchor) {
-				baseBox = buildCornerBox(getMovingCorner(newBox), null);
+				baseBox = buildCornerBox(getMovingCorner(newCanvasBox), null);
 			}
 
 			// 限制最小尺寸
-			if (baseBox.width < 5 || baseBox.height < 5) {
+			if (baseBox.width < minSizeCanvas || baseBox.height < minSizeCanvas) {
 				return oldBox;
 			}
 			if (!snapEnabled) {
 				clearSnapGuides();
-				return baseBox;
+				return persistAndProjectBox(baseBox);
 			}
 
 			if (isCornerAnchor) {
 				const movingCorner = getMovingCorner(baseBox);
-				const snapResult = computeSnapResult(baseBox, selectedIds, {
-					movingX: [movingCorner.x],
-					movingY: [movingCorner.y],
-				});
+				const snapResult = computeSnapResult(
+					baseBox,
+					selectedIds,
+					snapThreshold,
+					{
+						movingX: [movingCorner.x],
+						movingY: [movingCorner.y],
+					},
+					guideValues,
+				);
 				const snapX = snapResult.deltaX !== 0;
 				const snapY = snapResult.deltaY !== 0;
 
 				if (!snapX && !snapY) {
-					setSnapGuides(snapResult.guides);
-					return baseBox;
+					const stabilizedBox = lockFixedEdgesToGuides(
+						baseBox,
+						cornerMoved,
+						guideValues,
+					);
+					setSnapGuides(projectGuidesToStage(snapResult.guides));
+					return persistAndProjectBox(stabilizedBox);
 				}
 
 				let snapAxis: "x" | "y";
@@ -1727,22 +2037,33 @@ export const usePreviewInteractions = ({
 				};
 
 				const snappedBox = buildCornerBox(snappedCorner, snapAxis);
-				if (snappedBox.width < 5 || snappedBox.height < 5) {
+				if (
+					snappedBox.width < minSizeCanvas ||
+					snappedBox.height < minSizeCanvas
+				) {
 					return oldBox;
 				}
+				const stabilizedBox = lockFixedEdgesToGuides(
+					snappedBox,
+					cornerMoved,
+					guideValues,
+				);
 
 				setSnapGuides({
-					vertical: snapAxis === "x" ? snapResult.guides.vertical : [],
-					horizontal: snapAxis === "y" ? snapResult.guides.horizontal : [],
+					...projectGuidesToStage({
+						vertical: snapAxis === "x" ? snapResult.guides.vertical : [],
+						horizontal: snapAxis === "y" ? snapResult.guides.horizontal : [],
+					}),
 				});
-				return snappedBox;
+				return persistAndProjectBox(stabilizedBox);
 			}
 
-			const leftMoved = baseBox.x !== oldBox.x;
-			const rightMoved = baseBox.x + baseBox.width !== oldBox.x + oldBox.width;
-			const topMoved = baseBox.y !== oldBox.y;
+			const leftMoved = baseBox.x !== oldCanvasBox.x;
+			const rightMoved =
+				baseBox.x + baseBox.width !== oldCanvasBox.x + oldCanvasBox.width;
+			const topMoved = baseBox.y !== oldCanvasBox.y;
 			const bottomMoved =
-				baseBox.y + baseBox.height !== oldBox.y + oldBox.height;
+				baseBox.y + baseBox.height !== oldCanvasBox.y + oldCanvasBox.height;
 
 			const movingX: number[] = [];
 			if (leftMoved && !rightMoved) {
@@ -1762,13 +2083,29 @@ export const usePreviewInteractions = ({
 				movingY.push(baseBox.y + baseBox.height / 2);
 			}
 
-			const snapResult = computeSnapResult(baseBox, selectedIds, {
-				movingX,
-				movingY,
-			});
+			const snapResult = computeSnapResult(
+				baseBox,
+				selectedIds,
+				snapThreshold,
+				{
+					movingX,
+					movingY,
+				},
+				guideValues,
+			);
 			if (snapResult.deltaX === 0 && snapResult.deltaY === 0) {
-				setSnapGuides(snapResult.guides);
-				return baseBox;
+				const stabilizedBox = lockFixedEdgesToGuides(
+					baseBox,
+					{
+						left: leftMoved,
+						right: rightMoved,
+						top: topMoved,
+						bottom: bottomMoved,
+					},
+					guideValues,
+				);
+				setSnapGuides(projectGuidesToStage(snapResult.guides));
+				return persistAndProjectBox(stabilizedBox);
 			}
 
 			const nextBox = { ...baseBox };
@@ -1795,14 +2132,34 @@ export const usePreviewInteractions = ({
 				}
 			}
 
-			if (nextBox.width < 5 || nextBox.height < 5) {
+			if (nextBox.width < minSizeCanvas || nextBox.height < minSizeCanvas) {
 				return oldBox;
 			}
+			const stabilizedBox = lockFixedEdgesToGuides(
+				nextBox,
+				{
+					left: leftMoved,
+					right: rightMoved,
+					top: topMoved,
+					bottom: bottomMoved,
+				},
+				guideValues,
+			);
 
-			setSnapGuides(snapResult.guides);
-			return nextBox;
+			setSnapGuides(projectGuidesToStage(snapResult.guides));
+			return persistAndProjectBox(stabilizedBox);
 		},
-		[clearSnapGuides, computeSnapResult, snapEnabled, selectedIds],
+		[
+			clearSnapGuides,
+			computeSnapResult,
+			snapEnabled,
+			selectedIds,
+			getSnapGuideValues,
+			getEffectiveZoom,
+			stageToCanvasCoords,
+			canvasToStageCoords,
+			projectGuidesToStage,
+		],
 	);
 
 	return {

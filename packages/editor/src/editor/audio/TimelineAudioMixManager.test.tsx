@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createTransformMeta } from "@/dsl/transform";
 import type { TimelineElement, TimelineMeta } from "../../dsl/types";
 import type { TimelineTrack } from "../timeline/types";
 import { runTimelineAudioMixFrame } from "./TimelineAudioMixRunner";
@@ -36,13 +37,12 @@ const createVideoElement = (
 	type: "VideoClip",
 	component: "video-clip",
 	name: id,
-	transform: {
-		centerX: 0,
-		centerY: 0,
+	transform: createTransformMeta({
 		width: 1920,
 		height: 1080,
-		rotation: 0,
-	},
+		positionX: 960,
+		positionY: 540,
+	}),
 	timeline: createTimeline(start, end, offset),
 	render: {
 		zIndex: 0,
@@ -66,13 +66,12 @@ const createTransitionElement = (
 	type: "Transition",
 	component: "transition/crossfade",
 	name: id,
-	transform: {
-		centerX: 0,
-		centerY: 0,
+	transform: createTransformMeta({
 		width: 1920,
 		height: 1080,
-		rotation: 0,
-	},
+		positionX: 960,
+		positionY: 540,
+	}),
 	timeline: createTimeline(start, end),
 	render: {
 		zIndex: 1,

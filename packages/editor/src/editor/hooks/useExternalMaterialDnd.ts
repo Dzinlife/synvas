@@ -10,6 +10,7 @@ import type {
 	TimelineElement as TimelineElementType,
 	TrackRole,
 } from "@/dsl/types";
+import { createTransformMeta } from "@/dsl/transform";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { toast } from "@/lib/toast";
 import { useProjectStore } from "@/projects/projectStore";
@@ -20,6 +21,7 @@ import {
 	useElements,
 	useFps,
 	useRippleEditing,
+	useTimelineStore,
 } from "../contexts/TimelineContext";
 import {
 	resolveMaterialDropTarget,
@@ -180,6 +182,7 @@ export function useExternalMaterialDnd({
 }: UseExternalMaterialDndOptions) {
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const { fps } = useFps();
+	const canvasSize = useTimelineStore((state) => state.canvasSize);
 	const { currentTime } = useCurrentTime();
 	const { setElements } = useElements();
 	const { attachments, autoAttach } = useAttachments();
@@ -690,13 +693,12 @@ export function useExternalMaterialDnd({
 							props: {
 								uri: item.uri,
 							},
-							transform: {
-								centerX: 0,
-								centerY: 0,
+							transform: createTransformMeta({
 								width: 1920,
 								height: 1080,
-								rotation: 0,
-							},
+								positionX: canvasSize.width / 2,
+								positionY: canvasSize.height / 2,
+							}),
 							timeline: buildTimelineMeta(
 								{
 									start: startFrame,
@@ -810,13 +812,12 @@ export function useExternalMaterialDnd({
 								props: {
 									uri: item.uri,
 								},
-								transform: {
-									centerX: canvasX,
-									centerY: canvasY,
+								transform: createTransformMeta({
 									width: item.width,
 									height: item.height,
-									rotation: 0,
-								},
+									positionX: canvasX,
+									positionY: canvasY,
+								}),
 								timeline: buildTimelineMeta(
 									{
 										start: startFrame,
@@ -880,13 +881,12 @@ export function useExternalMaterialDnd({
 							props: {
 								uri: item.uri,
 							},
-							transform: {
-								centerX: 0,
-								centerY: 0,
+							transform: createTransformMeta({
 								width: item.width,
 								height: item.height,
-								rotation: 0,
-							},
+								positionX: canvasSize.width / 2,
+								positionY: canvasSize.height / 2,
+							}),
 							timeline: buildTimelineMeta(
 								{
 									start: startFrame,
@@ -1030,13 +1030,12 @@ export function useExternalMaterialDnd({
 							props: {
 								uri: item.uri,
 							},
-							transform: {
-								centerX: canvasX,
-								centerY: canvasY,
+							transform: createTransformMeta({
 								width: item.metadata.width,
 								height: item.metadata.height,
-								rotation: 0,
-							},
+								positionX: canvasX,
+								positionY: canvasY,
+							}),
 							timeline: buildTimelineMeta(
 								{
 									start: startFrame,
@@ -1100,13 +1099,12 @@ export function useExternalMaterialDnd({
 						props: {
 							uri: item.uri,
 						},
-						transform: {
-							centerX: 0,
-							centerY: 0,
+						transform: createTransformMeta({
 							width: item.metadata.width,
 							height: item.metadata.height,
-							rotation: 0,
-						},
+							positionX: canvasSize.width / 2,
+							positionY: canvasSize.height / 2,
+						}),
 						timeline: buildTimelineMeta(
 							{
 								start: startFrame,
@@ -1175,8 +1173,9 @@ export function useExternalMaterialDnd({
 			endDrag,
 			setElements,
 			currentTime,
-			fps,
-			materialDndContext,
+				fps,
+				canvasSize,
+				materialDndContext,
 			rippleEditingEnabled,
 			attachments,
 			autoAttach,

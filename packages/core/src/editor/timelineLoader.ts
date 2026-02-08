@@ -166,6 +166,11 @@ function validateTimeline(data: unknown): TimelineData {
 	if (!isNonEmptyString(timeline.version)) {
 		throw new Error("Timeline JSON missing version field");
 	}
+	if (timeline.version !== "1.0") {
+		throw new Error(
+			`Unsupported timeline version "${timeline.version}", expected "1.0"`,
+		);
+	}
 
 	if (!isIntegerNumber(timeline.fps) || timeline.fps <= 0) {
 		throw new Error("Timeline JSON missing or invalid fps");
@@ -600,32 +605,171 @@ function serializeTracks(
 function validateTransform(transform: unknown, path: string): TransformMeta {
 	const current = expectRecord(transform, path);
 
-	if (typeof current.centerX !== "number") {
-		throw new Error(`${path}.centerX: must be a number`);
+	if (current.schema !== "v2") {
+		throw new Error(`${path}.schema: must be "v2"`);
 	}
 
-	if (typeof current.centerY !== "number") {
-		throw new Error(`${path}.centerY: must be a number`);
+	const baseSize = expectRecord(current.baseSize, `${path}.baseSize`);
+	if (typeof baseSize.width !== "number" || baseSize.width <= 0) {
+		throw new Error(`${path}.baseSize.width: must be a positive number`);
+	}
+	if (typeof baseSize.height !== "number" || baseSize.height <= 0) {
+		throw new Error(`${path}.baseSize.height: must be a positive number`);
 	}
 
-	if (typeof current.width !== "number" || current.width <= 0) {
-		throw new Error(`${path}.width: must be a positive number`);
+	const position = expectRecord(current.position, `${path}.position`);
+	if (typeof position.x !== "number" || !Number.isFinite(position.x)) {
+		throw new Error(`${path}.position.x: must be a finite number`);
+	}
+	if (typeof position.y !== "number" || !Number.isFinite(position.y)) {
+		throw new Error(`${path}.position.y: must be a finite number`);
+	}
+	if (position.space !== "canvas") {
+		throw new Error(`${path}.position.space: must be "canvas"`);
 	}
 
-	if (typeof current.height !== "number" || current.height <= 0) {
-		throw new Error(`${path}.height: must be a positive number`);
+	const anchor = expectRecord(current.anchor, `${path}.anchor`);
+	if (typeof anchor.x !== "number" || anchor.x < 0 || anchor.x > 1) {
+		throw new Error(`${path}.anchor.x: must be a number between 0 and 1`);
+	}
+	if (typeof anchor.y !== "number" || anchor.y < 0 || anchor.y > 1) {
+		throw new Error(`${path}.anchor.y: must be a number between 0 and 1`);
+	}
+	if (anchor.space !== "normalized") {
+		throw new Error(`${path}.anchor.space: must be "normalized"`);
 	}
 
-	if (typeof current.rotation !== "number") {
-		throw new Error(`${path}.rotation: must be a number (radians)`);
+	const scale = expectRecord(current.scale, `${path}.scale`);
+	if (
+		typeof scale.x !== "number" ||
+		!Number.isFinite(scale.x) ||
+		Math.abs(scale.x) < Number.EPSILON
+	) {
+		throw new Error(`${path}.scale.x: must be a non-zero finite number`);
+	}
+	if (
+		typeof scale.y !== "number" ||
+		!Number.isFinite(scale.y) ||
+		Math.abs(scale.y) < Number.EPSILON
+	) {
+		throw new Error(`${path}.scale.y: must be a non-zero finite number`);
+	}
+
+	const rotation = expectRecord(current.rotation, `${path}.rotation`);
+	if (typeof rotation.value !== "number" || !Number.isFinite(rotation.value)) {
+		throw new Error(`${path}.rotation.value: must be a finite number`);
+	}
+	if (rotation.unit !== "deg") {
+		throw new Error(`${path}.rotation.unit: must be "deg"`);
+	}
+
+	let crop: TransformMeta["crop"];
+	if (current.crop !== undefined) {
+		const cropValue = expectRecord(current.crop, `${path}.crop`);
+		if (typeof cropValue.left !== "number" || !Number.isFinite(cropValue.left)) {
+			throw new Error(`${path}.crop.left: must be a finite number`);
+		}
+		if (
+			typeof cropValue.right !== "number" ||
+			!Number.isFinite(cropValue.right)
+		) {
+			throw new Error(`${path}.crop.right: must be a finite number`);
+		}
+		if (typeof cropValue.top !== "number" || !Number.isFinite(cropValue.top)) {
+			throw new Error(`${path}.crop.top: must be a finite number`);
+		}
+		if (
+			typeof cropValue.bottom !== "number" ||
+			!Number.isFinite(cropValue.bottom)
+		) {
+			throw new Error(`${path}.crop.bottom: must be a finite number`);
+		}
+		if (cropValue.unit !== "normalized" && cropValue.unit !== "px") {
+			throw new Error(`${path}.crop.unit: must be "normalized" or "px"`);
+		}
+		crop = {
+			left: cropValue.left,
+			right: cropValue.right,
+			top: cropValue.top,
+			bottom: cropValue.bottom,
+			unit: cropValue.unit,
+		};
+	}
+
+	let distort: TransformMeta["distort"];
+	if (current.distort !== undefined) {
+		const distortValue = expectRecord(current.distort, `${path}.distort`);
+		if (distortValue.type === "none") {
+			distort = { type: "none" };
+		} else if (distortValue.type === "cornerPin") {
+			if (distortValue.space !== "normalized_local") {
+				throw new Error(`${path}.distort.space: must be "normalized_local"`);
+			}
+			if (!Array.isArray(distortValue.points) || distortValue.points.length !== 4) {
+				throw new Error(`${path}.distort.points: must contain 4 points`);
+			}
+			const points = distortValue.points.map((point, pointIndex) => {
+				const pointRecord = expectRecord(
+					point,
+					`${path}.distort.points[${pointIndex}]`,
+				);
+				if (
+					typeof pointRecord.x !== "number" ||
+					!Number.isFinite(pointRecord.x)
+				) {
+					throw new Error(
+						`${path}.distort.points[${pointIndex}].x: must be a finite number`,
+					);
+				}
+				if (
+					typeof pointRecord.y !== "number" ||
+					!Number.isFinite(pointRecord.y)
+				) {
+					throw new Error(
+						`${path}.distort.points[${pointIndex}].y: must be a finite number`,
+					);
+				}
+				return {
+					x: pointRecord.x,
+					y: pointRecord.y,
+				};
+			});
+			distort = {
+				type: "cornerPin",
+				points: [points[0], points[1], points[2], points[3]],
+				space: "normalized_local",
+			};
+		} else {
+			throw new Error(`${path}.distort.type: must be "none" or "cornerPin"`);
+		}
 	}
 
 	return {
-		centerX: current.centerX,
-		centerY: current.centerY,
-		width: current.width,
-		height: current.height,
-		rotation: current.rotation,
+		schema: "v2",
+		baseSize: {
+			width: baseSize.width,
+			height: baseSize.height,
+		},
+		position: {
+			x: position.x,
+			y: position.y,
+			space: "canvas",
+		},
+		anchor: {
+			x: anchor.x,
+			y: anchor.y,
+			space: "normalized",
+		},
+		scale: {
+			x: scale.x,
+			y: scale.y,
+		},
+		rotation: {
+			value: rotation.value,
+			unit: "deg",
+		},
+		...(crop ? { crop } : {}),
+		...(distort ? { distort } : {}),
 	};
 }
 
@@ -833,7 +977,7 @@ function validateRender(render: unknown, path: string): RenderMeta {
 }
 
 /**
- * 辅助函数：将旧的 left/top 坐标（左上角坐标系）转换为新的 center 坐标（画布中心坐标系）
+ * 辅助函数：将旧的 left/top 坐标（左上角坐标系）转换为 V2 transform
  * @param layout 旧的布局信息（左上角坐标系）
  * @param pictureSize 画布尺寸，用于坐标系转换
  */
@@ -845,47 +989,58 @@ export function convertLegacyLayoutToTransform(
 		height: number;
 		rotate?: string;
 	},
-	pictureSize: { width: number; height: number } = {
+	_pictureSize: { width: number; height: number } = {
 		width: 1920,
 		height: 1080,
 	},
 ): TransformMeta {
-	// 从左上角坐标系转换到画布中心坐标系
-	// 元素中心相对于画布左上角的坐标
-	const centerXFromTopLeft = layout.left + layout.width / 2;
-	const centerYFromTopLeft = layout.top + layout.height / 2;
-
-	// 转换为相对于画布中心的坐标
-	const centerX = centerXFromTopLeft - pictureSize.width / 2;
-	const centerY = centerYFromTopLeft - pictureSize.height / 2;
-
-	// 解析旋转角度（从 "45deg" 转换为弧度）
+	// 解析旋转角度（保留度数表示）
 	let rotation = 0;
 	if (layout.rotate) {
 		const match = layout.rotate.match(/^([-\d.]+)deg$/);
 		if (match) {
-			const degrees = parseFloat(match[1]);
-			rotation = (degrees * Math.PI) / 180;
+			rotation = parseFloat(match[1]);
 		}
 	}
 
 	return {
-		centerX,
-		centerY,
-		width: layout.width,
-		height: layout.height,
-		rotation,
+		schema: "v2",
+		baseSize: {
+			width: layout.width,
+			height: layout.height,
+		},
+		position: {
+			x: layout.left + layout.width / 2,
+			y: layout.top + layout.height / 2,
+			space: "canvas",
+		},
+		anchor: {
+			x: 0.5,
+			y: 0.5,
+			space: "normalized",
+		},
+		scale: {
+			x: 1,
+			y: 1,
+		},
+		rotation: {
+			value: rotation,
+			unit: "deg",
+		},
+		distort: {
+			type: "none",
+		},
 	};
 }
 
 /**
- * 辅助函数：将新的 center 坐标（画布中心坐标系）转换为旧的 left/top 坐标（左上角坐标系，用于向后兼容）
- * @param transform 变换属性（画布中心坐标系）
+ * 辅助函数：将 V2 transform 转换为旧的 left/top 坐标（仅调试用途）
+ * @param transform 变换属性（V2）
  * @param pictureSize 画布尺寸，用于坐标系转换
  */
 export function convertTransformToLegacyLayout(
 	transform: TransformMeta,
-	pictureSize: { width: number; height: number } = {
+	_pictureSize: { width: number; height: number } = {
 		width: 1920,
 		height: 1080,
 	},
@@ -896,21 +1051,17 @@ export function convertTransformToLegacyLayout(
 	height: number;
 	rotate: string;
 } {
-	// 从画布中心坐标系转换到左上角坐标系
-	// 元素中心相对于画布左上角的坐标
-	const centerXFromTopLeft = transform.centerX + pictureSize.width / 2;
-	const centerYFromTopLeft = transform.centerY + pictureSize.height / 2;
-
-	// 计算左上角坐标
-	const left = centerXFromTopLeft - transform.width / 2;
-	const top = centerYFromTopLeft - transform.height / 2;
-	const degrees = (transform.rotation * 180) / Math.PI;
+	const width = transform.baseSize.width * Math.abs(transform.scale.x);
+	const height = transform.baseSize.height * Math.abs(transform.scale.y);
+	const left = transform.position.x - width * transform.anchor.x;
+	const top = transform.position.y - height * transform.anchor.y;
+	const degrees = transform.rotation.value;
 
 	return {
 		left,
 		top,
-		width: transform.width,
-		height: transform.height,
+		width,
+		height,
 		rotate: `${degrees}deg`,
 	};
 }

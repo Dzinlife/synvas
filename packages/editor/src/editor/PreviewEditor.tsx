@@ -119,16 +119,14 @@ const Preview = () => {
 		handleStageMouseMove,
 		handleStageMouseUp,
 		transformBaseRef,
-	} = usePreviewInteractions({
-		renderElements,
-		renderElementsRef,
-		canvasConvertOptions,
-		pictureWidth,
-		pictureHeight,
-		canvasWidth,
-		canvasHeight,
-		getEffectiveZoom,
-		stageToCanvasCoords,
+		} = usePreviewInteractions({
+			renderElements,
+			renderElementsRef,
+			canvasConvertOptions,
+			canvasWidth,
+			canvasHeight,
+			getEffectiveZoom,
+			stageToCanvasCoords,
 		canvasToStageCoords,
 	});
 

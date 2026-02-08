@@ -7,6 +7,7 @@ import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type React from "react";
 import { useCallback } from "react";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
+import { createTransformMeta } from "@/dsl/transform";
 import type { ElementType, TimelineElement, TrackRole } from "@/dsl/types";
 import {
 	clampFrame,
@@ -391,6 +392,7 @@ const MaterialLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
 	const currentTime = useTimelineStore((state) => state.currentTime);
+	const canvasSize = useTimelineStore((state) => state.canvasSize);
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
@@ -430,7 +432,7 @@ const MaterialLibrary: React.FC = () => {
 					const { head, tail } = getTransitionDurationParts(durationFrames);
 					const transitionStart = startFrame - head;
 					const transitionEnd = startFrame + tail;
-					const newTransition: TimelineElement = {
+						const newTransition: TimelineElement = {
 						id: `transition-${Date.now()}`,
 						type: "Transition",
 						component: item.component,
@@ -442,13 +444,12 @@ const MaterialLibrary: React.FC = () => {
 							fromId: link.fromId,
 							toId: link.toId,
 						},
-						transform: {
-							centerX: 0,
-							centerY: 0,
-							width: item.width ?? 1920,
-							height: item.height ?? 1080,
-							rotation: 0,
-						},
+							transform: createTransformMeta({
+								width: item.width ?? 1920,
+								height: item.height ?? 1080,
+								positionX: canvasSize.width / 2,
+								positionY: canvasSize.height / 2,
+							}),
 						timeline: buildTimelineMeta(
 							{
 								start: transitionStart,
@@ -478,19 +479,18 @@ const MaterialLibrary: React.FC = () => {
 							? Math.min(-1, trackIndex)
 							: Math.max(1, trackIndex)
 						: trackIndex;
-				const newElement: TimelineElement = {
+					const newElement: TimelineElement = {
 					id: `element-${Date.now()}`,
 					type: item.elementType,
 					component: item.component,
 					name: item.name,
 					props: { ...(item.props ?? {}) },
-					transform: {
-						centerX: 0,
-						centerY: 0,
-						width: item.width ?? 1920,
-						height: item.height ?? 1080,
-						rotation: 0,
-					},
+						transform: createTransformMeta({
+							width: item.width ?? 1920,
+							height: item.height ?? 1080,
+							positionX: canvasSize.width / 2,
+							positionY: canvasSize.height / 2,
+						}),
 					timeline: buildTimelineMeta(
 						{
 							start: startFrame,
@@ -558,15 +558,16 @@ const MaterialLibrary: React.FC = () => {
 				);
 			});
 		},
-		[
-			setElements,
-			rippleEditingEnabled,
-			attachments,
-			autoAttach,
-			fps,
-			dndContext,
-		],
-	);
+			[
+				setElements,
+				rippleEditingEnabled,
+				attachments,
+				autoAttach,
+				fps,
+				canvasSize,
+				dndContext,
+			],
+		);
 
 	// 处理素材库拖拽放置到预览画布
 	const handlePreviewDrop = useCallback(
@@ -594,19 +595,18 @@ const MaterialLibrary: React.FC = () => {
 					newId,
 					trackCount,
 				);
-				const newElement: TimelineElement = {
+					const newElement: TimelineElement = {
 					id: newId,
 					type: item.elementType,
 					component: item.component,
 					name: item.name,
 					props: { ...(item.props ?? {}) },
-					transform: {
-						centerX: canvasX,
-						centerY: canvasY,
-						width: elementWidth,
-						height: elementHeight,
-						rotation: 0,
-					},
+						transform: createTransformMeta({
+							width: elementWidth,
+							height: elementHeight,
+							positionX: canvasX,
+							positionY: canvasY,
+						}),
 					timeline: buildTimelineMeta(
 						{
 							start: startFrame,

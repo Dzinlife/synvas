@@ -1,339 +1,549 @@
 {
-	"version": "1.0",
-	"fps": 30,
-	"canvas": {
-		"width": 1920,
-		"height": 1080
-	},
-	"settings": {
-		"snapEnabled": true,
-		"autoAttach": true,
-		"rippleEditingEnabled": true,
-		"previewAxisEnabled": true
-	},
-	"tracks": [
-		{
-			"id": "main",
-			"role": "clip"
-		},
-		{
-			"id": "track-1",
-			"role": "effect"
-		},
-		{
-			"id": "track-2",
-			"role": "effect"
-		},
-		{
-			"id": "track-3",
-			"role": "overlay"
-		},
-		{
-			"id": "track-4",
-			"role": "overlay"
-		}
-	],
-	"elements": [
-		{
-			"id": "clip1",
-			"type": "VideoClip",
-			"component": "video-clip",
-			"name": "视频片段",
-			"transform": {
-				"centerX": 0,
-				"centerY": 0,
-				"width": 1920,
-				"height": 1080,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 0,
-				"end": 178,
-				"startTimecode": "00:00:00:00",
-				"endTimecode": "00:00:05:28",
-				"trackIndex": 0,
-				"trackId": "main",
-				"role": "clip"
-			},
-			"render": {
-				"zIndex": 0
-			},
-			"props": {
-				"uri": "/intro.mp4"
-			}
-		},
-		{
-			"id": "video-piano",
-			"type": "VideoClip",
-			"component": "video-clip",
-			"name": "WZ",
-			"transform": {
-				"centerX": 0,
-				"centerY": 0,
-				"width": 1920,
-				"height": 1080,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 178,
-				"end": 480,
-				"startTimecode": "00:00:05:28",
-				"endTimecode": "00:00:16:00",
-				"trackIndex": 0,
-				"trackId": "main",
-				"role": "clip"
-			},
-			"render": {
-				"zIndex": 0
-			},
-			"props": {
-				"uri": "/unwrapped-WZ.mp4"
-			}
-		},
-		{
-			"id": "image2",
-			"type": "Image",
-			"component": "image",
-			"name": "照片",
-			"transform": {
-				"centerX": 0,
-				"centerY": 0,
-				"width": 1920,
-				"height": 1080,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 480,
-				"end": 720,
-				"startTimecode": "00:00:16:00",
-				"endTimecode": "00:00:24:00",
-				"trackIndex": 0,
-				"trackId": "main",
-				"role": "clip"
-			},
-			"render": {
-				"zIndex": 0
-			},
-			"props": {
-				"uri": "/photo.jpeg"
-			}
-		},
-		{
-			"id": "transition-1",
-			"type": "Transition",
-			"component": "transition/crossfade",
-			"name": "转场",
-			"transform": {
-				"centerX": 0,
-				"centerY": 0,
-				"width": 1920,
-				"height": 1080,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 78,
-				"end": 278,
-				"startTimecode": "00:00:02:18",
-				"endTimecode": "00:00:09:08",
-				"trackIndex": 0,
-				"trackId": "main",
-				"role": "clip"
-			},
-			"render": {
-				"zIndex": 1
-			},
-			"props": {},
-			"transition": {
-				"duration": 200,
-				"boundry": 178,
-				"fromId": "clip1",
-				"toId": "video-piano"
-			}
-		},
-		{
-			"id": "backdropZoom1",
-			"type": "Filter",
-			"component": "filter/backdrop-zoom",
-			"name": "放大镜效果",
-			"transform": {
-				"centerX": -610,
-				"centerY": -140,
-				"width": 300,
-				"height": 300,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 60,
-				"end": 360,
-				"startTimecode": "00:00:02:00",
-				"endTimecode": "00:00:12:00",
-				"trackIndex": 1,
-				"trackId": "track-1",
-				"role": "effect"
-			},
-			"render": {
-				"zIndex": 2
-			},
-			"props": {
-				"zoom": 1.5,
-				"shape": "circle",
-				"cornerRadius": 16
-			}
-		},
-		{
-			"id": "lottie1",
-			"type": "Lottie",
-			"component": "lottie",
-			"name": "贴纸动画",
-			"transform": {
-				"centerX": -160,
-				"centerY": 260,
-				"width": 400,
-				"height": 400,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 240,
-				"end": 600,
-				"startTimecode": "00:00:08:00",
-				"endTimecode": "00:00:20:00",
-				"trackIndex": 4,
-				"trackId": "track-4",
-				"role": "overlay"
-			},
-			"render": {
-				"zIndex": 3
-			},
-			"props": {
-				"uri": "https://lottie.host/2eb481e4-0f47-46a0-b670-936cd715c51f/ajTiosbGxW.lottie",
-				"speed": 1.0,
-				"loop": true
-			}
-		},
-		{
-			"id": "colorFilterLayer1",
-			"type": "Filter",
-			"component": "filter/color-filter",
-			"name": "调色滤镜",
-			"transform": {
-				"centerX": 0,
-				"centerY": 0,
-				"width": 1920,
-				"height": 1080,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 300,
-				"end": 540,
-				"startTimecode": "00:00:10:00",
-				"endTimecode": "00:00:18:00",
-				"trackIndex": 2,
-				"trackId": "track-2",
-				"role": "effect"
-			},
-			"render": {
-				"zIndex": 5
-			},
-			"props": {
-				"hue": 30,
-				"saturation": 0.3,
-				"brightness": 0.1,
-				"contrast": 0.2,
-				"feather": 40
-			}
-		},
-		{
-			"id": "image1",
-			"type": "Image",
-			"component": "image",
-			"name": "Logo 水印",
-			"transform": {
-				"centerX": 760,
-				"centerY": -440,
-				"width": 200,
-				"height": 200,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 0,
-				"end": 720,
-				"startTimecode": "00:00:00:00",
-				"endTimecode": "00:00:24:00",
-				"trackIndex": 3,
-				"trackId": "track-3",
-				"role": "overlay"
-			},
-			"render": {
-				"zIndex": 6
-			},
-			"props": {
-				"uri": "/logo512.png"
-			}
-		},
-		{
-			"id": "seaWave1",
-			"type": "Background",
-			"component": "background/sea-wave",
-			"name": "海浪特效",
-			"transform": {
-				"centerX": 0,
-				"centerY": 0,
-				"width": 1920,
-				"height": 1080,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 720,
-				"end": 1020,
-				"startTimecode": "00:00:24:00",
-				"endTimecode": "00:00:34:00",
-				"trackIndex": 0,
-				"trackId": "main",
-				"role": "clip"
-			},
-			"render": {
-				"zIndex": 0
-			},
-			"props": {
-				"speed": 1.0,
-				"amplitude": 1.2,
-				"frequency": 2.5,
-				"waveColor": "#1e40af",
-				"foamColor": "#f8fafc",
-				"deepWaterColor": "#0f172a"
-			}
-		},
-		{
-			"id": "transition-2",
-			"type": "Transition",
-			"component": "transition/crossfade",
-			"name": "转场",
-			"transform": {
-				"centerX": 0,
-				"centerY": 0,
-				"width": 1920,
-				"height": 1080,
-				"rotation": 0
-			},
-			"timeline": {
-				"start": 713,
-				"end": 728,
-				"startTimecode": "00:00:23:23",
-				"endTimecode": "00:00:24:08",
-				"trackIndex": 0,
-				"trackId": "main",
-				"role": "clip"
-			},
-			"render": {
-				"zIndex": 1
-			},
-			"props": {},
-			"transition": {
-				"duration": 15,
-				"boundry": 720,
-				"fromId": "image2",
-				"toId": "seaWave1"
-			}
-		}
-	]
+  "version": "1.0",
+  "fps": 30,
+  "canvas": {
+    "width": 1920,
+    "height": 1080
+  },
+  "settings": {
+    "snapEnabled": true,
+    "autoAttach": true,
+    "rippleEditingEnabled": true,
+    "previewAxisEnabled": true
+  },
+  "tracks": [
+    {
+      "id": "main",
+      "role": "clip"
+    },
+    {
+      "id": "track-1",
+      "role": "effect"
+    },
+    {
+      "id": "track-2",
+      "role": "effect"
+    },
+    {
+      "id": "track-3",
+      "role": "overlay"
+    },
+    {
+      "id": "track-4",
+      "role": "overlay"
+    }
+  ],
+  "elements": [
+    {
+      "id": "clip1",
+      "type": "VideoClip",
+      "component": "video-clip",
+      "name": "视频片段",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "position": {
+          "x": 960,
+          "y": 540,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 0,
+        "end": 178,
+        "startTimecode": "00:00:00:00",
+        "endTimecode": "00:00:05:28",
+        "trackIndex": 0,
+        "trackId": "main",
+        "role": "clip"
+      },
+      "render": {
+        "zIndex": 0
+      },
+      "props": {
+        "uri": "/intro.mp4"
+      }
+    },
+    {
+      "id": "video-piano",
+      "type": "VideoClip",
+      "component": "video-clip",
+      "name": "WZ",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "position": {
+          "x": 960,
+          "y": 540,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 178,
+        "end": 480,
+        "startTimecode": "00:00:05:28",
+        "endTimecode": "00:00:16:00",
+        "trackIndex": 0,
+        "trackId": "main",
+        "role": "clip"
+      },
+      "render": {
+        "zIndex": 0
+      },
+      "props": {
+        "uri": "/unwrapped-WZ.mp4"
+      }
+    },
+    {
+      "id": "image2",
+      "type": "Image",
+      "component": "image",
+      "name": "照片",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "position": {
+          "x": 960,
+          "y": 540,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 480,
+        "end": 720,
+        "startTimecode": "00:00:16:00",
+        "endTimecode": "00:00:24:00",
+        "trackIndex": 0,
+        "trackId": "main",
+        "role": "clip"
+      },
+      "render": {
+        "zIndex": 0
+      },
+      "props": {
+        "uri": "/photo.jpeg"
+      }
+    },
+    {
+      "id": "transition-1",
+      "type": "Transition",
+      "component": "transition/crossfade",
+      "name": "转场",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "position": {
+          "x": 960,
+          "y": 540,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 78,
+        "end": 278,
+        "startTimecode": "00:00:02:18",
+        "endTimecode": "00:00:09:08",
+        "trackIndex": 0,
+        "trackId": "main",
+        "role": "clip"
+      },
+      "render": {
+        "zIndex": 1
+      },
+      "props": {},
+      "transition": {
+        "duration": 200,
+        "boundry": 178,
+        "fromId": "clip1",
+        "toId": "video-piano"
+      }
+    },
+    {
+      "id": "backdropZoom1",
+      "type": "Filter",
+      "component": "filter/backdrop-zoom",
+      "name": "放大镜效果",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 300,
+          "height": 300
+        },
+        "position": {
+          "x": 350,
+          "y": 400,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 60,
+        "end": 360,
+        "startTimecode": "00:00:02:00",
+        "endTimecode": "00:00:12:00",
+        "trackIndex": 1,
+        "trackId": "track-1",
+        "role": "effect"
+      },
+      "render": {
+        "zIndex": 2
+      },
+      "props": {
+        "zoom": 1.5,
+        "shape": "circle",
+        "cornerRadius": 16
+      }
+    },
+    {
+      "id": "lottie1",
+      "type": "Lottie",
+      "component": "lottie",
+      "name": "贴纸动画",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 400,
+          "height": 400
+        },
+        "position": {
+          "x": 800,
+          "y": 800,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 240,
+        "end": 600,
+        "startTimecode": "00:00:08:00",
+        "endTimecode": "00:00:20:00",
+        "trackIndex": 4,
+        "trackId": "track-4",
+        "role": "overlay"
+      },
+      "render": {
+        "zIndex": 3
+      },
+      "props": {
+        "uri": "https://lottie.host/2eb481e4-0f47-46a0-b670-936cd715c51f/ajTiosbGxW.lottie",
+        "speed": 1,
+        "loop": true
+      }
+    },
+    {
+      "id": "colorFilterLayer1",
+      "type": "Filter",
+      "component": "filter/color-filter",
+      "name": "调色滤镜",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "position": {
+          "x": 960,
+          "y": 540,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 300,
+        "end": 540,
+        "startTimecode": "00:00:10:00",
+        "endTimecode": "00:00:18:00",
+        "trackIndex": 2,
+        "trackId": "track-2",
+        "role": "effect"
+      },
+      "render": {
+        "zIndex": 5
+      },
+      "props": {
+        "hue": 30,
+        "saturation": 0.3,
+        "brightness": 0.1,
+        "contrast": 0.2,
+        "feather": 40
+      }
+    },
+    {
+      "id": "image1",
+      "type": "Image",
+      "component": "image",
+      "name": "Logo 水印",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 200,
+          "height": 200
+        },
+        "position": {
+          "x": 1720,
+          "y": 100,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 0,
+        "end": 720,
+        "startTimecode": "00:00:00:00",
+        "endTimecode": "00:00:24:00",
+        "trackIndex": 3,
+        "trackId": "track-3",
+        "role": "overlay"
+      },
+      "render": {
+        "zIndex": 6
+      },
+      "props": {
+        "uri": "/logo512.png"
+      }
+    },
+    {
+      "id": "seaWave1",
+      "type": "Background",
+      "component": "background/sea-wave",
+      "name": "海浪特效",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "position": {
+          "x": 960,
+          "y": 540,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 720,
+        "end": 1020,
+        "startTimecode": "00:00:24:00",
+        "endTimecode": "00:00:34:00",
+        "trackIndex": 0,
+        "trackId": "main",
+        "role": "clip"
+      },
+      "render": {
+        "zIndex": 0
+      },
+      "props": {
+        "speed": 1,
+        "amplitude": 1.2,
+        "frequency": 2.5,
+        "waveColor": "#1e40af",
+        "foamColor": "#f8fafc",
+        "deepWaterColor": "#0f172a"
+      }
+    },
+    {
+      "id": "transition-2",
+      "type": "Transition",
+      "component": "transition/crossfade",
+      "name": "转场",
+      "transform": {
+        "schema": "v2",
+        "baseSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "position": {
+          "x": 960,
+          "y": 540,
+          "space": "canvas"
+        },
+        "anchor": {
+          "x": 0.5,
+          "y": 0.5,
+          "space": "normalized"
+        },
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "rotation": {
+          "value": 0,
+          "unit": "deg"
+        },
+        "distort": {
+          "type": "none"
+        }
+      },
+      "timeline": {
+        "start": 713,
+        "end": 728,
+        "startTimecode": "00:00:23:23",
+        "endTimecode": "00:00:24:08",
+        "trackIndex": 0,
+        "trackId": "main",
+        "role": "clip"
+      },
+      "render": {
+        "zIndex": 1
+      },
+      "props": {},
+      "transition": {
+        "duration": 15,
+        "boundry": 720,
+        "fromId": "image2",
+        "toId": "seaWave1"
+      }
+    }
+  ]
 }

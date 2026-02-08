@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createTransformMeta } from "@/dsl/transform";
 import type { TimelineElement } from "../../dsl/types";
 import {
 	detachVideoClipAudio,
@@ -15,13 +16,12 @@ const createVideoElement = (id: string): TimelineElement => {
 		props: {
 			uri: "file:///video.mp4",
 		},
-		transform: {
-			centerX: 0,
-			centerY: 0,
-			width: 1920,
-			height: 1080,
-			rotation: 0,
-		},
+			transform: createTransformMeta({
+				width: 1920,
+				height: 1080,
+				positionX: 960,
+				positionY: 540,
+			}),
 		timeline: {
 			start: 10,
 			end: 100,

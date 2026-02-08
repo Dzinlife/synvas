@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTransformMeta } from "@/dsl/transform";
 import type { TimelineElement } from "@/dsl/types";
 import {
 	HALATION_FILTER_DEFAULT_PROPS,
@@ -14,16 +15,15 @@ const createHalationElement = (
 ): TimelineElement<HalationFilterLayerProps> => {
 	return {
 		id: "halation-1",
-		type: "Filter",
-		component: "filter/halation",
-		name: "Halation",
-		transform: {
-			centerX: 0,
-			centerY: 0,
-			width: 320,
-			height: 180,
-			rotation: 0,
-		},
+			type: "Filter",
+			component: "filter/halation",
+			name: "Halation",
+			transform: createTransformMeta({
+				width: 320,
+				height: 180,
+				positionX: 160,
+				positionY: 90,
+			}),
 		timeline: {
 			start: 0,
 			end: 30,

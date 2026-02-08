@@ -71,6 +71,13 @@ const createProjectId = (): string => {
 };
 
 const resolveTimelineData = (data: TimelineJSON): TimelineData => {
+	if (data.version !== "1.0") {
+		console.warn(
+			`Unsupported timeline version "${data.version}", reset to empty timeline.`,
+		);
+		return loadTimelineFromObject(buildEmptyTimeline());
+	}
+
 	try {
 		return loadTimelineFromObject(data);
 	} catch (error) {

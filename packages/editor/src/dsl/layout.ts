@@ -429,14 +429,28 @@ export const converMetaLayoutToCanvasLayout = (
 };
 
 /**
- * 将 TransformMeta（中心坐标系统）转换为 RenderLayout
- * 这是新架构的核心转换函数
- * @param transform 中心坐标系的变换属性
- * @param picture 影片尺寸（原始坐标系）
- * @param canvas 画布尺寸（目标坐标系）
+ * 计算 TransformMeta 的最终可见尺寸（以项目画布坐标为基准）
+ */
+export const resolveTransformSize = (
+	transform: import("./types").TransformMeta,
+): {
+	width: number;
+	height: number;
+} => {
+	return {
+		width: transform.baseSize.width * Math.abs(transform.scale.x),
+		height: transform.baseSize.height * Math.abs(transform.scale.y),
+	};
+};
+
+/**
+ * 将 TransformMeta（V2）转换为 RenderLayout
+ * @param transform V2 变换属性
+ * @param picture 项目画布尺寸（逻辑坐标）
+ * @param canvas 渲染画布尺寸（像素坐标）
  * @returns RenderLayout 用于渲染的布局信息
  */
-export const transformMetaToRenderLayout = (
+export const resolveTransformToRenderLayout = (
 	transform: import("./types").TransformMeta,
 	picture: {
 		width: number;
@@ -448,28 +462,33 @@ export const transformMetaToRenderLayout = (
 	},
 	pixelRatio = 1,
 ): import("./types").RenderLayout => {
-	const { centerX, centerY, width, height, rotation } = transform;
+	const size = resolveTransformSize(transform);
+	const anchor = transform.anchor;
 
-	// 计算缩放比例（从 picture 到 canvas）
+	// 锚点坐标转左上角坐标（项目画布坐标系）
+	const projectTopLeftX = transform.position.x - size.width * anchor.x;
+	const projectTopLeftY = transform.position.y - size.height * anchor.y;
+
+	// 计算缩放比例（从项目画布到渲染画布）
 	const scaleX = (canvas.width / picture.width) * pixelRatio;
 	const scaleY = (canvas.height / picture.height) * pixelRatio;
 
-	// 将中心坐标从画布中心坐标系转换到左上角坐标系，然后缩放到 canvas 坐标系
-	// centerX/centerY 是相对于画布中心的坐标（0,0 表示画布中心）
-	// 需要先加上 picture 尺寸的一半，转换为相对于左上角的坐标
-	const canvasCenterX = (centerX + picture.width / 2) * scaleX;
-	const canvasCenterY = (centerY + picture.height / 2) * scaleY;
-	const canvasWidth = width * scaleX;
-	const canvasHeight = height * scaleY;
+	const canvasTopLeftX = projectTopLeftX * scaleX;
+	const canvasTopLeftY = projectTopLeftY * scaleY;
+	const canvasWidth = size.width * scaleX;
+	const canvasHeight = size.height * scaleY;
+	const rotation = (transform.rotation.value * Math.PI) / 180;
 
 	return {
-		cx: canvasCenterX,
-		cy: canvasCenterY,
+		cx: canvasTopLeftX + canvasWidth / 2,
+		cy: canvasTopLeftY + canvasHeight / 2,
 		w: canvasWidth,
 		h: canvasHeight,
 		rotation,
 	};
 };
+
+export const transformMetaToRenderLayout = resolveTransformToRenderLayout;
 
 /**
  * 将 RenderLayout（中心坐标）转换为左上角坐标

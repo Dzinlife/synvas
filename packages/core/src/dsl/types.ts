@@ -2,17 +2,69 @@
 // 新架构：分离的属性系统
 // ============================================================================
 
+export interface TransformSizeMeta {
+	width: number; // 尺寸宽度（像素）
+	height: number; // 尺寸高度（像素）
+}
+
+export interface TransformPositionMeta {
+	x: number; // 锚点在画布坐标系中的 X（左上角原点）
+	y: number; // 锚点在画布坐标系中的 Y（左上角原点）
+	space: "canvas";
+}
+
+export interface TransformAnchorMeta {
+	x: number; // 归一化锚点 X（0~1）
+	y: number; // 归一化锚点 Y（0~1）
+	space: "normalized";
+}
+
+export interface TransformScaleMeta {
+	x: number; // 水平缩放，1=100%
+	y: number; // 垂直缩放，1=100%
+}
+
+export interface TransformRotationMeta {
+	value: number; // 旋转角度（度）
+	unit: "deg";
+}
+
+export interface TransformCropMeta {
+	left: number;
+	right: number;
+	top: number;
+	bottom: number;
+	unit: "normalized" | "px";
+}
+
+export type CornerPinPoint = {
+	x: number;
+	y: number;
+};
+
+export interface TransformDistortNone {
+	type: "none";
+}
+
+export interface TransformDistortCornerPin {
+	type: "cornerPin";
+	points: [CornerPinPoint, CornerPinPoint, CornerPinPoint, CornerPinPoint];
+	space: "normalized_local";
+}
+
 /**
- * 空间变换属性 (画布中心坐标系统)
- * 独立于组件 props，描述元素的空间位置和变换
- * 坐标系原点在画布中心，centerX=0, centerY=0 表示元素中心在画布中心
+ * 空间变换属性（V2）
+ * 使用主流 NLE 的 SRT + Anchor 语义；四角形变仅预留接口
  */
 export interface TransformMeta {
-	centerX: number; // 中心点 X 坐标（相对于画布中心，正值向右）
-	centerY: number; // 中心点 Y 坐标（相对于画布中心，正值向下）
-	width: number; // 宽度（像素）
-	height: number; // 高度（像素）
-	rotation: number; // 旋转角度（弧度）
+	schema: "v2";
+	baseSize: TransformSizeMeta;
+	position: TransformPositionMeta;
+	anchor: TransformAnchorMeta;
+	scale: TransformScaleMeta;
+	rotation: TransformRotationMeta;
+	crop?: TransformCropMeta;
+	distort?: TransformDistortNone | TransformDistortCornerPin;
 }
 
 /**
