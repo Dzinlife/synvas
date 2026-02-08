@@ -89,7 +89,7 @@ const POSITION_QUANTUM = 1e-6;
 const SIZE_QUANTUM = 1e-6;
 const SCALE_QUANTUM = 1e-6;
 const ROTATION_QUANTUM = 1e-6;
-const POSITION_INTEGER_SNAP_EPSILON = 1e-4;
+const POSITION_INTEGER_SNAP_EPSILON = 1e-3;
 const SCALE_EPSILON = 1e-6;
 const MIN_TRANSFORM_SIZE_STAGE = 5;
 const GUIDE_LOCK_EPSILON = 0.5;
@@ -152,6 +152,19 @@ const quantizeTransform = (transform: TransformMeta): TransformMeta => {
 			value: quantize(transform.rotation.value, ROTATION_QUANTUM),
 		},
 	};
+};
+
+const isTransformChanged = (
+	prev: TransformMeta,
+	next: TransformMeta,
+): boolean => {
+	return (
+		prev.position.x !== next.position.x ||
+		prev.position.y !== next.position.y ||
+		prev.scale.x !== next.scale.x ||
+		prev.scale.y !== next.scale.y ||
+		prev.rotation.value !== next.rotation.value
+	);
 };
 
 const resolveScaleFromSize = (
@@ -323,6 +336,10 @@ const createCopyElement = (source: TimelineElement, copyId: string) => ({
 	...(source.clip ? { clip: cloneValue(source.clip) } : {}),
 });
 
+type TimelineHistorySnapshot = ReturnType<
+	typeof useTimelineStore.getState
+>["historyPast"][number];
+
 export const usePreviewInteractions = ({
 	renderElements,
 	renderElementsRef,
@@ -388,6 +405,54 @@ export const usePreviewInteractions = ({
 	const dragHasMovedRef = useRef(false);
 	const dragLastCanvasRef = useRef<{ canvasX: number; canvasY: number } | null>(
 		null,
+	);
+	const dragHistorySnapshotRef = useRef<TimelineHistorySnapshot | null>(null);
+	const transformHistorySnapshotsRef = useRef<
+		Record<string, TimelineHistorySnapshot | undefined>
+	>({});
+	const transformHasChangedRef = useRef<Record<string, boolean>>({});
+	const groupTransformHistorySnapshotRef =
+		useRef<TimelineHistorySnapshot | null>(null);
+	const groupTransformHasChangedRef = useRef(false);
+
+	const captureHistorySnapshot = useCallback((): TimelineHistorySnapshot => {
+		const state = useTimelineStore.getState();
+		return {
+			elements: state.elements,
+			tracks: state.tracks,
+			audioTrackStates: state.audioTrackStates,
+			rippleEditingEnabled: state.rippleEditingEnabled,
+		};
+	}, []);
+
+	const pushHistorySnapshot = useCallback(
+		(snapshot: TimelineHistorySnapshot | null) => {
+			if (!snapshot) return;
+			useTimelineStore.setState((state) => {
+				if (state.elements === snapshot.elements) return state;
+				const nextPast = [...state.historyPast, snapshot];
+				const trimmedPast =
+					nextPast.length <= state.historyLimit
+						? nextPast
+						: nextPast.slice(nextPast.length - state.historyLimit);
+				return {
+					historyPast: trimmedPast,
+					historyFuture: [],
+				};
+			});
+		},
+		[],
+	);
+
+	const setElementsWithoutHistory = useCallback(
+		(
+			elements:
+				| TimelineElement[]
+				| ((prev: TimelineElement[]) => TimelineElement[]),
+		) => {
+			useTimelineStore.getState().setElements(elements, { history: false });
+		},
+		[],
 	);
 
 	const clearSnapGuides = useCallback(() => {
@@ -481,6 +546,8 @@ export const usePreviewInteractions = ({
 			groupCenterRef.current = null;
 			groupTransformSnapshotRef.current = null;
 			groupTransformingRef.current = false;
+			groupTransformHistorySnapshotRef.current = null;
+			groupTransformHasChangedRef.current = false;
 		}
 	}, [selectedIds]);
 
@@ -728,6 +795,7 @@ export const usePreviewInteractions = ({
 		dragHasMovedRef.current = false;
 		dragLastCanvasRef.current = null;
 		dragSourcePositionsRef.current = {};
+		dragHistorySnapshotRef.current = null;
 	}, []);
 
 	const applyTrackAssignments = useCallback(
@@ -769,6 +837,7 @@ export const usePreviewInteractions = ({
 				suppressDragStartRef.current = false;
 				return;
 			}
+			dragHistorySnapshotRef.current = captureHistorySnapshot();
 			dragLastCanvasRef.current = null;
 			const nextSelectedIds = selectedIds.includes(id) ? selectedIds : [id];
 			if (!selectedIds.includes(id)) {
@@ -828,9 +897,7 @@ export const usePreviewInteractions = ({
 					.filter(Boolean) as TimelineElement[];
 
 				if (copies.length > 0) {
-					useTimelineStore.setState({
-						elements: [...currentElements, ...copies],
-					});
+					setElementsWithoutHistory([...currentElements, ...copies]);
 				}
 
 				// 在 alt 复制模式下，我们继续拖拽源元素，但将位移应用到副本上
@@ -865,7 +932,13 @@ export const usePreviewInteractions = ({
 			setDraggingId(draggingIndicatorId);
 			setHoveredId(draggingIndicatorId); // 拖拽开始时保持 hover 状态
 		},
-		[selectedIds, setSelection, canvasConvertOptions],
+		[
+			selectedIds,
+			setSelection,
+			canvasConvertOptions,
+			captureHistorySnapshot,
+			setElementsWithoutHistory,
+		],
 	);
 
 	const applyDragToElements = useCallback(
@@ -873,18 +946,18 @@ export const usePreviewInteractions = ({
 			const dragSelectedIds = dragSelectedIdsRef.current;
 			const initialPositions = dragInitialPositionsRef.current;
 			const dragAnchorId = anchorId ?? dragAnchorIdRef.current;
-			if (!dragAnchorId) return;
+			if (!dragAnchorId) return false;
 
 			const isMultiDrag =
 				dragSelectedIds.length > 1 && dragSelectedIds.includes(dragAnchorId);
 			const draggedInitial = initialPositions[dragAnchorId];
-			if (isMultiDrag && !draggedInitial) return;
+			if (isMultiDrag && !draggedInitial) return false;
 
 			const deltaX = draggedInitial ? canvasX - draggedInitial.x : 0;
 			const deltaY = draggedInitial ? canvasY - draggedInitial.y : 0;
 
-			// 直接使用 setState 确保更新被触发
 			const currentElements = useTimelineStore.getState().elements;
+			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				const isDragged = dragSelectedIds.includes(el.id);
 				const initial = initialPositions[el.id];
@@ -900,6 +973,10 @@ export const usePreviewInteractions = ({
 							y: nextCanvasY + size.height * el.transform.anchor.y,
 						},
 					});
+					if (!isTransformChanged(el.transform, updatedTransform)) {
+						return el;
+					}
+					didChange = true;
 
 					return {
 						...el,
@@ -919,6 +996,10 @@ export const usePreviewInteractions = ({
 						y: canvasY + size.height * el.transform.anchor.y,
 					},
 				});
+				if (!isTransformChanged(el.transform, updatedTransform)) {
+					return el;
+				}
+				didChange = true;
 
 				return {
 					...el,
@@ -926,9 +1007,11 @@ export const usePreviewInteractions = ({
 				};
 			});
 
-			useTimelineStore.setState({ elements: newElements });
+			if (!didChange) return false;
+			setElementsWithoutHistory(newElements);
+			return true;
 		},
-		[],
+		[setElementsWithoutHistory],
 	);
 
 	const handleDrag = useCallback(
@@ -1124,7 +1207,7 @@ export const usePreviewInteractions = ({
 					const restored = currentElements.map(
 						(el) => snapshots.get(el.id) ?? el,
 					);
-					useTimelineStore.setState({ elements: restored });
+					setElementsWithoutHistory(restored);
 				}
 
 				resetCopySourceNodes();
@@ -1137,7 +1220,7 @@ export const usePreviewInteractions = ({
 						const nextElements = currentElements.filter(
 							(el) => !copyIds.has(el.id),
 						);
-						useTimelineStore.setState({ elements: nextElements });
+						setElementsWithoutHistory(nextElements);
 					}
 
 					const sources = copySourceIdsRef.current;
@@ -1154,10 +1237,12 @@ export const usePreviewInteractions = ({
 					}
 
 					const currentElements = useTimelineStore.getState().elements;
-					useTimelineStore.setState({
-						elements: applyTrackAssignments(currentElements),
-					});
+					setElementsWithoutHistory(applyTrackAssignments(currentElements));
 				}
+			}
+
+			if (dragHasMovedRef.current) {
+				pushHistorySnapshot(dragHistorySnapshotRef.current);
 			}
 
 			clearCopyState();
@@ -1170,6 +1255,8 @@ export const usePreviewInteractions = ({
 			applyTrackAssignments,
 			resetCopySourceNodes,
 			applyDragToElements,
+			setElementsWithoutHistory,
+			pushHistorySnapshot,
 		],
 	);
 
@@ -1259,15 +1346,19 @@ export const usePreviewInteractions = ({
 	const handleGroupTransformStart = useCallback(
 		(e: Konva.KonvaEventObject<Event>) => {
 			const node = e.target as Konva.Rect;
+			groupTransformHistorySnapshotRef.current = captureHistorySnapshot();
+			groupTransformHasChangedRef.current = false;
 			snapshotGroupTransform(node);
 		},
-		[snapshotGroupTransform],
+		[captureHistorySnapshot, snapshotGroupTransform],
 	);
 
 	const handleGroupTransform = useCallback(
 		(e: Konva.KonvaEventObject<Event>) => {
 			const node = e.target as Konva.Rect;
 			if (!groupTransformSnapshotRef.current) {
+				groupTransformHistorySnapshotRef.current = captureHistorySnapshot();
+				groupTransformHasChangedRef.current = false;
 				snapshotGroupTransform(node);
 			}
 			const snapshot = groupTransformSnapshotRef.current;
@@ -1286,6 +1377,7 @@ export const usePreviewInteractions = ({
 			const scaleY = currentScaleY / snapshot.scaleY;
 
 			const currentElements = useTimelineStore.getState().elements;
+			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				const base = snapshot.elements[el.id];
 				if (!base) return el;
@@ -1324,6 +1416,10 @@ export const usePreviewInteractions = ({
 						value: toDegrees(nextRotation),
 					},
 				});
+				if (!isTransformChanged(el.transform, updatedTransform)) {
+					return el;
+				}
+				didChange = true;
 
 				return {
 					...el,
@@ -1331,7 +1427,10 @@ export const usePreviewInteractions = ({
 				};
 			});
 
-			useTimelineStore.setState({ elements: newElements });
+			if (didChange) {
+				setElementsWithoutHistory(newElements);
+				groupTransformHasChangedRef.current = true;
+			}
 			groupRotationRef.current = currentRotation;
 			groupCenterRef.current = currentCenter;
 			setGroupProxyBox({
@@ -1342,7 +1441,12 @@ export const usePreviewInteractions = ({
 				rotation: node.rotation(),
 			});
 		},
-		[snapshotGroupTransform, stageToCanvasCoords],
+		[
+			captureHistorySnapshot,
+			snapshotGroupTransform,
+			stageToCanvasCoords,
+			setElementsWithoutHistory,
+		],
 	);
 
 	const handleGroupTransformEnd = useCallback(
@@ -1369,14 +1473,21 @@ export const usePreviewInteractions = ({
 				rotation: node.rotation(),
 			});
 			clearSnapGuides();
+			if (groupTransformHasChangedRef.current) {
+				pushHistorySnapshot(groupTransformHistorySnapshotRef.current);
+			}
+			groupTransformHistorySnapshotRef.current = null;
+			groupTransformHasChangedRef.current = false;
 		},
-		[clearSnapGuides],
+		[clearSnapGuides, pushHistorySnapshot],
 	);
 
 	// 处理 transform 事件（实时更新）
 	const handleTransformStart = useCallback(
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
 			const node = e.target as Konva.Node;
+			transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
+			transformHasChangedRef.current[id] = false;
 			const element = useTimelineStore
 				.getState()
 				.elements.find((el) => el.id === id);
@@ -1415,6 +1526,7 @@ export const usePreviewInteractions = ({
 			};
 		},
 		[
+			captureHistorySnapshot,
 			getEffectiveZoom,
 			updateTransformerCenteredScaling,
 			updateTransformerRotationSnaps,
@@ -1424,6 +1536,10 @@ export const usePreviewInteractions = ({
 	const handleTransform = useCallback(
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
 			const node = e.target as Konva.Node;
+			if (!transformHistorySnapshotsRef.current[id]) {
+				transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
+				transformHasChangedRef.current[id] = false;
+			}
 			let base = transformBaseRef.current[id];
 			if (!base) {
 				const effectiveZoom = getEffectiveZoom();
@@ -1469,6 +1585,7 @@ export const usePreviewInteractions = ({
 				null;
 
 			const currentElements = useTimelineStore.getState().elements;
+			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				if (el.id !== id) return el;
 
@@ -1516,6 +1633,10 @@ export const usePreviewInteractions = ({
 						value: rotationDegrees,
 					},
 				});
+				if (!isTransformChanged(el.transform, updatedTransform)) {
+					return el;
+				}
+				didChange = true;
 
 				return {
 					...el,
@@ -1523,9 +1644,16 @@ export const usePreviewInteractions = ({
 				};
 			});
 
-			useTimelineStore.setState({ elements: newElements });
+			if (!didChange) return;
+			setElementsWithoutHistory(newElements);
+			transformHasChangedRef.current[id] = true;
 		},
-		[stageToCanvasCoords, getEffectiveZoom],
+		[
+			stageToCanvasCoords,
+			getEffectiveZoom,
+			captureHistorySnapshot,
+			setElementsWithoutHistory,
+		],
 	);
 
 	// 处理 transform 结束事件
@@ -1561,6 +1689,7 @@ export const usePreviewInteractions = ({
 				null;
 
 			const currentElements = useTimelineStore.getState().elements;
+			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				if (el.id !== id) return el;
 
@@ -1608,6 +1737,10 @@ export const usePreviewInteractions = ({
 						value: rotationDegrees,
 					},
 				});
+				if (!isTransformChanged(el.transform, updatedTransform)) {
+					return el;
+				}
+				didChange = true;
 
 				return {
 					...el,
@@ -1615,12 +1748,25 @@ export const usePreviewInteractions = ({
 				};
 			});
 
-			useTimelineStore.setState({ elements: newElements });
+			if (didChange) {
+				setElementsWithoutHistory(newElements);
+			}
+			if (transformHasChangedRef.current[id] || didChange) {
+				pushHistorySnapshot(transformHistorySnapshotsRef.current[id] ?? null);
+			}
+			delete transformHistorySnapshotsRef.current[id];
+			delete transformHasChangedRef.current[id];
 			delete transformBaseRef.current[id];
 			delete transformCanvasBoxRef.current[id];
 			clearSnapGuides();
 		},
-		[stageToCanvasCoords, getEffectiveZoom, clearSnapGuides],
+		[
+			stageToCanvasCoords,
+			getEffectiveZoom,
+			clearSnapGuides,
+			setElementsWithoutHistory,
+			pushHistorySnapshot,
+		],
 	);
 
 	// 处理点击事件，支持选择/取消选择

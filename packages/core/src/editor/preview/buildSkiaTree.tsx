@@ -7,8 +7,8 @@ import type {
 import type { TimelineElement } from "../../dsl/types";
 import type { TimelineTrack } from "../timeline/types";
 import {
-	resolveTransitionFrameState as resolveTransitionFrameStateCore,
 	type ActiveTransitionFrameState,
+	resolveTransitionFrameState as resolveTransitionFrameStateCore,
 	type TransitionFrameState,
 } from "./transitionFrameState";
 
@@ -244,7 +244,7 @@ export const buildSkiaRenderStateCore = async (
 	const plans = await Promise.all(orderedElements.map(buildElementPlan));
 
 	const children = [
-		<Fill key="background" color="transparent" />,
+		<Fill key="background" color="black" />,
 		...plans.map((plan) => plan.node),
 	];
 

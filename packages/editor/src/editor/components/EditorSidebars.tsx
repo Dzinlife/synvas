@@ -23,7 +23,7 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
 }) => {
 	return (
 		<div
-			className={`bg-neutral-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl flex flex-col min-h-0 max-h-full overflow-hidden ${
+			className={`pointer-events-auto bg-neutral-900/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl flex flex-col min-h-0 max-h-full overflow-hidden ${
 				widthClassName ?? "w-60"
 			}`}
 		>
@@ -109,7 +109,7 @@ const EditorSidebars: React.FC = () => {
 
 	return (
 		<div className="absolute inset-0 pointer-events-none">
-			<div className="absolute left-4 top-4 bottom-4 flex flex-col gap-2 pointer-events-auto overflow-y-auto min-h-0">
+			<div className="absolute left-4 top-4 bottom-4 flex flex-col gap-2 pointer-events-none overflow-y-auto min-h-0">
 				<SidebarPanel
 					title="素材库"
 					isOpen={panelOpenState.material}
@@ -130,7 +130,7 @@ const EditorSidebars: React.FC = () => {
 					</SidebarPanel>
 				)}
 			</div>
-			<div className="absolute right-4 top-4 bottom-4 flex flex-col gap-2 pointer-events-auto overflow-y-auto min-h-0">
+			<div className="absolute right-4 top-4 bottom-4 flex flex-col gap-2 pointer-events-none overflow-y-auto min-h-0">
 				<SidebarPanel
 					title="转写结果"
 					isOpen={panelOpenState.transcript}
