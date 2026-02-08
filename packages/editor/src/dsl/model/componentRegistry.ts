@@ -1,7 +1,14 @@
 import type { RendererPrepareFrameContext } from "core/dsl/model/types";
 import type React from "react";
-import type { ElementType, TrackRole } from "../types";
+import type { ElementType, TimelineElement, TrackRole } from "../types";
 import type { ComponentModelStore } from "./types";
+
+export interface DSLComponentSettingProps<
+	Props = Record<string, unknown>,
+> {
+	element: TimelineElement<Props>;
+	updateProps: (partial: Partial<Props>) => void;
+}
 
 /**
  * 组件定义接口
@@ -27,6 +34,9 @@ export interface DSLComponentDefinition<Props = any, Internal = any> {
 
 	// 时间线组件
 	Timeline: React.ComponentType<any>;
+
+	// 元素设置面板组件
+	Setting?: React.ComponentType<DSLComponentSettingProps<Props>>;
 
 	// 组件元数据
 	meta: {

@@ -13,6 +13,18 @@ export interface HalationFilterLayerProps {
 	cornerRadius?: number;
 }
 
+export const HALATION_FILTER_DEFAULT_PROPS: Required<HalationFilterLayerProps> =
+	{
+		intensity: 0.45,
+		threshold: 0.78,
+		radius: 8,
+		diffusion: 0.55,
+		warmness: 0.6,
+		chromaticShift: 1.2,
+		shape: "rect",
+		cornerRadius: 0,
+	};
+
 export type HalationFilterLayerModelStore =
 	ComponentModelStore<HalationFilterLayerProps>;
 
@@ -25,14 +37,7 @@ export function createHalationFilterLayerModel(
 			id,
 			type: "Filter",
 			props: {
-				intensity: 0.45,
-				threshold: 0.78,
-				radius: 8,
-				diffusion: 0.55,
-				warmness: 0.6,
-				chromaticShift: 1.2,
-				shape: "rect",
-				cornerRadius: 0,
+				...HALATION_FILTER_DEFAULT_PROPS,
 				...initialProps,
 			},
 			constraints: {

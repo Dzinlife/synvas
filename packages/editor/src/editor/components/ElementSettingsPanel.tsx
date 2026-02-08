@@ -1,7 +1,8 @@
 import type React from "react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useModelSafe, useModelSelectorSafe } from "@/dsl/model";
+import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { framesToTimecode } from "@/utils/timecode";
 import {
 	useElements,
@@ -38,6 +39,11 @@ const ElementSettingsPanel: React.FC = () => {
 		{},
 	);
 	const selectedModel = useModelSafe(selectedElement?.id ?? "");
+	const selectedDefinition = useMemo(() => {
+		if (!selectedElement) return undefined;
+		return componentRegistry.get(selectedElement.component);
+	}, [selectedElement?.component, selectedElement]);
+	const SettingComponent = selectedDefinition?.Setting;
 
 	const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (!selectedElement) return;
@@ -51,6 +57,26 @@ const ElementSettingsPanel: React.FC = () => {
 			),
 		);
 	};
+
+	const updateProps = useCallback(
+		(partial: Record<string, unknown>) => {
+			if (!selectedElement) return;
+			const selectedId = selectedElement.id;
+			setElements((prev) =>
+				prev.map((el) => {
+					if (el.id !== selectedId) return el;
+					return {
+						...el,
+						props: {
+							...(el.props as Record<string, unknown>),
+							...partial,
+						},
+					};
+				}),
+			);
+		},
+		[selectedElement?.id, selectedElement, setElements],
+	);
 
 	if (!selectedElement) {
 		return <div className="text-xs text-neutral-500">未选中元素</div>;
@@ -74,6 +100,13 @@ const ElementSettingsPanel: React.FC = () => {
 					className="w-full bg-neutral-800 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
 				/>
 			</div>
+
+			{SettingComponent && (
+				<SettingComponent
+					element={selectedElement}
+					updateProps={updateProps}
+				/>
+			)}
 
 			<div className="pt-2 border-t border-white/10">
 				<div className="text-xs text-neutral-500">
