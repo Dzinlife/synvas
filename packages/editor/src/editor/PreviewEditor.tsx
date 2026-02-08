@@ -575,7 +575,13 @@ const Preview = () => {
 						const effectiveZoom = pinchState.isPinching
 							? pinchState.currentZoom
 							: zoomLevel;
-						const baseTransform = transformBaseRef.current[id];
+						const isSingleSelectionTransforming =
+							selectedIds.length === 1 &&
+							selectedIds[0] === id &&
+							transformerRef.current?.isTransforming?.() === true;
+						const baseTransform = isSingleSelectionTransforming
+							? transformBaseRef.current[id]
+							: undefined;
 						const canvasWidth = baseTransform?.canvasWidth ?? canvasWidth_el;
 						const canvasHeight = baseTransform?.canvasHeight ?? canvasHeight_el;
 						const stageWidth = canvasWidth * effectiveZoom;
