@@ -4,6 +4,7 @@
  */
 
 import { useDrag } from "@use-gesture/react";
+import type { TimelineElement as TimelineElementType } from "core/dsl/types";
 import React, {
 	useCallback,
 	useEffect,
@@ -13,7 +14,6 @@ import React, {
 } from "react";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { modelRegistry, useModelExists } from "@/dsl/model/registry";
-import { TimelineElement as TimelineElementType } from "@/dsl/types";
 import { cn } from "@/lib/utils";
 import { framesToTimecode } from "@/utils/timecode";
 import {
@@ -301,11 +301,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 		setLocalEndTime,
 		setLocalTrackY,
 		setLocalOffsetFrames,
-	} = useLocalDragState(
-		timeline.start,
-		timeline.end,
-		trackY,
-	);
+	} = useLocalDragState(timeline.start, timeline.end, trackY);
 	const [localTransitionDuration, setLocalTransitionDuration] = useState<
 		number | null
 	>(null);

@@ -82,7 +82,10 @@ const ElementSettingsPanel: React.FC = () => {
 	if (!selectedElement) {
 		return <div className="text-xs text-neutral-500">未选中元素</div>;
 	}
-	const transformSize = getTransformSize(selectedElement.transform);
+	const transform = selectedElement.transform;
+	const transformSize = transform
+		? getTransformSize(transform)
+		: { width: 0, height: 0 };
 
 	return (
 		<div className="space-y-3">
@@ -104,10 +107,7 @@ const ElementSettingsPanel: React.FC = () => {
 			</div>
 
 			{SettingComponent && (
-				<SettingComponent
-					element={selectedElement}
-					updateProps={updateProps}
-				/>
+				<SettingComponent element={selectedElement} updateProps={updateProps} />
 			)}
 
 			<div className="pt-2 border-t border-white/10">
@@ -125,24 +125,24 @@ const ElementSettingsPanel: React.FC = () => {
 						End: {selectedElement.timeline.end}f (
 						{selectedElement.timeline.endTimecode})
 					</div>
-						<div>
-							Duration: {durationFrames}f ({framesToTimecode(durationFrames, fps)}
-							)
-						</div>
-						<div>Transform:</div>
-						<div>PositionX: {selectedElement.transform.position.x}</div>
-						<div>PositionY: {selectedElement.transform.position.y}</div>
-						<div>AnchorX: {selectedElement.transform.anchor.x}</div>
-						<div>AnchorY: {selectedElement.transform.anchor.y}</div>
-						<div>BaseWidth: {selectedElement.transform.baseSize.width}</div>
-						<div>BaseHeight: {selectedElement.transform.baseSize.height}</div>
-						<div>ScaleX: {selectedElement.transform.scale.x}</div>
-						<div>ScaleY: {selectedElement.transform.scale.y}</div>
-						<div>Width: {transformSize.width}</div>
-						<div>Height: {transformSize.height}</div>
-						<div>Rotation(deg): {selectedElement.transform.rotation.value}</div>
-						<div>
-							Max Duration:{" "}
+					<div>
+						Duration: {durationFrames}f ({framesToTimecode(durationFrames, fps)}
+						)
+					</div>
+					<div>Transform:</div>
+					<div>PositionX: {transform?.position.x ?? "-"}</div>
+					<div>PositionY: {transform?.position.y ?? "-"}</div>
+					<div>AnchorX: {transform?.anchor.x ?? "-"}</div>
+					<div>AnchorY: {transform?.anchor.y ?? "-"}</div>
+					<div>BaseWidth: {transform?.baseSize.width ?? "-"}</div>
+					<div>BaseHeight: {transform?.baseSize.height ?? "-"}</div>
+					<div>ScaleX: {transform?.scale.x ?? "-"}</div>
+					<div>ScaleY: {transform?.scale.y ?? "-"}</div>
+					<div>Width: {transformSize.width}</div>
+					<div>Height: {transformSize.height}</div>
+					<div>Rotation(deg): {transform?.rotation.value ?? "-"}</div>
+					<div>
+						Max Duration:{" "}
 						{constraints.maxDuration !== undefined
 							? `${constraints.maxDuration}f (${framesToTimecode(
 									constraints.maxDuration,

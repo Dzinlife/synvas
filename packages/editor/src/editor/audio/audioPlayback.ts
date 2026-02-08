@@ -1,5 +1,5 @@
+import type { TimelineMeta } from "core/dsl/types";
 import type { AudioBufferSink, WrappedAudioBuffer } from "mediabunny";
-import type { TimelineMeta } from "@/dsl/types";
 import {
 	createClipGain,
 	ensureAudioContext,

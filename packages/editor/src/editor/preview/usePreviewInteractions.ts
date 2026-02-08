@@ -1,3 +1,4 @@
+import type { TimelineElement, TransformMeta } from "core/dsl/types";
 import type Konva from "konva";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -5,7 +6,6 @@ import {
 	transformMetaToRenderLayout,
 } from "@/dsl/layout";
 import { getTransformSize } from "@/dsl/transform";
-import type { TimelineElement, TransformMeta } from "@/dsl/types";
 import {
 	useMultiSelect,
 	useSnap,
@@ -111,6 +111,16 @@ type EdgeMoveState = {
 	right: boolean;
 	top: boolean;
 	bottom: boolean;
+};
+
+type TransformableTimelineElement = TimelineElement & {
+	transform: TransformMeta;
+};
+
+const hasTransform = (
+	element: TimelineElement | null | undefined,
+): element is TransformableTimelineElement => {
+	return Boolean(element?.transform);
 };
 
 const quantize = (value: number, quantum: number): number => {
@@ -229,7 +239,10 @@ const resolveUniformScale = (params: {
 			? baseHeight * previousMagnitudeY
 			: NaN;
 	const ratioCandidates: number[] = [];
-	if (Number.isFinite(currentWidth) && Math.abs(currentWidth) >= SCALE_EPSILON) {
+	if (
+		Number.isFinite(currentWidth) &&
+		Math.abs(currentWidth) >= SCALE_EPSILON
+	) {
 		ratioCandidates.push(Math.abs(nextWidth / currentWidth));
 	}
 	if (
@@ -583,6 +596,14 @@ export const usePreviewInteractions = ({
 
 	const getElementCanvasBox = useCallback(
 		(el: TimelineElement): CanvasRect => {
+			if (!el.transform) {
+				return {
+					x: 0,
+					y: 0,
+					width: 0,
+					height: 0,
+				};
+			}
 			const renderLayout = transformMetaToRenderLayout(
 				el.transform,
 				canvasConvertOptions.picture,
@@ -635,8 +656,9 @@ export const usePreviewInteractions = ({
 	);
 
 	const computeGroupProxyBox = useCallback((): TransformerBox | null => {
-		const selectedElements = renderElements.filter((el) =>
-			selectedIds.includes(el.id),
+		const selectedElements = renderElements.filter(
+			(el): el is TransformableTimelineElement =>
+				selectedIds.includes(el.id) && hasTransform(el),
 		);
 		if (selectedElements.length < 2) {
 			return null;
@@ -878,6 +900,7 @@ export const usePreviewInteractions = ({
 			const positions: Record<string, { x: number; y: number }> = {};
 			for (const el of currentElements) {
 				if (!nextSelectedIds.includes(el.id)) continue;
+				if (!el.transform) continue;
 				const renderLayout = transformMetaToRenderLayout(
 					el.transform,
 					canvasConvertOptions.picture,
@@ -990,24 +1013,26 @@ export const usePreviewInteractions = ({
 			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				const isDragged = dragSelectedIds.includes(el.id);
+				if (!isDragged) return el;
+				if (!el.transform) return el;
+				const transform = el.transform;
 				const initial = initialPositions[el.id];
-				if (isMultiDrag && isDragged && initial && draggedInitial) {
+				if (isMultiDrag && initial && draggedInitial) {
 					const nextCanvasX = initial.x + deltaX;
 					const nextCanvasY = initial.y + deltaY;
-					const size = getTransformSize(el.transform);
+					const size = getTransformSize(transform);
 					const updatedTransform = quantizeTransform({
-						...el.transform,
+						...transform,
 						position: {
-							...el.transform.position,
-							x: nextCanvasX + size.width * el.transform.anchor.x,
-							y: nextCanvasY + size.height * el.transform.anchor.y,
+							...transform.position,
+							x: nextCanvasX + size.width * transform.anchor.x,
+							y: nextCanvasY + size.height * transform.anchor.y,
 						},
 					});
-					if (!isTransformChanged(el.transform, updatedTransform)) {
+					if (!isTransformChanged(transform, updatedTransform)) {
 						return el;
 					}
 					didChange = true;
-
 					return {
 						...el,
 						transform: updatedTransform,
@@ -1015,22 +1040,21 @@ export const usePreviewInteractions = ({
 				}
 
 				// 使用 el.id 而不是 el.props.id
-				if (!isDragged || el.id !== dragAnchorId) return el;
+				if (el.id !== dragAnchorId) return el;
 
-				const size = getTransformSize(el.transform);
+				const size = getTransformSize(transform);
 				const updatedTransform = quantizeTransform({
-					...el.transform,
+					...transform,
 					position: {
-						...el.transform.position,
-						x: canvasX + size.width * el.transform.anchor.x,
-						y: canvasY + size.height * el.transform.anchor.y,
+						...transform.position,
+						x: canvasX + size.width * transform.anchor.x,
+						y: canvasY + size.height * transform.anchor.y,
 					},
 				});
-				if (!isTransformChanged(el.transform, updatedTransform)) {
+				if (!isTransformChanged(transform, updatedTransform)) {
 					return el;
 				}
 				didChange = true;
-
 				return {
 					...el,
 					transform: updatedTransform,
@@ -1084,7 +1108,7 @@ export const usePreviewInteractions = ({
 
 					dragSelectedIds.forEach((selectedId) => {
 						const element = currentElements.find((el) => el.id === selectedId);
-						if (!element) return;
+						if (!hasTransform(element)) return;
 
 						const renderLayout = transformMetaToRenderLayout(
 							element.transform,
@@ -1342,7 +1366,7 @@ export const usePreviewInteractions = ({
 
 			selectedIds.forEach((id) => {
 				const element = renderElementsRef.current.find((el) => el.id === id);
-				if (!element) return;
+				if (!hasTransform(element)) return;
 
 				const renderLayout = transformMetaToRenderLayout(
 					element.transform,
@@ -1411,6 +1435,8 @@ export const usePreviewInteractions = ({
 			const newElements = currentElements.map((el) => {
 				const base = snapshot.elements[el.id];
 				if (!base) return el;
+				if (!el.transform) return el;
+				const transform = el.transform;
 
 				const nextTopLeft = deltaTransform.point(base.topLeft);
 				const { canvasX: nextLeft, canvasY: nextTop } = stageToCanvasCoords(
@@ -1422,31 +1448,31 @@ export const usePreviewInteractions = ({
 				const nextRotation = base.rotation + deltaRotation;
 				const nextScaleX = resolveScaleFromSize(
 					nextWidth,
-					el.transform.baseSize.width,
-					el.transform.scale.x,
+					transform.baseSize.width,
+					transform.scale.x,
 				);
 				const nextScaleY = resolveScaleFromSize(
 					nextHeight,
-					el.transform.baseSize.height,
-					el.transform.scale.y,
+					transform.baseSize.height,
+					transform.scale.y,
 				);
 				const updatedTransform = quantizeTransform({
-					...el.transform,
+					...transform,
 					position: {
-						...el.transform.position,
-						x: nextLeft + nextWidth * el.transform.anchor.x,
-						y: nextTop + nextHeight * el.transform.anchor.y,
+						...transform.position,
+						x: nextLeft + nextWidth * transform.anchor.x,
+						y: nextTop + nextHeight * transform.anchor.y,
 					},
 					scale: {
 						x: nextScaleX,
 						y: nextScaleY,
 					},
 					rotation: {
-						...el.transform.rotation,
+						...transform.rotation,
 						value: toDegrees(nextRotation),
 					},
 				});
-				if (!isTransformChanged(el.transform, updatedTransform)) {
+				if (!isTransformChanged(transform, updatedTransform)) {
 					return el;
 				}
 				didChange = true;
@@ -1550,8 +1576,8 @@ export const usePreviewInteractions = ({
 				scaleX: baseScaleX,
 				scaleY: baseScaleY,
 				effectiveZoom,
-				elementScaleX: element?.transform.scale.x ?? 1,
-				elementScaleY: element?.transform.scale.y ?? 1,
+				elementScaleX: element?.transform?.scale.x ?? 1,
+				elementScaleY: element?.transform?.scale.y ?? 1,
 				activeAnchor: transformerRef.current?.getActiveAnchor?.() ?? null,
 			};
 		},
@@ -1589,8 +1615,8 @@ export const usePreviewInteractions = ({
 					scaleX: baseScaleX,
 					scaleY: baseScaleY,
 					effectiveZoom,
-					elementScaleX: element?.transform.scale.x ?? 1,
-					elementScaleY: element?.transform.scale.y ?? 1,
+					elementScaleX: element?.transform?.scale.x ?? 1,
+					elementScaleY: element?.transform?.scale.y ?? 1,
 					activeAnchor: transformerRef.current?.getActiveAnchor?.() ?? null,
 				};
 				transformBaseRef.current[id] = base;
@@ -1618,23 +1644,25 @@ export const usePreviewInteractions = ({
 			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				if (el.id !== id) return el;
+				if (!el.transform) return el;
+				const transform = el.transform;
 
 				let nextScaleX = resolveScaleFromSize(
 					pictureWidthScaled,
-					el.transform.baseSize.width,
+					transform.baseSize.width,
 					base.elementScaleX,
 				);
 				let nextScaleY = resolveScaleFromSize(
 					pictureHeightScaled,
-					el.transform.baseSize.height,
+					transform.baseSize.height,
 					base.elementScaleY,
 				);
 				if (isCornerResizeAnchor(activeAnchor)) {
 					const uniformScale = resolveUniformScale({
 						nextWidth: pictureWidthScaled,
 						nextHeight: pictureHeightScaled,
-						baseWidth: el.transform.baseSize.width,
-						baseHeight: el.transform.baseSize.height,
+						baseWidth: transform.baseSize.width,
+						baseHeight: transform.baseSize.height,
 						previousScaleX: base.elementScaleX,
 						previousScaleY: base.elementScaleY,
 					});
@@ -1645,25 +1673,25 @@ export const usePreviewInteractions = ({
 				} else if (isVerticalResizeAnchor(activeAnchor)) {
 					nextScaleX = base.elementScaleX;
 				}
-				const nextWidth = el.transform.baseSize.width * Math.abs(nextScaleX);
-				const nextHeight = el.transform.baseSize.height * Math.abs(nextScaleY);
+				const nextWidth = transform.baseSize.width * Math.abs(nextScaleX);
+				const nextHeight = transform.baseSize.height * Math.abs(nextScaleY);
 				const updatedTransform = quantizeTransform({
-					...el.transform,
+					...transform,
 					position: {
-						...el.transform.position,
-						x: canvasX + nextWidth * el.transform.anchor.x,
-						y: canvasY + nextHeight * el.transform.anchor.y,
+						...transform.position,
+						x: canvasX + nextWidth * transform.anchor.x,
+						y: canvasY + nextHeight * transform.anchor.y,
 					},
 					scale: {
 						x: nextScaleX,
 						y: nextScaleY,
 					},
 					rotation: {
-						...el.transform.rotation,
+						...transform.rotation,
 						value: rotationDegrees,
 					},
 				});
-				if (!isTransformChanged(el.transform, updatedTransform)) {
+				if (!isTransformChanged(transform, updatedTransform)) {
 					return el;
 				}
 				didChange = true;
@@ -1722,52 +1750,54 @@ export const usePreviewInteractions = ({
 			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				if (el.id !== id) return el;
+				if (!el.transform) return el;
+				const transform = el.transform;
 
 				let nextScaleX = resolveScaleFromSize(
 					pictureWidthScaled,
-					el.transform.baseSize.width,
-					base?.elementScaleX ?? el.transform.scale.x,
+					transform.baseSize.width,
+					base?.elementScaleX ?? transform.scale.x,
 				);
 				let nextScaleY = resolveScaleFromSize(
 					pictureHeightScaled,
-					el.transform.baseSize.height,
-					base?.elementScaleY ?? el.transform.scale.y,
+					transform.baseSize.height,
+					base?.elementScaleY ?? transform.scale.y,
 				);
 				if (isCornerResizeAnchor(activeAnchor)) {
 					const uniformScale = resolveUniformScale({
 						nextWidth: pictureWidthScaled,
 						nextHeight: pictureHeightScaled,
-						baseWidth: el.transform.baseSize.width,
-						baseHeight: el.transform.baseSize.height,
-						previousScaleX: base?.elementScaleX ?? el.transform.scale.x,
-						previousScaleY: base?.elementScaleY ?? el.transform.scale.y,
+						baseWidth: transform.baseSize.width,
+						baseHeight: transform.baseSize.height,
+						previousScaleX: base?.elementScaleX ?? transform.scale.x,
+						previousScaleY: base?.elementScaleY ?? transform.scale.y,
 					});
 					nextScaleX = uniformScale.scaleX;
 					nextScaleY = uniformScale.scaleY;
 				} else if (isHorizontalResizeAnchor(activeAnchor)) {
-					nextScaleY = base?.elementScaleY ?? el.transform.scale.y;
+					nextScaleY = base?.elementScaleY ?? transform.scale.y;
 				} else if (isVerticalResizeAnchor(activeAnchor)) {
-					nextScaleX = base?.elementScaleX ?? el.transform.scale.x;
+					nextScaleX = base?.elementScaleX ?? transform.scale.x;
 				}
-				const nextWidth = el.transform.baseSize.width * Math.abs(nextScaleX);
-				const nextHeight = el.transform.baseSize.height * Math.abs(nextScaleY);
+				const nextWidth = transform.baseSize.width * Math.abs(nextScaleX);
+				const nextHeight = transform.baseSize.height * Math.abs(nextScaleY);
 				const updatedTransform = quantizeTransform({
-					...el.transform,
+					...transform,
 					position: {
-						...el.transform.position,
-						x: canvasX + nextWidth * el.transform.anchor.x,
-						y: canvasY + nextHeight * el.transform.anchor.y,
+						...transform.position,
+						x: canvasX + nextWidth * transform.anchor.x,
+						y: canvasY + nextHeight * transform.anchor.y,
 					},
 					scale: {
 						x: nextScaleX,
 						y: nextScaleY,
 					},
 					rotation: {
-						...el.transform.rotation,
+						...transform.rotation,
 						value: rotationDegrees,
 					},
 				});
-				if (!isTransformChanged(el.transform, updatedTransform)) {
+				if (!isTransformChanged(transform, updatedTransform)) {
 					return el;
 				}
 				didChange = true;
@@ -1877,6 +1907,7 @@ export const usePreviewInteractions = ({
 
 			const selected: string[] = [];
 			renderElements.forEach((el) => {
+				if (!el.transform) return;
 				const renderLayout = transformMetaToRenderLayout(
 					el.transform,
 					canvasConvertOptions.picture,

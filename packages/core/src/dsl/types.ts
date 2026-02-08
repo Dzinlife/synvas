@@ -157,9 +157,9 @@ export interface TimelineElement<Props = Record<string, any>> {
 	component: string; // 组件实现标识（区分具体实现）
 	name: string; // 显示名称
 
-	transform: TransformMeta; // 空间属性
+	transform?: TransformMeta; // 空间属性
 	timeline: TimelineMeta; // 时间属性
-	render: RenderMeta; // 渲染属性
+	render?: RenderMeta; // 渲染属性
 
 	props: Props; // 组件特定属性（仅业务逻辑）
 

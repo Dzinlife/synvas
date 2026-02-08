@@ -1,4 +1,5 @@
 import type { PrepareFrameContext } from "core/dsl/model/types";
+import type { TimelineElement } from "core/dsl/types";
 import type {
 	AudioBufferSink,
 	CanvasSink,
@@ -11,7 +12,6 @@ import { createStore } from "zustand/vanilla";
 import type { AssetHandle } from "@/dsl/assets/AssetStore";
 import { type AudioAsset, acquireAudioAsset } from "@/dsl/assets/audioAsset";
 import { acquireVideoAsset, type VideoAsset } from "@/dsl/assets/videoAsset";
-import type { TimelineElement } from "@/dsl/types";
 import {
 	type AudioPlaybackController,
 	type AudioPlaybackMixInstruction,

@@ -1,6 +1,6 @@
+import type { TimelineElement, TimelineMeta } from "core/dsl/types";
 import { resolveTransitionFrameState } from "core/editor/preview/transitionFrameState";
 import type { TransitionAudioCurve } from "../../dsl/Transition/model";
-import type { TimelineElement, TimelineMeta } from "../../dsl/types";
 import type { TimelineTrack } from "../timeline/types";
 import type { AudioTrackControlStateMap } from "../utils/audioTrackState";
 import type { AudioMixInstruction } from "./transitionAudioMix";

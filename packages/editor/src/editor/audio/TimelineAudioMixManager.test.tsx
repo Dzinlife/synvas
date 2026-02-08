@@ -1,6 +1,6 @@
+import type { TimelineElement, TimelineMeta } from "core/dsl/types";
 import { describe, expect, it, vi } from "vitest";
 import { createTransformMeta } from "@/dsl/transform";
-import type { TimelineElement, TimelineMeta } from "../../dsl/types";
 import type { TimelineTrack } from "../timeline/types";
 import { runTimelineAudioMixFrame } from "./TimelineAudioMixRunner";
 

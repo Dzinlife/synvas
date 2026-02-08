@@ -119,7 +119,9 @@ export const HalationFilterLayerSetting: React.FC<
 		element.props.shape === "circle" || element.props.shape === "rect"
 			? element.props.shape
 			: HALATION_FILTER_DEFAULT_PROPS.shape;
-	const transformSize = getTransformSize(element.transform);
+	const transformSize = element.transform
+		? getTransformSize(element.transform)
+		: { width: 0, height: 0 };
 	const cornerRadiusMax = Math.max(
 		0,
 		Math.min(transformSize.width, transformSize.height) / 2,

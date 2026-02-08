@@ -1,3 +1,7 @@
+import type {
+	TimelineElement as TimelineElementType,
+	TrackRole,
+} from "core/dsl/types";
 import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type React from "react";
 import { useCallback, useRef } from "react";
@@ -6,10 +10,6 @@ import {
 	readAudioMetadata,
 	writeAudioToOpfs,
 } from "@/asr/opfsAudio";
-import type {
-	TimelineElement as TimelineElementType,
-	TrackRole,
-} from "@/dsl/types";
 import { createTransformMeta } from "@/dsl/transform";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { toast } from "@/lib/toast";
@@ -1173,9 +1173,9 @@ export function useExternalMaterialDnd({
 			endDrag,
 			setElements,
 			currentTime,
-				fps,
-				canvasSize,
-				materialDndContext,
+			fps,
+			canvasSize,
+			materialDndContext,
 			rippleEditingEnabled,
 			attachments,
 			autoAttach,

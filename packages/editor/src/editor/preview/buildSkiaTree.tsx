@@ -41,7 +41,10 @@ export const buildKonvaTree = (
 		return !trackHidden && displayTime >= start && displayTime < end;
 	});
 	return sortByTrackIndex(
-		visibleElements.filter((element) => !isTransitionElement(element)),
+		visibleElements.filter(
+			(element) =>
+				!isTransitionElement(element) && element.type !== "Filter",
+		),
 	);
 };
 

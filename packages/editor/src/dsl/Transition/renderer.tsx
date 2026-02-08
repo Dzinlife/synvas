@@ -1,3 +1,4 @@
+import type { TimelineElement } from "core/dsl/types";
 import type React from "react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo } from "react";
@@ -10,7 +11,6 @@ import {
 	Skia,
 	TileMode,
 } from "react-skia-lite";
-import type { TimelineElement } from "@/dsl/types";
 import {
 	useRenderTime,
 	useTimelineStore,

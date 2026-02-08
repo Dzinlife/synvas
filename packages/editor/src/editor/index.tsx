@@ -12,7 +12,6 @@ import PreviewEditor from "./PreviewEditor";
 import TimelineEditor from "./TimelineEditor";
 
 // 导入所有组件以触发注册
-import "@/dsl/BackdropZoom";
 import "@/dsl/AudioClip";
 import "@/dsl/VideoClip";
 import "@/dsl/ColorFilterLayer";

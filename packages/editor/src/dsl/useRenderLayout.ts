@@ -1,7 +1,7 @@
+import type { RenderLayout } from "core/dsl/types";
 import { useMemo } from "react";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import { transformMetaToRenderLayout } from "./layout";
-import type { RenderLayout } from "./types";
 
 const EMPTY_LAYOUT: RenderLayout = {
 	cx: 0,

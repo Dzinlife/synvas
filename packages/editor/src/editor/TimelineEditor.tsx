@@ -1,4 +1,5 @@
 import { useDrag } from "@use-gesture/react";
+import type { TimelineElement as TimelineElementType } from "core/dsl/types";
 import type React from "react";
 import {
 	startTransition,
@@ -11,7 +12,6 @@ import {
 } from "react";
 import { ProgressiveBlur } from "@/components/ui/progressive-blur";
 import { modelRegistry } from "@/dsl/model/registry";
-import type { TimelineElement as TimelineElementType } from "@/dsl/types";
 import TimeIndicatorCanvas from "@/editor/components/TimeIndicatorCanvas";
 import { cn } from "@/lib/utils";
 import { clampFrame, framesToTimecode } from "@/utils/timecode";
@@ -1342,7 +1342,8 @@ const TimelineEditor = () => {
 					: undefined;
 			const isSingleVideo = targetElement?.type === "VideoClip";
 			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
-			const hasSourceAudioTrack = getVideoClipHasSourceAudioTrack(targetElement);
+			const hasSourceAudioTrack =
+				getVideoClipHasSourceAudioTrack(targetElement);
 			const videoUri = getVideoClipUri(targetElement);
 			if (isSingleVideo && hasSourceAudioTrack) {
 				const isActionDisabled = !videoUri;

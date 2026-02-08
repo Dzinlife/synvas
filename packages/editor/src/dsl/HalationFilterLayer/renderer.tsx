@@ -2,13 +2,11 @@ import { useMemo } from "react";
 import {
 	BackdropFilter,
 	BlendMode,
-	Group,
 	ImageFilter,
 	type SkImageFilter,
 	Skia,
 	TileMode,
 } from "react-skia-lite";
-import { useRenderLayout } from "../useRenderLayout";
 import type { HalationFilterLayerProps } from "./model";
 
 interface HalationFilterLayerRendererProps extends HalationFilterLayerProps {
@@ -125,21 +123,13 @@ const createHalationPassFilter = ({
 };
 
 const HalationFilterLayer: React.FC<HalationFilterLayerRendererProps> = ({
-	id,
 	intensity = 0.45,
 	threshold = 0.78,
 	radius = 8,
 	diffusion = 0.55,
 	warmness = 0.6,
 	chromaticShift = 1.2,
-	shape = "rect",
-	cornerRadius = 0,
 }) => {
-	const renderLayout = useRenderLayout(id);
-	const { cx, cy, w: width, h: height, rotation: rotate = 0 } = renderLayout;
-	const x = cx - width / 2;
-	const y = cy - height / 2;
-
 	const safeIntensity = Math.min(2, clampNonNegative(intensity, 0.45));
 	const safeThreshold = clamp01(threshold);
 	const safeRadius = clampNonNegative(radius, 8);
@@ -192,42 +182,15 @@ const HalationFilterLayer: React.FC<HalationFilterLayerRendererProps> = ({
 		return Skia.ImageFilter.MakeBlend(BlendMode.Screen, glow, null, null);
 	}, [primaryFilter, secondaryFilter]);
 
-	const clipPath = useMemo(() => {
-		const path = Skia.Path.Make();
-		if (shape === "circle") {
-			const radius = Math.min(width, height) / 2;
-			path.addCircle(x + width / 2, y + height / 2, radius);
-			return path;
-		}
-		path.addRRect({
-			rect: {
-				x,
-				y,
-				width,
-				height,
-			},
-			rx: cornerRadius,
-			ry: cornerRadius,
-		});
-		return path;
-	}, [shape, x, y, width, height, cornerRadius]);
-
-	if (
-		safeIntensity <= 0.001 ||
-		safeRadius <= 0.001 ||
-		width <= 0 ||
-		height <= 0
-	) {
-		return <Group />;
+	if (safeIntensity <= 0.001 || safeRadius <= 0.001) {
+		return null;
 	}
 
 	return (
-		<Group clip={clipPath} transform={[{ rotate }]} origin={{ x, y }}>
-			<BackdropFilter
-				opacity={globalMix}
-				filter={<ImageFilter filter={finalFilter} />}
-			/>
-		</Group>
+		<BackdropFilter
+			opacity={globalMix}
+			filter={<ImageFilter filter={finalFilter} />}
+		/>
 	);
 };
 

@@ -1,3 +1,4 @@
+import type { TimelineElement } from "core/dsl/types";
 import {
 	compactMainTrackElements as compactMainTrackElementsCore,
 	finalizeTimelineElements as finalizeTimelineElementsCore,
@@ -5,7 +6,6 @@ import {
 	shiftMainTrackElementsAfter as shiftMainTrackElementsAfterCore,
 	type TimelinePostProcessOptions,
 } from "core/editor/utils/mainTrackMagnet";
-import type { TimelineElement } from "@/dsl/types";
 import { resolveTimelineElementRole } from "./resolveRole";
 
 const withResolveRole = (

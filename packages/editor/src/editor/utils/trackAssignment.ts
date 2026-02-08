@@ -1,3 +1,4 @@
+import type { TimelineElement, TrackRole } from "core/dsl/types";
 import type { DropTarget } from "core/editor/timeline/types";
 import {
 	applyTrackAssignments as applyTrackAssignmentsCore,
@@ -20,7 +21,6 @@ import {
 	normalizeStoredTrackIndices,
 	normalizeTrackAssignments,
 } from "core/editor/utils/trackAssignment";
-import type { TimelineElement, TrackRole } from "@/dsl/types";
 import { getTrackConfig } from "../timeline/trackConfig";
 import type { TimelineTrack } from "../timeline/types";
 import { resolveTimelineElementRole } from "./resolveRole";

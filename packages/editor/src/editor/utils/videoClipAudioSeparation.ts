@@ -1,6 +1,6 @@
-import type { TimelineElement } from "../../dsl/types";
-import { clampFrame, framesToTimecode } from "../../utils/timecode";
+import type { TimelineElement } from "core/dsl/types";
 import { isVideoSourceAudioMuted as isVideoSourceAudioMutedCore } from "core/editor/utils/videoSourceAudio";
+import { clampFrame, framesToTimecode } from "../../utils/timecode";
 
 const MAIN_TRACK_INDEX = 0;
 
@@ -210,9 +210,13 @@ export const detachVideoClipAudio = ({
 		props: {
 			uri,
 		},
-		transform: {
-			...videoElement.transform,
-		},
+		...(videoElement.transform
+			? {
+					transform: {
+						...videoElement.transform,
+					},
+				}
+			: {}),
 		timeline: buildAudioTimelineMeta(videoElement, audioTrackIndex, fps),
 		render: {
 			zIndex: 0,

@@ -1,11 +1,9 @@
 import type { RendererPrepareFrameContext } from "core/dsl/model/types";
+import type { ElementType, TimelineElement, TrackRole } from "core/dsl/types";
 import type React from "react";
-import type { ElementType, TimelineElement, TrackRole } from "../types";
 import type { ComponentModelStore } from "./types";
 
-export interface DSLComponentSettingProps<
-	Props = Record<string, unknown>,
-> {
+export interface DSLComponentSettingProps<Props = Record<string, unknown>> {
 	element: TimelineElement<Props>;
 	updateProps: (partial: Partial<Props>) => void;
 }

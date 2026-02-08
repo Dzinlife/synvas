@@ -1,7 +1,7 @@
+import type { TimelineElement } from "core/dsl/types";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import { exportCanvasAsImage } from "@/dsl/export";
-import type { TimelineElement } from "@/dsl/types";
 import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import { cn } from "@/lib/utils";
 import { clampFrame } from "@/utils/timecode";

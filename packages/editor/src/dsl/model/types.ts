@@ -1,6 +1,6 @@
 import type { PrepareFrameContext } from "core/dsl/model/types";
+import type { ClipMeta } from "core/dsl/types";
 import type { StoreApi } from "zustand";
-import type { ClipMeta } from "../types";
 
 // 组件约束信息
 export interface ComponentConstraints {

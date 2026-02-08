@@ -1,9 +1,9 @@
+import type { TimelineElement } from "core/dsl/types";
 import {
 	MAIN_TRACK_ID,
 	reconcileTracks as reconcileTracksCore,
 	type TrackReconcileResult,
 } from "core/editor/utils/trackState";
-import type { TimelineElement } from "@/dsl/types";
 import type { TimelineTrack } from "../timeline/types";
 import { resolveTimelineElementRole } from "./resolveRole";
 

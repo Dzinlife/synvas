@@ -3,8 +3,8 @@
  * 定义不同类型轨道的属性和兼容性规则
  */
 
+import type { TrackRole } from "core/dsl/types";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
-import type { TrackRole } from "@/dsl/types";
 import type { TrackConfig, TrackInstance } from "./types";
 
 // ============================================================================

@@ -3,12 +3,12 @@
  */
 
 import { useDrag } from "@use-gesture/react";
+import type { TimelineElement } from "core/dsl/types";
 import {
 	insertElementIntoMainTrack,
 	insertElementsIntoMainTrackGroup,
 } from "core/editor/utils/mainTrackMagnet";
 import { useCallback, useMemo, useRef } from "react";
-import type { TimelineElement } from "@/dsl/types";
 import {
 	type DragGhostState,
 	useTimelineStore,

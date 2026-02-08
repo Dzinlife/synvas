@@ -1,11 +1,11 @@
-import type { ActiveTransitionFrameState } from "core/editor/preview/buildSkiaTree";
-import { describe, expect, it } from "vitest";
-import type { TransitionAudioCurve } from "../../dsl/Transition/model";
-import type { TimelineMeta } from "../../dsl/types";
+import type { TimelineMeta } from "core/dsl/types";
 import {
 	type AudioMixClip,
 	buildTransitionAudioMixPlan,
 } from "core/editor/audio/transitionAudioMix";
+import type { ActiveTransitionFrameState } from "core/editor/preview/buildSkiaTree";
+import { describe, expect, it } from "vitest";
+import type { TransitionAudioCurve } from "../../dsl/Transition/model";
 
 const FPS = 30;
 

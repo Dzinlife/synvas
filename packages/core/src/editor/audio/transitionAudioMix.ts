@@ -1,6 +1,6 @@
 import type { TimelineMeta } from "../../dsl/types";
-import type { ActiveTransitionFrameState } from "../preview/transitionFrameState";
 import { framesToSeconds } from "../../utils/timecode";
+import type { ActiveTransitionFrameState } from "../preview/transitionFrameState";
 
 export type TransitionAudioCurve = "equal-power" | "linear";
 
@@ -162,7 +162,8 @@ const resolveTransitionMix = ({
 			fromGain = 0;
 			toGain = 1;
 		} else {
-			const progress = (currentTime - overlapStart) / (overlapEnd - overlapStart);
+			const progress =
+				(currentTime - overlapStart) / (overlapEnd - overlapStart);
 			const gains = resolveCurveGains(progress, curve);
 			fromGain = gains.fromGain;
 			toGain = gains.toGain;
@@ -215,7 +216,10 @@ const mergeWindowAndSourceRange = (
 	window: { start: number; end: number },
 ) => {
 	const normalizedWindow = normalizeRange(window.start, window.end);
-	acc.activeWindowStart = Math.min(acc.activeWindowStart, normalizedWindow.start);
+	acc.activeWindowStart = Math.min(
+		acc.activeWindowStart,
+		normalizedWindow.start,
+	);
 	acc.activeWindowEnd = Math.max(acc.activeWindowEnd, normalizedWindow.end);
 
 	const sourceStart = clamp(
@@ -243,7 +247,8 @@ export const buildTransitionAudioMixPlan = (
 
 	for (const clip of input.clips) {
 		if (!clip.enabled) continue;
-		if (!Number.isFinite(clip.audioDuration) || clip.audioDuration <= 0) continue;
+		if (!Number.isFinite(clip.audioDuration) || clip.audioDuration <= 0)
+			continue;
 		const runtime = buildClipRuntime(clip, fps);
 		clipRuntimeById.set(runtime.id, runtime);
 		accById.set(runtime.id, {
@@ -283,7 +288,10 @@ export const buildTransitionAudioMixPlan = (
 		const acc = accById.get(id);
 		if (!acc) continue;
 		const window = normalizeRange(acc.activeWindowStart, acc.activeWindowEnd);
-		const sourceRange = normalizeRange(acc.sourceRangeStart, acc.sourceRangeEnd);
+		const sourceRange = normalizeRange(
+			acc.sourceRangeStart,
+			acc.sourceRangeEnd,
+		);
 		if (!isInRange(currentTime, window.start, window.end)) continue;
 		if (sourceRange.end - sourceRange.start <= EPSILON) continue;
 		const gain = clamp(acc.gain, 0, 1);

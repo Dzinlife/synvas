@@ -1,8 +1,8 @@
+import type { TimelineElement } from "core/dsl/types";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Canvas, type CanvasRef } from "react-skia-lite";
 import { modelRegistry } from "@/dsl/model/registry";
-import type { TimelineElement } from "@/dsl/types";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import type { TimelineTrack } from "@/editor/timeline/types";
 import { buildSkiaTree } from "./buildSkiaTree";

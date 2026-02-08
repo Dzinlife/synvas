@@ -1,3 +1,4 @@
+import type { TimelineElement } from "core/dsl/types";
 import {
 	collectLinkedTransitions as collectLinkedTransitionsCore,
 	getTransitionBoundary,
@@ -8,7 +9,6 @@ import {
 	reconcileTransitions as reconcileTransitionsCore,
 	TRANSITION_TYPE,
 } from "core/editor/utils/transitions";
-import type { TimelineElement } from "@/dsl/types";
 import { resolveTimelineElementRole } from "./resolveRole";
 
 export {

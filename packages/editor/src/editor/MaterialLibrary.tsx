@@ -3,12 +3,12 @@
  * 用于展示可拖拽的素材（图片、视频等）
  */
 
+import type { ElementType, TimelineElement, TrackRole } from "core/dsl/types";
 import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type React from "react";
 import { useCallback } from "react";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { createTransformMeta } from "@/dsl/transform";
-import type { ElementType, TimelineElement, TrackRole } from "@/dsl/types";
 import {
 	clampFrame,
 	framesToTimecode,
@@ -181,14 +181,6 @@ const MATERIAL_PRESETS: Record<string, MaterialPreset> = {
 			loop: true,
 			speed: 1.0,
 		},
-	},
-	"filter/backdrop-zoom": {
-		type: "image",
-		name: "放大镜效果",
-		thumbnailUrl: buildSvgThumbnail("ZOOM", "#d97706"),
-		width: 300,
-		height: 300,
-		props: { zoom: 1.4, shape: "circle", cornerRadius: 16 },
 	},
 	"filter/color-filter": {
 		type: "image",
@@ -422,7 +414,7 @@ const MaterialLibrary: React.FC = () => {
 					const { head, tail } = getTransitionDurationParts(durationFrames);
 					const transitionStart = startFrame - head;
 					const transitionEnd = startFrame + tail;
-						const newTransition: TimelineElement = {
+					const newTransition: TimelineElement = {
 						id: `transition-${Date.now()}`,
 						type: "Transition",
 						component: item.component,
@@ -434,12 +426,6 @@ const MaterialLibrary: React.FC = () => {
 							fromId: link.fromId,
 							toId: link.toId,
 						},
-							transform: createTransformMeta({
-								width: item.width ?? 1920,
-								height: item.height ?? 1080,
-								positionX: canvasSize.width / 2,
-								positionY: canvasSize.height / 2,
-							}),
 						timeline: buildTimelineMeta(
 							{
 								start: transitionStart,
@@ -469,18 +455,18 @@ const MaterialLibrary: React.FC = () => {
 							? Math.min(-1, trackIndex)
 							: Math.max(1, trackIndex)
 						: trackIndex;
-					const newElement: TimelineElement = {
+				const newElement: TimelineElement = {
 					id: `element-${Date.now()}`,
 					type: item.elementType,
 					component: item.component,
 					name: item.name,
 					props: { ...(item.props ?? {}) },
-						transform: createTransformMeta({
-							width: item.width ?? 1920,
-							height: item.height ?? 1080,
-							positionX: canvasSize.width / 2,
-							positionY: canvasSize.height / 2,
-						}),
+					transform: createTransformMeta({
+						width: item.width ?? 1920,
+						height: item.height ?? 1080,
+						positionX: canvasSize.width / 2,
+						positionY: canvasSize.height / 2,
+					}),
 					timeline: buildTimelineMeta(
 						{
 							start: startFrame,
@@ -548,16 +534,16 @@ const MaterialLibrary: React.FC = () => {
 				);
 			});
 		},
-			[
-				setElements,
-				rippleEditingEnabled,
-				attachments,
-				autoAttach,
-				fps,
-				canvasSize,
-				dndContext,
-			],
-		);
+		[
+			setElements,
+			rippleEditingEnabled,
+			attachments,
+			autoAttach,
+			fps,
+			canvasSize,
+			dndContext,
+		],
+	);
 
 	// 处理素材库拖拽放置到预览画布
 	const handlePreviewDrop = useCallback(
@@ -585,18 +571,18 @@ const MaterialLibrary: React.FC = () => {
 					newId,
 					trackCount,
 				);
-					const newElement: TimelineElement = {
+				const newElement: TimelineElement = {
 					id: newId,
 					type: item.elementType,
 					component: item.component,
 					name: item.name,
 					props: { ...(item.props ?? {}) },
-						transform: createTransformMeta({
-							width: elementWidth,
-							height: elementHeight,
-							positionX: canvasX,
-							positionY: canvasY,
-						}),
+					transform: createTransformMeta({
+						width: elementWidth,
+						height: elementHeight,
+						positionX: canvasX,
+						positionY: canvasY,
+					}),
 					timeline: buildTimelineMeta(
 						{
 							start: startFrame,

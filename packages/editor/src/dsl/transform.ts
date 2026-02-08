@@ -1,4 +1,4 @@
-import type { TransformMeta } from "./types";
+import type { TransformMeta } from "core/dsl/types";
 
 type CreateTransformMetaOptions = {
 	width: number;

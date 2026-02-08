@@ -1,3 +1,4 @@
+import type { TimelineElement, TrackRole } from "core/dsl/types";
 import {
 	createContext,
 	useCallback,
@@ -8,7 +9,6 @@ import {
 } from "react";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import type { TimelineElement, TrackRole } from "@/dsl/types";
 import { clampFrame } from "@/utils/timecode";
 import { getAudioContext } from "../audio/audioEngine";
 import type {

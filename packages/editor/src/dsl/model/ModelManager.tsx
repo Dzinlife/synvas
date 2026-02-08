@@ -1,7 +1,7 @@
+import type { TimelineElement } from "core/dsl/types";
 import { useEffect, useRef } from "react";
 import { TimelineAudioMixManager } from "@/editor/audio/TimelineAudioMixManager";
 import { useElements } from "@/editor/contexts/TimelineContext";
-import type { TimelineElement } from "../types";
 import { componentRegistry } from "./componentRegistry";
 import { modelRegistry } from "./registry";
 

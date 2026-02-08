@@ -1,3 +1,4 @@
+import type { TimelineElement } from "core/dsl/types";
 import type Konva from "konva";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
@@ -5,7 +6,6 @@ import {
 	renderLayoutToTopLeft,
 	transformMetaToRenderLayout,
 } from "@/dsl/layout";
-import type { TimelineElement } from "@/dsl/types";
 import type { PinchState } from "../contexts/PreviewProvider";
 import type { CanvasConvertOptions } from "./utils";
 
@@ -104,6 +104,7 @@ export const LabelLayer: React.FC<LabelLayerProps> = ({
 				| undefined;
 
 			if (!node) {
+				if (!el.transform) return;
 				// 如果找不到节点，使用 transform 计算的位置并转换到屏幕坐标
 				const renderLayout = transformMetaToRenderLayout(
 					el.transform,

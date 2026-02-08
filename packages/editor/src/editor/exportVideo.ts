@@ -1,9 +1,9 @@
+import type { TimelineElement } from "core/dsl/types";
 import {
-	exportTimelineAsVideoCore,
 	type ExportElementAudioSource,
+	exportTimelineAsVideoCore,
 } from "core/editor/exportVideo";
 import { modelRegistry } from "@/dsl/model/registry";
-import type { TimelineElement } from "@/dsl/types";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import { buildSkiaRenderState } from "@/editor/preview/buildSkiaTree";
 
@@ -33,7 +33,10 @@ const getExportAudioSourceByElementId = (
 	if (!store) return null;
 	const internal = store.getState().internal as ExportAudioModelInternal;
 	if (!internal.audioSink) return null;
-	if (!Number.isFinite(internal.audioDuration) || (internal.audioDuration ?? 0) <= 0) {
+	if (
+		!Number.isFinite(internal.audioDuration) ||
+		(internal.audioDuration ?? 0) <= 0
+	) {
 		return null;
 	}
 	return {

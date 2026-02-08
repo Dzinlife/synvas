@@ -1,5 +1,5 @@
 export { default as AudioClip } from "./AudioClip";
-export { default as BackdropZoom } from "./BackdropZoom";
+// export { default as BackdropZoom } from "./BackdropZoom";
 export { default as ColorFilterLayer } from "./ColorFilterLayer";
 export { default as HalationFilterLayer } from "./HalationFilterLayer";
 export { default as Image } from "./Image";

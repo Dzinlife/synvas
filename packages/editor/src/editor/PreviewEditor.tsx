@@ -1,4 +1,6 @@
 // import { QueryClientContext } from "@tanstack/react-query";
+
+import type { TimelineElement } from "core/dsl/types";
 import type Konva from "konva";
 import React, {
 	useCallback,
@@ -19,7 +21,6 @@ import {
 	renderLayoutToTopLeft,
 	transformMetaToRenderLayout,
 } from "@/dsl/layout";
-import type { TimelineElement } from "@/dsl/types";
 import { usePreview } from "./contexts/PreviewProvider";
 import { useTimelineStore, useTracks } from "./contexts/TimelineContext";
 import { buildKonvaTree } from "./preview/buildSkiaTree";
@@ -119,14 +120,14 @@ const Preview = () => {
 		handleStageMouseMove,
 		handleStageMouseUp,
 		transformBaseRef,
-		} = usePreviewInteractions({
-			renderElements,
-			renderElementsRef,
-			canvasConvertOptions,
-			canvasWidth,
-			canvasHeight,
-			getEffectiveZoom,
-			stageToCanvasCoords,
+	} = usePreviewInteractions({
+		renderElements,
+		renderElementsRef,
+		canvasConvertOptions,
+		canvasWidth,
+		canvasHeight,
+		getEffectiveZoom,
+		stageToCanvasCoords,
 		canvasToStageCoords,
 	});
 
@@ -551,6 +552,7 @@ const Preview = () => {
 						)}
 					{renderElements.map((el) => {
 						const { id } = el;
+						if (!el.transform) return null;
 						const isHovered = hoveredId === id;
 						const isDragging = draggingId === id;
 						const isSelected = selectedIds.includes(id);
