@@ -218,23 +218,53 @@ const resolveUniformScale = (params: {
 		previousScaleY,
 	} = params;
 
-	const candidates: number[] = [];
-	if (Number.isFinite(baseWidth) && Math.abs(baseWidth) >= SCALE_EPSILON) {
-		candidates.push(Math.abs(nextWidth / baseWidth));
+	const previousMagnitudeX = Math.abs(previousScaleX);
+	const previousMagnitudeY = Math.abs(previousScaleY);
+	const currentWidth =
+		Number.isFinite(baseWidth) && Math.abs(baseWidth) >= SCALE_EPSILON
+			? baseWidth * previousMagnitudeX
+			: NaN;
+	const currentHeight =
+		Number.isFinite(baseHeight) && Math.abs(baseHeight) >= SCALE_EPSILON
+			? baseHeight * previousMagnitudeY
+			: NaN;
+	const ratioCandidates: number[] = [];
+	if (Number.isFinite(currentWidth) && Math.abs(currentWidth) >= SCALE_EPSILON) {
+		ratioCandidates.push(Math.abs(nextWidth / currentWidth));
 	}
-	if (Number.isFinite(baseHeight) && Math.abs(baseHeight) >= SCALE_EPSILON) {
-		candidates.push(Math.abs(nextHeight / baseHeight));
+	if (
+		Number.isFinite(currentHeight) &&
+		Math.abs(currentHeight) >= SCALE_EPSILON
+	) {
+		ratioCandidates.push(Math.abs(nextHeight / currentHeight));
 	}
-	const magnitude =
-		candidates.length > 0
-			? candidates.reduce((sum, value) => sum + value, 0) / candidates.length
-			: Math.max(Math.abs(previousScaleX), Math.abs(previousScaleY));
+	const uniformRatio =
+		ratioCandidates.length > 0
+			? ratioCandidates.reduce((sum, value) => sum + value, 0) /
+				ratioCandidates.length
+			: 1;
+	const fallbackMagnitudeX =
+		Number.isFinite(baseWidth) && Math.abs(baseWidth) >= SCALE_EPSILON
+			? Math.abs(nextWidth / baseWidth)
+			: previousMagnitudeX;
+	const fallbackMagnitudeY =
+		Number.isFinite(baseHeight) && Math.abs(baseHeight) >= SCALE_EPSILON
+			? Math.abs(nextHeight / baseHeight)
+			: previousMagnitudeY;
+	const magnitudeX =
+		previousMagnitudeX >= SCALE_EPSILON
+			? previousMagnitudeX * uniformRatio
+			: fallbackMagnitudeX;
+	const magnitudeY =
+		previousMagnitudeY >= SCALE_EPSILON
+			? previousMagnitudeY * uniformRatio
+			: fallbackMagnitudeY;
 	const signX = previousScaleX < 0 ? -1 : 1;
 	const signY = previousScaleY < 0 ? -1 : 1;
 
 	return {
-		scaleX: signX * magnitude,
-		scaleY: signY * magnitude,
+		scaleX: signX * magnitudeX,
+		scaleY: signY * magnitudeY,
 	};
 };
 
