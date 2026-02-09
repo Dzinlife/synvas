@@ -1,4 +1,10 @@
 import type { TimelineElement } from "core/dsl/types";
+import {
+	toDisplayTimeFromFrameIndex,
+	toFrameIndex,
+} from "core/editor/preview/framePrecompileBuffer";
+import { createFramePrecompileController } from "core/editor/preview/framePrecompileController";
+import { schedulePrecompileTask } from "core/editor/preview/framePrecompileScheduler";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Canvas, type CanvasRef } from "react-skia-lite";
@@ -18,6 +24,10 @@ interface SkiaPreviewCanvasProps {
 	canvasRef?: React.RefObject<CanvasRef | null>;
 }
 
+const PRECOMPILE_LOOKAHEAD_FRAMES = 3;
+
+type SkiaRenderState = Awaited<ReturnType<typeof buildSkiaTree>>;
+
 export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	canvasWidth,
 	canvasHeight,
@@ -32,44 +42,93 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	const targetCanvasRef = canvasRef ?? internalCanvasRef;
 	const renderTokenRef = useRef(0);
 	const disposeRef = useRef<(() => void) | null>(null);
+	const frameControllerRef = useRef(
+		createFramePrecompileController<SkiaRenderState>({
+			lookaheadFrames: PRECOMPILE_LOOKAHEAD_FRAMES,
+			scheduleTask: schedulePrecompileTask,
+			onPrefetchError: (error, frameIndex) => {
+				console.error(
+					`Failed to precompile preview frame ${frameIndex}:`,
+					error,
+				);
+			},
+			onCacheEvent: (event) => {
+				if (event.type === "miss") {
+					console.log(`[SkiaPreviewCache] miss frame=${event.frameIndex}`);
+					return;
+				}
+				console.log(
+					`[SkiaPreviewCache] ${event.type} frame=${event.frameIndex} status=${event.status}`,
+				);
+			},
+		}),
+	);
 	const fps = useTimelineStore((state) => state.fps);
+
+	const invalidateBuffer = useCallback(() => {
+		frameControllerRef.current.invalidateAll();
+	}, []);
 
 	const runRender = useCallback(
 		(elements: TimelineElement[], displayTime: number) => {
 			const renderToken = renderTokenRef.current + 1;
 			renderTokenRef.current = renderToken;
 
-			buildSkiaTree({
-				elements,
-				displayTime,
-				tracks,
-				getTrackIndexForElement,
-				sortByTrackIndex,
-				prepare: {
-					isExporting: false,
-					// 预览态也要带上 fps，保证帧时间换算一致
-					fps: Number.isFinite(fps) ? Math.round(fps) : 0,
-					canvasSize: { width: canvasWidth, height: canvasHeight },
-					prepareTransitionPictures: true,
-					// 提供模型索引，供预览态准备帧使用
-					getModelStore: (id) => modelRegistry.get(id),
-				},
-			})
-				.then(({ children, dispose }) => {
+			const normalizedFps = Number.isFinite(fps) ? Math.round(fps) : 0;
+			const frameIndex = toFrameIndex(displayTime, normalizedFps);
+			frameControllerRef.current.reconcileFrame(frameIndex);
+
+			const buildFrameState = (targetFrame: number) => {
+				const targetDisplayTime =
+					targetFrame === frameIndex
+						? displayTime
+						: toDisplayTimeFromFrameIndex(
+								targetFrame,
+								normalizedFps,
+								displayTime,
+							);
+				return buildSkiaTree({
+					elements,
+					displayTime: targetDisplayTime,
+					tracks,
+					getTrackIndexForElement,
+					sortByTrackIndex,
+					prepare: {
+						isExporting: false,
+						// 预览态也要带上 fps，保证帧时间换算一致
+						fps: normalizedFps,
+						canvasSize: { width: canvasWidth, height: canvasHeight },
+						prepareTransitionPictures: true,
+						// 提供模型索引，供预览态准备帧使用
+						getModelStore: (id) => modelRegistry.get(id),
+					},
+				});
+			};
+
+			frameControllerRef.current
+				.getOrBuildCurrent(frameIndex, buildFrameState)
+				.then((entry) => {
 					if (renderTokenRef.current !== renderToken) {
-						dispose?.();
 						return;
 					}
 					const root = targetCanvasRef.current?.getRoot();
 					if (!root) {
-						dispose?.();
 						return;
 					}
-					root.render(children);
+					const frameState = entry.state;
+					if (!frameState) {
+						return;
+					}
+					root.render(frameState.children);
+					const nextDispose = frameControllerRef.current.takeDispose(entry);
 					disposeRef.current?.();
-					disposeRef.current = dispose ?? null;
+					disposeRef.current = nextDispose ?? null;
+					frameControllerRef.current.commitFrame(frameIndex, buildFrameState);
 				})
 				.catch((error) => {
+					if (renderTokenRef.current !== renderToken) {
+						return;
+					}
 					console.error("Failed to build skia preview tree:", error);
 				});
 		},
@@ -107,16 +166,23 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 		return useTimelineStore.subscribe(
 			(state) => state.elements,
 			(newElements) => {
+				invalidateBuffer();
 				runRender(newElements, getDisplayTime());
 			},
 			{
 				fireImmediately: true,
 			},
 		);
-	}, [getDisplayTime, runRender]);
+	}, [getDisplayTime, invalidateBuffer, runRender]);
+
+	useEffect(() => {
+		// 构建输入（fps/轨道/尺寸等）变化时保守失效，避免复用旧条件下的缓存。
+		invalidateBuffer();
+	}, [invalidateBuffer]);
 
 	useEffect(() => {
 		return () => {
+			frameControllerRef.current.disposeAll();
 			disposeRef.current?.();
 			disposeRef.current = null;
 		};

@@ -1,11 +1,11 @@
 import {
+	type AudioBufferSink,
 	AudioBufferSource,
 	BufferTarget,
 	CanvasSource,
 	Mp4OutputFormat,
 	Output,
 	QUALITY_HIGH,
-	type AudioBufferSink,
 	type WrappedAudioBuffer,
 } from "mediabunny";
 import { JsiSkSurface, Skia, SkiaSGRoot } from "react-skia-lite";
@@ -14,10 +14,12 @@ import { framesToSeconds } from "../utils/timecode";
 import {
 	type AudioMixClip,
 	type AudioMixInstruction,
-	type TransitionAudioCurve,
 	buildTransitionAudioMixPlan,
+	type TransitionAudioCurve,
 } from "./audio/transitionAudioMix";
 import type { buildSkiaRenderStateCore } from "./preview/buildSkiaTree";
+import { createFramePrecompileController } from "./preview/framePrecompileController";
+import { schedulePrecompileTask } from "./preview/framePrecompileScheduler";
 import type { TransitionFrameState } from "./preview/transitionFrameState";
 import type { TimelineTrack } from "./timeline/types";
 import type { AudioTrackControlStateMap } from "./utils/audioTrackState";
@@ -71,6 +73,7 @@ type ExportAudioTarget = {
 
 const AUDIO_EPSILON = 1e-6;
 const FALLBACK_OFFLINE_SAMPLE_RATE = 48_000;
+const EXPORT_PRECOMPILE_LOOKAHEAD_FRAMES = 3;
 
 const getTrackIndexForElement = (element: TimelineElement) =>
 	element.timeline.trackIndex ?? 0;
@@ -199,15 +202,15 @@ const collectExportAudioTargets = (
 		if (element.type !== "AudioClip" && element.type !== "VideoClip") continue;
 		const source = getAudioSource(element.id);
 		if (!source?.audioSink) continue;
-		if (!Number.isFinite(source.audioDuration) || source.audioDuration <= 0) continue;
+		if (!Number.isFinite(source.audioDuration) || source.audioDuration <= 0)
+			continue;
 
 		const enabled =
 			isTimelineTrackAudible(
 				element.timeline,
 				options.tracks,
 				audioTrackStates,
-			) &&
-			!(element.type === "VideoClip" && isVideoSourceAudioMuted(element));
+			) && !(element.type === "VideoClip" && isVideoSourceAudioMuted(element));
 
 		targets.push({
 			id: element.id,
@@ -255,7 +258,8 @@ const applyAudioMixPlanAtFrame = ({
 		const target = audioTargetsById.get(clip.id);
 		if (!target) continue;
 
-		const instruction: AudioMixInstruction | undefined = plan.instructions[clip.id];
+		const instruction: AudioMixInstruction | undefined =
+			plan.instructions[clip.id];
 		if (!instruction) {
 			target.gains[frameIndex] = 0;
 			continue;
@@ -287,10 +291,15 @@ const decodeTargetAudioChunks = async (
 	}
 
 	const chunks: WrappedAudioBuffer[] = [];
-	for await (const wrapped of target.audioSink.buffers(decodeStart, decodeEnd)) {
+	for await (const wrapped of target.audioSink.buffers(
+		decodeStart,
+		decodeEnd,
+	)) {
 		const buffer = wrapped?.buffer;
 		if (!buffer) continue;
-		const timestamp = Number.isFinite(wrapped.timestamp) ? wrapped.timestamp : 0;
+		const timestamp = Number.isFinite(wrapped.timestamp)
+			? wrapped.timestamp
+			: 0;
 		const duration =
 			Number.isFinite(wrapped.duration) && wrapped.duration > 0
 				? wrapped.duration
@@ -328,7 +337,7 @@ const applyGainAutomationByFrame = ({
 		const t0 = Math.min(exportDuration, i * frameDuration);
 		const t1 = Math.min(exportDuration, (i + 1) * frameDuration);
 		const g0 = clampGain(gains[i] ?? 0);
-		const g1 = clampGain(i + 1 < gains.length ? gains[i + 1] ?? 0 : 0);
+		const g1 = clampGain(i + 1 < gains.length ? (gains[i + 1] ?? 0) : 0);
 
 		gainParam.setValueAtTime(g0, t0);
 		if (t1 > t0) {
@@ -374,7 +383,10 @@ const mixAudioTargetsForExport = async ({
 			decodedChunksById.set(target.id, chunks);
 			for (const chunk of chunks) {
 				maxChannels = Math.max(maxChannels, chunk.buffer.numberOfChannels);
-				if (Number.isFinite(chunk.buffer.sampleRate) && chunk.buffer.sampleRate > 0) {
+				if (
+					Number.isFinite(chunk.buffer.sampleRate) &&
+					chunk.buffer.sampleRate > 0
+				) {
 					sampleRate = chunk.buffer.sampleRate;
 				}
 			}
@@ -487,7 +499,9 @@ export const exportTimelineAsVideoCore = async (
 
 	const totalFrames = endFrame - startFrame;
 	const audioTargets = collectExportAudioTargets(options, totalFrames);
-	const audioTargetsById = new Map(audioTargets.map((target) => [target.id, target]));
+	const audioTargetsById = new Map(
+		audioTargets.map((target) => [target.id, target]),
+	);
 	const audioClips: AudioMixClip[] = audioTargets.map((target) => ({
 		id: target.id,
 		timeline: target.timeline,
@@ -499,6 +513,15 @@ export const exportTimelineAsVideoCore = async (
 	let root: SkiaSGRoot | null = null;
 	let surface: JsiSkSurface | null = null;
 	let webglCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
+	const frameController = createFramePrecompileController<
+		Awaited<ReturnType<BuildSkiaRenderState>>
+	>({
+		lookaheadFrames: EXPORT_PRECOMPILE_LOOKAHEAD_FRAMES,
+		scheduleTask: schedulePrecompileTask,
+		onPrefetchError: (error, frameIndex) => {
+			console.warn(`导出预编译帧失败（frame=${frameIndex}）:`, error);
+		},
+	});
 
 	try {
 		const target = new BufferTarget();
@@ -556,24 +579,36 @@ export const exportTimelineAsVideoCore = async (
 			throw new Error("导出失败：无法获取 WebGL 画布");
 		}
 
+		const buildFrameState = (targetFrame: number) => {
+			return options.buildSkiaRenderState({
+				elements: options.elements,
+				displayTime: targetFrame,
+				tracks: options.tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: true,
+					fps,
+					canvasSize: { width, height },
+					getModelStore: options.getModelStore,
+					prepareTransitionPictures: true,
+				},
+			});
+		};
+
 		for (let frame = startFrame; frame < endFrame; frame += 1) {
 			options.onFrame?.(frame);
-
-			const { children, ready, dispose, transitionFrameState } =
-				await options.buildSkiaRenderState({
-					elements: options.elements,
-					displayTime: frame,
-					tracks: options.tracks,
-					getTrackIndexForElement,
-					sortByTrackIndex,
-					prepare: {
-						isExporting: true,
-						fps,
-						canvasSize: { width, height },
-						getModelStore: options.getModelStore,
-						prepareTransitionPictures: true,
-					},
-				});
+			frameController.reconcileFrame(frame);
+			const entry = await frameController.getOrBuildCurrent(
+				frame,
+				buildFrameState,
+			);
+			const frameState = entry.state;
+			const frameDispose = frameController.takeDispose(entry);
+			if (!frameState) {
+				frameDispose?.();
+				continue;
+			}
 
 			try {
 				if (audioTargetsById.size > 0) {
@@ -583,14 +618,14 @@ export const exportTimelineAsVideoCore = async (
 						fps,
 						audioClips,
 						audioTargetsById,
-						transitionFrameState,
+						transitionFrameState: frameState.transitionFrameState,
 						transitionCurveById,
 					});
 				}
 
-				await ready;
+				await frameState.ready;
 
-				await root.render(children);
+				await root.render(frameState.children);
 				skiaCanvas.clear(Float32Array.of(0, 0, 0, 0));
 				root.drawOnCanvas(skiaCanvas);
 				surface.flush();
@@ -599,8 +634,9 @@ export const exportTimelineAsVideoCore = async (
 				ctx.drawImage(webglCanvas, 0, 0, width, height);
 
 				await videoSource.add(frame / fps, 1 / fps);
+				frameController.commitFrame(frame, buildFrameState);
 			} finally {
-				dispose();
+				frameDispose?.();
 			}
 		}
 
@@ -629,6 +665,7 @@ export const exportTimelineAsVideoCore = async (
 		const filename = options.filename ?? `timeline-${Date.now()}.mp4`;
 		downloadBlob(blob, filename);
 	} finally {
+		frameController.disposeAll();
 		try {
 			root?.unmount();
 		} catch {}
