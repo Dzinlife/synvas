@@ -25,29 +25,6 @@ const useVideoClipSelector = createModelSelector<
 
 // 低于该帧数的时间抖动不触发 seek（按时间线 FPS 计算）
 const SEEK_SKIP_FRAMES = 1.5;
-const resolveRenderTimeFromState = (
-	state: ReturnType<typeof useTimelineStore.getState>,
-) => {
-	if (state.isExporting && state.exportTime !== null) return state.exportTime;
-	if (state.isPlaying) return state.currentTime;
-	return state.previewTime ?? state.currentTime;
-};
-
-const isClipInTransitionAtTime = (
-	clipId: string,
-	time: number,
-	elements: ReturnType<typeof useTimelineStore.getState>["elements"],
-): boolean => {
-	for (const element of elements) {
-		if (element.type !== "Transition") continue;
-		const { fromId, toId } = element.transition ?? {};
-		if (fromId !== clipId && toId !== clipId) continue;
-		const start = element.timeline.start ?? 0;
-		const end = element.timeline.end ?? 0;
-		if (time >= start && time < end) return true;
-	}
-	return false;
-};
 
 const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	// 渲染时优先使用导出帧
@@ -99,6 +76,10 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	const stopPlayback = useVideoClipSelector(
 		id,
 		(state) => state.internal.stopPlayback,
+	);
+	const releasePlaybackSession = useVideoClipSelector(
+		id,
+		(state) => state.internal.releasePlaybackSession,
 	);
 	// 跟踪播放状态
 	const wasPlayingRef = useRef(false);
@@ -201,21 +182,13 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 		}
 	}, [isExporting, stopPlayback]);
 
-	// 组件卸载时停止播放
+	// 组件卸载时仅释放会话引用，避免跨切点瞬间停流
 	useEffect(() => {
 		return () => {
 			if (isExporting) return;
-			if (isPlaying) {
-				const state = useTimelineStore.getState();
-				const renderTime = resolveRenderTimeFromState(state);
-				// 转场切换期间不停止播放，避免进入瞬间卡顿
-				if (isClipInTransitionAtTime(id, renderTime, state.elements)) {
-					return;
-				}
-			}
-			stopPlayback();
+			releasePlaybackSession();
 		};
-	}, [id, isPlaying, isExporting, stopPlayback]);
+	}, [isExporting, releasePlaybackSession]);
 
 	// Loading 状态
 	if (isLoading) {

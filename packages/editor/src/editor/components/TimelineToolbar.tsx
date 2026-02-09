@@ -19,20 +19,15 @@ import {
 	useTimelineScale,
 	useTimelineStore,
 } from "../contexts/TimelineContext";
-import { updateElementTime } from "../utils/timelineTime";
 import {
 	isTransitionElement,
 	reconcileTransitions,
 } from "../utils/transitions";
 import AsrDialog from "./AsrDialog";
+import { buildSplitElements } from "./timelineSplit";
 
 const isSplittableClip = (element: TimelineElement) =>
 	element.type === "VideoClip" || element.type === "AudioClip";
-
-const normalizeOffsetFrames = (value: unknown): number => {
-	if (!Number.isFinite(value as number)) return 0;
-	return Math.max(0, Math.round(value as number));
-};
 
 const createElementId = () => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -41,30 +36,6 @@ const createElementId = () => {
 	return `clip-${Date.now().toString(36)}-${Math.random()
 		.toString(36)
 		.slice(2, 6)}`;
-};
-
-const buildSplitElements = (
-	element: TimelineElement,
-	splitFrame: number,
-	fps: number,
-	newId: string,
-): { left: TimelineElement; right: TimelineElement } => {
-	const originalStart = element.timeline.start;
-	const originalEnd = element.timeline.end;
-	const offsetFrames = normalizeOffsetFrames(element.timeline.offset);
-	const rightOffset = offsetFrames + (splitFrame - originalStart);
-
-	const left = updateElementTime(element, originalStart, splitFrame, fps);
-	const rightBase: TimelineElement = {
-		...element,
-		id: newId,
-		timeline: {
-			...element.timeline,
-			offset: rightOffset,
-		},
-	};
-	const right = updateElementTime(rightBase, splitFrame, originalEnd, fps);
-	return { left, right };
 };
 
 const remapTransitionsAfterSplit = (
