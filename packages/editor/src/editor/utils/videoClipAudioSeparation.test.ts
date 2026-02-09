@@ -137,15 +137,4 @@ describe("videoClipAudioSeparation", () => {
 		expect(detachedAudio?.clip?.sourceVideoClipId).toBe("video-1");
 		expect(restored.some((element) => element.id === "video-1")).toBe(true);
 	});
-
-	it("兼容旧版 kind/audio.enabled=false 的静音判定", () => {
-		const legacyVideo: TimelineElement = {
-			...createVideoElement("video-legacy"),
-			clip: {
-				kind: "video",
-				audio: { enabled: false },
-			} as unknown as TimelineElement["clip"],
-		};
-		expect(isVideoSourceAudioMuted(legacyVideo)).toBe(true);
-	});
 });

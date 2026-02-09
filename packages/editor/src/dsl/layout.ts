@@ -82,8 +82,8 @@ export const resolveTransformSize = (
 };
 
 /**
- * 将 TransformMeta（V2）转换为 RenderLayout
- * @param transform V2 变换属性
+ * 将 TransformMeta 转换为 RenderLayout
+ * @param transform 变换属性
  * @param picture 项目画布尺寸（逻辑坐标）
  * @param canvas 渲染画布尺寸（像素坐标）
  * @returns RenderLayout 用于渲染的布局信息

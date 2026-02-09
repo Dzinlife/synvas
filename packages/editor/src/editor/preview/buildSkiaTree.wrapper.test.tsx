@@ -108,7 +108,6 @@ const sortByTrackIndex = (elements: TimelineElement[]) => {
 };
 
 const createTransform = (partial: Partial<TransformMeta> = {}): TransformMeta => ({
-	schema: "v2",
 	baseSize: { width: 200, height: 100 },
 	position: { x: 100, y: 60, space: "canvas" },
 	anchor: { x: 0.5, y: 0.5, space: "normalized" },

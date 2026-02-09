@@ -122,7 +122,6 @@ const transcriptRecordSchema = z.object({
 });
 
 const transformMetaSchema: z.ZodType<TransformMeta> = z.object({
-	schema: z.literal("v2"),
 	baseSize: z.object({
 		width: z.number().positive(),
 		height: z.number().positive(),
@@ -638,94 +637,4 @@ function validateTransition(
  */
 function validateRender(render: unknown, path: string): RenderMeta {
 	return parseWithSchema(renderMetaSchema, render, path);
-}
-
-/**
- * 辅助函数：将旧的 left/top 坐标（左上角坐标系）转换为 V2 transform
- * @param layout 旧的布局信息（左上角坐标系）
- * @param pictureSize 画布尺寸，用于坐标系转换
- */
-export function convertLegacyLayoutToTransform(
-	layout: {
-		left: number;
-		top: number;
-		width: number;
-		height: number;
-		rotate?: string;
-	},
-	_pictureSize: { width: number; height: number } = {
-		width: 1920,
-		height: 1080,
-	},
-): TransformMeta {
-	// 解析旋转角度（保留度数表示）
-	let rotation = 0;
-	if (layout.rotate) {
-		const match = layout.rotate.match(/^([-\d.]+)deg$/);
-		if (match) {
-			rotation = parseFloat(match[1]);
-		}
-	}
-
-	return {
-		schema: "v2",
-		baseSize: {
-			width: layout.width,
-			height: layout.height,
-		},
-		position: {
-			x: layout.left + layout.width / 2,
-			y: layout.top + layout.height / 2,
-			space: "canvas",
-		},
-		anchor: {
-			x: 0.5,
-			y: 0.5,
-			space: "normalized",
-		},
-		scale: {
-			x: 1,
-			y: 1,
-		},
-		rotation: {
-			value: rotation,
-			unit: "deg",
-		},
-		distort: {
-			type: "none",
-		},
-	};
-}
-
-/**
- * 辅助函数：将 V2 transform 转换为旧的 left/top 坐标（仅调试用途）
- * @param transform 变换属性（V2）
- * @param pictureSize 画布尺寸，用于坐标系转换
- */
-export function convertTransformToLegacyLayout(
-	transform: TransformMeta,
-	_pictureSize: { width: number; height: number } = {
-		width: 1920,
-		height: 1080,
-	},
-): {
-	left: number;
-	top: number;
-	width: number;
-	height: number;
-	rotate: string;
-} {
-	const width = transform.baseSize.width * Math.abs(transform.scale.x);
-	const height = transform.baseSize.height * Math.abs(transform.scale.y);
-	const left = transform.position.x - width * transform.anchor.x;
-	const top = transform.position.y - height * transform.anchor.y;
-	const degrees = transform.rotation.value;
-
-	return {
-		left,
-		top,
-		width,
-		height,
-		rotate: `${degrees}deg`,
-	};
 }

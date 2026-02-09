@@ -53,11 +53,10 @@ export interface TransformDistortCornerPin {
 }
 
 /**
- * 空间变换属性（V2）
+ * 空间变换属性
  * 使用主流 NLE 的 SRT + Anchor 语义；四角形变仅预留接口
  */
 export interface TransformMeta {
-	schema: "v2";
 	baseSize: TransformSizeMeta;
 	position: TransformPositionMeta;
 	anchor: TransformAnchorMeta;

@@ -29,7 +29,6 @@ describe("layout transform semantics", () => {
 
 	it("resolveTransformToRenderLayout 中 position 语义为中心坐标", () => {
 		const baseTransform: Omit<TransformMeta, "anchor"> = {
-			schema: "v2",
 			baseSize: { width: 200, height: 100 },
 			position: { x: 500, y: 260, space: "canvas" },
 			scale: { x: 1.2, y: 0.8 },

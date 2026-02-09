@@ -10,7 +10,7 @@ type CreateTransformMetaOptions = {
 };
 
 /**
- * 创建 V2 transform 默认值
+ * 创建 transform 默认值
  */
 export const createTransformMeta = ({
 	width,
@@ -21,7 +21,6 @@ export const createTransformMeta = ({
 	positionY = height / 2,
 }: CreateTransformMetaOptions): TransformMeta => {
 	return {
-		schema: "v2",
 		baseSize: {
 			width,
 			height,
@@ -51,7 +50,7 @@ export const createTransformMeta = ({
 };
 
 /**
- * 计算 V2 transform 的最终尺寸
+ * 计算 transform 的最终尺寸
  */
 export const getTransformSize = (transform: TransformMeta) => {
 	return {

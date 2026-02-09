@@ -40,7 +40,6 @@
       "component": "video-clip",
       "name": "视频片段",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 1920,
           "height": 1080
@@ -89,7 +88,6 @@
       "component": "video-clip",
       "name": "WZ",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 1920,
           "height": 1080
@@ -138,7 +136,6 @@
       "component": "image",
       "name": "照片",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 1920,
           "height": 1080
@@ -187,7 +184,6 @@
       "component": "transition/crossfade",
       "name": "转场",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 1920,
           "height": 1080
@@ -240,7 +236,6 @@
       "component": "filter/backdrop-zoom",
       "name": "放大镜效果",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 300,
           "height": 300
@@ -291,7 +286,6 @@
       "component": "lottie",
       "name": "贴纸动画",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 400,
           "height": 400
@@ -342,7 +336,6 @@
       "component": "filter/color-filter",
       "name": "调色滤镜",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 1920,
           "height": 1080
@@ -395,7 +388,6 @@
       "component": "image",
       "name": "Logo 水印",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 200,
           "height": 200
@@ -444,7 +436,6 @@
       "component": "transition/crossfade",
       "name": "转场",
       "transform": {
-        "schema": "v2",
         "baseSize": {
           "width": 1920,
           "height": 1080
