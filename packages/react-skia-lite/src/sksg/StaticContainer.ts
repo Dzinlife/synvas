@@ -1,4 +1,4 @@
-import type { SkCanvas, Skia } from "../skia/types";
+import type { SkCanvas, Skia, SkPaint } from "../skia/types";
 import { SkiaViewApi } from "../views/api";
 import type { Node } from "./Node";
 import { createDrawingContext } from "./Recorder/DrawingContext";
@@ -12,6 +12,7 @@ export abstract class Container {
 	private _root: Node[] = [];
 	protected recording: Recording | null = null;
 	protected unmounted = false;
+	protected paintPool: SkPaint[] = [];
 
 	constructor(protected Skia: Skia) {}
 
@@ -29,6 +30,12 @@ export abstract class Container {
 
 	unmount() {
 		this.unmounted = true;
+		for (const paint of this.paintPool) {
+			try {
+				paint.dispose();
+			} catch {}
+		}
+		this.paintPool.length = 0;
 	}
 
 	drawOnCanvas(canvas: SkCanvas) {
@@ -37,7 +44,7 @@ export abstract class Container {
 		}
 		const ctx = createDrawingContext(
 			this.Skia,
-			this.recording.paintPool,
+			this.paintPool,
 			canvas,
 		);
 		replay(ctx, this.recording.commands);

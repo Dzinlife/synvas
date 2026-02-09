@@ -7,6 +7,7 @@ import type {
   SkImageFilter,
   SkPathEffect,
 } from "../../skia/types";
+import { BlendMode, PaintStyle, StrokeCap, StrokeJoin } from "../../skia/types";
 
 export const createDrawingContext = (
   Skia: Skia,
@@ -27,8 +28,25 @@ export const createDrawingContext = (
   let nextPaintIndex = 1;
 
   // Initialize first paint and opacity
-  paintPool[0] = Skia.Paint();
-  paints.push(paintPool[0]);
+  if (!paintPool[0]) {
+    paintPool[0] = Skia.Paint();
+  }
+  const rootPaint = paintPool[0];
+  rootPaint.setShader(null);
+  rootPaint.setColorFilter(null);
+  rootPaint.setImageFilter(null);
+  rootPaint.setMaskFilter(null);
+  rootPaint.setPathEffect(null);
+  rootPaint.setBlendMode(BlendMode.SrcOver);
+  rootPaint.setStyle(PaintStyle.Fill);
+  rootPaint.setStrokeWidth(0);
+  rootPaint.setStrokeMiter(4);
+  rootPaint.setStrokeCap(StrokeCap.Butt);
+  rootPaint.setStrokeJoin(StrokeJoin.Miter);
+  rootPaint.setAlphaf(1);
+  rootPaint.setDither(false);
+  rootPaint.setAntiAlias(true);
+  paints.push(rootPaint);
   opacities.push(1);
 
   // Methods (formerly class methods)

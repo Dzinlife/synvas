@@ -2,6 +2,8 @@ import type { CanvasKit, EmbindEnumEntity } from "canvaskit-wasm";
 
 import type { SkJSIInstance } from "../types";
 
+const disposedNativeRefs = new WeakSet<object>();
+
 export const throwNotImplementedOnRNWeb = <T>(): T => {
 	const jestFn = (globalThis as { jest?: { fn: () => unknown } }).jest?.fn;
 	if (jestFn) {
@@ -36,14 +38,17 @@ export abstract class BaseHostObject<T, N extends string>
 	}
 
 	[Symbol.dispose](): void {
-		if (
-			this.ref !== null &&
-			typeof this.ref === "object" &&
-			"delete" in this.ref &&
-			typeof this.ref.delete === "function"
-		) {
-			this.ref.delete();
+		const currentRef = this.ref as unknown;
+		if (!currentRef || typeof currentRef !== "object") return;
+		if (disposedNativeRefs.has(currentRef)) return;
+		if (!("delete" in currentRef) || typeof currentRef.delete !== "function") {
+			return;
 		}
+		disposedNativeRefs.add(currentRef);
+		this.ref = null as unknown as T;
+		try {
+			currentRef.delete();
+		} catch {}
 	}
 }
 

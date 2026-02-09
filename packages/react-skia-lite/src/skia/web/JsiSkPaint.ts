@@ -31,11 +31,16 @@ export class JsiSkPaint extends HostObject<Paint, "Paint"> implements SkPaint {
   }
 
   assign(paint: JsiSkPaint) {
+    if (paint === this) return;
+    const previousRef = this.ref;
     this.ref = paint.ref.copy();
+    previousRef.delete();
   }
 
   reset() {
+    const previousRef = this.ref;
     this.ref = new this.CanvasKit.Paint();
+    previousRef.delete();
   }
 
   getAlphaf() {

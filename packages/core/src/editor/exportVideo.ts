@@ -6,6 +6,7 @@ import {
 	Mp4OutputFormat,
 	Output,
 	QUALITY_HIGH,
+	StreamTarget,
 	type WrappedAudioBuffer,
 } from "mediabunny";
 import { JsiSkSurface, Skia, SkiaSGRoot } from "react-skia-lite";
@@ -18,8 +19,6 @@ import {
 	type TransitionAudioCurve,
 } from "./audio/transitionAudioMix";
 import type { buildSkiaRenderStateCore } from "./preview/buildSkiaTree";
-import { createFramePrecompileController } from "./preview/framePrecompileController";
-import { schedulePrecompileTask } from "./preview/framePrecompileScheduler";
 import type { TransitionFrameState } from "./preview/transitionFrameState";
 import type { TimelineTrack } from "./timeline/types";
 import type { AudioTrackControlStateMap } from "./utils/audioTrackState";
@@ -73,7 +72,6 @@ type ExportAudioTarget = {
 
 const AUDIO_EPSILON = 1e-6;
 const FALLBACK_OFFLINE_SAMPLE_RATE = 48_000;
-const EXPORT_PRECOMPILE_LOOKAHEAD_FRAMES = 3;
 
 const getTrackIndexForElement = (element: TimelineElement) =>
 	element.timeline.trackIndex ?? 0;
@@ -94,14 +92,6 @@ const sortByTrackIndex = (items: TimelineElement[]) => {
 		.map(({ el }) => el);
 };
 
-const ensure2DContext = (canvas: HTMLCanvasElement | OffscreenCanvas) => {
-	const ctx = canvas.getContext("2d");
-	if (!ctx) {
-		throw new Error("无法获取导出画布的 2D 上下文");
-	}
-	return ctx as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-};
-
 const cleanupWebGLContext = (canvas: HTMLCanvasElement | OffscreenCanvas) => {
 	const ctx = canvas.getContext("webgl2") as WebGL2RenderingContext;
 	if (!ctx) return;
@@ -109,22 +99,23 @@ const cleanupWebGLContext = (canvas: HTMLCanvasElement | OffscreenCanvas) => {
 	loseContext?.loseContext();
 };
 
+const DOWNLOAD_URL_REVOKE_DELAY_MS = 60_000;
+const OPFS_CLEANUP_DELAY_MS = 10 * 60_000;
+
 const createWebGLSurfaceForExport = (
+	canvas: HTMLCanvasElement | OffscreenCanvas,
 	width: number,
 	height: number,
 ): {
 	surface: JsiSkSurface;
 	canvas: HTMLCanvasElement | OffscreenCanvas;
 } | null => {
-	const canvas =
-		typeof OffscreenCanvas !== "undefined"
-			? new OffscreenCanvas(width, height)
-			: (() => {
-					const temp = document.createElement("canvas");
-					temp.width = width;
-					temp.height = height;
-					return temp;
-				})();
+	if (canvas.width !== width) {
+		canvas.width = width;
+	}
+	if (canvas.height !== height) {
+		canvas.height = height;
+	}
 
 	let surface: JsiSkSurface | null = null;
 	try {
@@ -160,6 +151,84 @@ const downloadBlob = (blob: Blob, filename: string): void => {
 	link.click();
 	document.body.removeChild(link);
 	URL.revokeObjectURL(url);
+};
+
+const scheduleDeferredCleanup = (target: ExportOutputTarget): void => {
+	setTimeout(() => {
+		void target.cleanup();
+	}, OPFS_CLEANUP_DELAY_MS);
+};
+
+type ExportOutputTarget = {
+	kind: "opfs-stream" | "buffer-memory";
+	target: BufferTarget | StreamTarget;
+	resolveBlob: () => Promise<Blob>;
+	cleanup: () => Promise<void>;
+};
+
+const createBufferExportTarget = (): ExportOutputTarget => {
+	const target = new BufferTarget();
+	return {
+		kind: "buffer-memory",
+		target,
+		resolveBlob: async () => {
+			if (!target.buffer) {
+				throw new Error("导出失败：无法获取输出数据");
+			}
+			return new Blob([target.buffer], { type: "video/mp4" });
+		},
+		cleanup: async () => {},
+	};
+};
+
+const createOpfsExportTarget = async (): Promise<ExportOutputTarget | null> => {
+	const nav = (globalThis as { navigator?: any }).navigator;
+	const getDirectory = nav?.storage?.getDirectory;
+	if (typeof getDirectory !== "function") return null;
+	if (typeof WritableStream === "undefined") return null;
+
+	try {
+		const root = await getDirectory.call(nav.storage);
+		const exportDir = await root.getDirectoryHandle(".ai-nle-export", {
+			create: true,
+		});
+		const tempName = `timeline-${Date.now()}-${Math.random()
+			.toString(36)
+			.slice(2)}.mp4`;
+		const fileHandle = await exportDir.getFileHandle(tempName, {
+			create: true,
+		});
+		const writable = await fileHandle.createWritable();
+		if (!(writable instanceof WritableStream)) {
+			await writable.close?.();
+			return null;
+		}
+
+		const target = new StreamTarget(writable, {
+			chunked: true,
+		});
+		return {
+			kind: "opfs-stream",
+			target,
+			resolveBlob: async () => {
+				return fileHandle.getFile();
+			},
+			cleanup: async () => {
+				try {
+					await exportDir.removeEntry(tempName);
+				} catch {}
+			},
+		};
+	} catch (error) {
+		console.warn("创建 OPFS 导出目标失败，将回退内存导出:", error);
+		return null;
+	}
+};
+
+const createExportOutputTarget = async (): Promise<ExportOutputTarget> => {
+	const opfsTarget = await createOpfsExportTarget();
+	if (opfsTarget) return opfsTarget;
+	return createBufferExportTarget();
 };
 
 const clampGain = (value: number): number => {
@@ -513,21 +582,15 @@ export const exportTimelineAsVideoCore = async (
 	let root: SkiaSGRoot | null = null;
 	let surface: JsiSkSurface | null = null;
 	let webglCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
-	const frameController = createFramePrecompileController<
-		Awaited<ReturnType<BuildSkiaRenderState>>
-	>({
-		lookaheadFrames: EXPORT_PRECOMPILE_LOOKAHEAD_FRAMES,
-		scheduleTask: schedulePrecompileTask,
-		onPrefetchError: (error, frameIndex) => {
-			console.warn(`导出预编译帧失败（frame=${frameIndex}）:`, error);
-		},
-	});
+	let outputTarget: ExportOutputTarget | null = null;
+	let shouldCleanupOutputTargetImmediately = true;
 
 	try {
-		const target = new BufferTarget();
+		outputTarget = await createExportOutputTarget();
+		console.info(`[Export] output target: ${outputTarget.kind}`);
 		const output = new Output({
 			format: new Mp4OutputFormat(),
-			target,
+			target: outputTarget.target,
 		});
 
 		const exportCanvas =
@@ -563,7 +626,11 @@ export const exportTimelineAsVideoCore = async (
 		await output.start();
 
 		root = new SkiaSGRoot(Skia);
-		const webglResult = createWebGLSurfaceForExport(width, height);
+		const webglResult = createWebGLSurfaceForExport(
+			exportCanvas,
+			width,
+			height,
+		);
 		if (!webglResult) {
 			throw new Error("导出失败：无法创建 WebGL Surface");
 		}
@@ -573,8 +640,6 @@ export const exportTimelineAsVideoCore = async (
 			throw new Error("导出失败：无法创建离屏画布");
 		}
 		const skiaCanvas = surface.getCanvas();
-
-		const ctx = ensure2DContext(exportCanvas);
 		if (!webglCanvas) {
 			throw new Error("导出失败：无法获取 WebGL 画布");
 		}
@@ -598,15 +663,8 @@ export const exportTimelineAsVideoCore = async (
 
 		for (let frame = startFrame; frame < endFrame; frame += 1) {
 			options.onFrame?.(frame);
-			frameController.reconcileFrame(frame);
-			const entry = await frameController.getOrBuildCurrent(
-				frame,
-				buildFrameState,
-			);
-			const frameState = entry.state;
-			const frameDispose = frameController.takeDispose(entry);
+			const frameState = await buildFrameState(frame);
 			if (!frameState) {
-				frameDispose?.();
 				continue;
 			}
 
@@ -626,19 +684,17 @@ export const exportTimelineAsVideoCore = async (
 				await frameState.ready;
 
 				await root.render(frameState.children);
-				skiaCanvas.clear(Float32Array.of(0, 0, 0, 0));
+				// 渲染树已包含全屏背景 Fill，避免额外 clear 触发 CanvasKit 崩溃路径
 				root.drawOnCanvas(skiaCanvas);
 				surface.flush();
 
-				ctx.clearRect(0, 0, width, height);
-				ctx.drawImage(webglCanvas, 0, 0, width, height);
-
 				await videoSource.add(frame / fps, 1 / fps);
-				frameController.commitFrame(frame, buildFrameState);
 			} finally {
-				frameDispose?.();
+				frameState.dispose?.();
 			}
 		}
+
+		console.log("video canvas rendered");
 
 		if (audioSource && audioTargets.length > 0) {
 			try {
@@ -656,16 +712,23 @@ export const exportTimelineAsVideoCore = async (
 			}
 		}
 
-		await output.finalize();
-		if (!target.buffer) {
-			throw new Error("导出失败：无法获取输出数据");
-		}
+		console.log("audio mixed");
 
-		const blob = new Blob([target.buffer], { type: "video/mp4" });
+		await output.finalize();
+		console.log("output finalized");
+		const blob = await outputTarget.resolveBlob();
 		const filename = options.filename ?? `timeline-${Date.now()}.mp4`;
 		downloadBlob(blob, filename);
+		console.log("blob downloaded");
+		if (outputTarget.kind === "opfs-stream") {
+			// 下载可能仍在读取 OPFS 文件，延后删除临时文件避免网络错误
+			scheduleDeferredCleanup(outputTarget);
+			shouldCleanupOutputTargetImmediately = false;
+		}
 	} finally {
-		frameController.disposeAll();
+		if (shouldCleanupOutputTargetImmediately) {
+			await outputTarget?.cleanup();
+		}
 		try {
 			root?.unmount();
 		} catch {}

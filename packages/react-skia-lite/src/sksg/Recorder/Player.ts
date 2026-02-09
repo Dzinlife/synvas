@@ -134,7 +134,11 @@ const play = (ctx: DrawingContext, _command: Command) => {
       ctx.savePaint();
       if (standalone) {
         const freshPaint = ctx.Skia.Paint();
-        ctx.paint.assign(freshPaint);
+        try {
+          ctx.paint.assign(freshPaint);
+        } finally {
+          freshPaint.dispose();
+        }
       }
       setPaintProperties(ctx.Skia, ctx, command.props, standalone);
     }
@@ -176,57 +180,61 @@ const play = (ctx: DrawingContext, _command: Command) => {
     paint.setAlphaf(paint.getAlphaf() * ctx.getOpacity());
     const paints = [paint, ...ctx.paintDeclarations];
     ctx.paintDeclarations = [];
-    paints.forEach((p) => {
-      ctx.paints.push(p);
-      if (isBoxCommand(command)) {
-        drawBox(ctx, command);
-      } else if (isCommand(command, CommandType.DrawPaint)) {
-        ctx.canvas.drawPaint(ctx.paint);
-      } else if (isDrawCommand(command, CommandType.DrawImage)) {
-        drawImage(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawCircle)) {
-        drawCircle(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawPoints)) {
-        drawPoints(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawPath)) {
-        drawPath(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawRect)) {
-        drawRect(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawRRect)) {
-        drawRRect(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawOval)) {
-        drawOval(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawLine)) {
-        drawLine(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawPatch)) {
-        drawPatch(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawVertices)) {
-        drawVertices(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawDiffRect)) {
-        drawDiffRect(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawText)) {
-        drawText(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawTextPath)) {
-        drawTextPath(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawTextBlob)) {
-        drawTextBlob(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawGlyphs)) {
-        drawGlyphs(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawPicture)) {
-        drawPicture(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawImageSVG)) {
-        drawImageSVG(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawParagraph)) {
-        drawParagraph(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawAtlas)) {
-        drawAtlas(ctx, command.props);
-      } else if (isDrawCommand(command, CommandType.DrawSkottie)) {
-        drawSkottie(ctx, command.props);
-      } else {
-        console.warn(`Unknown command: ${command.type}`);
-      }
-      ctx.paints.pop();
-    });
+    try {
+      paints.forEach((p) => {
+        ctx.paints.push(p);
+        if (isBoxCommand(command)) {
+          drawBox(ctx, command);
+        } else if (isCommand(command, CommandType.DrawPaint)) {
+          ctx.canvas.drawPaint(ctx.paint);
+        } else if (isDrawCommand(command, CommandType.DrawImage)) {
+          drawImage(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawCircle)) {
+          drawCircle(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawPoints)) {
+          drawPoints(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawPath)) {
+          drawPath(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawRect)) {
+          drawRect(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawRRect)) {
+          drawRRect(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawOval)) {
+          drawOval(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawLine)) {
+          drawLine(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawPatch)) {
+          drawPatch(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawVertices)) {
+          drawVertices(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawDiffRect)) {
+          drawDiffRect(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawText)) {
+          drawText(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawTextPath)) {
+          drawTextPath(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawTextBlob)) {
+          drawTextBlob(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawGlyphs)) {
+          drawGlyphs(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawPicture)) {
+          drawPicture(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawImageSVG)) {
+          drawImageSVG(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawParagraph)) {
+          drawParagraph(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawAtlas)) {
+          drawAtlas(ctx, command.props);
+        } else if (isDrawCommand(command, CommandType.DrawSkottie)) {
+          drawSkottie(ctx, command.props);
+        } else {
+          console.warn(`Unknown command: ${command.type}`);
+        }
+        ctx.paints.pop();
+      });
+    } finally {
+      paint.dispose();
+    }
   }
 };
 export function replay(ctx: DrawingContext, commands: Command[]) {
