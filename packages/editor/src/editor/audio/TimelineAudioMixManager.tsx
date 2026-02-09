@@ -2,6 +2,7 @@ import type React from "react";
 import { useCallback, useEffect } from "react";
 import { modelRegistry } from "../../dsl/model/registry";
 import { useTimelineStore } from "../contexts/TimelineContext";
+import { getAudioPlaybackSessionKey } from "../playback/clipContinuityIndex";
 import { isTimelineTrackAudible } from "../utils/trackAudibility";
 import { isVideoSourceAudioMuted } from "../utils/videoClipAudioSeparation";
 import {
@@ -51,6 +52,7 @@ const collectAudioMixTargets = (
 			timeline: element.timeline,
 			audioDuration,
 			enabled,
+			sessionKey: getAudioPlaybackSessionKey(state.elements, element.id),
 			applyAudioMix: internal.applyAudioMix,
 		});
 	}
@@ -76,7 +78,10 @@ export const TimelineAudioMixManager: React.FC = () => {
 	const stopAllMixTargets = useCallback(() => {
 		const state = useTimelineStore.getState();
 		const targets = collectAudioMixTargets(state);
+		const handledSessionKeys = new Set<string>();
 		for (const target of targets.values()) {
+			if (handledSessionKeys.has(target.sessionKey)) continue;
+			handledSessionKeys.add(target.sessionKey);
 			invokeApplyAudioMix(target, null);
 		}
 	}, []);

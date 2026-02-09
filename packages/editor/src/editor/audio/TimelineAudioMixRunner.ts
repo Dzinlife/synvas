@@ -11,6 +11,7 @@ export type AudioMixTarget = {
 	timeline: TimelineMeta;
 	audioDuration: number;
 	enabled: boolean;
+	sessionKey: string;
 	applyAudioMix: (
 		instruction: AudioMixInstruction | null,
 	) => void | Promise<void>;
@@ -50,6 +51,36 @@ const resolveTransitionCurve = (
 	return undefined;
 };
 
+const EPSILON = 1e-6;
+
+const chooseSessionInstruction = (
+	current: { target: AudioMixTarget; instruction: AudioMixInstruction | null },
+	candidate: {
+		target: AudioMixTarget;
+		instruction: AudioMixInstruction | null;
+	},
+) => {
+	if (!current.instruction && candidate.instruction) return candidate;
+	if (current.instruction && !candidate.instruction) return current;
+	if (!current.instruction && !candidate.instruction) return current;
+	if (!current.instruction || !candidate.instruction) return current;
+
+	const currentGain = current.instruction.gain ?? 0;
+	const candidateGain = candidate.instruction.gain ?? 0;
+	if (candidateGain > currentGain + EPSILON) return candidate;
+	if (currentGain > candidateGain + EPSILON) return current;
+
+	const currentStart = current.target.timeline.start ?? 0;
+	const candidateStart = candidate.target.timeline.start ?? 0;
+	if (candidateStart > currentStart) return candidate;
+	if (currentStart > candidateStart) return current;
+
+	if (candidate.target.id.localeCompare(current.target.id) > 0) {
+		return candidate;
+	}
+	return current;
+};
+
 export const runTimelineAudioMixFrame = (
 	args: RunTimelineAudioMixFrameArgs,
 ): Set<string> => {
@@ -58,7 +89,10 @@ export const runTimelineAudioMixFrame = (
 		args.getTrackIndexForElement ?? DEFAULT_TRACK_INDEX_RESOLVER;
 
 	if (!args.isPlaying || args.isExporting) {
+		const stoppedSessionKeys = new Set<string>();
 		for (const target of args.targets.values()) {
+			if (stoppedSessionKeys.has(target.sessionKey)) continue;
+			stoppedSessionKeys.add(target.sessionKey);
 			invokeApplyAudioMix(target, null);
 		}
 		return activeIds;
@@ -95,11 +129,38 @@ export const runTimelineAudioMixFrame = (
 		transitionCurves: transitionCurveById,
 	});
 
+	const pickedBySession = new Map<
+		string,
+		{ target: AudioMixTarget; instruction: AudioMixInstruction | null }
+	>();
 	for (const [id, target] of args.targets.entries()) {
 		const instruction = plan.instructions[id] ?? null;
-		invokeApplyAudioMix(target, instruction);
+		const candidate = { target, instruction };
+		const existing = pickedBySession.get(target.sessionKey);
+		if (!existing) {
+			pickedBySession.set(target.sessionKey, candidate);
+			continue;
+		}
+		if (
+			existing.instruction &&
+			instruction &&
+			existing.target.id !== target.id
+		) {
+			console.warn(
+				`[TimelineAudioMix] session=${target.sessionKey} has multiple active clips, selecting by gain/start`,
+			);
+		}
+		pickedBySession.set(
+			target.sessionKey,
+			chooseSessionInstruction(existing, candidate),
+		);
+	}
+
+	for (const picked of pickedBySession.values()) {
+		invokeApplyAudioMix(picked.target, picked.instruction);
+		const instruction = picked.instruction;
 		if (instruction) {
-			activeIds.add(id);
+			activeIds.add(picked.target.id);
 		}
 	}
 

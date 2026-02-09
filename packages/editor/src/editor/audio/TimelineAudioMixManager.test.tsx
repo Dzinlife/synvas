@@ -87,6 +87,29 @@ const createTransitionElement = (
 	},
 });
 
+const createTarget = ({
+	id,
+	timeline,
+	applyAudioMix,
+	audioDuration = 2,
+	enabled = true,
+	sessionKey,
+}: {
+	id: string;
+	timeline: TimelineMeta;
+	applyAudioMix: ReturnType<typeof vi.fn>;
+	audioDuration?: number;
+	enabled?: boolean;
+	sessionKey?: string;
+}) => ({
+	id,
+	timeline,
+	audioDuration,
+	enabled,
+	sessionKey: sessionKey ?? `session:${id}`,
+	applyAudioMix,
+});
+
 describe("TimelineAudioMixManager.runTimelineAudioMixFrame", () => {
 	it("暂停时会停止所有目标", () => {
 		const apply = vi.fn();
@@ -94,13 +117,11 @@ describe("TimelineAudioMixManager.runTimelineAudioMixFrame", () => {
 		const targets = new Map([
 			[
 				"clip-a",
-				{
+				createTarget({
 					id: "clip-a",
 					timeline,
-					audioDuration: 2,
-					enabled: true,
 					applyAudioMix: apply,
-				},
+				}),
 			],
 		]);
 
@@ -128,23 +149,19 @@ describe("TimelineAudioMixManager.runTimelineAudioMixFrame", () => {
 		const targets = new Map([
 			[
 				"from",
-				{
+				createTarget({
 					id: "from",
 					timeline: from.timeline,
-					audioDuration: 2,
-					enabled: true,
 					applyAudioMix: applyFrom,
-				},
+				}),
 			],
 			[
 				"to",
-				{
+				createTarget({
 					id: "to",
 					timeline: to.timeline,
-					audioDuration: 2,
-					enabled: true,
 					applyAudioMix: applyTo,
-				},
+				}),
 			],
 		]);
 
@@ -178,13 +195,11 @@ describe("TimelineAudioMixManager.runTimelineAudioMixFrame", () => {
 		const targets = new Map([
 			[
 				"clip-a",
-				{
+				createTarget({
 					id: "clip-a",
 					timeline: createTimeline(0, 60),
-					audioDuration: 2,
-					enabled: true,
 					applyAudioMix: apply,
-				},
+				}),
 			],
 		]);
 
@@ -207,13 +222,12 @@ describe("TimelineAudioMixManager.runTimelineAudioMixFrame", () => {
 		const targets = new Map([
 			[
 				"clip-a",
-				{
+				createTarget({
 					id: "clip-a",
 					timeline: createTimeline(0, 60),
-					audioDuration: 2,
 					enabled: false,
 					applyAudioMix: apply,
-				},
+				}),
 			],
 		]);
 
@@ -229,5 +243,46 @@ describe("TimelineAudioMixManager.runTimelineAudioMixFrame", () => {
 		});
 
 		expect(apply).toHaveBeenLastCalledWith(null);
+	});
+
+	it("同一 session 在同一帧只会调用一次混音", () => {
+		const applyA = vi.fn();
+		const applyB = vi.fn();
+		const targets = new Map([
+			[
+				"clip-a",
+				createTarget({
+					id: "clip-a",
+					timeline: createTimeline(0, 60, 0),
+					applyAudioMix: applyA,
+					sessionKey: "session:shared",
+				}),
+			],
+			[
+				"clip-b",
+				createTarget({
+					id: "clip-b",
+					timeline: createTimeline(60, 120, 60),
+					applyAudioMix: applyB,
+					sessionKey: "session:shared",
+				}),
+			],
+		]);
+
+		runTimelineAudioMixFrame({
+			isPlaying: true,
+			isExporting: false,
+			displayTime: 75,
+			fps: 30,
+			elements: [
+				createVideoElement("clip-a", 0, 60, 0),
+				createVideoElement("clip-b", 60, 120, 60),
+			],
+			tracks: [createTrack()],
+			audioTrackStates: {},
+			targets,
+		});
+
+		expect(applyA.mock.calls.length + applyB.mock.calls.length).toBe(1);
 	});
 });

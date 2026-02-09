@@ -174,14 +174,15 @@ const buildContinuityIndex = (
 					: false,
 		};
 
-		if (clipInfo.type === "AudioClip") {
-			const groupKey = `${clipInfo.trackIndex}|${clipInfo.uri}`;
-			const group = audioGroups.get(groupKey);
-			if (group) {
-				group.push(clipInfo);
-			} else {
-				audioGroups.set(groupKey, [clipInfo]);
-			}
+		const audioGroupKey = `${clipInfo.trackIndex}|${clipInfo.uri}|${clipInfo.reversed}`;
+		const audioGroup = audioGroups.get(audioGroupKey);
+		if (audioGroup) {
+			audioGroup.push(clipInfo);
+		} else {
+			audioGroups.set(audioGroupKey, [clipInfo]);
+		}
+
+		if (clipInfo.type !== "VideoClip") {
 			continue;
 		}
 

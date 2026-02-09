@@ -167,6 +167,16 @@ describe("clipContinuityIndex", () => {
 		expect(key1).toBe(key2);
 	});
 
+	it("VideoClip 的源音频同源硬切也会归并到同一 session", () => {
+		const elements = [
+			createVideoClip({ id: "v1", start: 0, end: 30, offset: 0 }),
+			createVideoClip({ id: "v2", start: 30, end: 60, offset: 30 }),
+		];
+		const key1 = getAudioPlaybackSessionKey(elements, "v1");
+		const key2 = getAudioPlaybackSessionKey(elements, "v2");
+		expect(key1).toBe(key2);
+	});
+
 	it("不存在归并信息时回退 clip key", () => {
 		const elements = [
 			createVideoClip({

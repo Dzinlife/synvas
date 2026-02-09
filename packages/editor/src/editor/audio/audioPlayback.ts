@@ -20,6 +20,8 @@ type AudioPlaybackDeps = {
 	getFps: () => number;
 	getState: () => AudioPlaybackState;
 	isPlaybackEnabled?: () => boolean;
+	getRuntimeKey?: () => string;
+	getSeekEpoch?: () => number;
 };
 
 export type AudioPlaybackRange = {
@@ -50,6 +52,9 @@ const PLAYBACK_LOOKAHEAD_SECONDS = 2;
 const PLAYBACK_LOOKAHEAD_POLL_MS = 120;
 const DEFAULT_GAIN = 1;
 const GAIN_RAMP_SECONDS = 0.02;
+const SOURCE_STOP_FADE_OUT_SECONDS = 0.008;
+const SOURCE_SEEK_FADE_OUT_SECONDS = 0.001;
+const RUNTIME_IDLE_TTL_MS = 500;
 
 type ResolvedPlaybackInput = {
 	timelineTimeSeconds: number;
@@ -58,6 +63,33 @@ type ResolvedPlaybackInput = {
 	sourceTime: number;
 	sourceRange: AudioPlaybackRange;
 };
+
+type ScheduledAudioSource = {
+	source: AudioBufferSourceNode;
+	gainNode: GainNode | null;
+};
+
+type AudioPlaybackRuntime = {
+	key: string;
+	refCount: number;
+	idleDisposalTimer: ReturnType<typeof setTimeout> | null;
+	asyncId: number;
+	playbackIterator: AsyncGenerator<
+		WrappedAudioBuffer | null,
+		void,
+		unknown
+	> | null;
+	isPlaybackActive: boolean;
+	playbackStartContextTime: number | null;
+	playbackStartAudioTime: number | null;
+	scheduledSources: ScheduledAudioSource[];
+	clipGain: GainNode | null;
+	lastPlaybackTargetTime: number | null;
+	lastHandledSeekEpoch: number | null;
+};
+
+const runtimeByKey = new Map<string, AudioPlaybackRuntime>();
+let runtimeControllerIdSeed = 0;
 
 const normalizeOffsetFrames = (offset?: number): number => {
 	if (!Number.isFinite(offset ?? NaN)) return 0;
@@ -101,34 +133,272 @@ const normalizeGain = (value: number | undefined): number => {
 	return Math.max(0, value ?? DEFAULT_GAIN);
 };
 
+const normalizeSeekEpoch = (value: number | undefined): number | null => {
+	if (!Number.isFinite(value)) return null;
+	return Math.round(value as number);
+};
+
+const createRuntime = (key: string): AudioPlaybackRuntime => ({
+	key,
+	refCount: 0,
+	idleDisposalTimer: null,
+	asyncId: 0,
+	playbackIterator: null,
+	isPlaybackActive: false,
+	playbackStartContextTime: null,
+	playbackStartAudioTime: null,
+	scheduledSources: [],
+	clipGain: null,
+	lastPlaybackTargetTime: null,
+	lastHandledSeekEpoch: null,
+});
+
+const disconnectScheduledSource = (scheduled: ScheduledAudioSource) => {
+	try {
+		scheduled.source.disconnect();
+	} catch {}
+	if (!scheduled.gainNode) return;
+	try {
+		scheduled.gainNode.disconnect();
+	} catch {}
+};
+
+const stopRuntimeScheduledSources = (
+	runtime: AudioPlaybackRuntime,
+	options?: {
+		fadeOutSeconds?: number;
+	},
+) => {
+	if (runtime.scheduledSources.length === 0) return;
+	const context = getAudioContext();
+	const fadeOutSeconds = Math.max(0, options?.fadeOutSeconds ?? 0);
+	const now = context?.currentTime ?? 0;
+	const scheduledSources = runtime.scheduledSources;
+	runtime.scheduledSources = [];
+
+	for (const scheduled of scheduledSources) {
+		scheduled.source.onended = () => {
+			disconnectScheduledSource(scheduled);
+		};
+		try {
+			if (context && fadeOutSeconds > 0 && scheduled.gainNode) {
+				scheduled.gainNode.gain.cancelScheduledValues(now);
+				scheduled.gainNode.gain.setValueAtTime(
+					scheduled.gainNode.gain.value,
+					now,
+				);
+				scheduled.gainNode.gain.linearRampToValueAtTime(
+					0,
+					now + fadeOutSeconds,
+				);
+				scheduled.source.stop(now + fadeOutSeconds);
+			} else {
+				scheduled.source.stop();
+			}
+		} catch {
+			disconnectScheduledSource(scheduled);
+		}
+		if (!context || fadeOutSeconds <= 0) {
+			disconnectScheduledSource(scheduled);
+		}
+	}
+};
+
+const stopRuntimePlayback = (
+	runtime: AudioPlaybackRuntime,
+	options?: {
+		fadeOutSeconds?: number;
+	},
+) => {
+	runtime.asyncId += 1;
+	runtime.isPlaybackActive = false;
+	runtime.playbackStartContextTime = null;
+	runtime.playbackStartAudioTime = null;
+	runtime.lastPlaybackTargetTime = null;
+	runtime.playbackIterator?.return?.();
+	runtime.playbackIterator = null;
+	stopRuntimeScheduledSources(runtime, options);
+};
+
+const disposeRuntime = (runtime: AudioPlaybackRuntime) => {
+	if (runtime.idleDisposalTimer) {
+		clearTimeout(runtime.idleDisposalTimer);
+		runtime.idleDisposalTimer = null;
+	}
+	stopRuntimePlayback(runtime, { fadeOutSeconds: 0 });
+	if (runtime.clipGain) {
+		try {
+			runtime.clipGain.disconnect();
+		} catch {}
+		runtime.clipGain = null;
+	}
+	runtimeByKey.delete(runtime.key);
+};
+
+const getOrCreateRuntime = (key: string): AudioPlaybackRuntime => {
+	const existing = runtimeByKey.get(key);
+	if (existing) {
+		if (existing.idleDisposalTimer) {
+			clearTimeout(existing.idleDisposalTimer);
+			existing.idleDisposalTimer = null;
+		}
+		return existing;
+	}
+	const runtime = createRuntime(key);
+	runtimeByKey.set(key, runtime);
+	return runtime;
+};
+
+const retainRuntime = (key: string): AudioPlaybackRuntime => {
+	const runtime = getOrCreateRuntime(key);
+	runtime.refCount += 1;
+	return runtime;
+};
+
+const releaseRuntime = (
+	key: string,
+	options?: {
+		stopWhenOrphaned?: boolean;
+	},
+) => {
+	const runtime = runtimeByKey.get(key);
+	if (!runtime) return;
+	runtime.refCount = Math.max(0, runtime.refCount - 1);
+	if (runtime.refCount > 0) return;
+	if (options?.stopWhenOrphaned) {
+		stopRuntimePlayback(runtime);
+	}
+	if (runtime.idleDisposalTimer) {
+		clearTimeout(runtime.idleDisposalTimer);
+	}
+	runtime.idleDisposalTimer = setTimeout(() => {
+		const latestRuntime = runtimeByKey.get(key);
+		if (!latestRuntime) return;
+		if (latestRuntime.refCount > 0) return;
+		disposeRuntime(latestRuntime);
+	}, RUNTIME_IDLE_TTL_MS);
+};
+
+const ensureRuntimeGainNode = (
+	runtime: AudioPlaybackRuntime,
+): GainNode | null => {
+	if (runtime.clipGain) return runtime.clipGain;
+	runtime.clipGain = createClipGain();
+	return runtime.clipGain;
+};
+
+const resolveRuntimeKeyValue = (
+	deps: AudioPlaybackDeps,
+	fallback: string,
+): string => {
+	const key = deps.getRuntimeKey?.();
+	if (!key || typeof key !== "string") return fallback;
+	return key;
+};
+
+const resolvePlaybackInput = (
+	input: AudioPlaybackStepInput,
+	timeline: TimelineMeta,
+	fps: number,
+	audioDuration: number,
+): ResolvedPlaybackInput => {
+	const timelineTimeSeconds =
+		typeof input === "number" ? input : input.timelineTimeSeconds;
+	const clipStartSeconds = framesToSeconds(timeline.start ?? 0, fps);
+	const clipEndSeconds = framesToSeconds(timeline.end ?? 0, fps);
+	const clipDurationSeconds = Math.max(0, clipEndSeconds - clipStartSeconds);
+	const offsetSeconds = framesToSeconds(
+		normalizeOffsetFrames(timeline.offset),
+		fps,
+	);
+
+	const fallbackSourceRange = clampRange(
+		{
+			start: offsetSeconds,
+			end: offsetSeconds + clipDurationSeconds,
+		},
+		0,
+		audioDuration,
+	);
+	const sourceRange =
+		typeof input === "number"
+			? fallbackSourceRange
+			: clampRange(input.sourceRange ?? fallbackSourceRange, 0, audioDuration);
+	const activeWindow =
+		typeof input === "number"
+			? { start: clipStartSeconds, end: clipEndSeconds }
+			: (() => {
+					const { activeWindow: inputWindow } = input;
+					const startCandidate = inputWindow?.start;
+					const start =
+						typeof startCandidate === "number" &&
+						Number.isFinite(startCandidate)
+							? startCandidate
+							: clipStartSeconds;
+					const endCandidate = inputWindow?.end;
+					const end =
+						typeof endCandidate === "number" && Number.isFinite(endCandidate)
+							? endCandidate
+							: clipEndSeconds;
+					return { start, end: Math.max(start, end) };
+				})();
+
+	const fallbackSourceTime =
+		offsetSeconds + Math.max(0, timelineTimeSeconds - clipStartSeconds);
+	const sourceTime = clampValue(
+		typeof input === "number"
+			? fallbackSourceTime
+			: (input.sourceTime ?? fallbackSourceTime),
+		sourceRange.start,
+		sourceRange.end,
+	);
+
+	return {
+		timelineTimeSeconds,
+		gain: typeof input === "number" ? DEFAULT_GAIN : normalizeGain(input.gain),
+		activeWindow,
+		sourceTime,
+		sourceRange,
+	};
+};
+
 export const createAudioPlaybackController = (
 	deps: AudioPlaybackDeps,
 ): AudioPlaybackController => {
-	let asyncId = 0;
-	let playbackIterator: AsyncGenerator<
-		WrappedAudioBuffer | null,
-		void,
-		unknown
-	> | null = null;
-	let isPlaybackActive = false;
-	let playbackStartContextTime: number | null = null;
-	let playbackStartAudioTime: number | null = null;
-	let scheduledSources: AudioBufferSourceNode[] = [];
-	let clipGain: GainNode | null = null;
-	let lastPlaybackTargetTime: number | null = null;
-	const isPlaybackEnabled = () => deps.isPlaybackEnabled?.() ?? true;
+	runtimeControllerIdSeed += 1;
+	const fallbackRuntimeKey = `controller:${runtimeControllerIdSeed}`;
+	let activeRuntimeKey = resolveRuntimeKeyValue(deps, fallbackRuntimeKey);
+	retainRuntime(activeRuntimeKey);
 
-	const ensureClipGainNode = (): GainNode | null => {
-		if (clipGain) return clipGain;
-		clipGain = createClipGain();
-		return clipGain;
+	const isPlaybackEnabled = () => deps.isPlaybackEnabled?.() ?? true;
+	const stopRuntimeByReason = (
+		runtime: AudioPlaybackRuntime,
+		reason: "default" | "seek",
+	) => {
+		stopRuntimePlayback(runtime, {
+			fadeOutSeconds:
+				reason === "seek"
+					? SOURCE_SEEK_FADE_OUT_SECONDS
+					: SOURCE_STOP_FADE_OUT_SECONDS,
+		});
+	};
+
+	const syncRuntime = (): AudioPlaybackRuntime => {
+		const resolvedKey = resolveRuntimeKeyValue(deps, fallbackRuntimeKey);
+		if (resolvedKey !== activeRuntimeKey) {
+			retainRuntime(resolvedKey);
+			releaseRuntime(activeRuntimeKey);
+			activeRuntimeKey = resolvedKey;
+		}
+		return getOrCreateRuntime(activeRuntimeKey);
 	};
 
 	const setGainInternal = (
+		runtime: AudioPlaybackRuntime,
 		gainValue: number,
 		contextOverride?: AudioContext | null,
 	) => {
-		const gainNode = ensureClipGainNode();
+		const gainNode = ensureRuntimeGainNode(runtime);
 		if (!gainNode) return;
 		const context = contextOverride ?? getAudioContext();
 		if (!context) return;
@@ -144,140 +414,81 @@ export const createAudioPlaybackController = (
 		}
 	};
 
-	const resolvePlaybackInput = (
-		input: AudioPlaybackStepInput,
-		timeline: TimelineMeta,
-		fps: number,
-		audioDuration: number,
-	): ResolvedPlaybackInput => {
-		const timelineTimeSeconds =
-			typeof input === "number" ? input : input.timelineTimeSeconds;
-		const clipStartSeconds = framesToSeconds(timeline.start ?? 0, fps);
-		const clipEndSeconds = framesToSeconds(timeline.end ?? 0, fps);
-		const clipDurationSeconds = Math.max(0, clipEndSeconds - clipStartSeconds);
-		const offsetSeconds = framesToSeconds(
-			normalizeOffsetFrames(timeline.offset),
-			fps,
-		);
-
-		const fallbackSourceRange = clampRange(
-			{
-				start: offsetSeconds,
-				end: offsetSeconds + clipDurationSeconds,
-			},
-			0,
-			audioDuration,
-		);
-		const sourceRange =
-			typeof input === "number"
-				? fallbackSourceRange
-				: clampRange(
-						input.sourceRange ?? fallbackSourceRange,
-						0,
-						audioDuration,
-					);
-		const activeWindow =
-			typeof input === "number"
-				? { start: clipStartSeconds, end: clipEndSeconds }
-				: (() => {
-						const { activeWindow: inputWindow } = input;
-						const startCandidate = inputWindow?.start;
-						const start =
-							typeof startCandidate === "number" &&
-							Number.isFinite(startCandidate)
-								? startCandidate
-								: clipStartSeconds;
-						const endCandidate = inputWindow?.end;
-						const end =
-							typeof endCandidate === "number" && Number.isFinite(endCandidate)
-								? endCandidate
-								: clipEndSeconds;
-						return { start, end: Math.max(start, end) };
-					})();
-
-		const fallbackSourceTime =
-			offsetSeconds + Math.max(0, timelineTimeSeconds - clipStartSeconds);
-		const sourceTime = clampValue(
-			typeof input === "number"
-				? fallbackSourceTime
-				: (input.sourceTime ?? fallbackSourceTime),
-			sourceRange.start,
-			sourceRange.end,
-		);
-
-		return {
-			timelineTimeSeconds,
-			gain:
-				typeof input === "number" ? DEFAULT_GAIN : normalizeGain(input.gain),
-			activeWindow,
-			sourceTime,
-			sourceRange,
-		};
-	};
-
-	const stopScheduledSources = () => {
-		for (const source of scheduledSources) {
-			try {
-				source.stop();
-			} catch {}
-		}
-		scheduledSources = [];
-	};
-
 	const schedulePlayback = async (
+		runtime: AudioPlaybackRuntime,
 		iterator: AsyncGenerator<WrappedAudioBuffer | null, void, unknown>,
 		currentAsyncId: number,
 	) => {
 		try {
 			for await (const wrapped of iterator) {
-				if (currentAsyncId !== asyncId) return;
+				if (currentAsyncId !== runtime.asyncId) return;
 				if (!wrapped?.buffer) continue;
 				const context = getAudioContext();
 				if (!context) return;
-				if (!clipGain) return;
+				if (!runtime.clipGain) return;
 				if (
-					playbackStartContextTime === null ||
-					playbackStartAudioTime === null
+					runtime.playbackStartContextTime === null ||
+					runtime.playbackStartAudioTime === null
 				) {
 					return;
 				}
 				const targetStart =
-					playbackStartContextTime +
-					(wrapped.timestamp - playbackStartAudioTime);
+					runtime.playbackStartContextTime +
+					(wrapped.timestamp - runtime.playbackStartAudioTime);
 
 				let waitGuard = 20;
 				while (
-					currentAsyncId === asyncId &&
+					currentAsyncId === runtime.asyncId &&
 					targetStart - context.currentTime > PLAYBACK_LOOKAHEAD_SECONDS &&
 					waitGuard > 0
 				) {
 					waitGuard -= 1;
 					await sleep(PLAYBACK_LOOKAHEAD_POLL_MS);
 				}
-				if (currentAsyncId !== asyncId) return;
+				if (currentAsyncId !== runtime.asyncId) return;
 				if (targetStart + 0.02 < context.currentTime) continue;
 
 				const source = context.createBufferSource();
+				const sourceGain =
+					typeof context.createGain === "function"
+						? context.createGain()
+						: null;
 				source.buffer = wrapped.buffer;
-				source.connect(clipGain);
-				source.onended = () => {
-					scheduledSources = scheduledSources.filter((item) => item !== source);
+				if (sourceGain) {
+					sourceGain.gain.value = 1;
+					source.connect(sourceGain);
+					sourceGain.connect(runtime.clipGain);
+				} else {
+					source.connect(runtime.clipGain);
+				}
+				const scheduledSource: ScheduledAudioSource = {
+					source,
+					gainNode: sourceGain,
 				};
-				scheduledSources.push(source);
+				source.onended = () => {
+					runtime.scheduledSources = runtime.scheduledSources.filter(
+						(item) => item !== scheduledSource,
+					);
+					disconnectScheduledSource(scheduledSource);
+				};
+				runtime.scheduledSources.push(scheduledSource);
 				source.start(targetStart);
 			}
 		} catch (error) {
-			if (currentAsyncId === asyncId) {
+			if (currentAsyncId === runtime.asyncId) {
 				console.warn("音频播放调度失败:", error);
 			}
 		}
 	};
 
 	const startPlayback = async (
+		runtime: AudioPlaybackRuntime,
 		playbackInput: ResolvedPlaybackInput,
 	): Promise<void> => {
 		if (!isPlaybackEnabled()) {
-			stopPlayback();
+			stopRuntimePlayback(runtime, {
+				fadeOutSeconds: SOURCE_STOP_FADE_OUT_SECONDS,
+			});
 			return;
 		}
 		const { isLoading, hasError, uri, audioSink, audioDuration } =
@@ -288,9 +499,9 @@ export const createAudioPlaybackController = (
 		const context = await ensureAudioContext();
 		if (!context) return;
 
-		const gainNode = ensureClipGainNode();
+		const gainNode = ensureRuntimeGainNode(runtime);
 		if (!gainNode) return;
-		setGainInternal(playbackInput.gain, context);
+		setGainInternal(runtime, playbackInput.gain, context);
 
 		const timeline = deps.getTimeline();
 		if (!timeline) return;
@@ -304,7 +515,7 @@ export const createAudioPlaybackController = (
 			playbackInput.sourceRange.end,
 		);
 		const audioEnd = clampValue(
-			playbackInput.sourceRange.end,
+			audioDuration,
 			playbackInput.sourceRange.start,
 			audioDuration,
 		);
@@ -312,35 +523,37 @@ export const createAudioPlaybackController = (
 		if (!Number.isFinite(audioStart) || !Number.isFinite(audioEnd)) return;
 		if (audioStart >= audioEnd) return;
 
-		stopScheduledSources();
-		playbackIterator?.return?.();
-		playbackIterator = null;
+		stopRuntimeScheduledSources(runtime, {
+			fadeOutSeconds: SOURCE_STOP_FADE_OUT_SECONDS,
+		});
+		runtime.playbackIterator?.return?.();
+		runtime.playbackIterator = null;
 
-		isPlaybackActive = true;
-		asyncId += 1;
-		const currentAsyncId = asyncId;
+		runtime.isPlaybackActive = true;
+		runtime.asyncId += 1;
+		const currentAsyncId = runtime.asyncId;
 
-		playbackStartAudioTime = audioStart;
-		playbackStartContextTime = context.currentTime + 0.05;
-		playbackIterator = audioSink.buffers(audioStart, audioEnd);
+		runtime.playbackStartAudioTime = audioStart;
+		runtime.playbackStartContextTime = context.currentTime + 0.05;
+		runtime.playbackIterator = audioSink.buffers(audioStart, audioEnd);
 
-		schedulePlayback(playbackIterator, currentAsyncId);
-	};
-
-	const stopPlayback = () => {
-		asyncId += 1;
-		isPlaybackActive = false;
-		playbackStartContextTime = null;
-		playbackStartAudioTime = null;
-		lastPlaybackTargetTime = null;
-		playbackIterator?.return?.();
-		playbackIterator = null;
-		stopScheduledSources();
+		schedulePlayback(runtime, runtime.playbackIterator, currentAsyncId);
 	};
 
 	const stepPlayback = async (input: AudioPlaybackStepInput): Promise<void> => {
+		const runtime = syncRuntime();
+		const seekEpoch = normalizeSeekEpoch(deps.getSeekEpoch?.());
+		const restartPlayback = async (
+			playbackInput: ResolvedPlaybackInput,
+			timelineTimeSeconds: number,
+			reason: "default" | "seek" = "default",
+		) => {
+			stopRuntimeByReason(runtime, reason);
+			await startPlayback(runtime, playbackInput);
+			runtime.lastPlaybackTargetTime = timelineTimeSeconds;
+		};
 		if (!isPlaybackEnabled()) {
-			stopPlayback();
+			stopRuntimeByReason(runtime, "default");
 			return;
 		}
 
@@ -363,46 +576,57 @@ export const createAudioPlaybackController = (
 		if (!Number.isFinite(playbackInput.timelineTimeSeconds)) return;
 
 		if (playbackInput.activeWindow.start >= playbackInput.activeWindow.end) {
-			stopPlayback();
+			stopRuntimeByReason(runtime, "default");
 			return;
 		}
 		if (
 			playbackInput.timelineTimeSeconds < playbackInput.activeWindow.start ||
 			playbackInput.timelineTimeSeconds >= playbackInput.activeWindow.end
 		) {
-			stopPlayback();
+			stopRuntimeByReason(runtime, "default");
 			return;
 		}
 
-		setGainInternal(playbackInput.gain);
+		setGainInternal(runtime, playbackInput.gain);
 
 		const backJumpSeconds = PLAYBACK_BACK_JUMP_FRAMES / fps;
-		if (!isPlaybackActive) {
-			await startPlayback(playbackInput);
-			lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
+		if (!runtime.isPlaybackActive) {
+			await startPlayback(runtime, playbackInput);
+			if (seekEpoch !== null) runtime.lastHandledSeekEpoch = seekEpoch;
+			runtime.lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
 			return;
+		}
+
+		if (seekEpoch !== null) {
+			if (runtime.lastHandledSeekEpoch === null) {
+				runtime.lastHandledSeekEpoch = seekEpoch;
+			} else if (runtime.lastHandledSeekEpoch !== seekEpoch) {
+				runtime.lastHandledSeekEpoch = seekEpoch;
+				await restartPlayback(
+					playbackInput,
+					playbackInput.timelineTimeSeconds,
+					"seek",
+				);
+				return;
+			}
 		}
 
 		const context = getAudioContext();
 		if (
 			!context ||
-			playbackStartAudioTime === null ||
-			playbackStartContextTime === null
+			runtime.playbackStartAudioTime === null ||
+			runtime.playbackStartContextTime === null
 		) {
-			stopPlayback();
-			await startPlayback(playbackInput);
-			lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
+			await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
 			return;
 		}
 
 		if (
-			lastPlaybackTargetTime !== null &&
+			runtime.lastPlaybackTargetTime !== null &&
 			playbackInput.timelineTimeSeconds <
-				lastPlaybackTargetTime - backJumpSeconds
+				runtime.lastPlaybackTargetTime - backJumpSeconds
 		) {
-			stopPlayback();
-			await startPlayback(playbackInput);
-			lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
+			await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
 			return;
 		}
 
@@ -412,29 +636,28 @@ export const createAudioPlaybackController = (
 			playbackInput.sourceRange.end,
 		);
 		const audioNow =
-			playbackStartAudioTime + (context.currentTime - playbackStartContextTime);
+			runtime.playbackStartAudioTime +
+			(context.currentTime - runtime.playbackStartContextTime);
 		if (Math.abs(audioNow - audioTargetTime) > 0.2) {
-			stopPlayback();
-			await startPlayback(playbackInput);
-			lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
+			await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
 			return;
 		}
 
-		lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
+		runtime.lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
 	};
 
 	const setGain = (gain: number) => {
-		setGainInternal(gain);
+		const runtime = syncRuntime();
+		setGainInternal(runtime, gain);
+	};
+
+	const stopPlayback = () => {
+		const runtime = syncRuntime();
+		stopRuntimeByReason(runtime, "default");
 	};
 
 	const dispose = () => {
-		stopPlayback();
-		if (clipGain) {
-			try {
-				clipGain.disconnect();
-			} catch {}
-			clipGain = null;
-		}
+		releaseRuntime(activeRuntimeKey, { stopWhenOrphaned: true });
 	};
 
 	return {
@@ -443,4 +666,11 @@ export const createAudioPlaybackController = (
 		stopPlayback,
 		dispose,
 	};
+};
+
+export const __resetAudioPlaybackRuntimeForTests = () => {
+	for (const runtime of runtimeByKey.values()) {
+		disposeRuntime(runtime);
+	}
+	runtimeByKey.clear();
 };

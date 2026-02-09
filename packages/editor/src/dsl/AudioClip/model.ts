@@ -10,6 +10,7 @@ import {
 	createAudioPlaybackController,
 } from "@/editor/audio/audioPlayback";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { getAudioPlaybackSessionKey } from "@/editor/playback/clipContinuityIndex";
 import { isTimelineTrackAudible } from "@/editor/utils/trackAudibility";
 import { secondsToFrames } from "@/utils/timecode";
 import type {
@@ -278,6 +279,11 @@ export function createAudioClipModel(
 		getTimeline,
 		getFps: getTimelineFps,
 		getState: getAudioPlaybackState,
+		getSeekEpoch: () => useTimelineStore.getState().seekEpoch,
+		getRuntimeKey: () => {
+			const timelineState = useTimelineStore.getState();
+			return getAudioPlaybackSessionKey(timelineState.elements, id);
+		},
 		isPlaybackEnabled: () => {
 			const timelineState = useTimelineStore.getState();
 			return isTimelineTrackAudible(
