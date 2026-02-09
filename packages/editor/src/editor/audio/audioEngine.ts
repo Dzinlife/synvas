@@ -1,19 +1,20 @@
 import {
-	createCompressorState,
-	processCompressorInPlace,
-	type CompressorState,
-} from "core/editor/audio/dsp/effects/compressor";
-import {
 	DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,
 	type ExportAudioDspSettings,
 	resolveExportAudioDspSettings,
 } from "core/editor/audio/dsp/types";
+import { PREVIEW_DSP_WORKLET_PROCESSOR_NAME } from "./previewDspConstants";
+
+const PREVIEW_DSP_WORKLET_MODULE_URL = new URL(
+	"./previewDspWorklet.ts",
+	import.meta.url,
+);
 
 let audioContext: AudioContext | null = null;
 let masterGain: GainNode | null = null;
-let masterDspNode: ScriptProcessorNode | null = null;
-let interleavedBlockBuffer = new Float32Array(0);
-let compressorState: CompressorState | null = null;
+let previewDspNode: AudioWorkletNode | null = null;
+let previewDspNodeInitPromise: Promise<void> | null = null;
+let directDestinationConnected = false;
 
 const createDefaultAudioSettings = (): ExportAudioDspSettings => ({
 	...DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,
@@ -21,164 +22,6 @@ const createDefaultAudioSettings = (): ExportAudioDspSettings => ({
 });
 
 let previewAudioSettings: ExportAudioDspSettings = createDefaultAudioSettings();
-let previewMasterGain = 1;
-
-const AUDIO_EPSILON = 1e-6;
-const PREVIEW_DSP_CHANNELS = 2;
-
-const dbToAmp = (db: number): number => Math.pow(10, db / 20);
-
-const applyMasterGain = (data: Float32Array, gain: number) => {
-	if (Math.abs(gain - 1) <= AUDIO_EPSILON) return;
-	for (let i = 0; i < data.length; i += 1) {
-		data[i] = (data[i] ?? 0) * gain;
-	}
-};
-
-const clampPcmInPlace = (data: Float32Array) => {
-	for (let i = 0; i < data.length; i += 1) {
-		const sample = data[i] ?? 0;
-		if (sample > 1) {
-			data[i] = 1;
-			continue;
-		}
-		if (sample < -1) {
-			data[i] = -1;
-		}
-	}
-};
-
-const ensureInterleavedBuffer = (size: number): Float32Array => {
-	if (interleavedBlockBuffer.length < size) {
-		interleavedBlockBuffer = new Float32Array(size);
-	}
-	return interleavedBlockBuffer.subarray(0, size);
-};
-
-const resetCompressorState = (sampleRate: number) => {
-	compressorState = createCompressorState({
-		config: previewAudioSettings.compressor,
-		sampleRate,
-	});
-};
-
-const readInputToInterleaved = (
-	inputBuffer: AudioBuffer,
-	outputChannels: number,
-	frameCount: number,
-	interleaved: Float32Array,
-) => {
-	const inputChannels = inputBuffer.numberOfChannels;
-	for (let channel = 0; channel < outputChannels; channel += 1) {
-		const sourceChannel =
-			channel < inputChannels ? channel : inputChannels === 1 ? 0 : -1;
-		const inputChannelData =
-			sourceChannel >= 0 ? inputBuffer.getChannelData(sourceChannel) : null;
-		for (let frame = 0; frame < frameCount; frame += 1) {
-			interleaved[frame * outputChannels + channel] =
-				inputChannelData?.[frame] ?? 0;
-		}
-	}
-};
-
-const writeInterleavedToOutput = (
-	outputBuffer: AudioBuffer,
-	outputChannels: number,
-	frameCount: number,
-	interleaved: Float32Array,
-) => {
-	for (let channel = 0; channel < outputBuffer.numberOfChannels; channel += 1) {
-		const output = outputBuffer.getChannelData(channel);
-		if (channel >= outputChannels) {
-			output.fill(0);
-			continue;
-		}
-		for (let frame = 0; frame < frameCount; frame += 1) {
-			output[frame] = interleaved[frame * outputChannels + channel] ?? 0;
-		}
-	}
-};
-
-const processPreviewBlock = (
-	event: AudioProcessingEvent,
-	contextSampleRate: number,
-) => {
-	const outputChannels = Math.max(1, event.outputBuffer.numberOfChannels);
-	const frameCount = event.outputBuffer.length;
-	if (frameCount <= 0) return;
-
-	const interleaved = ensureInterleavedBuffer(frameCount * outputChannels);
-	readInputToInterleaved(
-		event.inputBuffer,
-		outputChannels,
-		frameCount,
-		interleaved,
-	);
-
-	applyMasterGain(interleaved, previewMasterGain);
-	if (!compressorState) {
-		resetCompressorState(contextSampleRate);
-	}
-	if (compressorState) {
-		processCompressorInPlace({
-			data: interleaved,
-			numberOfChannels: outputChannels,
-			config: previewAudioSettings.compressor,
-			state: compressorState,
-		});
-	}
-	clampPcmInPlace(interleaved);
-	writeInterleavedToOutput(
-		event.outputBuffer,
-		outputChannels,
-		frameCount,
-		interleaved,
-	);
-};
-
-const disconnectMasterDspNode = () => {
-	if (!masterDspNode) return;
-	masterDspNode.onaudioprocess = null;
-	try {
-		masterDspNode.disconnect();
-	} catch {}
-	masterDspNode = null;
-};
-
-const rebuildMasterDspGraph = (context: AudioContext) => {
-	if (!masterGain) return;
-
-	try {
-		masterGain.disconnect();
-	} catch {}
-	disconnectMasterDspNode();
-
-	const dspNode = context.createScriptProcessor(
-		previewAudioSettings.exportBlockSize,
-		PREVIEW_DSP_CHANNELS,
-		PREVIEW_DSP_CHANNELS,
-	);
-	dspNode.onaudioprocess = (event) => {
-		processPreviewBlock(event, context.sampleRate);
-	};
-	masterGain.connect(dspNode);
-	dspNode.connect(context.destination);
-
-	masterDspNode = dspNode;
-	interleavedBlockBuffer = new Float32Array(0);
-	resetCompressorState(context.sampleRate);
-};
-
-const ensureMasterDspGraph = (context: AudioContext) => {
-	if (!masterGain) return;
-	if (
-		!masterDspNode ||
-		masterDspNode.context !== context ||
-		masterDspNode.bufferSize !== previewAudioSettings.exportBlockSize
-	) {
-		rebuildMasterDspGraph(context);
-	}
-};
 
 const resolveAudioContext = (): AudioContext | null => {
 	if (typeof window === "undefined") return null;
@@ -193,6 +36,105 @@ const resolveAudioContext = (): AudioContext | null => {
 	return audioContext;
 };
 
+const safeDisconnect = (
+	node: Pick<AudioNode, "disconnect"> | null | undefined,
+) => {
+	if (!node) return;
+	try {
+		node.disconnect();
+	} catch {}
+};
+
+const connectMasterDirectly = (context: AudioContext) => {
+	if (!masterGain || directDestinationConnected) return;
+	masterGain.connect(context.destination);
+	directDestinationConnected = true;
+};
+
+const disconnectMasterDirect = () => {
+	if (!masterGain || !directDestinationConnected) return;
+	try {
+		masterGain.disconnect();
+	} catch {}
+	directDestinationConnected = false;
+};
+
+const postDspConfigToWorklet = () => {
+	if (!previewDspNode) return;
+	previewDspNode.port.postMessage({
+		type: "config",
+		config: previewAudioSettings,
+	});
+};
+
+const supportsAudioWorklet = (
+	context: AudioContext,
+): context is AudioContext & { audioWorklet: AudioWorklet } => {
+	return typeof context.audioWorklet?.addModule === "function";
+};
+
+const ensurePreviewDspNodeAsync = (context: AudioContext) => {
+	if (!masterGain) return;
+	if (previewDspNode?.context === context) {
+		postDspConfigToWorklet();
+		return;
+	}
+	if (previewDspNodeInitPromise) return;
+
+	connectMasterDirectly(context);
+
+	if (!supportsAudioWorklet(context) || typeof AudioWorkletNode === "undefined") {
+		console.warn("[AudioEngine] AudioWorklet 不可用，预览音频将绕过 DSP。");
+		return;
+	}
+
+	previewDspNodeInitPromise = (async () => {
+		await context.audioWorklet.addModule(PREVIEW_DSP_WORKLET_MODULE_URL.href);
+		// 构建期间上下文可能已切换，避免连接到过期上下文
+		if (audioContext !== context || !masterGain) return;
+
+		const nextDspNode = new AudioWorkletNode(
+			context,
+			PREVIEW_DSP_WORKLET_PROCESSOR_NAME,
+			{
+				numberOfInputs: 1,
+				numberOfOutputs: 1,
+				outputChannelCount: [2],
+				channelCount: 2,
+				channelCountMode: "explicit",
+				channelInterpretation: "speakers",
+				processorOptions: {
+					config: previewAudioSettings,
+				},
+			},
+		);
+		nextDspNode.connect(context.destination);
+		safeDisconnect(previewDspNode);
+		previewDspNode = nextDspNode;
+
+		disconnectMasterDirect();
+		masterGain.connect(nextDspNode);
+		postDspConfigToWorklet();
+	})()
+		.catch((error) => {
+			console.error("[AudioEngine] AudioWorklet 初始化失败:", error);
+			connectMasterDirectly(context);
+		})
+		.finally(() => {
+			previewDspNodeInitPromise = null;
+		});
+};
+
+const ensureMasterOutputGraph = (context: AudioContext) => {
+	if (!masterGain) return;
+	if (previewDspNode?.context === context) {
+		disconnectMasterDirect();
+		postDspConfigToWorklet();
+		return;
+	}
+	ensurePreviewDspNodeAsync(context);
+};
+
 export const setPreviewAudioDspSettings = (
 	settings: ExportAudioDspSettings | undefined,
 ) => {
@@ -201,18 +143,10 @@ export const setPreviewAudioDspSettings = (
 		...next,
 		compressor: { ...next.compressor },
 	};
-	previewMasterGain = dbToAmp(previewAudioSettings.masterGainDb);
+	postDspConfigToWorklet();
 	const context = audioContext;
 	if (!context || !masterGain) return;
-	if (
-		!masterDspNode ||
-		masterDspNode.context !== context ||
-		masterDspNode.bufferSize !== previewAudioSettings.exportBlockSize
-	) {
-		rebuildMasterDspGraph(context);
-		return;
-	}
-	resetCompressorState(context.sampleRate);
+	ensureMasterOutputGraph(context);
 };
 
 export const getAudioContext = (): AudioContext | null => {
@@ -222,7 +156,7 @@ export const getAudioContext = (): AudioContext | null => {
 		masterGain = context.createGain();
 		masterGain.gain.value = 1;
 	}
-	ensureMasterDspGraph(context);
+	ensureMasterOutputGraph(context);
 	return context;
 };
 
@@ -256,14 +190,12 @@ export const createClipGain = (): GainNode | null => {
 };
 
 export const __resetAudioEngineForTests = () => {
-	try {
-		masterGain?.disconnect();
-	} catch {}
-	disconnectMasterDspNode();
+	safeDisconnect(masterGain);
+	safeDisconnect(previewDspNode);
 	masterGain = null;
+	previewDspNode = null;
 	audioContext = null;
-	interleavedBlockBuffer = new Float32Array(0);
-	compressorState = null;
+	previewDspNodeInitPromise = null;
+	directDestinationConnected = false;
 	previewAudioSettings = createDefaultAudioSettings();
-	previewMasterGain = dbToAmp(previewAudioSettings.masterGainDb);
 };
