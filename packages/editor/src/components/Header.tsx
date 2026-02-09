@@ -47,6 +47,10 @@ export default function Header() {
 				autoAttach: state.autoAttach,
 				rippleEditingEnabled: state.rippleEditingEnabled,
 				previewAxisEnabled: state.previewAxisEnabled,
+				audio: {
+					...state.audioSettings,
+					compressor: { ...state.audioSettings.compressor },
+				},
 			},
 			transcripts,
 		);

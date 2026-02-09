@@ -9,6 +9,7 @@ import {
 	type AudioMixTarget,
 	runTimelineAudioMixFrame,
 } from "./TimelineAudioMixRunner";
+import { setPreviewAudioDspSettings } from "./audioEngine";
 import type { AudioMixInstruction } from "./transitionAudioMix";
 
 const invokeApplyAudioMix = (
@@ -60,6 +61,8 @@ const collectAudioMixTargets = (
 };
 
 export const TimelineAudioMixManager: React.FC = () => {
+	const audioSettings = useTimelineStore((state) => state.audioSettings);
+
 	const runMix = useCallback(() => {
 		const state = useTimelineStore.getState();
 		const targets = collectAudioMixTargets(state);
@@ -111,6 +114,10 @@ export const TimelineAudioMixManager: React.FC = () => {
 			stopAllMixTargets();
 		};
 	}, [runMix, stopAllMixTargets]);
+
+	useEffect(() => {
+		setPreviewAudioDspSettings(audioSettings);
+	}, [audioSettings]);
 
 	return null;
 };

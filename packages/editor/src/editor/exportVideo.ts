@@ -96,6 +96,7 @@ export const exportTimelineAsVideo = async (options?: {
 			audio: {
 				audioTrackStates: timelineState.audioTrackStates,
 				getAudioSourceByElementId: getExportAudioSourceByElementId,
+				dspConfig: timelineState.audioSettings,
 			},
 			waitForReady: () => waitForStaticModelsReady(elements),
 			onFrame: (frame) => {

@@ -1,5 +1,8 @@
 import type { TimelineElement, TrackRole } from "core/dsl/types";
-import type { TimelineSettings } from "core/editor/timelineLoader";
+import {
+	DEFAULT_TIMELINE_SETTINGS,
+	type TimelineSettings,
+} from "core/editor/timelineLoader";
 import {
 	createContext,
 	useCallback,
@@ -72,6 +75,44 @@ const normalizeFps = (value: number): number => {
 	return Math.round(value);
 };
 
+const cloneAudioSettings = (
+	audio: TimelineSettings["audio"] | undefined,
+): TimelineSettings["audio"] => {
+	const defaultAudio = DEFAULT_TIMELINE_SETTINGS.audio;
+	const compressor = {
+		...defaultAudio.compressor,
+		...(audio?.compressor ?? {}),
+	};
+	return {
+		exportSampleRate: audio?.exportSampleRate ?? defaultAudio.exportSampleRate,
+		exportBlockSize: audio?.exportBlockSize ?? defaultAudio.exportBlockSize,
+		masterGainDb: Number.isFinite(audio?.masterGainDb ?? NaN)
+			? (audio?.masterGainDb as number)
+			: defaultAudio.masterGainDb,
+		compressor: {
+			enabled: compressor.enabled ?? defaultAudio.compressor.enabled,
+			thresholdDb: Number.isFinite(compressor.thresholdDb)
+				? compressor.thresholdDb
+				: defaultAudio.compressor.thresholdDb,
+			ratio: Number.isFinite(compressor.ratio)
+				? compressor.ratio
+				: defaultAudio.compressor.ratio,
+			kneeDb: Number.isFinite(compressor.kneeDb)
+				? compressor.kneeDb
+				: defaultAudio.compressor.kneeDb,
+			attackMs: Number.isFinite(compressor.attackMs)
+				? compressor.attackMs
+				: defaultAudio.compressor.attackMs,
+			releaseMs: Number.isFinite(compressor.releaseMs)
+				? compressor.releaseMs
+				: defaultAudio.compressor.releaseMs,
+			makeupGainDb: Number.isFinite(compressor.makeupGainDb)
+				? compressor.makeupGainDb
+				: defaultAudio.compressor.makeupGainDb,
+		},
+	};
+};
+
 interface TimelineStore {
 	fps: number;
 	timelineScale: number;
@@ -99,6 +140,7 @@ interface TimelineStore {
 	autoAttach: boolean;
 	// 主轨波纹编辑模式
 	rippleEditingEnabled: boolean;
+	audioSettings: TimelineSettings["audio"];
 	// 拖拽目标指示状态
 	activeDropTarget: ExtendedDropTarget | null;
 	// 拖拽 Ghost 状态
@@ -159,6 +201,7 @@ interface TimelineStore {
 	setAutoAttach: (enabled: boolean) => void;
 	// 主轨波纹编辑模式方法
 	setRippleEditingEnabled: (enabled: boolean) => void;
+	setAudioSettings: (audioSettings: TimelineSettings["audio"]) => void;
 	// 拖拽目标指示方法
 	setActiveDropTarget: (target: ExtendedDropTarget | null) => void;
 	// 拖拽 Ghost 方法
@@ -473,6 +516,7 @@ export const useTimelineStore = create<TimelineStore>()(
 		autoAttach: true,
 		// 主轨波纹编辑模式初始值
 		rippleEditingEnabled: false,
+		audioSettings: cloneAudioSettings(DEFAULT_TIMELINE_SETTINGS.audio),
 		// 拖拽目标指示状态初始值
 		activeDropTarget: null,
 		// 拖拽 Ghost 状态初始值
@@ -1137,6 +1181,9 @@ export const useTimelineStore = create<TimelineStore>()(
 					historyFuture: [],
 				};
 			});
+		},
+		setAudioSettings: (audioSettings: TimelineSettings["audio"]) => {
+			set({ audioSettings: cloneAudioSettings(audioSettings) });
 		},
 
 		// 拖拽目标指示方法
@@ -2008,11 +2055,13 @@ export const TimelineProvider = ({
 				autoAttach: initialSettings.autoAttach,
 				rippleEditingEnabled: initialSettings.rippleEditingEnabled,
 				previewAxisEnabled: initialSettings.previewAxisEnabled,
+				audioSettings: cloneAudioSettings(initialSettings.audio),
 			}
 		: null;
 
 	// 在首次渲染前同步设置初始状态
 	// 使用 useLayoutEffect 确保在子组件渲染前执行
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 初始化仅执行一次，后续更新由下方 useEffect 处理。
 	useLayoutEffect(() => {
 		if (initialElements) {
 			const baseTracks = initialTracks ?? useTimelineStore.getState().tracks;

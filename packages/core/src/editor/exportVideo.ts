@@ -1,17 +1,17 @@
 import {
 	type AudioBufferSink,
-	AudioBufferSource,
+	AudioSampleSource,
 	BufferTarget,
 	CanvasSource,
 	Mp4OutputFormat,
 	Output,
 	QUALITY_HIGH,
 	StreamTarget,
-	type WrappedAudioBuffer,
 } from "mediabunny";
 import { JsiSkSurface, Skia, SkiaSGRoot } from "react-skia-lite";
 import type { TimelineElement } from "../dsl/types";
-import { framesToSeconds } from "../utils/timecode";
+import { renderMixedAudioForExport } from "./audio/dsp/exportRenderer";
+import type { PartialExportAudioDspSettings } from "./audio/dsp/types";
 import {
 	type AudioMixClip,
 	type AudioMixInstruction,
@@ -39,6 +39,7 @@ export type ExportTimelineAudioOptions = {
 	getAudioSourceByElementId?: (
 		elementId: string,
 	) => ExportElementAudioSource | null | undefined;
+	dspConfig?: PartialExportAudioDspSettings;
 };
 
 export type ExportTimelineAsVideoOptions = {
@@ -70,9 +71,6 @@ type ExportAudioTarget = {
 	sourceRangeEnd: number;
 };
 
-const AUDIO_EPSILON = 1e-6;
-const FALLBACK_OFFLINE_SAMPLE_RATE = 48_000;
-
 const getTrackIndexForElement = (element: TimelineElement) =>
 	element.timeline.trackIndex ?? 0;
 
@@ -99,7 +97,6 @@ const cleanupWebGLContext = (canvas: HTMLCanvasElement | OffscreenCanvas) => {
 	loseContext?.loseContext();
 };
 
-const DOWNLOAD_URL_REVOKE_DELAY_MS = 60_000;
 const OPFS_CLEANUP_DELAY_MS = 10 * 60_000;
 
 const createWebGLSurfaceForExport = (
@@ -350,193 +347,6 @@ const applyAudioMixPlanAtFrame = ({
 	}
 };
 
-const decodeTargetAudioChunks = async (
-	target: ExportAudioTarget,
-): Promise<WrappedAudioBuffer[]> => {
-	const decodeStart = Math.max(0, target.sourceRangeStart);
-	const decodeEnd = Math.min(target.audioDuration, target.sourceRangeEnd);
-	if (decodeEnd - decodeStart <= AUDIO_EPSILON) {
-		return [];
-	}
-
-	const chunks: WrappedAudioBuffer[] = [];
-	for await (const wrapped of target.audioSink.buffers(
-		decodeStart,
-		decodeEnd,
-	)) {
-		const buffer = wrapped?.buffer;
-		if (!buffer) continue;
-		const timestamp = Number.isFinite(wrapped.timestamp)
-			? wrapped.timestamp
-			: 0;
-		const duration =
-			Number.isFinite(wrapped.duration) && wrapped.duration > 0
-				? wrapped.duration
-				: buffer.duration;
-
-		const chunkEnd = timestamp + duration;
-		if (chunkEnd <= decodeStart + AUDIO_EPSILON) continue;
-		if (timestamp >= decodeEnd - AUDIO_EPSILON) continue;
-
-		chunks.push({
-			buffer,
-			timestamp,
-			duration,
-		});
-	}
-	return chunks;
-};
-
-const applyGainAutomationByFrame = ({
-	gainParam,
-	gains,
-	fps,
-	exportDuration,
-}: {
-	gainParam: AudioParam;
-	gains: Float32Array;
-	fps: number;
-	exportDuration: number;
-}) => {
-	const frameDuration = 1 / fps;
-	gainParam.cancelScheduledValues(0);
-	gainParam.setValueAtTime(0, 0);
-
-	for (let i = 0; i < gains.length; i += 1) {
-		const t0 = Math.min(exportDuration, i * frameDuration);
-		const t1 = Math.min(exportDuration, (i + 1) * frameDuration);
-		const g0 = clampGain(gains[i] ?? 0);
-		const g1 = clampGain(i + 1 < gains.length ? (gains[i + 1] ?? 0) : 0);
-
-		gainParam.setValueAtTime(g0, t0);
-		if (t1 > t0) {
-			gainParam.linearRampToValueAtTime(g1, t1);
-		}
-	}
-
-	gainParam.setValueAtTime(0, exportDuration);
-};
-
-const mixAudioTargetsForExport = async ({
-	targets,
-	startFrame,
-	endFrame,
-	fps,
-}: {
-	targets: ExportAudioTarget[];
-	startFrame: number;
-	endFrame: number;
-	fps: number;
-}): Promise<AudioBuffer | null> => {
-	if (typeof OfflineAudioContext === "undefined") {
-		console.warn("导出音频混音失败：当前环境不支持 OfflineAudioContext");
-		return null;
-	}
-
-	const activeTargets = targets.filter(
-		(target) =>
-			target.enabled &&
-			target.hasAudibleFrame &&
-			target.sourceRangeEnd - target.sourceRangeStart > AUDIO_EPSILON,
-	);
-	if (activeTargets.length === 0) return null;
-
-	const decodedChunksById = new Map<string, WrappedAudioBuffer[]>();
-	let maxChannels = 1;
-	let sampleRate = FALLBACK_OFFLINE_SAMPLE_RATE;
-
-	for (const target of activeTargets) {
-		try {
-			const chunks = await decodeTargetAudioChunks(target);
-			if (chunks.length === 0) continue;
-			decodedChunksById.set(target.id, chunks);
-			for (const chunk of chunks) {
-				maxChannels = Math.max(maxChannels, chunk.buffer.numberOfChannels);
-				if (
-					Number.isFinite(chunk.buffer.sampleRate) &&
-					chunk.buffer.sampleRate > 0
-				) {
-					sampleRate = chunk.buffer.sampleRate;
-				}
-			}
-		} catch (error) {
-			console.warn(`导出音频解码失败（${target.id}），已跳过该片段:`, error);
-		}
-	}
-
-	if (decodedChunksById.size === 0) return null;
-
-	const exportDuration = framesToSeconds(endFrame - startFrame, fps);
-	if (exportDuration <= AUDIO_EPSILON) return null;
-	const exportStartSeconds = framesToSeconds(startFrame, fps);
-
-	const offlineContext = new OfflineAudioContext(
-		Math.max(1, maxChannels),
-		Math.max(1, Math.ceil(exportDuration * sampleRate)),
-		sampleRate,
-	);
-
-	for (const target of activeTargets) {
-		const chunks = decodedChunksById.get(target.id);
-		if (!chunks || chunks.length === 0) continue;
-
-		const gainNode = offlineContext.createGain();
-		gainNode.connect(offlineContext.destination);
-		applyGainAutomationByFrame({
-			gainParam: gainNode.gain,
-			gains: target.gains,
-			fps,
-			exportDuration,
-		});
-
-		const clipStartSeconds = framesToSeconds(target.timeline.start ?? 0, fps);
-		const clipOffsetSeconds = framesToSeconds(target.timeline.offset ?? 0, fps);
-		const decodeStart = Math.max(0, target.sourceRangeStart);
-		const decodeEnd = Math.min(target.audioDuration, target.sourceRangeEnd);
-
-		for (const chunk of chunks) {
-			const sourceNode = offlineContext.createBufferSource();
-			sourceNode.buffer = chunk.buffer;
-			sourceNode.connect(gainNode);
-
-			const chunkDuration =
-				Number.isFinite(chunk.duration) && chunk.duration > 0
-					? chunk.duration
-					: chunk.buffer.duration;
-			const chunkSourceStart = chunk.timestamp;
-			const chunkSourceEnd = chunkSourceStart + chunkDuration;
-			const playSourceStart = Math.max(chunkSourceStart, decodeStart);
-			const playSourceEnd = Math.min(chunkSourceEnd, decodeEnd);
-			if (playSourceEnd - playSourceStart <= AUDIO_EPSILON) continue;
-
-			let when =
-				playSourceStart -
-				clipOffsetSeconds +
-				clipStartSeconds -
-				exportStartSeconds;
-			let bufferOffset = playSourceStart - chunkSourceStart;
-			let playDuration = playSourceEnd - playSourceStart;
-
-			if (when < 0) {
-				const shift = -when;
-				bufferOffset += shift;
-				when = 0;
-				playDuration -= shift;
-			}
-			if (playDuration <= AUDIO_EPSILON) continue;
-			if (when >= exportDuration) continue;
-			if (when + playDuration > exportDuration) {
-				playDuration = exportDuration - when;
-			}
-			if (playDuration <= AUDIO_EPSILON) continue;
-
-			sourceNode.start(when, bufferOffset, playDuration);
-		}
-	}
-
-	return offlineContext.startRendering();
-};
-
 export const exportTimelineAsVideoCore = async (
 	options: ExportTimelineAsVideoOptions,
 ): Promise<void> => {
@@ -609,18 +419,13 @@ export const exportTimelineAsVideoCore = async (
 		});
 		output.addVideoTrack(videoSource, { frameRate: fps });
 
-		let audioSource: AudioBufferSource | null = null;
+		let audioSource: AudioSampleSource | null = null;
 		if (audioTargets.length > 0) {
-			try {
-				audioSource = new AudioBufferSource({
-					codec: "aac",
-					bitrate: QUALITY_HIGH,
-				});
-				output.addAudioTrack(audioSource);
-			} catch (error) {
-				console.warn("创建导出音轨失败，将回退为仅视频导出:", error);
-				audioSource = null;
-			}
+			audioSource = new AudioSampleSource({
+				codec: "aac",
+				bitrate: QUALITY_HIGH,
+			});
+			output.addAudioTrack(audioSource);
 		}
 
 		await output.start();
@@ -697,19 +502,14 @@ export const exportTimelineAsVideoCore = async (
 		console.log("video canvas rendered");
 
 		if (audioSource && audioTargets.length > 0) {
-			try {
-				const mixedBuffer = await mixAudioTargetsForExport({
-					targets: audioTargets,
-					startFrame,
-					endFrame,
-					fps,
-				});
-				if (mixedBuffer) {
-					await audioSource.add(mixedBuffer);
-				}
-			} catch (error) {
-				console.warn("导出音频混音失败，已回退为仅视频导出:", error);
-			}
+			await renderMixedAudioForExport({
+				targets: audioTargets,
+				startFrame,
+				endFrame,
+				fps,
+				audioSource,
+				dspConfig: options.audio?.dspConfig,
+			});
 		}
 
 		console.log("audio mixed");

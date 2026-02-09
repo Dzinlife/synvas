@@ -10,6 +10,11 @@ import type {
 } from "../dsl/types";
 import { ELEMENT_TYPE_VALUES } from "../dsl/types";
 import { framesToTimecode, timecodeToFrames } from "../utils/timecode";
+import {
+	DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,
+	type ExportAudioDspSettings,
+	resolveExportAudioDspSettings,
+} from "./audio/dsp/types";
 import type { TimelineTrack } from "./timeline/types";
 
 /**
@@ -33,7 +38,13 @@ export interface TimelineSettings {
 	autoAttach: boolean;
 	rippleEditingEnabled: boolean;
 	previewAxisEnabled: boolean;
+	audio: ExportAudioDspSettings;
 }
+
+const cloneDefaultAudioSettings = (): ExportAudioDspSettings => ({
+	...DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,
+	compressor: { ...DEFAULT_EXPORT_AUDIO_DSP_SETTINGS.compressor },
+});
 
 /**
  * 时间线默认配置
@@ -43,6 +54,7 @@ export const DEFAULT_TIMELINE_SETTINGS: TimelineSettings = {
 	autoAttach: true,
 	rippleEditingEnabled: true,
 	previewAxisEnabled: true,
+	audio: cloneDefaultAudioSettings(),
 };
 
 export interface TimelineData {
@@ -70,11 +82,31 @@ const finiteNumberSchema = z.number().refine(Number.isFinite, {
 	message: "must be a finite number",
 });
 
+const timelineAudioCompressorSchema = z.object({
+	enabled: z.boolean().optional(),
+	thresholdDb: finiteNumberSchema.optional(),
+	ratio: finiteNumberSchema.optional(),
+	kneeDb: finiteNumberSchema.optional(),
+	attackMs: finiteNumberSchema.optional(),
+	releaseMs: finiteNumberSchema.optional(),
+	makeupGainDb: finiteNumberSchema.optional(),
+});
+
+const timelineAudioSettingsSchema = z.object({
+	exportSampleRate: z.union([z.literal(44100), z.literal(48000)]).optional(),
+	exportBlockSize: z
+		.union([z.literal(256), z.literal(512), z.literal(1024)])
+		.optional(),
+	masterGainDb: finiteNumberSchema.optional(),
+	compressor: timelineAudioCompressorSchema.optional(),
+});
+
 const timelineSettingsSchema = z.object({
 	snapEnabled: z.boolean(),
 	autoAttach: z.boolean(),
 	rippleEditingEnabled: z.boolean(),
 	previewAxisEnabled: z.boolean(),
+	audio: timelineAudioSettingsSchema.optional(),
 });
 
 const timelineTrackSchema = z.object({
@@ -315,7 +347,17 @@ export function saveTimelineToObject(
 	transcripts?: TranscriptRecord[],
 ): TimelineJSON {
 	const serializedTracks = serializeTracks(tracks);
-	const resolvedSettings = settings ?? DEFAULT_TIMELINE_SETTINGS;
+	const resolvedSettings: TimelineSettings = {
+		snapEnabled: settings?.snapEnabled ?? DEFAULT_TIMELINE_SETTINGS.snapEnabled,
+		autoAttach: settings?.autoAttach ?? DEFAULT_TIMELINE_SETTINGS.autoAttach,
+		rippleEditingEnabled:
+			settings?.rippleEditingEnabled ??
+			DEFAULT_TIMELINE_SETTINGS.rippleEditingEnabled,
+		previewAxisEnabled:
+			settings?.previewAxisEnabled ??
+			DEFAULT_TIMELINE_SETTINGS.previewAxisEnabled,
+		audio: resolveExportAudioDspSettings(settings?.audio),
+	};
 	return {
 		version: "1.0",
 		fps,
@@ -439,7 +481,14 @@ function validateTranscripts(
 }
 
 function validateSettings(settings: unknown, path: string): TimelineSettings {
-	return parseWithSchema(timelineSettingsSchema, settings, path);
+	const parsed = parseWithSchema(timelineSettingsSchema, settings, path);
+	return {
+		snapEnabled: parsed.snapEnabled,
+		autoAttach: parsed.autoAttach,
+		rippleEditingEnabled: parsed.rippleEditingEnabled,
+		previewAxisEnabled: parsed.previewAxisEnabled,
+		audio: resolveExportAudioDspSettings(parsed.audio),
+	};
 }
 
 function serializeTracks(

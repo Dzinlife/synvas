@@ -1,4 +1,7 @@
-import type { TimelineJSON } from "core/editor/timelineLoader";
+import {
+	DEFAULT_TIMELINE_SETTINGS,
+	type TimelineJSON,
+} from "core/editor/timelineLoader";
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
 
 export interface ProjectRecord {
@@ -39,10 +42,14 @@ export const buildEmptyTimeline = (): TimelineJSON => ({
 		height: 1080,
 	},
 	settings: {
-		snapEnabled: true,
-		autoAttach: true,
-		rippleEditingEnabled: true,
-		previewAxisEnabled: true,
+		snapEnabled: DEFAULT_TIMELINE_SETTINGS.snapEnabled,
+		autoAttach: DEFAULT_TIMELINE_SETTINGS.autoAttach,
+		rippleEditingEnabled: DEFAULT_TIMELINE_SETTINGS.rippleEditingEnabled,
+		previewAxisEnabled: DEFAULT_TIMELINE_SETTINGS.previewAxisEnabled,
+		audio: {
+			...DEFAULT_TIMELINE_SETTINGS.audio,
+			compressor: { ...DEFAULT_TIMELINE_SETTINGS.audio.compressor },
+		},
 	},
 	tracks: [],
 	transcripts: [],
