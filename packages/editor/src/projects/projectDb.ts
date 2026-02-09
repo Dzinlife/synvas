@@ -1,5 +1,5 @@
+import type { TimelineJSON } from "core/editor/timelineLoader";
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
-import type { TimelineJSON } from "@/editor/timelineLoader";
 
 export interface ProjectRecord {
 	id: string;

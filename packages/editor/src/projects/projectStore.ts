@@ -1,9 +1,9 @@
-import { create } from "zustand";
 import {
 	loadTimelineFromObject,
 	type TimelineData,
 	type TimelineJSON,
-} from "@/editor/timelineLoader";
+} from "core/editor/timelineLoader";
+import { create } from "zustand";
 import {
 	buildAutoProjectName,
 	buildEmptyTimeline,

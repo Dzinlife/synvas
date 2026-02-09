@@ -1,3 +1,4 @@
+import { saveTimelineToObject } from "core/editor/timelineLoader";
 import { Check, FolderPlus, Save } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo } from "react";
 import { useTranscriptStore } from "@/asr/transcriptStore";
@@ -11,7 +12,6 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
-import { saveTimelineToObject } from "@/editor/timelineLoader";
 import { useProjectStore } from "@/projects/projectStore";
 
 export default function Header() {

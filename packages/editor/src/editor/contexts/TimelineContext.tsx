@@ -1,4 +1,5 @@
 import type { TimelineElement, TrackRole } from "core/dsl/types";
+import type { TimelineSettings } from "core/editor/timelineLoader";
 import {
 	createContext,
 	useCallback,
@@ -16,7 +17,6 @@ import type {
 	ExtendedDropTarget,
 	TimelineTrack,
 } from "../timeline/types";
-import type { TimelineSettings } from "../timelineLoader";
 import { findAttachments } from "../utils/attachments";
 import {
 	type AudioTrackControlStateMap,
