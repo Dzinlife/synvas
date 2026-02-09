@@ -11,6 +11,18 @@ import "./Elements";
 
 const skiaReconciler = ReactReconciler(sksgHostConfig);
 
+type SyncCapableReconciler = typeof skiaReconciler & {
+	updateContainerSync: (
+		element: ReactNode,
+		container: OpaqueRoot,
+		parentComponent: null,
+		callback: null,
+	) => void;
+	flushSyncWork: () => void;
+};
+
+const syncCapableReconciler = skiaReconciler as SyncCapableReconciler;
+
 skiaReconciler.injectIntoDevTools({
 	bundleType: 1,
 	version: "0.0.1",
@@ -47,18 +59,15 @@ export class SkiaSGRoot {
 		return { type: NodeType.Group, props: {}, children, isDeclaration: false };
 	}
 
-	private updateContainer(element: ReactNode) {
-		return new Promise((resolve) => {
-			skiaReconciler.updateContainer(element, this.root, null, () => {
-				resolve(true);
-			});
-		});
+	private updateContainer(element: ReactNode, onCommit?: () => void) {
+		syncCapableReconciler.updateContainerSync(element, this.root, null, null);
+		syncCapableReconciler.flushSyncWork();
+		onCommit?.();
 	}
 
-	async render(element: ReactNode) {
+	render(element: ReactNode) {
 		this.container.mount();
-		await this.updateContainer(element);
-		this.container.redraw();
+		this.updateContainer(element);
 	}
 
 	drawOnCanvas(canvas: SkCanvas) {
@@ -74,11 +83,8 @@ export class SkiaSGRoot {
 
 	unmount() {
 		this.container.unmount();
-		return new Promise((resolve) => {
-			skiaReconciler.updateContainer(null, this.root, null, () => {
-				debug("unmountContainer");
-				resolve(true);
-			});
+		this.updateContainer(null, () => {
+			debug("unmountContainer");
 		});
 	}
 }

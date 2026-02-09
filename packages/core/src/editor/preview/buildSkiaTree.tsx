@@ -42,7 +42,7 @@ export type BuildSkiaDeps = {
 	renderNodeToPicture: (
 		node: React.ReactNode,
 		size: { width: number; height: number },
-	) => Promise<SkPicture | null>;
+	) => SkPicture | null | Promise<SkPicture | null>;
 	isTransitionElement?: (element: TimelineElement) => boolean;
 };
 

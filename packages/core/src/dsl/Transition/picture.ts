@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { Skia, SkiaSGRoot, type SkPicture } from "react-skia-lite";
 
-export const renderNodeToPicture = async (
+export const renderNodeToPicture = (
 	node: ReactNode,
 	size: { width: number; height: number },
-): Promise<SkPicture | null> => {
+): SkPicture | null => {
 	if (size.width <= 0 || size.height <= 0) return null;
 	const recorder = Skia.PictureRecorder();
 	const canvas = recorder.beginRecording({
@@ -14,7 +14,7 @@ export const renderNodeToPicture = async (
 		height: size.height,
 	});
 	const root = new SkiaSGRoot(Skia);
-	await root.render(node);
+	root.render(node);
 	root.drawOnCanvas(canvas);
 	root.unmount();
 	return recorder.finishRecordingAsPicture();
