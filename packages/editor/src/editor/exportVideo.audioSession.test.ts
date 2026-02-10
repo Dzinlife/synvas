@@ -352,6 +352,8 @@ describe("export audio session mix", () => {
 					audioDuration: 10,
 					enabled: true,
 				},
+				id: "a",
+				timelineStart: 0,
 				instruction: {
 					timelineTimeSeconds: 1,
 					gain: 0.8,
@@ -366,6 +368,8 @@ describe("export audio session mix", () => {
 					audioDuration: 10,
 					enabled: true,
 				},
+				id: "b",
+				timelineStart: 20,
 				instruction: {
 					timelineTimeSeconds: 1,
 					gain: 0.8,

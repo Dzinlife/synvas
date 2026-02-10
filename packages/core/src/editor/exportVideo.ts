@@ -10,6 +10,7 @@ import {
 } from "mediabunny";
 import { JsiSkSurface, Skia, SkiaSGRoot } from "react-skia-lite";
 import type { TimelineElement } from "../dsl/types";
+import { chooseSessionInstructionCandidate } from "./audio/sessionInstructionSelector";
 import { renderMixedAudioForExport } from "./audio/dsp/exportRenderer";
 import type { PartialExportAudioDspSettings } from "./audio/dsp/types";
 import {
@@ -382,36 +383,11 @@ const collectExportAudioTargets = (
 	};
 };
 
-const SESSION_INSTRUCTION_EPSILON = 1e-6;
-
 type SessionInstructionCandidate = {
 	clip: ExportAudioClipTarget;
+	id: string;
+	timelineStart: number;
 	instruction: AudioMixInstruction | null;
-};
-
-const chooseSessionInstruction = (
-	current: SessionInstructionCandidate,
-	candidate: SessionInstructionCandidate,
-): SessionInstructionCandidate => {
-	if (!current.instruction && candidate.instruction) return candidate;
-	if (current.instruction && !candidate.instruction) return current;
-	if (!current.instruction && !candidate.instruction) return current;
-	if (!current.instruction || !candidate.instruction) return current;
-
-	const currentGain = current.instruction.gain ?? 0;
-	const candidateGain = candidate.instruction.gain ?? 0;
-	if (candidateGain > currentGain + SESSION_INSTRUCTION_EPSILON) return candidate;
-	if (currentGain > candidateGain + SESSION_INSTRUCTION_EPSILON) return current;
-
-	const currentStart = resolveTimelineStart(current.clip.timeline);
-	const candidateStart = resolveTimelineStart(candidate.clip.timeline);
-	if (candidateStart > currentStart) return candidate;
-	if (currentStart > candidateStart) return current;
-
-	if (candidate.clip.id.localeCompare(current.clip.id) > 0) {
-		return candidate;
-	}
-	return current;
 };
 
 const applyAudioMixPlanAtFrame = ({
@@ -455,6 +431,8 @@ const applyAudioMixPlanAtFrame = ({
 			plan.instructions[clip.id] ?? null;
 		const candidate: SessionInstructionCandidate = {
 			clip: clipTarget,
+			id: clipTarget.id,
+			timelineStart: clipTarget.timeline.start ?? 0,
 			instruction,
 		};
 		const existing = pickedBySessionKey.get(clipTarget.sessionKey);
@@ -464,7 +442,7 @@ const applyAudioMixPlanAtFrame = ({
 		}
 		pickedBySessionKey.set(
 			clipTarget.sessionKey,
-			chooseSessionInstruction(existing, candidate),
+			chooseSessionInstructionCandidate(existing, candidate),
 		);
 	}
 
@@ -491,7 +469,8 @@ const applyAudioMixPlanAtFrame = ({
 };
 
 export const __collectExportAudioTargetsForTests = collectExportAudioTargets;
-export const __chooseSessionInstructionForTests = chooseSessionInstruction;
+export const __chooseSessionInstructionForTests =
+	chooseSessionInstructionCandidate;
 export const __applyAudioMixPlanAtFrameForTests = applyAudioMixPlanAtFrame;
 
 export const exportTimelineAsVideoCore = async (

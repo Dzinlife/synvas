@@ -1,4 +1,5 @@
 import type { TimelineElement, TimelineMeta } from "core/dsl/types";
+import { chooseSessionInstructionCandidate } from "core/editor/audio/sessionInstructionSelector";
 import { resolveTransitionFrameState } from "core/editor/preview/transitionFrameState";
 import type { TransitionAudioCurve } from "../../dsl/Transition/model";
 import type { TimelineTrack } from "../timeline/types";
@@ -51,36 +52,6 @@ const resolveTransitionCurve = (
 	return undefined;
 };
 
-const EPSILON = 1e-6;
-
-const chooseSessionInstruction = (
-	current: { target: AudioMixTarget; instruction: AudioMixInstruction | null },
-	candidate: {
-		target: AudioMixTarget;
-		instruction: AudioMixInstruction | null;
-	},
-) => {
-	if (!current.instruction && candidate.instruction) return candidate;
-	if (current.instruction && !candidate.instruction) return current;
-	if (!current.instruction && !candidate.instruction) return current;
-	if (!current.instruction || !candidate.instruction) return current;
-
-	const currentGain = current.instruction.gain ?? 0;
-	const candidateGain = candidate.instruction.gain ?? 0;
-	if (candidateGain > currentGain + EPSILON) return candidate;
-	if (currentGain > candidateGain + EPSILON) return current;
-
-	const currentStart = current.target.timeline.start ?? 0;
-	const candidateStart = candidate.target.timeline.start ?? 0;
-	if (candidateStart > currentStart) return candidate;
-	if (currentStart > candidateStart) return current;
-
-	if (candidate.target.id.localeCompare(current.target.id) > 0) {
-		return candidate;
-	}
-	return current;
-};
-
 export const runTimelineAudioMixFrame = (
 	args: RunTimelineAudioMixFrameArgs,
 ): Set<string> => {
@@ -131,11 +102,21 @@ export const runTimelineAudioMixFrame = (
 
 	const pickedBySession = new Map<
 		string,
-		{ target: AudioMixTarget; instruction: AudioMixInstruction | null }
+		{
+			target: AudioMixTarget;
+			instruction: AudioMixInstruction | null;
+			id: string;
+			timelineStart: number;
+		}
 	>();
 	for (const [id, target] of args.targets.entries()) {
 		const instruction = plan.instructions[id] ?? null;
-		const candidate = { target, instruction };
+		const candidate = {
+			target,
+			instruction,
+			id: target.id,
+			timelineStart: target.timeline.start ?? 0,
+		};
 		const existing = pickedBySession.get(target.sessionKey);
 		if (!existing) {
 			pickedBySession.set(target.sessionKey, candidate);
@@ -152,7 +133,7 @@ export const runTimelineAudioMixFrame = (
 		}
 		pickedBySession.set(
 			target.sessionKey,
-			chooseSessionInstruction(existing, candidate),
+			chooseSessionInstructionCandidate(existing, candidate),
 		);
 	}
 
