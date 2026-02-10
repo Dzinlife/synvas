@@ -39,6 +39,9 @@ export type ExportTimelineAudioOptions = {
 	getAudioSourceByElementId?: (
 		elementId: string,
 	) => ExportElementAudioSource | null | undefined;
+	getAudioSessionKeyByElementId?: (
+		elementId: string,
+	) => string | null | undefined;
 	dspConfig?: PartialExportAudioDspSettings;
 };
 
@@ -69,6 +72,22 @@ type ExportAudioTarget = {
 	hasAudibleFrame: boolean;
 	sourceRangeStart: number;
 	sourceRangeEnd: number;
+};
+
+type ExportAudioClipTarget = {
+	id: string;
+	sessionKey: string;
+	timeline: TimelineElement["timeline"];
+	audioSink: AudioBufferSink;
+	audioDuration: number;
+	enabled: boolean;
+};
+
+type CollectedExportAudioTargets = {
+	audioTargets: ExportAudioTarget[];
+	audioTargetsBySessionKey: Map<string, ExportAudioTarget>;
+	audioClips: AudioMixClip[];
+	audioClipTargetsById: Map<string, ExportAudioClipTarget>;
 };
 
 const getTrackIndexForElement = (element: TimelineElement) =>
@@ -255,15 +274,48 @@ const collectTransitionCurveById = (
 	return curveById;
 };
 
+const resolveTimelineStart = (timeline: TimelineElement["timeline"]): number => {
+	const start = timeline.start;
+	if (!Number.isFinite(start)) return 0;
+	return Math.round(start);
+};
+
+const pickSessionAnchorClip = (
+	current: ExportAudioClipTarget,
+	candidate: ExportAudioClipTarget,
+): ExportAudioClipTarget => {
+	const currentStart = resolveTimelineStart(current.timeline);
+	const candidateStart = resolveTimelineStart(candidate.timeline);
+	if (candidateStart < currentStart) return candidate;
+	if (currentStart < candidateStart) return current;
+	return candidate.id.localeCompare(current.id) < 0 ? candidate : current;
+};
+
+const resolveAudioSessionKey = (
+	options: ExportTimelineAsVideoOptions,
+	elementId: string,
+): string => {
+	const key = options.audio?.getAudioSessionKeyByElementId?.(elementId);
+	if (typeof key === "string" && key.length > 0) return key;
+	return `clip:${elementId}`;
+};
+
 const collectExportAudioTargets = (
 	options: ExportTimelineAsVideoOptions,
 	totalFrames: number,
-): ExportAudioTarget[] => {
+): CollectedExportAudioTargets => {
 	const getAudioSource = options.audio?.getAudioSourceByElementId;
-	if (!getAudioSource) return [];
+	if (!getAudioSource) {
+		return {
+			audioTargets: [],
+			audioTargetsBySessionKey: new Map(),
+			audioClips: [],
+			audioClipTargetsById: new Map(),
+		};
+	}
 	const audioTrackStates = options.audio?.audioTrackStates ?? {};
 
-	const targets: ExportAudioTarget[] = [];
+	const clipTargets: ExportAudioClipTarget[] = [];
 	for (const element of options.elements) {
 		if (element.type !== "AudioClip" && element.type !== "VideoClip") continue;
 		const source = getAudioSource(element.id);
@@ -278,19 +330,88 @@ const collectExportAudioTargets = (
 				audioTrackStates,
 			) && !(element.type === "VideoClip" && isVideoSourceAudioMuted(element));
 
-		targets.push({
+		clipTargets.push({
 			id: element.id,
+			sessionKey: resolveAudioSessionKey(options, element.id),
 			timeline: element.timeline,
 			audioSink: source.audioSink,
 			audioDuration: source.audioDuration,
 			enabled,
+		});
+	}
+
+	const anchorBySession = new Map<string, ExportAudioClipTarget>();
+	const enabledBySession = new Map<string, boolean>();
+	for (const clip of clipTargets) {
+		const currentAnchor = anchorBySession.get(clip.sessionKey);
+		anchorBySession.set(
+			clip.sessionKey,
+			currentAnchor ? pickSessionAnchorClip(currentAnchor, clip) : clip,
+		);
+		enabledBySession.set(
+			clip.sessionKey,
+			Boolean(enabledBySession.get(clip.sessionKey)) || clip.enabled,
+		);
+	}
+
+	const audioTargetsBySessionKey = new Map<string, ExportAudioTarget>();
+	for (const [sessionKey, anchorClip] of anchorBySession.entries()) {
+		audioTargetsBySessionKey.set(sessionKey, {
+			id: sessionKey,
+			timeline: anchorClip.timeline,
+			audioSink: anchorClip.audioSink,
+			audioDuration: anchorClip.audioDuration,
+			enabled: enabledBySession.get(sessionKey) ?? anchorClip.enabled,
 			gains: new Float32Array(totalFrames),
 			hasAudibleFrame: false,
 			sourceRangeStart: Number.POSITIVE_INFINITY,
 			sourceRangeEnd: 0,
 		});
 	}
-	return targets;
+
+	return {
+		audioTargets: Array.from(audioTargetsBySessionKey.values()),
+		audioTargetsBySessionKey,
+		audioClips: clipTargets.map((clip) => ({
+			id: clip.id,
+			timeline: clip.timeline,
+			audioDuration: clip.audioDuration,
+			enabled: clip.enabled,
+		})),
+		audioClipTargetsById: new Map(clipTargets.map((clip) => [clip.id, clip])),
+	};
+};
+
+const SESSION_INSTRUCTION_EPSILON = 1e-6;
+
+type SessionInstructionCandidate = {
+	clip: ExportAudioClipTarget;
+	instruction: AudioMixInstruction | null;
+};
+
+const chooseSessionInstruction = (
+	current: SessionInstructionCandidate,
+	candidate: SessionInstructionCandidate,
+): SessionInstructionCandidate => {
+	if (!current.instruction && candidate.instruction) return candidate;
+	if (current.instruction && !candidate.instruction) return current;
+	if (!current.instruction && !candidate.instruction) return current;
+	if (!current.instruction || !candidate.instruction) return current;
+
+	const currentGain = current.instruction.gain ?? 0;
+	const candidateGain = candidate.instruction.gain ?? 0;
+	if (candidateGain > currentGain + SESSION_INSTRUCTION_EPSILON) return candidate;
+	if (currentGain > candidateGain + SESSION_INSTRUCTION_EPSILON) return current;
+
+	const currentStart = resolveTimelineStart(current.clip.timeline);
+	const candidateStart = resolveTimelineStart(candidate.clip.timeline);
+	if (candidateStart > currentStart) return candidate;
+	if (currentStart > candidateStart) return current;
+
+	if (candidate.clip.id.localeCompare(current.clip.id) > 0) {
+		return candidate;
+	}
+	return current;
 };
 
 const applyAudioMixPlanAtFrame = ({
@@ -298,7 +419,8 @@ const applyAudioMixPlanAtFrame = ({
 	startFrame,
 	fps,
 	audioClips,
-	audioTargetsById,
+	audioClipTargetsById,
+	audioTargetsBySessionKey,
 	transitionFrameState,
 	transitionCurveById,
 }: {
@@ -306,7 +428,8 @@ const applyAudioMixPlanAtFrame = ({
 	startFrame: number;
 	fps: number;
 	audioClips: AudioMixClip[];
-	audioTargetsById: Map<string, ExportAudioTarget>;
+	audioClipTargetsById: Map<string, ExportAudioClipTarget>;
+	audioTargetsBySessionKey: Map<string, ExportAudioTarget>;
 	transitionFrameState: TransitionFrameState;
 	transitionCurveById: Record<string, TransitionAudioCurve | undefined>;
 }) => {
@@ -320,16 +443,36 @@ const applyAudioMixPlanAtFrame = ({
 	const frameIndex = frame - startFrame;
 	if (frameIndex < 0) return;
 
-	for (const clip of audioClips) {
-		const target = audioTargetsById.get(clip.id);
-		if (!target) continue;
+	for (const target of audioTargetsBySessionKey.values()) {
+		target.gains[frameIndex] = 0;
+	}
 
-		const instruction: AudioMixInstruction | undefined =
-			plan.instructions[clip.id];
-		if (!instruction) {
-			target.gains[frameIndex] = 0;
+	const pickedBySessionKey = new Map<string, SessionInstructionCandidate>();
+	for (const clip of audioClips) {
+		const clipTarget = audioClipTargetsById.get(clip.id);
+		if (!clipTarget) continue;
+		const instruction: AudioMixInstruction | null =
+			plan.instructions[clip.id] ?? null;
+		const candidate: SessionInstructionCandidate = {
+			clip: clipTarget,
+			instruction,
+		};
+		const existing = pickedBySessionKey.get(clipTarget.sessionKey);
+		if (!existing) {
+			pickedBySessionKey.set(clipTarget.sessionKey, candidate);
 			continue;
 		}
+		pickedBySessionKey.set(
+			clipTarget.sessionKey,
+			chooseSessionInstruction(existing, candidate),
+		);
+	}
+
+	for (const [sessionKey, picked] of pickedBySessionKey.entries()) {
+		const target = audioTargetsBySessionKey.get(sessionKey);
+		if (!target) continue;
+		const instruction = picked.instruction;
+		if (!instruction) continue;
 
 		const gain = clampGain(instruction.gain);
 		target.gains[frameIndex] = gain;
@@ -346,6 +489,10 @@ const applyAudioMixPlanAtFrame = ({
 		target.sourceRangeEnd = Math.max(target.sourceRangeEnd, sourceEnd);
 	}
 };
+
+export const __collectExportAudioTargetsForTests = collectExportAudioTargets;
+export const __chooseSessionInstructionForTests = chooseSessionInstruction;
+export const __applyAudioMixPlanAtFrameForTests = applyAudioMixPlanAtFrame;
 
 export const exportTimelineAsVideoCore = async (
 	options: ExportTimelineAsVideoOptions,
@@ -377,16 +524,12 @@ export const exportTimelineAsVideoCore = async (
 	}
 
 	const totalFrames = endFrame - startFrame;
-	const audioTargets = collectExportAudioTargets(options, totalFrames);
-	const audioTargetsById = new Map(
-		audioTargets.map((target) => [target.id, target]),
-	);
-	const audioClips: AudioMixClip[] = audioTargets.map((target) => ({
-		id: target.id,
-		timeline: target.timeline,
-		audioDuration: target.audioDuration,
-		enabled: target.enabled,
-	}));
+	const {
+		audioTargets,
+		audioTargetsBySessionKey,
+		audioClips,
+		audioClipTargetsById,
+	} = collectExportAudioTargets(options, totalFrames);
 	const transitionCurveById = collectTransitionCurveById(options.elements);
 
 	let root: SkiaSGRoot | null = null;
@@ -474,13 +617,14 @@ export const exportTimelineAsVideoCore = async (
 			}
 
 			try {
-				if (audioTargetsById.size > 0) {
+				if (audioTargetsBySessionKey.size > 0) {
 					applyAudioMixPlanAtFrame({
 						frame,
 						startFrame,
 						fps,
 						audioClips,
-						audioTargetsById,
+						audioClipTargetsById,
+						audioTargetsBySessionKey,
 						transitionFrameState: frameState.transitionFrameState,
 						transitionCurveById,
 					});

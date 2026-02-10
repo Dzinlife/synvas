@@ -5,6 +5,7 @@ import {
 } from "core/editor/exportVideo";
 import { modelRegistry } from "@/dsl/model/registry";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { getAudioPlaybackSessionKey } from "@/editor/playback/clipContinuityIndex";
 import { buildSkiaRenderState } from "@/editor/preview/buildSkiaTree";
 
 const waitForStaticModelsReady = async (elements: TimelineElement[]) => {
@@ -96,6 +97,8 @@ export const exportTimelineAsVideo = async (options?: {
 			audio: {
 				audioTrackStates: timelineState.audioTrackStates,
 				getAudioSourceByElementId: getExportAudioSourceByElementId,
+				getAudioSessionKeyByElementId: (elementId) =>
+					getAudioPlaybackSessionKey(elements, elementId),
 				dspConfig: timelineState.audioSettings,
 			},
 			waitForReady: () => waitForStaticModelsReady(elements),
