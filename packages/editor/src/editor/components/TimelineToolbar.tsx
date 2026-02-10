@@ -6,6 +6,11 @@ import {
 } from "core/editor/audio/dsp/types";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Slider } from "@/components/ui/slider";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { exportCanvasAsImage } from "@/dsl/export";
 import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import { cn } from "@/lib/utils";
@@ -393,58 +398,66 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			</button>
 			{/* 开关按钮组 */}
 			<div className="flex items-center gap-2 ml-4">
-				<button
-					type="button"
-					onClick={() => setSnapEnabled(!snapEnabled)}
-					className={cn(
-						"px-2 py-1 text-xs rounded transition-colors",
-						snapEnabled
-							? "bg-green-600 text-white"
-							: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
-					)}
-					title="水平吸附"
-				>
-					吸附
-				</button>
-				<button
-					type="button"
-					onClick={() => setAutoAttach(!autoAttach)}
-					className={cn(
-						"px-2 py-1 text-xs rounded transition-colors",
-						autoAttach
-							? "bg-green-600 text-white"
-							: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
-					)}
-					title="主轴联动"
-				>
-					联动
-				</button>
-				<button
-					type="button"
-					onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
-					className={cn(
-						"px-2 py-1 text-xs rounded transition-colors",
-						rippleEditingEnabled
-							? "bg-green-600 text-white"
-							: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
-					)}
-					title="主轨波纹编辑"
-				>
-					波纹编辑
-				</button>
-				<button
-					type="button"
-					onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}
-					className={cn(
-						"px-2 py-1 text-xs rounded transition-colors",
-						previewAxisEnabled
-							? "bg-green-600 text-white"
-							: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
-					)}
-					title="预览轴"
-				>
-					预览轴
-				</button>
+				<Tooltip>
+					<TooltipTrigger
+						type="button"
+						onClick={() => setSnapEnabled(!snapEnabled)}
+						className={cn(
+							"px-2 py-1 text-xs rounded transition-colors",
+							snapEnabled
+								? "bg-green-600 text-white"
+								: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
+						)}
+					>
+						吸附
+					</TooltipTrigger>
+					<TooltipContent>水平吸附</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger
+						type="button"
+						onClick={() => setAutoAttach(!autoAttach)}
+						className={cn(
+							"px-2 py-1 text-xs rounded transition-colors",
+							autoAttach
+								? "bg-green-600 text-white"
+								: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
+						)}
+					>
+						联动
+					</TooltipTrigger>
+					<TooltipContent>主轴联动</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger
+						type="button"
+						onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
+						className={cn(
+							"px-2 py-1 text-xs rounded transition-colors",
+							rippleEditingEnabled
+								? "bg-green-600 text-white"
+								: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
+						)}
+					>
+						波纹编辑
+					</TooltipTrigger>
+					<TooltipContent>主轨波纹编辑</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger
+						type="button"
+						onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}
+						className={cn(
+							"px-2 py-1 text-xs rounded transition-colors",
+							previewAxisEnabled
+								? "bg-green-600 text-white"
+								: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
+						)}
+					>
+						预览轴
+					</TooltipTrigger>
+					<TooltipContent>预览轴</TooltipContent>
+				</Tooltip>
 			</div>
 			<div className="flex items-center gap-2">
 				<Slider

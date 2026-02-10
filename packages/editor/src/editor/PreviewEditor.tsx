@@ -18,8 +18,11 @@ import {
 } from "react-konva";
 import type { CanvasRef } from "react-skia-lite";
 import {
-	transformMetaToRenderLayout,
-} from "@/dsl/layout";
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { transformMetaToRenderLayout } from "@/dsl/layout";
 import { usePreview } from "./contexts/PreviewProvider";
 import { useTimelineStore, useTracks } from "./contexts/TimelineContext";
 import { buildKonvaTree } from "./preview/buildSkiaTree";
@@ -672,22 +675,24 @@ const Preview = () => {
 					backdropFilter: "blur(8px)",
 				}}
 			>
-				<button
-					type="button"
-					onClick={resetPanOffset}
-					style={{
-						background: "transparent",
-						border: "none",
-						color: "white",
-						cursor: "pointer",
-						padding: "4px 8px",
-						borderRadius: 4,
-						fontSize: 12,
-					}}
-					title="重置视图位置"
-				>
-					⟲
-				</button>
+				<Tooltip>
+					<TooltipTrigger
+						type="button"
+						onClick={resetPanOffset}
+						style={{
+							background: "transparent",
+							border: "none",
+							color: "white",
+							cursor: "pointer",
+							padding: "4px 8px",
+							borderRadius: 4,
+							fontSize: 12,
+						}}
+					>
+						⟲
+					</TooltipTrigger>
+					<TooltipContent>重置视图位置</TooltipContent>
+				</Tooltip>
 				<input
 					type="range"
 					min={0.1}

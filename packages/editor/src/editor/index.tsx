@@ -3,6 +3,7 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranscriptStore } from "@/asr/transcriptStore";
 import { Toaster } from "@/components/ui/toast";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ModelManager } from "@/dsl/model";
 import { useProjectStore } from "@/projects/projectStore";
 import EditorSidebars from "./components/EditorSidebars";
@@ -116,20 +117,22 @@ const Editor = () => {
 
 	return (
 		<QueryClientProvider client={queryClient}>
-			<Toaster />
-			<TimelineProvider
-				elements={currentProjectData.elements}
-				tracks={currentProjectData.tracks}
-				canvasSize={currentProjectData.canvas}
-				fps={currentProjectData.fps}
-				settings={currentProjectData.settings}
-			>
-				<ModelManager>
-					<PreviewProvider>
-						<EditorContent />
-					</PreviewProvider>
-				</ModelManager>
-			</TimelineProvider>
+			<TooltipProvider>
+				<Toaster />
+				<TimelineProvider
+					elements={currentProjectData.elements}
+					tracks={currentProjectData.tracks}
+					canvasSize={currentProjectData.canvas}
+					fps={currentProjectData.fps}
+					settings={currentProjectData.settings}
+				>
+					<ModelManager>
+						<PreviewProvider>
+							<EditorContent />
+						</PreviewProvider>
+					</ModelManager>
+				</TimelineProvider>
+			</TooltipProvider>
 		</QueryClientProvider>
 	);
 };
