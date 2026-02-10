@@ -6,22 +6,11 @@ export interface NativeProps extends ViewProps {
 	debug?: boolean;
 	opaque?: boolean;
 	nativeID: string;
+	pd?: number;
 }
 
-const SkiaPictureViewNativeComponent = ({
-	nativeID,
-	debug,
-	opaque,
-	onLayout,
-	...viewProps
-}: NativeProps) => {
-	return createElement(SkiaPictureView, {
-		nativeID,
-		debug,
-		opaque,
-		onLayout,
-		...viewProps,
-	});
+const SkiaPictureViewNativeComponent = (props: NativeProps) => {
+	return createElement(SkiaPictureView, props);
 };
 // eslint-disable-next-line import/no-default-export
 export default SkiaPictureViewNativeComponent;

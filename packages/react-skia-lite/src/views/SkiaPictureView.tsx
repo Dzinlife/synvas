@@ -69,7 +69,7 @@ class WebGLRenderer implements Renderer {
 			const canvas = this.surface.getCanvas();
 			canvas.clear(Float32Array.of(0, 0, 0, 0));
 			canvas.save();
-			canvas.scale(pd, pd);
+			canvas.scale(this.pd, this.pd);
 			canvas.drawPicture(picture);
 			canvas.restore();
 			this.surface.ref.flush();
@@ -210,8 +210,6 @@ class StaticWebGLRenderer implements Renderer {
 	}
 }
 
-const pd = Platform.PixelRatio;
-
 export interface SkiaPictureViewHandle {
 	setPicture(picture: SkPicture): void;
 	getSize(): { width: number; height: number };
@@ -234,10 +232,11 @@ export interface SkiaPictureViewHandle {
 
 export interface SkiaPictureViewProps extends SkiaPictureViewNativeProps {
 	ref?: React.Ref<SkiaPictureViewHandle>;
+	pd?: number;
 }
 
 export const SkiaPictureView = (props: SkiaPictureViewProps) => {
-	const { ref } = props;
+	const { ref, pd = Platform.PixelRatio } = props;
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const renderer = useRef<Renderer | null>(null);
 	const redrawRequestsRef = useRef(0);

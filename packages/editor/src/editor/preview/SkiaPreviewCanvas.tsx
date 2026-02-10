@@ -191,6 +191,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	const skiaCanvas = useMemo(() => {
 		return (
 			<Canvas
+				pd={1}
 				style={{
 					width: canvasWidth,
 					height: canvasHeight,

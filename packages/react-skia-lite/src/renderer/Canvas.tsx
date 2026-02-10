@@ -8,14 +8,12 @@ import {
 	useRef,
 	useState,
 } from "react";
-import type {
-	SharedValue,
-} from "../react-native-types";
 import { Platform } from "../Platform";
 import type {
 	LayoutChangeEvent,
 	MeasureInWindowOnSuccessCallback,
 	MeasureOnSuccessCallback,
+	SharedValue,
 	View,
 	ViewProps,
 } from "../react-native-types";
@@ -67,6 +65,7 @@ export interface CanvasProps extends Omit<ViewProps, "onLayout"> {
 	ref?: React.Ref<CanvasRef>;
 	androidWarmup?: boolean;
 	__destroyWebGLContextAfterRender?: boolean;
+	pd?: number;
 }
 
 export const Canvas = ({
@@ -81,6 +80,7 @@ export const Canvas = ({
 	// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 	// @ts-expect-error
 	onLayout,
+	pd = Platform.PixelRatio,
 	...viewProps
 }: CanvasProps) => {
 	const viewRef = useCanvasRefPriv(null);
@@ -147,6 +147,7 @@ export const Canvas = ({
 	);
 	return (
 		<SkiaPictureViewNativeComponent
+			pd={pd}
 			ref={viewRef}
 			collapsable={false}
 			nativeID={`${nativeId}`}
