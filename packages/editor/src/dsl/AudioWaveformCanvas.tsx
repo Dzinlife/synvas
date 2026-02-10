@@ -15,6 +15,7 @@ type AudioWaveformCanvasProps = {
 	uri?: string;
 	audioSink: AudioBufferSink | null;
 	audioDuration: number;
+	gainDb?: number;
 	start: number;
 	end: number;
 	fps: number;
@@ -32,10 +33,16 @@ type LoadedWaveformWindow = {
 	waveform: HTMLCanvasElement;
 };
 
+const roundGainDbForWaveform = (gainDb: number): number => {
+	if (!Number.isFinite(gainDb)) return 0;
+	return Math.round(gainDb * 10) / 10;
+};
+
 export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 	uri,
 	audioSink,
 	audioDuration,
+	gainDb = 0,
 	start,
 	end,
 	fps,
@@ -54,6 +61,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 
 	const getAudioSink = useEffectEvent(() => audioSink);
 	const getAudioDuration = useEffectEvent(() => audioDuration);
+	const getGainDb = useEffectEvent(() => gainDb);
 
 	const clipDurationFrames = end - start;
 	const clipDurationSeconds = framesToSeconds(clipDurationFrames, fps);
@@ -162,7 +170,13 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 				Math.min(sourceStart, currentAudioDuration),
 			);
 			const decodeEnd = Math.max(0, Math.min(sourceEnd, currentAudioDuration));
-			const identityKey = [uri, color, currentAudioDuration].join("|");
+			const currentGainDb = roundGainDbForWaveform(getGainDb());
+			const identityKey = [
+				uri,
+				color,
+				currentAudioDuration,
+				currentGainDb.toFixed(3),
+			].join("|");
 			const requestKey = [
 				identityKey,
 				`${sourceStart.toFixed(6)}-${sourceEnd.toFixed(6)}`,
@@ -186,7 +200,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 			const loaded = loadedWindowRef.current;
 			let hasFullCoverage = false;
 			let hasEnoughResolution = false;
-			if (loaded && loaded.identityKey === identityKey) {
+			if (loaded) {
 				const loadedDuration = loaded.windowEnd - loaded.windowStart;
 				const viewportDuration = viewportSourceEnd - viewportSourceStart;
 				const overlapStart = Math.max(viewportSourceStart, loaded.windowStart);
@@ -215,18 +229,24 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 						canvasHeight,
 					);
 				}
-				hasFullCoverage =
-					loaded.windowStart <= viewportSourceStart &&
-					loaded.windowEnd >= viewportSourceEnd;
-				const loadedPixelsPerSecond =
-					loaded.waveform.width / Math.max(1e-6, loadedDuration);
-				const targetPixelsPerSecond =
-					(requestWidth * pixelRatio) / Math.max(1e-6, sourceEnd - sourceStart);
-				const resolutionRatio = targetPixelsPerSecond / loadedPixelsPerSecond;
-				hasEnoughResolution = resolutionRatio >= 0.72 && resolutionRatio <= 1.4;
+				if (loaded.identityKey === identityKey) {
+					hasFullCoverage =
+						loaded.windowStart <= viewportSourceStart &&
+						loaded.windowEnd >= viewportSourceEnd;
+					const loadedPixelsPerSecond =
+						loaded.waveform.width / Math.max(1e-6, loadedDuration);
+					const targetPixelsPerSecond =
+						(requestWidth * pixelRatio) /
+						Math.max(1e-6, sourceEnd - sourceStart);
+					const resolutionRatio = targetPixelsPerSecond / loadedPixelsPerSecond;
+					hasEnoughResolution =
+						resolutionRatio >= 0.72 && resolutionRatio <= 1.4;
+				}
 			}
 
-			const needRefresh = !hasFullCoverage || !hasEnoughResolution;
+			const hasMatchingLoaded = loaded?.identityKey === identityKey;
+			const needRefresh =
+				!hasMatchingLoaded || !hasFullCoverage || !hasEnoughResolution;
 			if (needRefresh && inflightRequestKeyRef.current !== requestKey) {
 				inflightRequestKeyRef.current = requestKey;
 				const requestToken = ++renderTokenRef.current;
@@ -241,6 +261,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 					pixelRatio,
 					audioSink: currentAudioSink,
 					color,
+					gainDb: currentGainDb,
 				})
 					.then((waveformCanvas) => {
 						if (!waveformCanvas) return;
@@ -282,6 +303,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 		timelineScale,
 		color,
 		getAudioDuration,
+		getGainDb,
 		getAudioSink,
 	]);
 
@@ -308,6 +330,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 	}, [
 		uri,
 		audioDuration,
+		gainDb,
 		audioSink,
 		offsetSeconds,
 		clipDurationSeconds,

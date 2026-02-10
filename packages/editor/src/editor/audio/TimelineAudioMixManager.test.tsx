@@ -285,4 +285,42 @@ describe("TimelineAudioMixManager.runTimelineAudioMixFrame", () => {
 
 		expect(applyA.mock.calls.length + applyB.mock.calls.length).toBe(1);
 	});
+
+	it("会叠加 clip.gainDb 到混音增益", () => {
+		const apply = vi.fn();
+		const boosted = {
+			...createVideoElement("clip-a", 0, 60),
+			clip: {
+				gainDb: 6,
+			},
+		} satisfies TimelineElement;
+		const targets = new Map([
+			[
+				"clip-a",
+				createTarget({
+					id: "clip-a",
+					timeline: boosted.timeline,
+					applyAudioMix: apply,
+				}),
+			],
+		]);
+
+		runTimelineAudioMixFrame({
+			isPlaying: true,
+			isExporting: false,
+			displayTime: 20,
+			fps: 30,
+			elements: [boosted],
+			tracks: [createTrack()],
+			audioTrackStates: {},
+			targets,
+		});
+
+		const instruction = apply.mock.calls.at(-1)?.[0];
+		expect(instruction).toMatchObject({
+			timelineTimeSeconds: expect.any(Number),
+			gain: expect.any(Number),
+		});
+		expect(instruction.gain).toBeCloseTo(10 ** (6 / 20), 4);
+	});
 });

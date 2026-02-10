@@ -6,6 +6,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { AudioGainBaselineControl } from "@/dsl/AudioGainBaselineControl";
 import { AudioWaveformCanvas } from "@/dsl/AudioWaveformCanvas";
 import {
 	useFps,
@@ -54,6 +55,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	const reversed = useVideoClipSelector(id, (state) => state.props.reversed);
 	const element = useTimelineStore((state) => state.getElementById(id));
 	const isSourceAudioMuted = isVideoSourceAudioMuted(element);
+	const clipGainDb = element?.clip?.gainDb ?? 0;
 
 	const isLoading = useVideoClipSelector(
 		id,
@@ -95,9 +97,8 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 	);
 	const timelineOffsetFrames = offsetFrames ?? storeOffsetFrames;
 	const isOffsetPreviewing = offsetFrames !== undefined;
-	const [renderedOffsetFrames, setRenderedOffsetFrames] = useState(
-		timelineOffsetFrames,
-	);
+	const [renderedOffsetFrames, setRenderedOffsetFrames] =
+		useState(timelineOffsetFrames);
 	const pixelsPerFrame = getPixelsPerFrame(fps, timelineScale);
 	const pendingOffsetShiftPx =
 		(renderedOffsetFrames - timelineOffsetFrames) * pixelsPerFrame;
@@ -338,6 +339,9 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 		offsetSeconds,
 		fps,
 		timelineScale,
+		getVideoSink,
+		getInput,
+		timelineOffsetFrames,
 	]);
 
 	const scheduleGenerate = useCallback(() => {
@@ -354,6 +358,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 		});
 	}, [generateThumbnails, isOffsetPreviewing]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 这里需要显式依赖滚动和时间参数来触发缩略图重绘
 	useEffect(() => {
 		if (lastUriRef.current !== uri) {
 			lastUriRef.current = uri ?? null;
@@ -370,6 +375,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 		input,
 		scrollLeft,
 		scheduleGenerate,
+		timelineOffsetFrames,
 	]);
 
 	useLayoutEffect(() => {
@@ -469,6 +475,7 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 							timelineScale={timelineScale}
 							offsetFrames={timelineOffsetFrames}
 							scrollLeft={scrollLeft}
+							gainDb={clipGainDb}
 							color={
 								isTrackMuted
 									? "rgba(163, 163, 163, 0.85)"
@@ -477,6 +484,10 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 							className="absolute inset-0"
 						/>
 					)}
+					<AudioGainBaselineControl
+						elementId={id}
+						lineClassName={isTrackMuted ? "bg-zinc-100/70" : "bg-blue-100/80"}
+					/>
 				</div>
 			)}
 		</div>

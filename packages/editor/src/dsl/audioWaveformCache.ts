@@ -1,11 +1,20 @@
+import {
+	clipGainDbToLinear,
+	normalizeClipGainDb,
+} from "core/editor/audio/clipGain";
 import type { AudioBufferSink } from "mediabunny";
 
 const WAVEFORM_CACHE_LIMIT = 600;
-const WAVEFORM_CACHE_VERSION = "v4";
 const LOUDNESS_BIN_SECONDS = 1 / 240;
 const LOUDNESS_CHUNK_BIN_COUNT = 2048;
 const LOUDNESS_CHUNK_DURATION = LOUDNESS_BIN_SECONDS * LOUDNESS_CHUNK_BIN_COUNT;
 const LOUDNESS_CHUNK_CACHE_LIMIT = 1200;
+const WAVEFORM_DB_FLOOR = -48;
+const WAVEFORM_DB_RANGE = -WAVEFORM_DB_FLOOR;
+const WAVEFORM_MIN_LINEAR = 10 ** (WAVEFORM_DB_FLOOR / 20);
+const WAVEFORM_HOT_DB_THRESHOLD = -6;
+const WAVEFORM_HOT_LINEAR_THRESHOLD = 10 ** (WAVEFORM_HOT_DB_THRESHOLD / 20);
+const DEFAULT_WAVEFORM_HOT_COLOR = "rgba(239, 68, 68, 0.95)";
 
 const waveformCache = new Map<string, HTMLCanvasElement>();
 const waveformAccessOrder: string[] = [];
@@ -39,7 +48,7 @@ const evictWaveformsIfNeeded = () => {
 };
 
 const getLoudnessChunkKey = (uri: string, chunkIndex: number) =>
-	`${WAVEFORM_CACHE_VERSION}|${uri}|loudness:${chunkIndex}`;
+	`${uri}|loudness:${chunkIndex}`;
 
 const touchLoudnessChunkKey = (key: string) => {
 	const index = loudnessChunkAccessOrder.indexOf(key);
@@ -62,14 +71,6 @@ const clampNumber = (value: number, min: number, max: number) => {
 	return Math.min(max, Math.max(min, value));
 };
 
-const getPeakBlend = (secondsPerPixel: number): number => {
-	if (secondsPerPixel >= 0.05) return 0.08;
-	if (secondsPerPixel >= 0.02) return 0.12;
-	if (secondsPerPixel >= 0.01) return 0.16;
-	if (secondsPerPixel >= 0.004) return 0.22;
-	return 0.3;
-};
-
 const getSmoothingRadius = (secondsPerPixel: number): number => {
 	if (secondsPerPixel >= 0.05) return 4;
 	if (secondsPerPixel >= 0.02) return 3;
@@ -77,11 +78,11 @@ const getSmoothingRadius = (secondsPerPixel: number): number => {
 	return 1;
 };
 
-const getLoudnessGain = (secondsPerPixel: number): number => {
-	if (secondsPerPixel >= 0.05) return 2.1;
-	if (secondsPerPixel >= 0.02) return 1.9;
-	if (secondsPerPixel >= 0.008) return 1.7;
-	return 1.5;
+const normalizeAmplitudeToWaveHeight = (amplitude: number): number => {
+	const safeAmplitude = clampNumber(amplitude, 0, 1);
+	if (safeAmplitude <= 0) return 0;
+	const db = 20 * Math.log10(Math.max(safeAmplitude, WAVEFORM_MIN_LINEAR));
+	return clampNumber((db - WAVEFORM_DB_FLOOR) / WAVEFORM_DB_RANGE, 0, 1);
 };
 
 const createEmptyLoudnessChunk = (chunkIndex: number): LoudnessChunk => ({
@@ -285,6 +286,8 @@ export const getWaveformThumbnail = async (options: {
 	pixelRatio: number;
 	audioSink?: AudioBufferSink | null;
 	color: string;
+	gainDb?: number;
+	hotColor?: string;
 }): Promise<HTMLCanvasElement | null> => {
 	const {
 		uri,
@@ -297,6 +300,8 @@ export const getWaveformThumbnail = async (options: {
 		pixelRatio,
 		audioSink,
 		color,
+		gainDb,
+		hotColor,
 	} = options;
 
 	if (!audioSink) return null;
@@ -308,7 +313,10 @@ export const getWaveformThumbnail = async (options: {
 	const endKey = Math.round(windowEnd * 1000);
 	const targetWidth = Math.max(1, Math.round(width * pixelRatio));
 	const targetHeight = Math.max(1, Math.round(height * pixelRatio));
-	const cacheKey = `${WAVEFORM_CACHE_VERSION}|${uri}|${startKey}-${endKey}|${targetWidth}x${targetHeight}|${color}`;
+	const safeGainDb = normalizeClipGainDb(gainDb);
+	const gainLinear = clipGainDbToLinear(safeGainDb);
+	const safeHotColor = hotColor ?? DEFAULT_WAVEFORM_HOT_COLOR;
+	const cacheKey = `${uri}|${startKey}-${endKey}|${targetWidth}x${targetHeight}|${color}|g:${safeGainDb.toFixed(3)}|hot:${safeHotColor}`;
 
 	const cached = waveformCache.get(cacheKey);
 	if (cached) {
@@ -327,9 +335,7 @@ export const getWaveformThumbnail = async (options: {
 		if (!Number.isFinite(bucketDuration) || bucketDuration <= 0) return null;
 
 		// 基于固定分辨率响度缓存再重采样到当前像素，缩放不重复读音频
-		const peakBlend = getPeakBlend(bucketDuration);
 		const smoothingRadius = getSmoothingRadius(bucketDuration);
-		const loudnessGain = getLoudnessGain(bucketDuration);
 		const peaks = new Float32Array(bucketCount);
 
 		try {
@@ -366,8 +372,6 @@ export const getWaveformThumbnail = async (options: {
 					Math.ceil(Math.max(0, sampleEnd) / LOUDNESS_BIN_SECONDS),
 				);
 				let bucketPeak = 0;
-				let bucketLoudnessSum = 0;
-				let bucketLoudnessCount = 0;
 				for (let bin = startBin; bin < endBinExclusive; bin += 1) {
 					if (bin < 0) continue;
 					const chunkIndex = Math.floor(bin / LOUDNESS_CHUNK_BIN_COUNT);
@@ -379,18 +383,9 @@ export const getWaveformThumbnail = async (options: {
 					if (!chunk.hasData[localIndex]) continue;
 					const binPeak = chunk.peak[localIndex];
 					if (binPeak > bucketPeak) bucketPeak = binPeak;
-					bucketLoudnessSum += chunk.loudness[localIndex];
-					bucketLoudnessCount += 1;
 				}
-				if (bucketLoudnessCount <= 0) continue;
-
-				const loudness = bucketLoudnessSum / bucketLoudnessCount;
-				const loudnessEnvelope = clampNumber(loudness * loudnessGain, 0, 1);
-				peaks[i] = clampNumber(
-					loudnessEnvelope * (1 - peakBlend) + bucketPeak * peakBlend,
-					0,
-					1,
-				);
+				if (bucketPeak <= 0) continue;
+				peaks[i] = clampNumber(bucketPeak, 0, 1);
 			}
 			if (bucketCount > 2) {
 				const smoothed = new Float32Array(bucketCount);
@@ -434,14 +429,21 @@ export const getWaveformThumbnail = async (options: {
 		if (!ctx) return null;
 
 		ctx.clearRect(0, 0, targetWidth, targetHeight);
-		const topPadding = Math.max(1, Math.round(targetHeight * 0.06));
-		const lineBottomPadding = Math.max(1, Math.round(targetHeight * 0.08));
+		const topPadding = Math.max(1, Math.round(targetHeight * 0.04));
+		const lineBottomPadding = Math.max(1, Math.round(targetHeight * 0.04));
 		const lineBottomY = targetHeight - lineBottomPadding;
 		const drawHeight = Math.max(1, lineBottomY - topPadding);
 		const yValues = new Float32Array(bucketCount);
+		const hotFlags = new Uint8Array(bucketCount);
 		for (let x = 0; x < bucketCount; x += 1) {
-			const amplitude = clampNumber(peaks[x], 0, 1);
-			const visualAmplitude = amplitude ** 0.85;
+			const gainAdjustedAmplitudeRaw = peaks[x] * gainLinear;
+			const gainAdjustedAmplitude = clampNumber(gainAdjustedAmplitudeRaw, 0, 1);
+			if (gainAdjustedAmplitudeRaw >= WAVEFORM_HOT_LINEAR_THRESHOLD) {
+				hotFlags[x] = 1;
+			}
+			const visualAmplitude = normalizeAmplitudeToWaveHeight(
+				gainAdjustedAmplitude,
+			);
 			yValues[x] = topPadding + (1 - visualAmplitude) * drawHeight;
 		}
 
@@ -479,6 +481,49 @@ export const getWaveformThumbnail = async (options: {
 		ctx.lineJoin = "round";
 		ctx.lineCap = "round";
 		ctx.stroke();
+
+		const hotThresholdVisual = normalizeAmplitudeToWaveHeight(
+			WAVEFORM_HOT_LINEAR_THRESHOLD,
+		);
+		const hotThresholdY = topPadding + (1 - hotThresholdVisual) * drawHeight;
+		ctx.beginPath();
+		let hasHotSegment = false;
+		for (let x = 0; x < bucketCount; x += 1) {
+			if (!hotFlags[x]) continue;
+			const drawX = x + 0.5;
+			const drawY = yValues[x];
+			if (!hasHotSegment || !hotFlags[x - 1]) {
+				ctx.moveTo(drawX, drawY);
+			} else {
+				ctx.lineTo(drawX, drawY);
+			}
+			hasHotSegment = true;
+		}
+		if (hasHotSegment) {
+			ctx.strokeStyle = safeHotColor;
+			ctx.lineWidth = 1.6;
+			ctx.stroke();
+		}
+
+		ctx.beginPath();
+		let hasHotCap = false;
+		const hotCapBottomY = Math.min(lineBottomY, hotThresholdY);
+		for (let x = 0; x < bucketCount; x += 1) {
+			if (!hotFlags[x]) continue;
+			const drawY = yValues[x];
+			if (drawY >= hotCapBottomY) continue;
+			const drawX = x + 0.5;
+			ctx.moveTo(drawX, drawY);
+			ctx.lineTo(drawX, hotCapBottomY);
+			hasHotCap = true;
+		}
+		if (hasHotCap) {
+			ctx.strokeStyle = safeHotColor;
+			ctx.globalAlpha = 0.45;
+			ctx.lineWidth = 1;
+			ctx.stroke();
+			ctx.globalAlpha = 1;
+		}
 
 		waveformCache.set(cacheKey, canvas);
 		touchWaveformKey(cacheKey);

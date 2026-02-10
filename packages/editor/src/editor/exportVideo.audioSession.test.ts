@@ -129,7 +129,9 @@ const createOptions = ({
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
 	audioSources: Record<string, ExportElementAudioSource>;
-	audioTrackStates?: NonNullable<ExportTimelineAsVideoOptions["audio"]>["audioTrackStates"];
+	audioTrackStates?: NonNullable<
+		ExportTimelineAsVideoOptions["audio"]
+	>["audioTrackStates"];
 	getAudioSessionKeyByElementId?: NonNullable<
 		ExportTimelineAsVideoOptions["audio"]
 	>["getAudioSessionKeyByElementId"];
@@ -341,6 +343,46 @@ describe("export audio session mix", () => {
 		expect(target.gains[40]).toBeGreaterThan(0.99);
 	});
 
+	it("会叠加 clip.gainDb 到导出混音增益", () => {
+		const boosted = {
+			...createAudioClip({
+				id: "a1",
+				start: 0,
+				end: 60,
+				offset: 0,
+			}),
+			clip: {
+				gainDb: 6,
+			},
+		} satisfies TimelineElement;
+		const sharedSink = {} as AudioBufferSink;
+		const options = createOptions({
+			elements: [boosted],
+			tracks: [createTrack()],
+			audioSources: {
+				a1: { audioSink: sharedSink, audioDuration: 10 },
+			},
+		});
+
+		const collected = __collectExportAudioTargetsForTests(options, 90);
+		__applyAudioMixPlanAtFrameForTests({
+			frame: 10,
+			startFrame: 0,
+			fps: 30,
+			audioClips: collected.audioClips,
+			audioClipTargetsById: collected.audioClipTargetsById,
+			audioTargetsBySessionKey: collected.audioTargetsBySessionKey,
+			transitionFrameState: EMPTY_TRANSITION_STATE,
+			transitionCurveById: {},
+		});
+
+		const target = collected.audioTargets[0];
+		if (!target) {
+			throw new Error("target should exist");
+		}
+		expect(target.gains[10]).toBeCloseTo(10 ** (6 / 20), 4);
+	});
+
 	it("同 session 冲突时按回放端规则优先选择候选", () => {
 		const chosen = __chooseSessionInstructionForTests(
 			{
@@ -351,6 +393,7 @@ describe("export audio session mix", () => {
 					audioSink: {} as AudioBufferSink,
 					audioDuration: 10,
 					enabled: true,
+					clipGain: 1,
 				},
 				id: "a",
 				timelineStart: 0,
@@ -367,6 +410,7 @@ describe("export audio session mix", () => {
 					audioSink: {} as AudioBufferSink,
 					audioDuration: 10,
 					enabled: true,
+					clipGain: 1,
 				},
 				id: "b",
 				timelineStart: 20,

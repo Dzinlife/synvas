@@ -1,3 +1,4 @@
+import { AudioGainBaselineControl } from "@/dsl/AudioGainBaselineControl";
 import { AudioWaveformCanvas } from "@/dsl/AudioWaveformCanvas";
 import {
 	useFps,
@@ -47,6 +48,9 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 	const storeOffsetFrames = useTimelineStore(
 		(state) => state.getElementById(id)?.timeline?.offset ?? 0,
 	);
+	const clipGainDb = useTimelineStore(
+		(state) => state.getElementById(id)?.clip?.gainDb ?? 0,
+	);
 	const effectiveOffsetFrames = offsetFrames ?? storeOffsetFrames;
 	const isTrackMuted = useTimelineStore((state) =>
 		isTimelineTrackMuted(
@@ -90,10 +94,15 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 					timelineScale={timelineScale}
 					offsetFrames={effectiveOffsetFrames}
 					scrollLeft={scrollLeft}
+					gainDb={clipGainDb}
 					color={waveformColor}
 					className="absolute inset-0"
 				/>
 			)}
+			<AudioGainBaselineControl
+				elementId={id}
+				lineClassName={isTrackMuted ? "bg-zinc-100/75" : "bg-emerald-100/75"}
+			/>
 			<div className="absolute inset-x-0 top-0 p-1 z-10">
 				<div className={labelTextClassName}>
 					<span className={labelDotClassName} />

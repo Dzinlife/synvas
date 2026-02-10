@@ -148,23 +148,22 @@ export const setVideoSourceAudioMuted = (
 ): TimelineElement => {
 	if (element.type !== "VideoClip") return element;
 	if (muted) {
-		if (
-			element.clip?.muteSourceAudio === true &&
-			Object.keys(element.clip).length === 1
-		) {
+		if (element.clip?.muteSourceAudio === true) {
 			return element;
 		}
 		return {
 			...element,
 			clip: {
+				...(element.clip ?? {}),
 				muteSourceAudio: true,
 			},
 		};
 	}
-	if (!element.clip) return element;
+	if (!element.clip?.muteSourceAudio) return element;
+	const { muteSourceAudio: _removed, ...rest } = element.clip;
 	return {
 		...element,
-		clip: undefined,
+		clip: Object.keys(rest).length > 0 ? rest : undefined,
 	};
 };
 

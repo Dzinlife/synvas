@@ -10,9 +10,10 @@ import {
 } from "mediabunny";
 import { JsiSkSurface, Skia, SkiaSGRoot } from "react-skia-lite";
 import type { TimelineElement } from "../dsl/types";
-import { chooseSessionInstructionCandidate } from "./audio/sessionInstructionSelector";
+import { resolveTimelineElementClipGainLinear } from "./audio/clipGain";
 import { renderMixedAudioForExport } from "./audio/dsp/exportRenderer";
 import type { PartialExportAudioDspSettings } from "./audio/dsp/types";
+import { chooseSessionInstructionCandidate } from "./audio/sessionInstructionSelector";
 import {
 	type AudioMixClip,
 	type AudioMixInstruction,
@@ -82,6 +83,7 @@ type ExportAudioClipTarget = {
 	audioSink: AudioBufferSink;
 	audioDuration: number;
 	enabled: boolean;
+	clipGain: number;
 };
 
 type CollectedExportAudioTargets = {
@@ -250,7 +252,7 @@ const createExportOutputTarget = async (): Promise<ExportOutputTarget> => {
 
 const clampGain = (value: number): number => {
 	if (!Number.isFinite(value)) return 0;
-	return Math.min(1, Math.max(0, value));
+	return Math.max(0, value);
 };
 
 const resolveTransitionCurve = (
@@ -275,7 +277,9 @@ const collectTransitionCurveById = (
 	return curveById;
 };
 
-const resolveTimelineStart = (timeline: TimelineElement["timeline"]): number => {
+const resolveTimelineStart = (
+	timeline: TimelineElement["timeline"],
+): number => {
 	const start = timeline.start;
 	if (!Number.isFinite(start)) return 0;
 	return Math.round(start);
@@ -338,6 +342,7 @@ const collectExportAudioTargets = (
 			audioSink: source.audioSink,
 			audioDuration: source.audioDuration,
 			enabled,
+			clipGain: resolveTimelineElementClipGainLinear(element),
 		});
 	}
 
@@ -427,8 +432,14 @@ const applyAudioMixPlanAtFrame = ({
 	for (const clip of audioClips) {
 		const clipTarget = audioClipTargetsById.get(clip.id);
 		if (!clipTarget) continue;
-		const instruction: AudioMixInstruction | null =
+		const planInstruction: AudioMixInstruction | null =
 			plan.instructions[clip.id] ?? null;
+		const instruction: AudioMixInstruction | null = planInstruction
+			? {
+					...planInstruction,
+					gain: Math.max(0, planInstruction.gain * clipTarget.clipGain),
+				}
+			: null;
 		const candidate: SessionInstructionCandidate = {
 			clip: clipTarget,
 			id: clipTarget.id,

@@ -121,6 +121,8 @@ export interface ClipMeta {
 	sourceVideoClipId?: string;
 	/** VideoClip 是否静音源音频；仅静音时写入 true */
 	muteSourceAudio?: true;
+	/** 片段音量（dB），0 表示不增减 */
+	gainDb?: number;
 }
 
 export const ELEMENT_TYPE_VALUES = [

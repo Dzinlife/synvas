@@ -1,4 +1,5 @@
 import type { TimelineElement, TimelineMeta } from "core/dsl/types";
+import { resolveTimelineElementClipGainLinear } from "core/editor/audio/clipGain";
 import { chooseSessionInstructionCandidate } from "core/editor/audio/sessionInstructionSelector";
 import { resolveTransitionFrameState } from "core/editor/preview/transitionFrameState";
 import type { TransitionAudioCurve } from "../../dsl/Transition/model";
@@ -79,6 +80,9 @@ export const runTimelineAudioMixFrame = (
 	const transitionCurveById: Record<string, TransitionAudioCurve | undefined> =
 		{};
 	const elementsById = new Map(args.elements.map((el) => [el.id, el] as const));
+	const resolveClipGainById = (id: string): number => {
+		return resolveTimelineElementClipGainLinear(elementsById.get(id));
+	};
 	for (const transition of transitionFrameState.activeTransitions) {
 		const element = elementsById.get(transition.id);
 		transitionCurveById[transition.id] = resolveTransitionCurve(
@@ -110,7 +114,14 @@ export const runTimelineAudioMixFrame = (
 		}
 	>();
 	for (const [id, target] of args.targets.entries()) {
-		const instruction = plan.instructions[id] ?? null;
+		const planInstruction = plan.instructions[id] ?? null;
+		const clipGain = resolveClipGainById(id);
+		const instruction = planInstruction
+			? {
+					...planInstruction,
+					gain: Math.max(0, planInstruction.gain * clipGain),
+				}
+			: null;
 		const candidate = {
 			target,
 			instruction,
