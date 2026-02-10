@@ -24,7 +24,7 @@ interface SkiaPreviewCanvasProps {
 	canvasRef?: React.RefObject<CanvasRef | null>;
 }
 
-const PRECOMPILE_LOOKAHEAD_FRAMES = 3;
+const PRECOMPILE_LOOKAHEAD_FRAMES = 0;
 
 type SkiaRenderState = Awaited<ReturnType<typeof buildSkiaTree>>;
 
@@ -53,13 +53,13 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 				);
 			},
 			onCacheEvent: (event) => {
-				if (event.type === "miss") {
-					console.log(`[SkiaPreviewCache] miss frame=${event.frameIndex}`);
-					return;
-				}
-				console.log(
-					`[SkiaPreviewCache] ${event.type} frame=${event.frameIndex} status=${event.status}`,
-				);
+				// if (event.type === "miss") {
+				// 	console.log(`[SkiaPreviewCache] miss frame=${event.frameIndex}`);
+				// 	return;
+				// }
+				// console.log(
+				// 	`[SkiaPreviewCache] ${event.type} frame=${event.frameIndex} status=${event.status}`,
+				// );
 			},
 		}),
 	);

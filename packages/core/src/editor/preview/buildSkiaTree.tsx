@@ -106,7 +106,11 @@ const wrapWithTransform = (
 	matrix.translate(anchorOffsetX, anchorOffsetY);
 	matrix.translate(-centerX, -centerY);
 
-	return <Group matrix={matrix}>{node}</Group>;
+	return (
+		<Group matrix={matrix} key={target.id}>
+			{node}
+		</Group>
+	);
 };
 
 const wrapElementNode = ({
@@ -127,7 +131,11 @@ const wrapElementNode = ({
 
 	const opacity = resolveElementOpacity(target);
 	if (opacity !== 1) {
-		wrapped = <Group opacity={opacity}>{wrapped}</Group>;
+		wrapped = (
+			<Group opacity={opacity} key={target.id}>
+				{wrapped}
+			</Group>
+		);
 	}
 	return wrapped;
 };
