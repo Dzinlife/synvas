@@ -1,11 +1,11 @@
 import {
+	type CompressorState,
 	createCompressorState,
 	processCompressorInPlace,
-	type CompressorState,
 } from "core/editor/audio/dsp/effects/compressor";
 import {
-	type PartialExportAudioDspSettings,
 	type ExportAudioDspSettings,
+	type PartialExportAudioDspSettings,
 	resolveExportAudioDspSettings,
 } from "core/editor/audio/dsp/types";
 import { PREVIEW_DSP_WORKLET_PROCESSOR_NAME } from "./previewDspConstants";
@@ -24,7 +24,9 @@ declare abstract class AudioWorkletProcessor {
 
 declare function registerProcessor(
 	name: string,
-	processorCtor: new (options?: AudioWorkletNodeOptions) => AudioWorkletProcessor,
+	processorCtor: new (
+		options?: AudioWorkletNodeOptions,
+	) => AudioWorkletProcessor,
 ): void;
 
 type DspConfigMessage = {
@@ -52,6 +54,7 @@ const clampPcmInPlace = (data: Float32Array) => {
 class PreviewDspProcessor extends AudioWorkletProcessor {
 	private settings: ExportAudioDspSettings;
 	private compressorState: CompressorState;
+	private interleavedBuffer = new Float32Array(0);
 
 	constructor(options?: AudioWorkletNodeOptions) {
 		super(options);
@@ -67,11 +70,20 @@ class PreviewDspProcessor extends AudioWorkletProcessor {
 			const message = event.data;
 			if (!message || message.type !== "config") return;
 			this.settings = resolveExportAudioDspSettings(message.config);
-			this.compressorState = createCompressorState({
+			const nextState = createCompressorState({
 				config: this.settings.compressor,
 				sampleRate,
 			});
+			nextState.runtime.envelope = this.compressorState.runtime.envelope;
+			this.compressorState = nextState;
 		};
+	}
+
+	private ensureInterleavedBuffer(size: number): Float32Array {
+		if (this.interleavedBuffer.length < size) {
+			this.interleavedBuffer = new Float32Array(size);
+		}
+		return this.interleavedBuffer.subarray(0, size);
 	}
 
 	private renderToInterleavedBuffer(
@@ -80,7 +92,7 @@ class PreviewDspProcessor extends AudioWorkletProcessor {
 	): Float32Array {
 		const channels = output.length;
 		const frames = output[0]?.length ?? 0;
-		const interleaved = new Float32Array(frames * channels);
+		const interleaved = this.ensureInterleavedBuffer(frames * channels);
 		for (let channel = 0; channel < channels; channel += 1) {
 			const sourceChannel =
 				channel < input.length ? channel : input.length === 1 ? 0 : -1;
@@ -92,7 +104,10 @@ class PreviewDspProcessor extends AudioWorkletProcessor {
 		return interleaved;
 	}
 
-	private writeInterleavedToOutput(output: Float32Array[], interleaved: Float32Array) {
+	private writeInterleavedToOutput(
+		output: Float32Array[],
+		interleaved: Float32Array,
+	) {
 		const channels = output.length;
 		const frames = output[0]?.length ?? 0;
 		for (let channel = 0; channel < channels; channel += 1) {
@@ -108,8 +123,26 @@ class PreviewDspProcessor extends AudioWorkletProcessor {
 		if (!output || output.length === 0) return true;
 
 		const input = inputs[0] ?? [];
-		const interleaved = this.renderToInterleavedBuffer(input, output);
 		const masterGain = dbToAmp(this.settings.masterGainDb);
+		if (
+			Math.abs(masterGain - 1) <= AUDIO_EPSILON &&
+			!this.settings.compressor.enabled
+		) {
+			const channels = output.length;
+			const frames = output[0]?.length ?? 0;
+			for (let channel = 0; channel < channels; channel += 1) {
+				const sourceChannel =
+					channel < input.length ? channel : input.length === 1 ? 0 : -1;
+				const sourceData = sourceChannel >= 0 ? input[sourceChannel] : null;
+				const targetData = output[channel];
+				for (let frame = 0; frame < frames; frame += 1) {
+					targetData[frame] = sourceData?.[frame] ?? 0;
+				}
+			}
+			return true;
+		}
+
+		const interleaved = this.renderToInterleavedBuffer(input, output);
 		if (Math.abs(masterGain - 1) > AUDIO_EPSILON) {
 			for (let i = 0; i < interleaved.length; i += 1) {
 				interleaved[i] = (interleaved[i] ?? 0) * masterGain;

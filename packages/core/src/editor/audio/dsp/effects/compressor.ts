@@ -98,6 +98,9 @@ export const processCompressorInPlace = ({
 		const coeff =
 			detector > runtime.envelope ? runtime.attackCoeff : runtime.releaseCoeff;
 		runtime.envelope = coeff * runtime.envelope + (1 - coeff) * detector;
+		if (runtime.envelope < AMP_EPSILON) {
+			runtime.envelope = 0;
+		}
 		const inputDb = ampToDb(runtime.envelope);
 		const reductionDb = resolveGainReductionDb({
 			inputDb,
