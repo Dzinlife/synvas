@@ -27,6 +27,7 @@ const createVideoClip = ({
 	uri = "a.mp4",
 	reversed = false,
 	trackIndex = 0,
+	muteSourceAudio = false,
 }: {
 	id: string;
 	start: number;
@@ -35,6 +36,7 @@ const createVideoClip = ({
 	uri?: string;
 	reversed?: boolean;
 	trackIndex?: number;
+	muteSourceAudio?: boolean;
 }): TimelineElement => ({
 	id,
 	type: "VideoClip",
@@ -42,6 +44,13 @@ const createVideoClip = ({
 	name: id,
 	timeline: createTimeline(start, end, offset, trackIndex),
 	props: { uri, reversed },
+	...(muteSourceAudio
+		? {
+				clip: {
+					muteSourceAudio: true,
+				},
+			}
+		: {}),
 });
 
 const createAudioClip = ({
@@ -173,6 +182,149 @@ describe("clipContinuityIndex", () => {
 			createVideoClip({ id: "v2", start: 30, end: 60, offset: 30 }),
 		];
 		const key1 = getAudioPlaybackSessionKey(elements, "v1");
+		const key2 = getAudioPlaybackSessionKey(elements, "v2");
+		expect(key1).toBe(key2);
+	});
+
+	it("同源跨轨且时间连续时会归并到同一音频 session", () => {
+		const elements = [
+			createAudioClip({
+				id: "a1",
+				start: 0,
+				end: 30,
+				offset: 100,
+				uri: "shared.mp4",
+				trackIndex: -1,
+			}),
+			createVideoClip({
+				id: "v2",
+				start: 30,
+				end: 60,
+				offset: 130,
+				uri: "shared.mp4",
+				trackIndex: 1,
+			}),
+		];
+		const key1 = getAudioPlaybackSessionKey(elements, "a1");
+		const key2 = getAudioPlaybackSessionKey(elements, "v2");
+		expect(key1).toBe(key2);
+	});
+
+	it("同源跨轨但时间不连续（有 gap）时不会归并", () => {
+		const elements = [
+			createAudioClip({
+				id: "a1",
+				start: 0,
+				end: 30,
+				offset: 100,
+				uri: "shared.mp4",
+				trackIndex: -1,
+			}),
+			createVideoClip({
+				id: "v2",
+				start: 31,
+				end: 60,
+				offset: 131,
+				uri: "shared.mp4",
+				trackIndex: 2,
+			}),
+		];
+		const key1 = getAudioPlaybackSessionKey(elements, "a1");
+		const key2 = getAudioPlaybackSessionKey(elements, "v2");
+		expect(key1).not.toBe(key2);
+	});
+
+	it("同源跨轨但时间重叠时不会归并", () => {
+		const elements = [
+			createAudioClip({
+				id: "a1",
+				start: 0,
+				end: 40,
+				offset: 100,
+				uri: "shared.mp4",
+				trackIndex: -2,
+			}),
+			createVideoClip({
+				id: "v2",
+				start: 30,
+				end: 60,
+				offset: 130,
+				uri: "shared.mp4",
+				trackIndex: 0,
+			}),
+		];
+		const key1 = getAudioPlaybackSessionKey(elements, "a1");
+		const key2 = getAudioPlaybackSessionKey(elements, "v2");
+		expect(key1).not.toBe(key2);
+	});
+
+	it("muteSourceAudio 的 VideoClip 不参与音频归并", () => {
+		const elements = [
+			createVideoClip({
+				id: "v1",
+				start: 0,
+				end: 30,
+				offset: 0,
+				uri: "shared.mp4",
+				muteSourceAudio: true,
+			}),
+			createAudioClip({
+				id: "a1",
+				start: 0,
+				end: 30,
+				offset: 0,
+				uri: "shared.mp4",
+				trackIndex: -1,
+			}),
+			createVideoClip({
+				id: "v2",
+				start: 30,
+				end: 60,
+				offset: 30,
+				uri: "shared.mp4",
+			}),
+		];
+		expect(getAudioPlaybackSessionKey(elements, "v1")).toBe("clip:v1");
+		const key1 = getAudioPlaybackSessionKey(elements, "a1");
+		const key2 = getAudioPlaybackSessionKey(elements, "v2");
+		expect(key1).toBe(key2);
+	});
+
+	it("分离 AudioClip 的连续性不受 Video 转场边界影响", () => {
+		const elements = [
+			createVideoClip({
+				id: "v1",
+				start: 0,
+				end: 30,
+				offset: 0,
+				uri: "shared.mp4",
+				muteSourceAudio: true,
+			}),
+			createAudioClip({
+				id: "detached-a1",
+				start: 0,
+				end: 30,
+				offset: 0,
+				uri: "shared.mp4",
+				trackIndex: -1,
+			}),
+			createVideoClip({
+				id: "v2",
+				start: 30,
+				end: 60,
+				offset: 30,
+				uri: "shared.mp4",
+			}),
+			createTransition({
+				id: "t1",
+				start: 15,
+				end: 45,
+				boundary: 30,
+				fromId: "v1",
+				toId: "v2",
+			}),
+		];
+		const key1 = getAudioPlaybackSessionKey(elements, "detached-a1");
 		const key2 = getAudioPlaybackSessionKey(elements, "v2");
 		expect(key1).toBe(key2);
 	});

@@ -36,6 +36,10 @@ const resolveTrackIndex = (element: TimelineElement): number => {
 	return normalizeInt(element.timeline.trackIndex, 0);
 };
 
+const hasMutedVideoSourceAudio = (element: TimelineElement): boolean => {
+	return element.type === "VideoClip" && element.clip?.muteSourceAudio === true;
+};
+
 const resolveDuration = (element: TimelineElement): number => {
 	const start = normalizeInt(element.timeline.start, 0);
 	const end = normalizeInt(element.timeline.end, start);
@@ -135,7 +139,7 @@ const assignSessionKeysForGroup = (
 		}
 		const sessionKey =
 			kind === "audio"
-				? `audio|${current.trackIndex}|${current.uri}|${chainHeadId}`
+				? `audio|${current.uri}|${current.reversed}|${chainHeadId}`
 				: `video|${current.trackIndex}|${current.uri}|${current.reversed}|${chainHeadId}`;
 		target.set(current.id, sessionKey);
 	}
@@ -174,12 +178,14 @@ const buildContinuityIndex = (
 					: false,
 		};
 
-		const audioGroupKey = `${clipInfo.trackIndex}|${clipInfo.uri}|${clipInfo.reversed}`;
-		const audioGroup = audioGroups.get(audioGroupKey);
-		if (audioGroup) {
-			audioGroup.push(clipInfo);
-		} else {
-			audioGroups.set(audioGroupKey, [clipInfo]);
+		if (!hasMutedVideoSourceAudio(element)) {
+			const audioGroupKey = `${clipInfo.uri}|${clipInfo.reversed}`;
+			const audioGroup = audioGroups.get(audioGroupKey);
+			if (audioGroup) {
+				audioGroup.push(clipInfo);
+			} else {
+				audioGroups.set(audioGroupKey, [clipInfo]);
+			}
 		}
 
 		if (clipInfo.type !== "VideoClip") {
