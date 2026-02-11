@@ -30,6 +30,8 @@ import {
 	secondsToFrames,
 } from "@/utils/timecode";
 import type { ComponentModel, ComponentModelStore } from "../model/types";
+import { resolveVideoKeyframeTime } from "./keyframeTimeCache";
+import { warmFramesFromKeyframeToTarget } from "./reverseSeekWarmup";
 import {
 	releaseVideoPlaybackSession,
 	retainVideoPlaybackSession,
@@ -43,6 +45,12 @@ export interface VideoClipProps {
 	reversed?: boolean;
 	start: number; // 帧
 	end: number; // 帧
+}
+
+export type VideoSeekReason = "default" | "reverse-playback";
+
+export interface VideoSeekOptions {
+	reason?: VideoSeekReason;
 }
 
 // VideoClip 内部状态
@@ -61,7 +69,7 @@ export interface VideoClipInternal {
 	// 帧缓存
 	frameCache: Map<number, SkImage>;
 	// seek 方法（用于拖动/跳转）
-	seekToTime: (seconds: number) => Promise<void>;
+	seekToTime: (seconds: number, options?: VideoSeekOptions) => Promise<void>;
 	// 开始流式播放
 	startPlayback: (startTime: number) => Promise<void>;
 	// 获取下一帧（流式播放时调用）
@@ -141,13 +149,16 @@ export function createVideoClipModel(
 	initialProps: VideoClipProps,
 ): ComponentModelStore<VideoClipProps, VideoClipInternal> {
 	const SEEK_PREFETCH_FRAMES = 24;
+	const REVERSE_PREWARM_LOOKAHEAD_KEYFRAMES = 2;
+	const REVERSE_PREWARM_COMPLETED_LIMIT = 512;
 	// 用于取消异步操作
 	let asyncId = 0;
 	// init 的取消标记，避免被播放/seek 的 asyncId 误伤
 	let initEpoch = 0;
 	let isSeekingFlag = false;
 	let lastSeekTime: number | null = null;
-	let pendingSeekTime: number | null = null;
+	let pendingSeekRequest: { time: number; options: VideoSeekOptions } | null =
+		null;
 	let lastPreparedFrameIndex: number | null = null;
 	let audioInitEpoch = 0;
 	let audioPlayback: AudioPlaybackController | null = null;
@@ -161,6 +172,9 @@ export function createVideoClipModel(
 	let activeDedicatedSink = false;
 	let dedicatedVideoSink: CanvasSink | null = null;
 	let lastSinkSwitchFrame: number | null = null;
+	const reversePrewarmInflight = new Set<string>();
+	const reversePrewarmCompleted = new Set<string>();
+	const reversePrewarmCompletedOrder: string[] = [];
 
 	const getTimelineFps = () => {
 		const fps = useTimelineStore.getState().fps;
@@ -213,6 +227,35 @@ export function createVideoClipModel(
 		return Math.round(time / frameInterval) * frameInterval;
 	};
 
+	const resetReversePrewarmState = () => {
+		reversePrewarmInflight.clear();
+		reversePrewarmCompleted.clear();
+		reversePrewarmCompletedOrder.length = 0;
+	};
+
+	const markReversePrewarmCompleted = (key: string) => {
+		if (reversePrewarmCompleted.has(key)) return;
+		reversePrewarmCompleted.add(key);
+		reversePrewarmCompletedOrder.push(key);
+		while (
+			reversePrewarmCompletedOrder.length > REVERSE_PREWARM_COMPLETED_LIMIT
+		) {
+			const oldest = reversePrewarmCompletedOrder.shift();
+			if (!oldest) break;
+			reversePrewarmCompleted.delete(oldest);
+		}
+	};
+
+	const buildReversePrewarmRangeKey = (
+		uri: string,
+		startTime: number,
+		endExclusive: number,
+	): string => {
+		const startKey = Math.max(0, Math.round(startTime * 1000));
+		const endKey = Math.max(0, Math.round(endExclusive * 1000));
+		return `${uri}|${startKey}-${endKey}`;
+	};
+
 	const fallbackFrameCache = new Map<number, SkImage>();
 	// 当前显示帧，避免缓存回收时误释放
 	let pinnedFrame: SkImage | null = null;
@@ -244,6 +287,106 @@ export function createVideoClipModel(
 			console.warn("Canvas to SkImage failed:", err);
 			return null;
 		}
+	};
+
+	const prewarmReverseRange = async (options: {
+		uri: string;
+		asset: VideoAsset;
+		videoSink: CanvasSink;
+		startTime: number;
+		endExclusive: number;
+	}): Promise<void> => {
+		const { uri, asset, videoSink, startTime, endExclusive } = options;
+		const rangeKey = buildReversePrewarmRangeKey(uri, startTime, endExclusive);
+		if (
+			reversePrewarmInflight.has(rangeKey) ||
+			reversePrewarmCompleted.has(rangeKey)
+		) {
+			return;
+		}
+		reversePrewarmInflight.add(rangeKey);
+
+		let iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+		let hasError = false;
+		try {
+			iterator = videoSink.canvases(startTime, endExclusive);
+			while (true) {
+				const result = await iterator.next();
+				if (result.done) break;
+				// 资源已切换时停止旧任务，避免把旧素材帧写进新状态。
+				if (assetHandle?.asset !== asset) return;
+				const canvas = result.value.canvas;
+				if (
+					!(
+						canvas instanceof HTMLCanvasElement ||
+						canvas instanceof OffscreenCanvas
+					)
+				) {
+					continue;
+				}
+				const skiaImage = await canvasToSkImage(canvas);
+				if (!skiaImage) continue;
+				asset.storeFrame(alignTime(result.value.timestamp), skiaImage);
+			}
+		} catch (err) {
+			hasError = true;
+			console.warn("Reverse prewarm failed:", err);
+		} finally {
+			await iterator?.return?.();
+			reversePrewarmInflight.delete(rangeKey);
+			if (!hasError) {
+				markReversePrewarmCompleted(rangeKey);
+			}
+		}
+	};
+
+	const scheduleReverseLookaheadPrewarm = (options: {
+		uri: string;
+		input: Input;
+		videoSink: CanvasSink;
+		asset: VideoAsset;
+		targetTime: number;
+	}) => {
+		const { uri, input, videoSink, asset, targetTime } = options;
+		void (async () => {
+			const frameInterval = 1 / getTimelineFps();
+			const currentTimeKey = Math.max(0, Math.round(targetTime * 1000));
+			const currentKeyTime = await resolveVideoKeyframeTime({
+				uri,
+				input,
+				time: targetTime,
+				timeKey: currentTimeKey,
+			});
+			if (currentKeyTime === null) return;
+
+			let upperBoundary = Math.max(0, currentKeyTime);
+			for (let i = 0; i < REVERSE_PREWARM_LOOKAHEAD_KEYFRAMES; i += 1) {
+				const previousQueryTime = Math.max(0, upperBoundary - frameInterval);
+				const previousQueryKey = Math.max(
+					0,
+					Math.round(previousQueryTime * 1000),
+				);
+				const previousKeyTime = await resolveVideoKeyframeTime({
+					uri,
+					input,
+					time: previousQueryTime,
+					timeKey: previousQueryKey,
+				});
+				if (previousKeyTime === null) break;
+				const startTime = Math.max(0, previousKeyTime);
+				if (startTime >= upperBoundary) break;
+				// 预热到当前关键帧右侧半帧，保证边界处也可直接命中缓存。
+				const endExclusive = upperBoundary + frameInterval * 0.5;
+				await prewarmReverseRange({
+					uri,
+					asset,
+					videoSink,
+					startTime,
+					endExclusive,
+				});
+				upperBoundary = startTime;
+			}
+		})();
 	};
 
 	// 更新当前帧
@@ -429,15 +572,19 @@ export function createVideoClipModel(
 	// 统一的播放步进方法，避免频繁挂载导致状态丢失
 	const stepPlayback = async (targetTime: number): Promise<void> => {
 		if (!Number.isFinite(targetTime)) return;
-		const { internal } = store.getState();
+		const { internal, props } = store.getState();
 		const videoSink = internal.videoSink;
 		if (!videoSink) return;
+		// 倒放时 targetTime 会递减，阈值必须为 0 才能每次回退都重建迭代器并推进画面。
+		const backJumpThresholdSeconds = props.reversed
+			? 0
+			: PLAYBACK_BACK_JUMP_FRAMES / getTimelineFps();
 		const sessionKey = retainPlaybackSession();
 		const frameToShow = await stepVideoPlaybackSession({
 			key: sessionKey,
 			sink: videoSink,
 			targetTime,
-			backJumpThresholdSeconds: PLAYBACK_BACK_JUMP_FRAMES / getTimelineFps(),
+			backJumpThresholdSeconds,
 		});
 		if (!frameToShow) {
 			return;
@@ -492,19 +639,48 @@ export function createVideoClipModel(
 	};
 
 	// Seek 到指定时间的方法（用于拖动/跳转）
-	const seekToTime = async (seconds: number): Promise<void> => {
-		const { internal } = store.getState();
-		const { videoSink } = internal;
+	const seekToTime = async (
+		seconds: number,
+		options: VideoSeekOptions = {},
+	): Promise<void> => {
+		const { internal, props } = store.getState();
+		const { videoSink, input } = internal;
 
 		if (!videoSink) return;
 
 		// seek 前先停止流式播放，避免迭代器与临时 seek 竞争
 		stopPlayback();
 
-		// 防止并发 seek
 		const alignedTime = alignTime(seconds);
+		const normalizedOptions: VideoSeekOptions = {
+			reason: options.reason ?? "default",
+		};
+		const reverseLookaheadContext =
+			normalizedOptions.reason === "reverse-playback" &&
+			props.reversed &&
+			typeof props.uri === "string" &&
+			props.uri.length > 0 &&
+			input &&
+			assetHandle?.asset
+				? {
+						uri: props.uri,
+						input,
+						asset: assetHandle.asset,
+					}
+				: null;
+		const triggerReverseLookaheadPrewarm = () => {
+			if (!reverseLookaheadContext) return;
+			scheduleReverseLookaheadPrewarm({
+				uri: reverseLookaheadContext.uri,
+				input: reverseLookaheadContext.input,
+				videoSink,
+				asset: reverseLookaheadContext.asset,
+				targetTime: alignedTime,
+			});
+		};
+		// 防止并发 seek
 		if (isSeekingFlag) {
-			pendingSeekTime = alignedTime;
+			pendingSeekRequest = { time: alignedTime, options: normalizedOptions };
 			return;
 		}
 		if (lastSeekTime === alignedTime) return;
@@ -522,6 +698,7 @@ export function createVideoClipModel(
 				},
 			}));
 			lastSeekTime = alignedTime;
+			triggerReverseLookaheadPrewarm();
 			return;
 		}
 
@@ -529,58 +706,103 @@ export function createVideoClipModel(
 		asyncId++;
 		const currentAsyncId = asyncId;
 
-		let iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
-		try {
-			// 创建临时迭代器获取帧
-			iterator = videoSink.canvases(alignedTime);
-			const firstFrame = (await iterator.next()).value ?? null;
-
-			if (currentAsyncId !== asyncId) return;
-
-			if (firstFrame) {
-				const canvas = firstFrame.canvas;
-				if (
+		const decodeWrappedFrame = async (
+			frame: WrappedCanvas,
+		): Promise<SkImage | null> => {
+			const canvas = frame.canvas;
+			if (
+				!(
 					canvas instanceof HTMLCanvasElement ||
 					canvas instanceof OffscreenCanvas
-				) {
-					const skiaImage = await canvasToSkImage(canvas);
-					if (skiaImage && currentAsyncId === asyncId) {
-						updateCurrentFrame(skiaImage, alignedTime);
-						lastSeekTime = alignedTime;
-					}
-				}
+				)
+			) {
+				return null;
 			}
-			if (firstFrame && SEEK_PREFETCH_FRAMES > 0) {
+			return canvasToSkImage(canvas);
+		};
+
+		const fallbackSeekBySingleFrame = async (): Promise<void> => {
+			const iterator = videoSink.canvases(alignedTime);
+			try {
+				const firstFrame = (await iterator.next()).value ?? null;
+				if (currentAsyncId !== asyncId) return;
+				if (!firstFrame) return;
+				const firstImage = await decodeWrappedFrame(firstFrame);
+				if (firstImage && currentAsyncId === asyncId) {
+					updateCurrentFrame(firstImage, alignedTime);
+					lastSeekTime = alignedTime;
+				}
+				if (SEEK_PREFETCH_FRAMES <= 0) return;
 				// 预取少量连续帧，减少拖动预览时的离散命中
 				for (let i = 0; i < SEEK_PREFETCH_FRAMES; i += 1) {
 					const result = await iterator.next();
 					if (currentAsyncId !== asyncId) return;
 					const nextFrame = result.value ?? null;
 					if (!nextFrame) break;
-					const canvas = nextFrame.canvas;
-					if (
-						canvas instanceof HTMLCanvasElement ||
-						canvas instanceof OffscreenCanvas
-					) {
-						const skiaImage = await canvasToSkImage(canvas);
-						if (skiaImage && currentAsyncId === asyncId) {
-							const alignedTime = alignTime(nextFrame.timestamp);
-							assetHandle?.asset.storeFrame(alignedTime, skiaImage);
-						}
+					const nextImage = await decodeWrappedFrame(nextFrame);
+					if (nextImage && currentAsyncId === asyncId) {
+						const nextAlignedTime = alignTime(nextFrame.timestamp);
+						assetHandle?.asset.storeFrame(nextAlignedTime, nextImage);
 					}
 				}
+			} finally {
+				await iterator.return?.();
 			}
+		};
+
+		try {
+			let resolvedByWarmup = false;
+			if (
+				normalizedOptions.reason === "reverse-playback" &&
+				props.reversed &&
+				props.uri &&
+				input &&
+				assetHandle?.asset
+			) {
+				const warmupResult = await warmFramesFromKeyframeToTarget<SkImage>({
+					videoSink,
+					targetTime: alignedTime,
+					frameInterval: 1 / getTimelineFps(),
+					alignTime,
+					resolveKeyframeTime: ({ targetTime, timeKey }) =>
+						resolveVideoKeyframeTime({
+							uri: props.uri ?? "",
+							input,
+							time: targetTime,
+							timeKey,
+						}),
+					getCachedFrame: (time) => assetHandle?.asset.getCachedFrame(time),
+					decodeWrappedFrame: async (frame) => {
+						const decoded = await decodeWrappedFrame(frame);
+						if (!decoded || currentAsyncId !== asyncId) return null;
+						return decoded;
+					},
+					storeFrame: (time, frame) => {
+						assetHandle?.asset.storeFrame(time, frame);
+					},
+					shouldAbort: () => currentAsyncId !== asyncId,
+				});
+				if (currentAsyncId !== asyncId) return;
+				if (warmupResult.frame) {
+					updateCurrentFrame(warmupResult.frame, alignedTime);
+					lastSeekTime = alignedTime;
+					resolvedByWarmup = true;
+				}
+			}
+			if (!resolvedByWarmup) {
+				await fallbackSeekBySingleFrame();
+			}
+			triggerReverseLookaheadPrewarm();
 		} catch (err) {
 			console.warn("Seek failed:", err);
 		} finally {
-			await iterator?.return?.();
 			isSeekingFlag = false;
-			if (pendingSeekTime !== null && pendingSeekTime !== lastSeekTime) {
-				const nextTime = pendingSeekTime;
-				pendingSeekTime = null;
-				await seekToTime(nextTime);
+			if (pendingSeekRequest && pendingSeekRequest.time !== lastSeekTime) {
+				const nextRequest = pendingSeekRequest;
+				pendingSeekRequest = null;
+				await seekToTime(nextRequest.time, nextRequest.options);
 			} else {
-				pendingSeekTime = null;
+				pendingSeekRequest = null;
 			}
 		}
 	};
@@ -784,6 +1006,7 @@ export function createVideoClipModel(
 
 					assetHandle?.release();
 					assetHandle = localHandle;
+					resetReversePrewarmState();
 
 					const { asset } = localHandle;
 					const elements = useTimelineStore.getState().elements;
@@ -959,6 +1182,7 @@ export function createVideoClipModel(
 				assetHandle = null;
 				audioAssetHandle?.release();
 				audioAssetHandle = null;
+				resetReversePrewarmState();
 
 				// 清理资源
 				internal.videoSink = null;

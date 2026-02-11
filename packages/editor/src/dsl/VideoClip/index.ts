@@ -2,6 +2,7 @@ import type { DSLComponentDefinition } from "../model/componentRegistry";
 import { componentRegistry } from "../model/componentRegistry";
 import { createVideoClipModel, type VideoClipProps } from "./model";
 import VideoClipRenderer from "./renderer";
+import { VideoClipSetting } from "./setting";
 import { VideoClipTimeline } from "./timeline";
 
 // 组件定义
@@ -19,16 +20,12 @@ export const VideoClipDefinition: DSLComponentDefinition<VideoClipProps> = {
 		});
 	},
 	Timeline: VideoClipTimeline,
+	Setting: VideoClipSetting,
 	meta: {
 		name: "Video Clip",
 		category: "media",
 		trackRole: "clip",
 		description: "Video clip with support for trimming and playback",
-		defaultProps: {
-			reversed: false,
-			start: 0,
-			end: 5,
-		},
 	},
 };
 

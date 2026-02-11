@@ -13,6 +13,7 @@ import {
 	type VideoClipInternal,
 	type VideoClipProps,
 } from "./model";
+import { applyPlayingPlaybackStrategy } from "./playbackStrategy";
 
 interface VideoClipRendererProps extends VideoClipProps {
 	id: string;
@@ -131,7 +132,12 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 			if (!wasPlayingRef.current) {
 				wasPlayingRef.current = true;
 			}
-			stepPlayback(videoTime);
+			applyPlayingPlaybackStrategy({
+				reversed: Boolean(props.reversed),
+				videoTime,
+				seekToTime,
+				stepPlayback,
+			});
 			return;
 		}
 

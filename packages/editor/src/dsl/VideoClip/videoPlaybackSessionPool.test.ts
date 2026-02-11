@@ -75,6 +75,27 @@ describe("videoPlaybackSessionPool", () => {
 		releaseVideoPlaybackSession("session:b");
 	});
 
+	it("阈值为 0 时任意回退都会重建迭代器", async () => {
+		const sink = createSink([0.1, 0.2, 0.3, 0.4]);
+		retainVideoPlaybackSession("session:reverse");
+		const frame1 = await stepVideoPlaybackSession({
+			key: "session:reverse",
+			sink,
+			targetTime: 0.35,
+			backJumpThresholdSeconds: 0,
+		});
+		const frame2 = await stepVideoPlaybackSession({
+			key: "session:reverse",
+			sink,
+			targetTime: 0.25,
+			backJumpThresholdSeconds: 0,
+		});
+		expect(frame1?.timestamp).toBe(0.3);
+		expect(frame2?.timestamp).toBe(0.2);
+		expect(sink.canvases).toHaveBeenCalledTimes(2);
+		releaseVideoPlaybackSession("session:reverse");
+	});
+
 	it("启动后不会展示时间戳晚于目标时间的首帧", async () => {
 		const sink = createSink([1.1, 1.2, 1.3]);
 		retainVideoPlaybackSession("session:c");
