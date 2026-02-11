@@ -1,0 +1,120 @@
+:root {
+	color-scheme: dark;
+	font-family:
+		"SF Mono", "Fira Code", Menlo, Monaco, Consolas, "Liberation Mono",
+		"Courier New", monospace;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: radial-gradient(circle at top, #2f3252 0%, #111 55%);
+	color: #ececf5;
+}
+
+.page {
+	max-width: 1100px;
+	margin: 24px auto 48px;
+	padding: 0 16px;
+	display: grid;
+	gap: 16px;
+}
+
+.panel {
+	background: rgba(14, 16, 30, 0.82);
+	border: 1px solid rgba(192, 201, 255, 0.24);
+	border-radius: 12px;
+	padding: 16px;
+}
+
+h1,
+h2,
+h3 {
+	margin: 0 0 12px;
+	font-weight: 600;
+}
+
+h1 {
+	font-size: 20px;
+}
+
+h2 {
+	font-size: 16px;
+}
+
+h3 {
+	font-size: 13px;
+}
+
+.status {
+	margin: 0 0 16px;
+	color: #7ce8a5;
+}
+
+.controls {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+	gap: 10px;
+	margin-bottom: 12px;
+	align-items: end;
+}
+
+label {
+	display: grid;
+	gap: 4px;
+	font-size: 12px;
+}
+
+input,
+select,
+button {
+	width: 100%;
+	border-radius: 8px;
+	border: 1px solid rgba(201, 215, 255, 0.36);
+	background: rgba(35, 39, 59, 0.92);
+	color: #f2f2fb;
+	padding: 8px 10px;
+	font: inherit;
+}
+
+button {
+	cursor: pointer;
+	background: linear-gradient(135deg, #4e7bff, #65d1ff);
+	color: #091127;
+	font-weight: 700;
+}
+
+button:hover {
+	filter: brightness(1.05);
+}
+
+.preview-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 12px;
+}
+
+canvas {
+	width: 100%;
+	height: auto;
+	aspect-ratio: 16 / 9;
+	border-radius: 8px;
+	border: 1px solid rgba(211, 228, 255, 0.3);
+	background: #12131d;
+}
+
+pre {
+	margin: 0;
+	padding: 12px;
+	border-radius: 8px;
+	max-height: 320px;
+	overflow: auto;
+	border: 1px solid rgba(190, 200, 255, 0.22);
+	background: rgba(4, 6, 12, 0.85);
+	line-height: 1.45;
+	font-size: 12px;
+	white-space: pre-wrap;
+}

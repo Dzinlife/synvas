@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>RIFE WebGPU Demo</title>
+	</head>
+	<body>
+		<main class="page">
+			<section class="panel">
+				<h1>RIFE WebGPU 验证 Demo</h1>
+				<p id="runtime-status" class="status"></p>
+				<div class="controls">
+					<label>
+						模型文件 (.onnx)
+						<input id="model-file" type="file" accept=".onnx" />
+					</label>
+					<label>
+						执行 Provider
+						<select id="provider-mode">
+							<option value="webgpu">webgpu only</option>
+							<option value="webgpu-wasm">webgpu + wasm fallback</option>
+							<option value="wasm">wasm only</option>
+						</select>
+					</label>
+					<button id="load-model" type="button">加载模型</button>
+				</div>
+
+				<div class="controls">
+					<label>
+						Frame A
+						<input id="image-a" type="file" accept="image/*" />
+					</label>
+					<label>
+						Frame B
+						<input id="image-b" type="file" accept="image/*" />
+					</label>
+					<button id="generate-sample" type="button">生成测试帧</button>
+				</div>
+
+				<div class="controls">
+					<label>
+						timestep (0~1)
+						<input id="timestep" type="number" value="0.5" min="0" max="1" step="0.01" />
+					</label>
+					<label>
+						target width
+						<input id="target-width" type="number" value="512" min="16" step="2" />
+					</label>
+					<label>
+						target height
+						<input id="target-height" type="number" value="512" min="16" step="2" />
+					</label>
+					<button id="run-inference" type="button">运行一次插帧</button>
+				</div>
+			</section>
+
+			<section class="panel">
+				<h2>输入与输出</h2>
+				<div class="preview-grid">
+					<div>
+						<h3>Frame A</h3>
+						<canvas id="canvas-a" width="320" height="180"></canvas>
+					</div>
+					<div>
+						<h3>Frame B</h3>
+						<canvas id="canvas-b" width="320" height="180"></canvas>
+					</div>
+					<div>
+						<h3>Output</h3>
+						<canvas id="canvas-out" width="320" height="180"></canvas>
+					</div>
+				</div>
+			</section>
+
+			<section class="panel">
+				<h2>运行日志</h2>
+				<pre id="log"></pre>
+			</section>
+		</main>
+		<script type="module" src="/src/main.ts"></script>
+	</body>
+</html>

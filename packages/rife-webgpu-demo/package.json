@@ -1,0 +1,21 @@
+{
+  "name": "@ai-nle/rife-webgpu-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "vite dev --port 3011",
+    "build": "vite build",
+    "preview": "vite preview --port 3011",
+    "typecheck": "tsc --noEmit",
+    "check": "biome check ."
+  },
+  "dependencies": {
+    "onnxruntime-web": "^1.24.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.4",
+    "typescript": "^5.7.2",
+    "vite": "^7.1.7"
+  }
+}
