@@ -415,7 +415,7 @@ export interface UseMaterialDndOptions<T extends MaterialDndItem> {
 		time: number,
 		dropTargetType?: "track" | "gap",
 	) => void;
-	onPreviewDrop?: (item: T, canvasX: number, canvasY: number) => void;
+	onPreviewDrop?: (item: T, positionX: number, positionY: number) => void;
 	getRole?: (item: T) => TrackRole;
 	getDurationFrames?: (item: T, defaultDurationFrames: number) => number;
 	getDragData?: (item: T) => MaterialDragData;
@@ -516,13 +516,13 @@ export function useMaterialDnd<T extends MaterialDndItem>({
 						);
 					} else if (
 						currentDropTarget.zone === "preview" &&
-						currentDropTarget.canvasX !== undefined &&
-						currentDropTarget.canvasY !== undefined
+						currentDropTarget.positionX !== undefined &&
+						currentDropTarget.positionY !== undefined
 					) {
 						onPreviewDrop?.(
 							item,
-							currentDropTarget.canvasX,
-							currentDropTarget.canvasY,
+							currentDropTarget.positionX,
+							currentDropTarget.positionY,
 						);
 					}
 				}

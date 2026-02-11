@@ -202,6 +202,11 @@ describe("buildSkiaTree transform wrapper", () => {
 				tracks,
 				getTrackIndexForElement,
 				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+				},
 			},
 			deps,
 		);
@@ -222,7 +227,7 @@ describe("buildSkiaTree transform wrapper", () => {
 		};
 		const matrixOps = matrix.__ops ?? [];
 		expect(matrixOps.length).toBe(6);
-		expect(matrixOps[0]).toEqual({ type: "translate", x: 300, y: 400 });
+		expect(matrixOps[0]).toEqual({ type: "translate", x: 1260, y: 140 });
 		expect(matrixOps[1]).toEqual({ type: "translate", x: 50, y: -25 });
 		expect(matrixOps[2]?.type).toBe("rotate");
 		expect(matrixOps[2]?.value).toBeCloseTo(Math.PI / 6, 6);

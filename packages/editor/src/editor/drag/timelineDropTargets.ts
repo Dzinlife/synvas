@@ -1,3 +1,4 @@
+import { canvasPointToTransformPosition } from "core/dsl/position";
 import { clampFrame } from "@/utils/timecode";
 import { DEFAULT_TRACK_HEIGHT } from "../timeline/trackConfig";
 import type { DropTarget } from "../timeline/types";
@@ -253,8 +254,8 @@ export function getTimelineDropTimeFromScreenX(
 
 export interface PreviewDropTargetInfo {
 	zone: "preview";
-	canvasX: number;
-	canvasY: number;
+	positionX: number;
+	positionY: number;
 	canDrop: boolean;
 }
 
@@ -289,11 +290,23 @@ export function getPreviewDropTargetFromScreenPosition(
 		topLeftX <= pictureWidth &&
 		topLeftY >= 0 &&
 		topLeftY <= pictureHeight;
+	const { positionX, positionY } = canvasPointToTransformPosition(
+		topLeftX,
+		topLeftY,
+		{
+			width: pictureWidth,
+			height: pictureHeight,
+		},
+		{
+			width: pictureWidth,
+			height: pictureHeight,
+		},
+	);
 
 	return {
 		zone: "preview",
-		canvasX: topLeftX,
-		canvasY: topLeftY,
+		positionX,
+		positionY,
 		canDrop: isInBounds,
 	};
 }

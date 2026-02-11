@@ -1,3 +1,4 @@
+import { transformPositionToCanvasPoint } from "core/dsl/position";
 import type { RenderLayout, TransformMeta } from "core/dsl/types";
 
 /**
@@ -102,23 +103,30 @@ export const resolveTransformToRenderLayout = (
 ): RenderLayout => {
 	const size = resolveTransformSize(transform);
 
-	// position 语义为元素中心坐标
-	const projectTopLeftX = transform.position.x - size.width / 2;
-	const projectTopLeftY = transform.position.y - size.height / 2;
-
-	// 计算缩放比例（从项目画布到渲染画布）
-	const scaleX = (canvas.width / picture.width) * pixelRatio;
-	const scaleY = (canvas.height / picture.height) * pixelRatio;
-
-	const canvasTopLeftX = projectTopLeftX * scaleX;
-	const canvasTopLeftY = projectTopLeftY * scaleY;
+	const effectiveCanvas = {
+		width: canvas.width * pixelRatio,
+		height: canvas.height * pixelRatio,
+	};
+	const { canvasX: canvasCenterX, canvasY: canvasCenterY } =
+		transformPositionToCanvasPoint(
+			transform.position.x,
+			transform.position.y,
+			picture,
+			effectiveCanvas,
+		);
+	const safePictureWidth =
+		Number.isFinite(picture.width) && picture.width > 0 ? picture.width : 1;
+	const safePictureHeight =
+		Number.isFinite(picture.height) && picture.height > 0 ? picture.height : 1;
+	const scaleX = effectiveCanvas.width / safePictureWidth;
+	const scaleY = effectiveCanvas.height / safePictureHeight;
 	const canvasWidth = size.width * scaleX;
 	const canvasHeight = size.height * scaleY;
 	const rotation = (transform.rotation.value * Math.PI) / 180;
 
 	return {
-		cx: canvasTopLeftX + canvasWidth / 2,
-		cy: canvasTopLeftY + canvasHeight / 2,
+		cx: canvasCenterX,
+		cy: canvasCenterY,
 		w: canvasWidth,
 		h: canvasHeight,
 		rotation,

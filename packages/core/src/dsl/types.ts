@@ -8,8 +8,8 @@ export interface TransformSizeMeta {
 }
 
 export interface TransformPositionMeta {
-	x: number; // 锚点在画布坐标系中的 X（左上角原点）
-	y: number; // 锚点在画布坐标系中的 Y（左上角原点）
+	x: number; // 锚点在画布坐标系中的 X（中心原点，右正）
+	y: number; // 锚点在画布坐标系中的 Y（中心原点，上正）
 	space: "canvas";
 }
 

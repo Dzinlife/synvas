@@ -27,10 +27,10 @@ describe("layout transform semantics", () => {
 		expect(centerY).toBeCloseTo(layout.cy, 6);
 	});
 
-	it("resolveTransformToRenderLayout 中 position 语义为中心坐标", () => {
+	it("resolveTransformToRenderLayout 中 (0,0) 映射到画布中心，且不受 anchor 影响", () => {
 		const baseTransform: Omit<TransformMeta, "anchor"> = {
 			baseSize: { width: 200, height: 100 },
-			position: { x: 500, y: 260, space: "canvas" },
+			position: { x: 0, y: 0, space: "canvas" },
 			scale: { x: 1.2, y: 0.8 },
 			rotation: { value: 30, unit: "deg" },
 			distort: { type: "none" },
@@ -50,11 +50,32 @@ describe("layout transform semantics", () => {
 		const layoutA = resolveTransformToRenderLayout(anchorA, picture, canvas);
 		const layoutB = resolveTransformToRenderLayout(anchorB, picture, canvas);
 
-		expect(layoutA.cx).toBeCloseTo(500, 6);
-		expect(layoutA.cy).toBeCloseTo(260, 6);
+		expect(layoutA.cx).toBeCloseTo(960, 6);
+		expect(layoutA.cy).toBeCloseTo(540, 6);
 		expect(layoutA.cx).toBeCloseTo(layoutB.cx, 6);
 		expect(layoutA.cy).toBeCloseTo(layoutB.cy, 6);
 		expect(layoutA.w).toBeCloseTo(layoutB.w, 6);
 		expect(layoutA.h).toBeCloseTo(layoutB.h, 6);
+	});
+
+	it("resolveTransformToRenderLayout 中 position.y 正向向上", () => {
+		const baseTransform: Omit<TransformMeta, "anchor"> = {
+			baseSize: { width: 200, height: 100 },
+			position: { x: 0, y: 100, space: "canvas" },
+			scale: { x: 1, y: 1 },
+			rotation: { value: 0, unit: "deg" },
+			distort: { type: "none" },
+		};
+
+		const transform: TransformMeta = {
+			...baseTransform,
+			anchor: { x: 0.5, y: 0.5, space: "normalized" },
+		};
+		const picture = { width: 1920, height: 1080 };
+		const canvas = { width: 1920, height: 1080 };
+		const layout = resolveTransformToRenderLayout(transform, picture, canvas);
+
+		expect(layout.cx).toBeCloseTo(960, 6);
+		expect(layout.cy).toBeCloseTo(440, 6);
 	});
 });

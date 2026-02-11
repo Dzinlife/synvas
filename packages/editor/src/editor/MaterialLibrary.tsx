@@ -72,8 +72,8 @@ interface MaterialCardProps {
 	) => void;
 	onPreviewDrop?: (
 		item: MaterialItem,
-		canvasX: number,
-		canvasY: number,
+		positionX: number,
+		positionY: number,
 	) => void;
 	dndContext: MaterialDndContext;
 }
@@ -375,7 +375,6 @@ const MaterialLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
 	const currentTime = useTimelineStore((state) => state.currentTime);
-	const canvasSize = useTimelineStore((state) => state.canvasSize);
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
@@ -465,8 +464,8 @@ const MaterialLibrary: React.FC = () => {
 					transform: createTransformMeta({
 						width: item.width ?? 1920,
 						height: item.height ?? 1080,
-						positionX: canvasSize.width / 2,
-						positionY: canvasSize.height / 2,
+						positionX: 0,
+						positionY: 0,
 					}),
 					timeline: buildTimelineMeta(
 						{
@@ -541,14 +540,13 @@ const MaterialLibrary: React.FC = () => {
 			attachments,
 			autoAttach,
 			fps,
-			canvasSize,
 			dndContext,
 		],
 	);
 
 	// 处理素材库拖拽放置到预览画布
 	const handlePreviewDrop = useCallback(
-		(item: MaterialItem, canvasX: number, canvasY: number) => {
+		(item: MaterialItem, positionX: number, positionY: number) => {
 			const elementWidth = item.width ?? 400;
 			const elementHeight = item.height ?? 300;
 			const role = getMaterialRole(item);
@@ -581,8 +579,8 @@ const MaterialLibrary: React.FC = () => {
 					transform: createTransformMeta({
 						width: elementWidth,
 						height: elementHeight,
-						positionX: canvasX,
-						positionY: canvasY,
+						positionX,
+						positionY,
 					}),
 					timeline: buildTimelineMeta(
 						{

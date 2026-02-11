@@ -2,7 +2,7 @@ import type { TimelineElement } from "core/dsl/types";
 import type React from "react";
 import { useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { useModelSafe, useModelSelectorSafe } from "@/dsl/model";
+import { useModelSelectorSafe } from "@/dsl/model";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { getTransformSize } from "@/dsl/transform";
 import { framesToTimecode } from "@/utils/timecode";
@@ -32,7 +32,6 @@ const ElementSettingsPanel: React.FC = () => {
 		(state) => state.constraints,
 		{},
 	);
-	const selectedModel = useModelSafe(selectedElementId ?? "");
 	const selectedDefinition = useMemo(() => {
 		if (!selectedElement) return undefined;
 		return componentRegistry.get(selectedElement.component);

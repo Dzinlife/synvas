@@ -21,7 +21,6 @@ import {
 	useElements,
 	useFps,
 	useRippleEditing,
-	useTimelineStore,
 } from "../contexts/TimelineContext";
 import {
 	resolveMaterialDropTarget,
@@ -182,7 +181,6 @@ export function useExternalMaterialDnd({
 }: UseExternalMaterialDndOptions) {
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const { fps } = useFps();
-	const canvasSize = useTimelineStore((state) => state.canvasSize);
 	const { currentTime } = useCurrentTime();
 	const { setElements } = useElements();
 	const { attachments, autoAttach } = useAttachments();
@@ -697,8 +695,8 @@ export function useExternalMaterialDnd({
 							transform: createTransformMeta({
 								width: 1920,
 								height: 1080,
-								positionX: canvasSize.width / 2,
-								positionY: canvasSize.height / 2,
+								positionX: 0,
+								positionY: 0,
 							}),
 							timeline: buildTimelineMeta(
 								{
@@ -779,8 +777,8 @@ export function useExternalMaterialDnd({
 				if (!resolvedDropTarget || !resolvedDropTarget.canDrop) return;
 
 				if (resolvedDropTarget.zone === "preview") {
-					const canvasX = resolvedDropTarget.canvasX ?? 0;
-					const canvasY = resolvedDropTarget.canvasY ?? 0;
+					const positionX = resolvedDropTarget.positionX ?? 0;
+					const positionY = resolvedDropTarget.positionY ?? 0;
 					setElements((prev) => {
 						let nextElements = prev;
 						let nextStart = clampFrame(currentTime);
@@ -816,8 +814,8 @@ export function useExternalMaterialDnd({
 								transform: createTransformMeta({
 									width: item.width,
 									height: item.height,
-									positionX: canvasX,
-									positionY: canvasY,
+									positionX,
+									positionY,
 								}),
 								timeline: buildTimelineMeta(
 									{
@@ -885,8 +883,8 @@ export function useExternalMaterialDnd({
 							transform: createTransformMeta({
 								width: item.width,
 								height: item.height,
-								positionX: canvasSize.width / 2,
-								positionY: canvasSize.height / 2,
+								positionX: 0,
+								positionY: 0,
 							}),
 							timeline: buildTimelineMeta(
 								{
@@ -997,8 +995,8 @@ export function useExternalMaterialDnd({
 			if (!resolvedDropTarget || !resolvedDropTarget.canDrop) return;
 
 			if (resolvedDropTarget.zone === "preview") {
-				const canvasX = resolvedDropTarget.canvasX ?? 0;
-				const canvasY = resolvedDropTarget.canvasY ?? 0;
+				const positionX = resolvedDropTarget.positionX ?? 0;
+				const positionY = resolvedDropTarget.positionY ?? 0;
 				setElements((prev) => {
 					let nextElements = prev;
 					let nextStart = clampFrame(currentTime);
@@ -1034,8 +1032,8 @@ export function useExternalMaterialDnd({
 							transform: createTransformMeta({
 								width: item.metadata.width,
 								height: item.metadata.height,
-								positionX: canvasX,
-								positionY: canvasY,
+								positionX,
+								positionY,
 							}),
 							timeline: buildTimelineMeta(
 								{
@@ -1103,8 +1101,8 @@ export function useExternalMaterialDnd({
 						transform: createTransformMeta({
 							width: item.metadata.width,
 							height: item.metadata.height,
-							positionX: canvasSize.width / 2,
-							positionY: canvasSize.height / 2,
+							positionX: 0,
+							positionY: 0,
 						}),
 						timeline: buildTimelineMeta(
 							{
@@ -1175,7 +1173,6 @@ export function useExternalMaterialDnd({
 			setElements,
 			currentTime,
 			fps,
-			canvasSize,
 			materialDndContext,
 			rippleEditingEnabled,
 			attachments,

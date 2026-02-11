@@ -1,6 +1,7 @@
 export * from "./utils/timecode";
 export * from "./asr/types";
 export * from "./dsl/types";
+export * from "./dsl/position";
 export * from "./dsl/model/types";
 export * from "./dsl/export";
 export * from "./dsl/Transition/picture";

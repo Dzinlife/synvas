@@ -45,8 +45,8 @@
           "height": 1080
         },
         "position": {
-          "x": 960,
-          "y": 540,
+          "x": 0,
+          "y": 0,
           "space": "canvas"
         },
         "anchor": {
@@ -93,8 +93,8 @@
           "height": 1080
         },
         "position": {
-          "x": 960,
-          "y": 540,
+          "x": 0,
+          "y": 0,
           "space": "canvas"
         },
         "anchor": {
@@ -141,8 +141,8 @@
           "height": 1080
         },
         "position": {
-          "x": 960,
-          "y": 540,
+          "x": 0,
+          "y": 0,
           "space": "canvas"
         },
         "anchor": {
@@ -189,8 +189,8 @@
           "height": 1080
         },
         "position": {
-          "x": 960,
-          "y": 540,
+          "x": 0,
+          "y": 0,
           "space": "canvas"
         },
         "anchor": {
@@ -241,8 +241,8 @@
           "height": 300
         },
         "position": {
-          "x": 350,
-          "y": 400,
+          "x": -610,
+          "y": 140,
           "space": "canvas"
         },
         "anchor": {
@@ -291,8 +291,8 @@
           "height": 400
         },
         "position": {
-          "x": 800,
-          "y": 800,
+          "x": -160,
+          "y": -260,
           "space": "canvas"
         },
         "anchor": {
@@ -341,8 +341,8 @@
           "height": 1080
         },
         "position": {
-          "x": 960,
-          "y": 540,
+          "x": 0,
+          "y": 0,
           "space": "canvas"
         },
         "anchor": {
@@ -393,8 +393,8 @@
           "height": 200
         },
         "position": {
-          "x": 1720,
-          "y": 100,
+          "x": 760,
+          "y": 440,
           "space": "canvas"
         },
         "anchor": {
@@ -441,8 +441,8 @@
           "height": 1080
         },
         "position": {
-          "x": 960,
-          "y": 540,
+          "x": 0,
+          "y": 0,
           "space": "canvas"
         },
         "anchor": {

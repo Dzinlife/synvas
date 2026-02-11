@@ -1,3 +1,7 @@
+import {
+	canvasPointToTransformPosition,
+	transformPositionToCanvasPoint,
+} from "core/dsl/position";
 import type { TimelineElement, TransformMeta } from "core/dsl/types";
 import Konva from "konva";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -583,6 +587,30 @@ export const usePreviewInteractions = ({
 		[],
 	);
 
+	const modelPositionToCanvasCenter = useCallback(
+		(position: { x: number; y: number }) => {
+			return transformPositionToCanvasPoint(
+				position.x,
+				position.y,
+				canvasConvertOptions.picture,
+				canvasConvertOptions.canvas,
+			);
+		},
+		[canvasConvertOptions],
+	);
+
+	const canvasCenterToModelPosition = useCallback(
+		(canvasX: number, canvasY: number) => {
+			return canvasPointToTransformPosition(
+				canvasX,
+				canvasY,
+				canvasConvertOptions.picture,
+				canvasConvertOptions.canvas,
+			);
+		},
+		[canvasConvertOptions],
+	);
+
 	const clearSnapGuides = useCallback(() => {
 		setSnapGuides({ vertical: [], horizontal: [] });
 	}, []);
@@ -925,15 +953,18 @@ export const usePreviewInteractions = ({
 			const node = stage.findOne(`.element-${sourceId}`) as Konva.Node | null;
 			if (!node) return;
 			if (!source.transform) return;
+			const { canvasX, canvasY } = modelPositionToCanvasCenter(
+				source.transform.position,
+			);
 			const { stageX, stageY } = canvasToStageCoords(
-				source.transform.position.x,
-				source.transform.position.y,
+				canvasX,
+				canvasY,
 			);
 			node.position({ x: stageX, y: stageY });
 		});
 
 		stage.batchDraw();
-	}, [canvasToStageCoords]);
+	}, [canvasToStageCoords, modelPositionToCanvasCenter]);
 
 	const handleMouseDown = useCallback((id: string) => {
 		setDraggingId(id);
@@ -962,9 +993,10 @@ export const usePreviewInteractions = ({
 			for (const el of currentElements) {
 				if (!nextSelectedIds.includes(el.id)) continue;
 				if (!el.transform) continue;
+				const center = modelPositionToCanvasCenter(el.transform.position);
 				centers[el.id] = {
-					x: el.transform.position.x,
-					y: el.transform.position.y,
+					x: center.canvasX,
+					y: center.canvasY,
 				};
 			}
 
@@ -1074,6 +1106,7 @@ export const usePreviewInteractions = ({
 			captureHistorySnapshot,
 			setElementsWithoutHistory,
 			getElementCanvasBox,
+			modelPositionToCanvasCenter,
 		],
 	);
 
@@ -1099,13 +1132,19 @@ export const usePreviewInteractions = ({
 				const transform = el.transform;
 				const initialCenter = initialCenters[el.id];
 				if (!initialCenter) return el;
+				const nextCanvasX = initialCenter.x + deltaX;
+				const nextCanvasY = initialCenter.y + deltaY;
+				const { positionX, positionY } = canvasCenterToModelPosition(
+					nextCanvasX,
+					nextCanvasY,
+				);
 
 				const updatedTransform = quantizeTransform({
 					...transform,
 					position: {
 						...transform.position,
-						x: initialCenter.x + deltaX,
-						y: initialCenter.y + deltaY,
+						x: positionX,
+						y: positionY,
 					},
 				});
 				if (!isTransformChanged(transform, updatedTransform)) {
@@ -1122,7 +1161,7 @@ export const usePreviewInteractions = ({
 			setElementsWithoutHistory(newElements);
 			return true;
 		},
-		[setElementsWithoutHistory],
+		[setElementsWithoutHistory, canvasCenterToModelPosition],
 	);
 
 	const handleDrag = useCallback(
@@ -1456,6 +1495,10 @@ export const usePreviewInteractions = ({
 					nextMetrics.center.x,
 					nextMetrics.center.y,
 				);
+				const { positionX, positionY } = canvasCenterToModelPosition(
+					nextCenterX,
+					nextCenterY,
+				);
 				const nextWidth = nextMetrics.width / effectiveZoom;
 				const nextHeight = nextMetrics.height / effectiveZoom;
 				const nextScaleX = resolveScaleFromSize(
@@ -1472,8 +1515,8 @@ export const usePreviewInteractions = ({
 					...transform,
 					position: {
 						...transform.position,
-						x: nextCenterX,
-						y: nextCenterY,
+						x: positionX,
+						y: positionY,
 					},
 					scale: {
 						x: nextScaleX,
@@ -1514,6 +1557,7 @@ export const usePreviewInteractions = ({
 			snapshotGroupTransform,
 			getEffectiveZoom,
 			stageToCanvasCoords,
+			canvasCenterToModelPosition,
 			setElementsWithoutHistory,
 		],
 	);
@@ -1642,6 +1686,10 @@ export const usePreviewInteractions = ({
 			const pictureHeightScaled = currentMetrics.height / base.effectiveZoom;
 			const { canvasX: canvasCenterX, canvasY: canvasCenterY } =
 				stageToCanvasCoords(currentMetrics.center.x, currentMetrics.center.y);
+			const { positionX, positionY } = canvasCenterToModelPosition(
+				canvasCenterX,
+				canvasCenterY,
+			);
 			const rotationDegrees = currentMetrics.rotationDeg;
 			const activeAnchor =
 				base.activeAnchor ??
@@ -1702,8 +1750,8 @@ export const usePreviewInteractions = ({
 					...transform,
 					position: {
 						...transform.position,
-						x: canvasCenterX,
-						y: canvasCenterY,
+						x: positionX,
+						y: positionY,
 					},
 					scale: {
 						x: nextScaleX,
@@ -1733,6 +1781,7 @@ export const usePreviewInteractions = ({
 			stageToCanvasCoords,
 			getEffectiveZoom,
 			captureHistorySnapshot,
+			canvasCenterToModelPosition,
 			setElementsWithoutHistory,
 		],
 	);
@@ -1764,6 +1813,10 @@ export const usePreviewInteractions = ({
 					metricsBeforeReset.center.x,
 					metricsBeforeReset.center.y,
 				);
+			const { positionX, positionY } = canvasCenterToModelPosition(
+				canvasCenterX,
+				canvasCenterY,
+			);
 			const rotationDegrees = metricsBeforeReset.rotationDeg;
 			const activeAnchor =
 				base?.activeAnchor ??
@@ -1824,8 +1877,8 @@ export const usePreviewInteractions = ({
 					...transform,
 					position: {
 						...transform.position,
-						x: canvasCenterX,
-						y: canvasCenterY,
+						x: positionX,
+						y: positionY,
 					},
 					scale: {
 						x: nextScaleX,
@@ -1862,6 +1915,7 @@ export const usePreviewInteractions = ({
 		[
 			stageToCanvasCoords,
 			getEffectiveZoom,
+			canvasCenterToModelPosition,
 			clearSnapGuides,
 			setElementsWithoutHistory,
 			pushHistorySnapshot,

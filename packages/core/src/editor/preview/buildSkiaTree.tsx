@@ -1,5 +1,6 @@
 import React from "react";
 import { Fill, Group, Skia, type SkPicture } from "react-skia-lite";
+import { transformPositionToCanvasPoint } from "../../dsl/position";
 import type {
 	ComponentModelStore,
 	RendererPrepareFrameContext,
@@ -71,6 +72,7 @@ const resolveElementOpacity = (element: TimelineElement): number =>
 const wrapWithTransform = (
 	node: NonNullable<React.ReactNode>,
 	target: TimelineElement,
+	canvasSize?: { width: number; height: number },
 ): NonNullable<React.ReactNode> => {
 	const transform = target.transform;
 	if (!transform) return node;
@@ -90,8 +92,20 @@ const wrapWithTransform = (
 	const centerY = baseHeight * 0.5;
 	const anchorOffsetX = anchorX - centerX;
 	const anchorOffsetY = anchorY - centerY;
-	const positionX = resolveFiniteNumber(transform.position.x, 0);
-	const positionY = resolveFiniteNumber(transform.position.y, 0);
+	const rawPositionX = resolveFiniteNumber(transform.position.x, 0);
+	const rawPositionY = resolveFiniteNumber(transform.position.y, 0);
+	let positionX = rawPositionX;
+	let positionY = rawPositionY;
+	if (canvasSize && canvasSize.width > 0 && canvasSize.height > 0) {
+		const converted = transformPositionToCanvasPoint(
+			rawPositionX,
+			rawPositionY,
+			canvasSize,
+			canvasSize,
+		);
+		positionX = converted.canvasX;
+		positionY = converted.canvasY;
+	}
 	const scaleX = resolveFiniteNumber(transform.scale.x, 1);
 	const scaleY = resolveFiniteNumber(transform.scale.y, 1);
 	const rotate =
@@ -117,16 +131,18 @@ const wrapElementNode = ({
 	target,
 	node,
 	isTransitionElement,
+	canvasSize,
 }: {
 	target: TimelineElement;
 	node: React.ReactNode | null;
 	isTransitionElement: (element: TimelineElement) => boolean;
+	canvasSize?: { width: number; height: number };
 }): React.ReactNode | null => {
 	if (node === null || node === undefined || node === false) return null;
 
 	let wrapped: NonNullable<React.ReactNode> = node;
 	if (!isTransitionElement(target) && target.type !== FILTER_ELEMENT_TYPE) {
-		wrapped = wrapWithTransform(wrapped, target);
+		wrapped = wrapWithTransform(wrapped, target, canvasSize);
 	}
 
 	const opacity = resolveElementOpacity(target);
@@ -256,6 +272,7 @@ export const buildSkiaRenderStateCore = async (
 			target,
 			node: renderElementNode(target, deps),
 			isTransitionElement,
+			canvasSize,
 		});
 		// 转场渲染需要 picture 时，提前准备帧避免画面停在旧帧
 		const ready = shouldPrepare
@@ -333,6 +350,7 @@ export const buildSkiaRenderStateCore = async (
 			target: element,
 			node: transitionNode,
 			isTransitionElement,
+			canvasSize,
 		});
 		const ready = Promise.all([
 			elementReady,
