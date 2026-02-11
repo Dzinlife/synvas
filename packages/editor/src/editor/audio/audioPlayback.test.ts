@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
 	});
 	const context = {
 		currentTime: 0,
+		sampleRate: 44_100,
 		destination: {},
 		createGain: vi.fn(() => ({
 			gain: {
@@ -78,13 +79,20 @@ const baseTimeline: TimelineMeta = {
 	trackIndex: -1,
 };
 
-const createSink = () => {
+const createSink = (sampleRate = 44_100) => {
+	const buffer = createMockAudioBuffer([0, 0, 0, 0], sampleRate);
 	return {
+		getBuffer: vi.fn(async (timestamp: number) => ({
+			timestamp,
+			duration: buffer.duration,
+			buffer,
+		})),
 		buffers: vi.fn((start: number) =>
 			(async function* () {
 				yield {
 					timestamp: start,
-					buffer: {} as AudioBuffer,
+					duration: buffer.duration,
+					buffer,
 				};
 			})(),
 		),
@@ -278,6 +286,52 @@ describe("audioPlayback runtime sharing", () => {
 		controller.dispose();
 	});
 
+	it("采样率不一致时会切换为整段缓存单 source 播放", async () => {
+		const sink = createSink(48_000);
+		const controller = createAudioPlaybackController({
+			getTimeline: () => baseTimeline,
+			getFps: () => 30,
+			getState: () => ({
+				uri: "resample.mp3",
+				audioSink: sink,
+				audioDuration: 20,
+			}),
+			getRuntimeKey: () => "session:resample",
+		});
+
+		await controller.stepPlayback({
+			timelineTimeSeconds: 1.5,
+			gain: 1,
+			activeWindow: { start: 0, end: 10 },
+			sourceTime: 1.5,
+			sourceRange: { start: 0, end: 10 },
+		});
+		(mocks.context as { currentTime: number }).currentTime = 0.1;
+		await controller.stepPlayback({
+			timelineTimeSeconds: 1.55,
+			gain: 1,
+			activeWindow: { start: 0, end: 10 },
+			sourceTime: 1.55,
+			sourceRange: { start: 0, end: 10 },
+		});
+
+		expect(sink.getBuffer).toHaveBeenCalledTimes(1);
+		expect(sink.buffers).toHaveBeenCalledTimes(1);
+		expect(sink.buffers).toHaveBeenNthCalledWith(1, 0, 20);
+		expect(mocks.context.createBuffer).toHaveBeenCalledTimes(1);
+		const createBufferSourceMock = mocks.context.createBufferSource as unknown as {
+			mock: {
+				results: Array<{ value: { start: ReturnType<typeof vi.fn> } }>;
+			};
+		};
+		expect(createBufferSourceMock.mock.results.length).toBe(1);
+		const source = createBufferSourceMock.mock.results[0]?.value;
+		const offset = source?.start.mock.calls[0]?.[1];
+		expect(offset).toBeCloseTo(1.5, 3);
+
+		controller.dispose();
+	});
+
 	it("倒放指令会复用反向缓存，不重复重建 source", async () => {
 		const reverseBuffer = createMockAudioBuffer([0.1, 0.2, 0.3, 0.4], 10);
 		const sink = {
@@ -321,7 +375,7 @@ describe("audioPlayback runtime sharing", () => {
 		});
 
 		expect(sink.buffers).toHaveBeenCalledTimes(1);
-		expect(mocks.context.createBuffer).toHaveBeenCalledTimes(1);
+		expect(mocks.context.createBuffer).toHaveBeenCalledTimes(2);
 		const createBufferSourceMock = mocks.context.createBufferSource as unknown as {
 			mock: {
 				results: Array<{ value: { start: ReturnType<typeof vi.fn> } }>;
