@@ -237,26 +237,43 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 						loaded.waveform.width / Math.max(1e-6, loadedDuration);
 					const sourceCropX =
 						(overlapStart - loaded.windowStart) * sourceScaleX;
-						const sourceCropWidth = Math.max(
-							1,
-							(overlapEnd - overlapStart) * sourceScaleX,
-						);
-						const drawScaleX = canvasWidth / Math.max(1e-6, viewportDuration);
-						const drawX = reversed
-							? (viewportSourceEnd - overlapEnd) * drawScaleX
-							: (overlapStart - viewportSourceStart) * drawScaleX;
-						const drawWidth = (overlapEnd - overlapStart) * drawScaleX;
+					const sourceCropWidth = Math.max(
+						1,
+						(overlapEnd - overlapStart) * sourceScaleX,
+					);
+					const drawScaleX = canvasWidth / Math.max(1e-6, viewportDuration);
+					const drawX = (overlapStart - viewportSourceStart) * drawScaleX;
+					const drawWidth = (overlapEnd - overlapStart) * drawScaleX;
+					if (reversed) {
+						// 倒放时对画布做水平镜像，保证波形方向与听感一致。
+						ctx.save();
+						ctx.translate(canvasWidth, 0);
+						ctx.scale(-1, 1);
 						ctx.drawImage(
 							loaded.waveform,
-						sourceCropX,
-						0,
-						sourceCropWidth,
-						loaded.waveform.height,
-						drawX,
-						0,
-						drawWidth,
-						canvasHeight,
-					);
+							sourceCropX,
+							0,
+							sourceCropWidth,
+							loaded.waveform.height,
+							drawX,
+							0,
+							drawWidth,
+							canvasHeight,
+						);
+						ctx.restore();
+					} else {
+						ctx.drawImage(
+							loaded.waveform,
+							sourceCropX,
+							0,
+							sourceCropWidth,
+							loaded.waveform.height,
+							drawX,
+							0,
+							drawWidth,
+							canvasHeight,
+						);
+					}
 				}
 				if (loaded.identityKey === identityKey) {
 					hasFullCoverage =
