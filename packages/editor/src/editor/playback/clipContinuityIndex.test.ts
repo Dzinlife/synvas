@@ -59,6 +59,7 @@ const createAudioClip = ({
 	end,
 	offset = 0,
 	uri = "a.mp3",
+	reversed = false,
 	trackIndex = -1,
 }: {
 	id: string;
@@ -66,6 +67,7 @@ const createAudioClip = ({
 	end: number;
 	offset?: number;
 	uri?: string;
+	reversed?: boolean;
 	trackIndex?: number;
 }): TimelineElement => ({
 	id,
@@ -73,7 +75,7 @@ const createAudioClip = ({
 	component: "audio-clip",
 	name: id,
 	timeline: createTimeline(start, end, offset, trackIndex),
-	props: { uri },
+	props: { uri, reversed },
 });
 
 const createTransition = ({
@@ -174,6 +176,50 @@ describe("clipContinuityIndex", () => {
 		const key1 = getAudioPlaybackSessionKey(elements, "a1");
 		const key2 = getAudioPlaybackSessionKey(elements, "a2");
 		expect(key1).toBe(key2);
+	});
+
+	it("AudioClip 同源倒放硬切会归并到同一 session", () => {
+		const elements = [
+			createAudioClip({
+				id: "a1",
+				start: 0,
+				end: 30,
+				offset: 30,
+				reversed: true,
+			}),
+			createAudioClip({
+				id: "a2",
+				start: 30,
+				end: 60,
+				offset: 0,
+				reversed: true,
+			}),
+		];
+		const key1 = getAudioPlaybackSessionKey(elements, "a1");
+		const key2 = getAudioPlaybackSessionKey(elements, "a2");
+		expect(key1).toBe(key2);
+	});
+
+	it("AudioClip 正反向不同不会归并到同一 session", () => {
+		const elements = [
+			createAudioClip({
+				id: "a1",
+				start: 0,
+				end: 30,
+				offset: 0,
+				reversed: false,
+			}),
+			createAudioClip({
+				id: "a2",
+				start: 30,
+				end: 60,
+				offset: 30,
+				reversed: true,
+			}),
+		];
+		const key1 = getAudioPlaybackSessionKey(elements, "a1");
+		const key2 = getAudioPlaybackSessionKey(elements, "a2");
+		expect(key1).not.toBe(key2);
 	});
 
 	it("VideoClip 的源音频同源硬切也会归并到同一 session", () => {

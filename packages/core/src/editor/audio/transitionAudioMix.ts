@@ -10,6 +10,7 @@ export type AudioMixInstruction = {
 	activeWindow?: { start: number; end: number };
 	sourceTime?: number;
 	sourceRange?: { start: number; end: number };
+	reversed?: boolean;
 };
 
 export type AudioMixClip = {
@@ -17,6 +18,7 @@ export type AudioMixClip = {
 	timeline: TimelineMeta;
 	audioDuration: number;
 	enabled: boolean;
+	reversed?: boolean;
 };
 
 export type TransitionAudioMixPlanInput = {
@@ -37,11 +39,13 @@ type ClipRuntime = {
 	start: number;
 	end: number;
 	offset: number;
+	clipDuration: number;
 	trimmedStart: number;
 	trimmedEnd: number;
 	headHandle: number;
 	tailHandle: number;
 	audioDuration: number;
+	reversed: boolean;
 };
 
 type TransitionSideMix = {
@@ -98,9 +102,19 @@ const buildClipRuntime = (clip: AudioMixClip, fps: number): ClipRuntime => {
 	const start = framesToSeconds(clip.timeline.start ?? 0, fps);
 	const end = framesToSeconds(clip.timeline.end ?? 0, fps);
 	const offset = framesToSeconds(clip.timeline.offset ?? 0, fps);
-	const duration = Math.max(0, end - start);
-	const trimmedStart = clamp(offset, 0, clip.audioDuration);
-	const trimmedEnd = clamp(offset + duration, trimmedStart, clip.audioDuration);
+	const clipDuration = Math.max(0, end - start);
+	const rawStart = offset;
+	const rawEnd = offset + clipDuration;
+	const trimmedStart = clamp(
+		Math.min(rawStart, rawEnd),
+		0,
+		clip.audioDuration,
+	);
+	const trimmedEnd = clamp(
+		Math.max(rawStart, rawEnd),
+		trimmedStart,
+		clip.audioDuration,
+	);
 	const headHandle = Math.max(0, trimmedStart);
 	const tailHandle = Math.max(0, clip.audioDuration - trimmedEnd);
 	return {
@@ -108,12 +122,25 @@ const buildClipRuntime = (clip: AudioMixClip, fps: number): ClipRuntime => {
 		start,
 		end,
 		offset,
+		clipDuration,
 		trimmedStart,
 		trimmedEnd,
 		headHandle,
 		tailHandle,
 		audioDuration: clip.audioDuration,
+		reversed: Boolean(clip.reversed),
 	};
+};
+
+const resolveSourceTimeAtTimeline = (
+	clip: ClipRuntime,
+	timelineTime: number,
+): number => {
+	const relativeTime = timelineTime - clip.start;
+	const sourceTime = clip.reversed
+		? clip.offset + clip.clipDuration - relativeTime
+		: clip.offset + relativeTime;
+	return clamp(sourceTime, 0, clip.audioDuration);
 };
 
 const resolveTransitionMix = ({
@@ -222,16 +249,8 @@ const mergeWindowAndSourceRange = (
 	);
 	acc.activeWindowEnd = Math.max(acc.activeWindowEnd, normalizedWindow.end);
 
-	const sourceStart = clamp(
-		clip.offset + (normalizedWindow.start - clip.start),
-		0,
-		clip.audioDuration,
-	);
-	const sourceEnd = clamp(
-		clip.offset + (normalizedWindow.end - clip.start),
-		0,
-		clip.audioDuration,
-	);
+	const sourceStart = resolveSourceTimeAtTimeline(clip, normalizedWindow.start);
+	const sourceEnd = resolveSourceTimeAtTimeline(clip, normalizedWindow.end);
 	acc.sourceRangeStart = Math.min(acc.sourceRangeStart, sourceStart, sourceEnd);
 	acc.sourceRangeEnd = Math.max(acc.sourceRangeEnd, sourceStart, sourceEnd);
 };
@@ -298,7 +317,7 @@ export const buildTransitionAudioMixPlan = (
 		if (gain <= 0) continue;
 
 		const sourceTime = clamp(
-			runtime.offset + (currentTime - runtime.start),
+			resolveSourceTimeAtTimeline(runtime, currentTime),
 			sourceRange.start,
 			sourceRange.end,
 		);
@@ -308,6 +327,7 @@ export const buildTransitionAudioMixPlan = (
 			activeWindow: window,
 			sourceRange,
 			sourceTime,
+			reversed: runtime.reversed,
 		};
 	}
 

@@ -59,15 +59,17 @@ describe("audio dsp core", () => {
 		const frameSamples = sampleRate / fps;
 		const sourceFrames = Math.round(frameSamples * 4);
 		const sourceData = new Float32Array(sourceFrames * 2).fill(1);
-		const target: PreparedMixTarget = {
-			id: "a",
-			enabled: true,
-			clipStartSeconds: 0,
-			clipOffsetSeconds: 0,
-			decodeStartSeconds: 0,
-			decodeEndSeconds: sourceFrames / sampleRate,
-			sourceData,
-			sourceFrameCount: sourceFrames,
+			const target: PreparedMixTarget = {
+				id: "a",
+				enabled: true,
+				clipStartSeconds: 0,
+				clipOffsetSeconds: 0,
+				clipDurationSeconds: sourceFrames / sampleRate,
+				reversed: false,
+				decodeStartSeconds: 0,
+				decodeEndSeconds: sourceFrames / sampleRate,
+				sourceData,
+				sourceFrameCount: sourceFrames,
 			gains: Float32Array.from([0, 1, 1]),
 		};
 		const outputFrames = Math.round(frameSamples * 2);

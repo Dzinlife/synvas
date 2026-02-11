@@ -2,6 +2,7 @@ import type { DSLComponentDefinition } from "../model/componentRegistry";
 import { componentRegistry } from "../model/componentRegistry";
 import { type AudioClipProps, createAudioClipModel } from "./model";
 import AudioClipRenderer from "./renderer";
+import { AudioClipSetting } from "./setting";
 import { AudioClipTimeline } from "./timeline";
 
 export const AudioClipDefinition: DSLComponentDefinition<AudioClipProps> = {
@@ -10,6 +11,7 @@ export const AudioClipDefinition: DSLComponentDefinition<AudioClipProps> = {
 	createModel: createAudioClipModel,
 	Renderer: AudioClipRenderer,
 	Timeline: AudioClipTimeline,
+	Setting: AudioClipSetting,
 	meta: {
 		name: "Audio Clip",
 		category: "media",

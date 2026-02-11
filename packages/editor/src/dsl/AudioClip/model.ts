@@ -21,6 +21,7 @@ import type {
 
 export interface AudioClipProps {
 	uri?: string;
+	reversed?: boolean;
 }
 
 export interface AudioClipInternal {

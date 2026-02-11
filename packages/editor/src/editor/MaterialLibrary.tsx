@@ -158,17 +158,18 @@ const MATERIAL_PRESETS: Record<string, MaterialPreset> = {
 		height: 1080,
 		props: { uri: "/intro.mp4", reversed: false },
 	},
-	"audio-clip": {
-		type: "audio",
-		name: "示例音频",
-		uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
+		"audio-clip": {
+			type: "audio",
+			name: "示例音频",
+			uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
 		thumbnailUrl: buildSvgThumbnail("AUDIO", "#0f766e"),
 		width: 1920,
 		height: 200,
-		props: {
-			uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
+			props: {
+				uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
+				reversed: false,
+			},
 		},
-	},
 	lottie: {
 		type: "image",
 		name: "Lottie 动画",

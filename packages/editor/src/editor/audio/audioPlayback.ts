@@ -35,6 +35,7 @@ export type AudioPlaybackMixInstruction = {
 	activeWindow?: AudioPlaybackRange;
 	sourceTime?: number;
 	sourceRange?: AudioPlaybackRange;
+	reversed?: boolean;
 };
 
 export type AudioPlaybackStepInput = number | AudioPlaybackMixInstruction;
@@ -62,6 +63,7 @@ type ResolvedPlaybackInput = {
 	activeWindow: AudioPlaybackRange;
 	sourceTime: number;
 	sourceRange: AudioPlaybackRange;
+	reversed: boolean;
 };
 
 type ScheduledAudioSource = {
@@ -84,8 +86,13 @@ type AudioPlaybackRuntime = {
 	playbackStartAudioTime: number | null;
 	scheduledSources: ScheduledAudioSource[];
 	clipGain: GainNode | null;
+	playbackDirection: 1 | -1;
 	lastPlaybackTargetTime: number | null;
+	lastPlaybackSourceTime: number | null;
 	lastHandledSeekEpoch: number | null;
+	reverseBuffer: AudioBuffer | null;
+	reverseBufferSignature: string | null;
+	reverseBufferPromise: Promise<AudioBuffer | null> | null;
 };
 
 const runtimeByKey = new Map<string, AudioPlaybackRuntime>();
@@ -149,8 +156,13 @@ const createRuntime = (key: string): AudioPlaybackRuntime => ({
 	playbackStartAudioTime: null,
 	scheduledSources: [],
 	clipGain: null,
+	playbackDirection: 1,
 	lastPlaybackTargetTime: null,
+	lastPlaybackSourceTime: null,
 	lastHandledSeekEpoch: null,
+	reverseBuffer: null,
+	reverseBufferSignature: null,
+	reverseBufferPromise: null,
 });
 
 const disconnectScheduledSource = (scheduled: ScheduledAudioSource) => {
@@ -214,7 +226,9 @@ const stopRuntimePlayback = (
 	runtime.isPlaybackActive = false;
 	runtime.playbackStartContextTime = null;
 	runtime.playbackStartAudioTime = null;
+	runtime.playbackDirection = 1;
 	runtime.lastPlaybackTargetTime = null;
+	runtime.lastPlaybackSourceTime = null;
 	runtime.playbackIterator?.return?.();
 	runtime.playbackIterator = null;
 	stopRuntimeScheduledSources(runtime, options);
@@ -226,6 +240,9 @@ const disposeRuntime = (runtime: AudioPlaybackRuntime) => {
 		runtime.idleDisposalTimer = null;
 	}
 	stopRuntimePlayback(runtime, { fadeOutSeconds: 0 });
+	runtime.reverseBuffer = null;
+	runtime.reverseBufferSignature = null;
+	runtime.reverseBufferPromise = null;
 	if (runtime.clipGain) {
 		try {
 			runtime.clipGain.disconnect();
@@ -359,6 +376,7 @@ const resolvePlaybackInput = (
 		activeWindow,
 		sourceTime,
 		sourceRange,
+		reversed: typeof input === "number" ? false : Boolean(input.reversed),
 	};
 };
 
@@ -411,6 +429,162 @@ export const createAudioPlaybackController = (
 			gainNode.gain.linearRampToValueAtTime(safeGain, now + GAIN_RAMP_SECONDS);
 		} catch {
 			gainNode.gain.value = safeGain;
+			}
+		};
+
+	const buildRuntimeReverseBuffer = async ({
+		audioSink,
+		audioDuration,
+		context,
+	}: {
+		audioSink: AudioBufferSink;
+		audioDuration: number;
+		context: AudioContext;
+	}): Promise<AudioBuffer | null> => {
+		const safeDuration = Number.isFinite(audioDuration)
+			? Math.max(0, audioDuration)
+			: 0;
+		if (safeDuration <= 0) return null;
+
+		const chunks: WrappedAudioBuffer[] = [];
+		let sampleRate = 0;
+		let numberOfChannels = 0;
+		for await (const wrapped of audioSink.buffers(0, safeDuration)) {
+			const buffer = wrapped?.buffer;
+			if (!buffer) continue;
+			chunks.push(wrapped);
+			if (!sampleRate) {
+				sampleRate = buffer.sampleRate;
+			}
+			numberOfChannels = Math.max(numberOfChannels, buffer.numberOfChannels);
+		}
+		if (chunks.length === 0 || sampleRate <= 0 || numberOfChannels <= 0) {
+			return null;
+		}
+
+		const totalFrames = Math.max(1, Math.round(safeDuration * sampleRate));
+		const forwardChannels = Array.from(
+			{ length: numberOfChannels },
+			() => new Float32Array(totalFrames),
+		);
+		for (const wrapped of chunks) {
+			const buffer = wrapped.buffer;
+			if (!buffer) continue;
+			const chunkSampleRate = buffer.sampleRate;
+			const chunkChannels = buffer.numberOfChannels;
+			if (chunkChannels <= 0 || chunkSampleRate <= 0) continue;
+
+			const normalizedTimestamp = Number.isFinite(wrapped.timestamp)
+				? Math.max(0, wrapped.timestamp)
+				: 0;
+			if (chunkSampleRate === sampleRate) {
+				const startFrame = Math.max(
+					0,
+					Math.round(normalizedTimestamp * sampleRate),
+				);
+				const availableFrames = Math.max(0, totalFrames - startFrame);
+				if (availableFrames <= 0) continue;
+				const copyFrames = Math.min(buffer.length, availableFrames);
+				if (copyFrames <= 0) continue;
+				for (let channel = 0; channel < numberOfChannels; channel += 1) {
+					const sourceChannel = Math.min(channel, chunkChannels - 1);
+					if (sourceChannel < 0) continue;
+					const sourceData = buffer.getChannelData(sourceChannel);
+					forwardChannels[channel]?.set(
+						sourceData.subarray(0, copyFrames),
+						startFrame,
+					);
+				}
+				continue;
+			}
+
+			const chunkDurationSeconds = buffer.length / chunkSampleRate;
+			const chunkEndTime = normalizedTimestamp + chunkDurationSeconds;
+			if (chunkEndTime <= 0 || normalizedTimestamp >= safeDuration) {
+				continue;
+			}
+			const writeStartTime = Math.max(0, normalizedTimestamp);
+			const writeEndTime = Math.min(safeDuration, chunkEndTime);
+			const writeStartIndex = Math.max(
+				0,
+				Math.floor((writeStartTime - normalizedTimestamp) * chunkSampleRate),
+			);
+			const writeEndIndex = Math.min(
+				buffer.length,
+				Math.ceil((writeEndTime - normalizedTimestamp) * chunkSampleRate),
+			);
+			for (let sourceIndex = writeStartIndex; sourceIndex < writeEndIndex; sourceIndex += 1) {
+				const time = normalizedTimestamp + sourceIndex / chunkSampleRate;
+				const destinationIndex = Math.round(time * sampleRate);
+				if (destinationIndex < 0 || destinationIndex >= totalFrames) continue;
+				for (let channel = 0; channel < numberOfChannels; channel += 1) {
+					const sourceChannel = Math.min(channel, chunkChannels - 1);
+					if (sourceChannel < 0) continue;
+					forwardChannels[channel][destinationIndex] =
+						buffer.getChannelData(sourceChannel)[sourceIndex] ?? 0;
+				}
+			}
+		}
+
+		const reversedBuffer = context.createBuffer(
+			numberOfChannels,
+			totalFrames,
+			sampleRate,
+		);
+		for (let channel = 0; channel < numberOfChannels; channel += 1) {
+			const sourceData = forwardChannels[channel];
+			const targetData = reversedBuffer.getChannelData(channel);
+			for (let i = 0; i < totalFrames; i += 1) {
+				targetData[i] = sourceData[totalFrames - 1 - i] ?? 0;
+			}
+		}
+		return reversedBuffer;
+	};
+
+	const ensureRuntimeReverseBuffer = async ({
+		runtime,
+		audioSink,
+		audioDuration,
+		context,
+		uri,
+	}: {
+		runtime: AudioPlaybackRuntime;
+		audioSink: AudioBufferSink;
+		audioDuration: number;
+		context: AudioContext;
+		uri: string;
+	}): Promise<AudioBuffer | null> => {
+		const signature = `${uri}|${audioDuration}`;
+		if (
+			runtime.reverseBuffer &&
+			runtime.reverseBufferSignature === signature
+		) {
+			return runtime.reverseBuffer;
+		}
+		if (
+			runtime.reverseBufferPromise &&
+			runtime.reverseBufferSignature === signature
+		) {
+			return runtime.reverseBufferPromise;
+		}
+
+		runtime.reverseBuffer = null;
+		runtime.reverseBufferSignature = signature;
+		const buildingPromise = buildRuntimeReverseBuffer({
+			audioSink,
+			audioDuration,
+			context,
+		});
+		runtime.reverseBufferPromise = buildingPromise;
+		try {
+			const reversed = await buildingPromise;
+			if (runtime.reverseBufferSignature !== signature) return null;
+			runtime.reverseBuffer = reversed;
+			return reversed;
+		} finally {
+			if (runtime.reverseBufferSignature === signature) {
+				runtime.reverseBufferPromise = null;
+			}
 		}
 	};
 
@@ -509,49 +683,110 @@ export const createAudioPlaybackController = (
 		if (playbackInput.sourceRange.start >= playbackInput.sourceRange.end)
 			return;
 
-		const audioStart = clampValue(
-			playbackInput.sourceTime,
-			playbackInput.sourceRange.start,
-			playbackInput.sourceRange.end,
-		);
-		const audioEnd = clampValue(
-			audioDuration,
-			playbackInput.sourceRange.start,
-			audioDuration,
-		);
+			const audioStart = clampValue(
+				playbackInput.sourceTime,
+				playbackInput.sourceRange.start,
+				playbackInput.sourceRange.end,
+			);
+			if (!Number.isFinite(audioStart)) return;
 
-		if (!Number.isFinite(audioStart) || !Number.isFinite(audioEnd)) return;
-		if (audioStart >= audioEnd) return;
+			stopRuntimeScheduledSources(runtime, {
+				fadeOutSeconds: SOURCE_STOP_FADE_OUT_SECONDS,
+			});
+			runtime.playbackIterator?.return?.();
+			runtime.playbackIterator = null;
 
-		stopRuntimeScheduledSources(runtime, {
-			fadeOutSeconds: SOURCE_STOP_FADE_OUT_SECONDS,
-		});
-		runtime.playbackIterator?.return?.();
-		runtime.playbackIterator = null;
+			if (playbackInput.reversed) {
+				const reverseBuffer = await ensureRuntimeReverseBuffer({
+					runtime,
+					audioSink,
+					audioDuration,
+					context,
+					uri,
+				});
+				if (!reverseBuffer) {
+					console.warn("音频倒放缓存构建失败，已停止当前播放。");
+					stopRuntimePlayback(runtime, {
+						fadeOutSeconds: SOURCE_STOP_FADE_OUT_SECONDS,
+					});
+					return;
+				}
 
-		runtime.isPlaybackActive = true;
-		runtime.asyncId += 1;
-		const currentAsyncId = runtime.asyncId;
+				const frameDuration = 1 / Math.max(1, reverseBuffer.sampleRate);
+				const maxOffset = Math.max(0, reverseBuffer.duration - frameDuration);
+				const reverseOffset = clampValue(
+					audioDuration - audioStart,
+					0,
+					maxOffset,
+				);
 
-		runtime.playbackStartAudioTime = audioStart;
-		runtime.playbackStartContextTime = context.currentTime + 0.05;
-		runtime.playbackIterator = audioSink.buffers(audioStart, audioEnd);
+				runtime.isPlaybackActive = true;
+				runtime.asyncId += 1;
+				runtime.playbackStartAudioTime = audioStart;
+				runtime.playbackStartContextTime = context.currentTime + 0.05;
+				runtime.playbackDirection = -1;
 
-		schedulePlayback(runtime, runtime.playbackIterator, currentAsyncId);
-	};
+				const source = context.createBufferSource();
+				const sourceGain =
+					typeof context.createGain === "function"
+						? context.createGain()
+						: null;
+				source.buffer = reverseBuffer;
+				if (sourceGain) {
+					sourceGain.gain.value = 1;
+					source.connect(sourceGain);
+					sourceGain.connect(gainNode);
+				} else {
+					source.connect(gainNode);
+				}
+				const scheduledSource: ScheduledAudioSource = {
+					source,
+					gainNode: sourceGain,
+				};
+				source.onended = () => {
+					runtime.scheduledSources = runtime.scheduledSources.filter(
+						(item) => item !== scheduledSource,
+					);
+					disconnectScheduledSource(scheduledSource);
+				};
+				runtime.scheduledSources.push(scheduledSource);
+				source.start(runtime.playbackStartContextTime, reverseOffset);
+				return;
+			}
+
+			const audioEnd = clampValue(
+				audioDuration,
+				playbackInput.sourceRange.start,
+				audioDuration,
+			);
+			if (!Number.isFinite(audioEnd)) return;
+			if (audioStart >= audioEnd) return;
+
+			runtime.isPlaybackActive = true;
+			runtime.asyncId += 1;
+			const currentAsyncId = runtime.asyncId;
+
+			runtime.playbackStartAudioTime = audioStart;
+			runtime.playbackStartContextTime = context.currentTime + 0.05;
+			runtime.playbackDirection = 1;
+			runtime.playbackIterator = audioSink.buffers(audioStart, audioEnd);
+
+			schedulePlayback(runtime, runtime.playbackIterator, currentAsyncId);
+		};
 
 	const stepPlayback = async (input: AudioPlaybackStepInput): Promise<void> => {
 		const runtime = syncRuntime();
 		const seekEpoch = normalizeSeekEpoch(deps.getSeekEpoch?.());
-		const restartPlayback = async (
-			playbackInput: ResolvedPlaybackInput,
-			timelineTimeSeconds: number,
-			reason: "default" | "seek" = "default",
-		) => {
-			stopRuntimeByReason(runtime, reason);
-			await startPlayback(runtime, playbackInput);
-			runtime.lastPlaybackTargetTime = timelineTimeSeconds;
-		};
+			const restartPlayback = async (
+				playbackInput: ResolvedPlaybackInput,
+				timelineTimeSeconds: number,
+				reason: "default" | "seek" = "default",
+			) => {
+				stopRuntimeByReason(runtime, reason);
+				await startPlayback(runtime, playbackInput);
+				runtime.lastPlaybackTargetTime = timelineTimeSeconds;
+				runtime.lastPlaybackSourceTime = playbackInput.sourceTime;
+			};
 		if (!isPlaybackEnabled()) {
 			stopRuntimeByReason(runtime, "default");
 			return;
@@ -589,13 +824,20 @@ export const createAudioPlaybackController = (
 
 		setGainInternal(runtime, playbackInput.gain);
 
-		const backJumpSeconds = PLAYBACK_BACK_JUMP_FRAMES / fps;
-		if (!runtime.isPlaybackActive) {
-			await startPlayback(runtime, playbackInput);
-			if (seekEpoch !== null) runtime.lastHandledSeekEpoch = seekEpoch;
-			runtime.lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
-			return;
-		}
+			const backJumpSeconds = PLAYBACK_BACK_JUMP_FRAMES / fps;
+			const expectedDirection = playbackInput.reversed ? -1 : 1;
+			if (!runtime.isPlaybackActive) {
+				await startPlayback(runtime, playbackInput);
+				if (seekEpoch !== null) runtime.lastHandledSeekEpoch = seekEpoch;
+				runtime.lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
+				runtime.lastPlaybackSourceTime = playbackInput.sourceTime;
+				runtime.playbackDirection = expectedDirection;
+				return;
+			}
+			if (runtime.playbackDirection !== expectedDirection) {
+				await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
+				return;
+			}
 
 		if (seekEpoch !== null) {
 			if (runtime.lastHandledSeekEpoch === null) {
@@ -621,30 +863,43 @@ export const createAudioPlaybackController = (
 			return;
 		}
 
-		if (
-			runtime.lastPlaybackTargetTime !== null &&
-			playbackInput.timelineTimeSeconds <
-				runtime.lastPlaybackTargetTime - backJumpSeconds
-		) {
-			await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
-			return;
-		}
+			if (runtime.lastPlaybackTargetTime !== null) {
+				if (
+					expectedDirection === 1 &&
+					playbackInput.timelineTimeSeconds <
+						runtime.lastPlaybackTargetTime - backJumpSeconds
+				) {
+					await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
+					return;
+				}
+				if (
+					expectedDirection === -1 &&
+					runtime.lastPlaybackSourceTime !== null &&
+					playbackInput.sourceTime >
+						runtime.lastPlaybackSourceTime + backJumpSeconds
+				) {
+					await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
+					return;
+				}
+			}
 
 		const audioTargetTime = clampValue(
 			playbackInput.sourceTime,
 			playbackInput.sourceRange.start,
 			playbackInput.sourceRange.end,
 		);
-		const audioNow =
-			runtime.playbackStartAudioTime +
-			(context.currentTime - runtime.playbackStartContextTime);
-		if (Math.abs(audioNow - audioTargetTime) > 0.2) {
-			await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
-			return;
-		}
+			const audioNow =
+				runtime.playbackStartAudioTime +
+				runtime.playbackDirection *
+					(context.currentTime - runtime.playbackStartContextTime);
+			if (Math.abs(audioNow - audioTargetTime) > 0.2) {
+				await restartPlayback(playbackInput, playbackInput.timelineTimeSeconds);
+				return;
+			}
 
-		runtime.lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
-	};
+			runtime.lastPlaybackTargetTime = playbackInput.timelineTimeSeconds;
+			runtime.lastPlaybackSourceTime = playbackInput.sourceTime;
+		};
 
 	const setGain = (gain: number) => {
 		const runtime = syncRuntime();

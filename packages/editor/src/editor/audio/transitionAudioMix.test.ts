@@ -26,11 +26,13 @@ const createClip = (
 	id: string,
 	timeline: TimelineMeta,
 	audioDuration: number,
+	reversed = false,
 ): AudioMixClip => ({
 	id,
 	timeline,
 	audioDuration,
 	enabled: true,
+	reversed,
 });
 
 const createTransition = (
@@ -152,6 +154,57 @@ describe("transitionAudioMix", () => {
 			toInstruction.sourceRange.end,
 		);
 	});
+
+	it("倒放 clip 的 sourceTime 会随时间递减", () => {
+		const clips = [createClip("rev", createTimeline(0, 60, 6), 4, true)];
+
+		const early = buildPlan({
+			displayTimeFrames: 10,
+			clips,
+			activeTransitions: [],
+		});
+		const late = buildPlan({
+			displayTimeFrames: 20,
+			clips,
+			activeTransitions: [],
+		});
+
+		const earlyInstruction = early.instructions.rev;
+		const lateInstruction = late.instructions.rev;
+		expect(earlyInstruction).toBeTruthy();
+		expect(lateInstruction).toBeTruthy();
+		if (
+			!earlyInstruction ||
+			!lateInstruction ||
+			!earlyInstruction.sourceRange ||
+			!lateInstruction.sourceRange
+		) {
+			throw new Error("reverse instruction should include source range");
+		}
+			expect(earlyInstruction.reversed).toBe(true);
+			expect(lateInstruction.reversed).toBe(true);
+			const earlySourceTime = earlyInstruction.sourceTime ?? 0;
+			const lateSourceTime = lateInstruction.sourceTime ?? 0;
+			expect(earlySourceTime).toBeGreaterThan(lateSourceTime);
+			expect(earlyInstruction.sourceRange.start).toBeLessThanOrEqual(
+				earlyInstruction.sourceRange.end,
+			);
+		expect(lateInstruction.sourceRange.start).toBeLessThanOrEqual(
+			lateInstruction.sourceRange.end,
+		);
+			expect(earlySourceTime).toBeGreaterThanOrEqual(
+				earlyInstruction.sourceRange.start,
+			);
+			expect(earlySourceTime).toBeLessThanOrEqual(
+				earlyInstruction.sourceRange.end,
+			);
+			expect(lateSourceTime).toBeGreaterThanOrEqual(
+				lateInstruction.sourceRange.start,
+			);
+			expect(lateSourceTime).toBeLessThanOrEqual(
+				lateInstruction.sourceRange.end,
+			);
+		});
 
 	it("多转场叠加时增益合成保持稳定", () => {
 		const clips = [

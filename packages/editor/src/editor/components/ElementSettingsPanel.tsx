@@ -1,17 +1,17 @@
-import type React from "react";
 import type { TimelineElement } from "core/dsl/types";
+import type React from "react";
 import { useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { useModelSafe, useModelSelectorSafe } from "@/dsl/model";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { getTransformSize } from "@/dsl/transform";
 import { framesToTimecode } from "@/utils/timecode";
-import CommonElementSettingsPanel from "./CommonElementSettingsPanel";
 import {
 	useElements,
 	useFps,
 	useSelectedElement,
 } from "../contexts/TimelineContext";
+import CommonElementSettingsPanel from "./CommonElementSettingsPanel";
 
 const ElementSettingsPanel: React.FC = () => {
 	const { selectedElement, selectedElementId } = useSelectedElement();
@@ -111,7 +111,8 @@ const ElementSettingsPanel: React.FC = () => {
 						{selectedElement.timeline.endTimecode})
 					</div>
 					<div>
-						Duration: {durationFrames}f ({framesToTimecode(durationFrames, fps)})
+						Duration: {durationFrames}f ({framesToTimecode(durationFrames, fps)}
+						)
 					</div>
 					<div>Transform:</div>
 					<div>PositionX: {transform?.position.x ?? "-"}</div>
@@ -138,7 +139,7 @@ const ElementSettingsPanel: React.FC = () => {
 					<div className="pt-1">
 						<Button
 							onClick={() => {
-								console.log(selectedModel?.getState());
+								console.log(selectedElement);
 							}}
 						>
 							log internal

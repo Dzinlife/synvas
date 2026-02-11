@@ -69,6 +69,7 @@ type ExportAudioTarget = {
 	timeline: TimelineElement["timeline"];
 	audioSink: AudioBufferSink;
 	audioDuration: number;
+	reversed: boolean;
 	enabled: boolean;
 	gains: Float32Array;
 	hasAudibleFrame: boolean;
@@ -82,6 +83,7 @@ type ExportAudioClipTarget = {
 	timeline: TimelineElement["timeline"];
 	audioSink: AudioBufferSink;
 	audioDuration: number;
+	reversed: boolean;
 	enabled: boolean;
 	clipGain: number;
 };
@@ -341,6 +343,9 @@ const collectExportAudioTargets = (
 			timeline: element.timeline,
 			audioSink: source.audioSink,
 			audioDuration: source.audioDuration,
+			reversed: Boolean(
+				(element.props as { reversed?: unknown } | undefined)?.reversed,
+			),
 			enabled,
 			clipGain: resolveTimelineElementClipGainLinear(element),
 		});
@@ -367,6 +372,7 @@ const collectExportAudioTargets = (
 			timeline: anchorClip.timeline,
 			audioSink: anchorClip.audioSink,
 			audioDuration: anchorClip.audioDuration,
+			reversed: anchorClip.reversed,
 			enabled: enabledBySession.get(sessionKey) ?? anchorClip.enabled,
 			gains: new Float32Array(totalFrames),
 			hasAudibleFrame: false,
@@ -383,6 +389,7 @@ const collectExportAudioTargets = (
 			timeline: clip.timeline,
 			audioDuration: clip.audioDuration,
 			enabled: clip.enabled,
+			reversed: clip.reversed,
 		})),
 		audioClipTargetsById: new Map(clipTargets.map((clip) => [clip.id, clip])),
 	};

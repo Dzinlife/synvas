@@ -170,12 +170,9 @@ const buildContinuityIndex = (
 			start: normalizeInt(element.timeline.start, 0),
 			end: normalizeInt(element.timeline.end, 0),
 			offset: resolveOffset(element),
-			reversed:
-				element.type === "VideoClip"
-					? Boolean(
-							(element.props as { reversed?: unknown } | undefined)?.reversed,
-						)
-					: false,
+			reversed: Boolean(
+				(element.props as { reversed?: unknown } | undefined)?.reversed,
+			),
 		};
 
 		if (!hasMutedVideoSourceAudio(element)) {

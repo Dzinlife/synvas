@@ -52,7 +52,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 					error,
 				);
 			},
-			onCacheEvent: (event) => {
+			onCacheEvent: (_event) => {
 				// if (event.type === "miss") {
 				// 	console.log(`[SkiaPreviewCache] miss frame=${event.frameIndex}`);
 				// 	return;

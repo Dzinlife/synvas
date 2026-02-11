@@ -29,6 +29,7 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 	const { timelineScale } = useTimelineScale();
 	const name = useTimelineStore((state) => state.getElementById(id)?.name);
 	const uri = useAudioClipSelector(id, (state) => state.props.uri);
+	const reversed = useAudioClipSelector(id, (state) => state.props.reversed);
 	const audioSink = useAudioClipSelector(
 		id,
 		(state) => state.internal.audioSink,
@@ -94,6 +95,7 @@ export const AudioClipTimeline: React.FC<AudioClipTimelineProps> = ({
 					timelineScale={timelineScale}
 					offsetFrames={effectiveOffsetFrames}
 					scrollLeft={scrollLeft}
+					reversed={Boolean(reversed)}
 					gainDb={clipGainDb}
 					color={waveformColor}
 					className="absolute inset-0"

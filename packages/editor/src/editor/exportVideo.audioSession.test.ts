@@ -50,6 +50,7 @@ const createAudioClip = ({
 	end,
 	offset = 0,
 	uri = "shared.mp3",
+	reversed = false,
 	trackIndex = -1,
 }: {
 	id: string;
@@ -57,6 +58,7 @@ const createAudioClip = ({
 	end: number;
 	offset?: number;
 	uri?: string;
+	reversed?: boolean;
 	trackIndex?: number;
 }): TimelineElement => ({
 	id,
@@ -64,7 +66,7 @@ const createAudioClip = ({
 	component: "audio-clip",
 	name: id,
 	timeline: createTimeline(start, end, offset, trackIndex),
-	props: { uri },
+	props: { uri, reversed },
 });
 
 const createVideoClip = ({
@@ -73,6 +75,7 @@ const createVideoClip = ({
 	end,
 	offset = 0,
 	uri = "shared.mp4",
+	reversed = false,
 	trackIndex = 0,
 }: {
 	id: string;
@@ -80,6 +83,7 @@ const createVideoClip = ({
 	end: number;
 	offset?: number;
 	uri?: string;
+	reversed?: boolean;
 	trackIndex?: number;
 }): TimelineElement => ({
 	id,
@@ -87,7 +91,7 @@ const createVideoClip = ({
 	component: "video-clip",
 	name: id,
 	timeline: createTimeline(start, end, offset, trackIndex),
-	props: { uri },
+	props: { uri, reversed },
 });
 
 const createTransition = ({
@@ -208,6 +212,69 @@ describe("export audio session mix", () => {
 		expect(Math.abs(gainAfter - gainBefore)).toBeLessThan(1e-6);
 		expect(target.sourceRangeStart).toBeCloseTo(100 / 30, 6);
 		expect(target.sourceRangeEnd).toBeCloseTo(160 / 30, 6);
+	});
+
+	it("倒放连续硬切会按反向源时间更新 sourceRange", () => {
+		const elements = [
+			createAudioClip({
+				id: "a1",
+				start: 0,
+				end: 30,
+				offset: 30,
+				reversed: true,
+			}),
+			createAudioClip({
+				id: "a2",
+				start: 30,
+				end: 60,
+				offset: 0,
+				reversed: true,
+			}),
+		];
+		const sharedSink = {} as AudioBufferSink;
+		const options = createOptions({
+			elements,
+			tracks: [createTrack()],
+			audioSources: {
+				a1: { audioSink: sharedSink, audioDuration: 3 },
+				a2: { audioSink: sharedSink, audioDuration: 3 },
+			},
+			getAudioSessionKeyByElementId: (elementId) =>
+				getAudioPlaybackSessionKey(elements, elementId),
+		});
+
+		const collected = __collectExportAudioTargetsForTests(options, 90);
+		expect(collected.audioTargets).toHaveLength(1);
+
+		__applyAudioMixPlanAtFrameForTests({
+			frame: 10,
+			startFrame: 0,
+			fps: 30,
+			audioClips: collected.audioClips,
+			audioClipTargetsById: collected.audioClipTargetsById,
+			audioTargetsBySessionKey: collected.audioTargetsBySessionKey,
+			transitionFrameState: EMPTY_TRANSITION_STATE,
+			transitionCurveById: {},
+		});
+		__applyAudioMixPlanAtFrameForTests({
+			frame: 40,
+			startFrame: 0,
+			fps: 30,
+			audioClips: collected.audioClips,
+			audioClipTargetsById: collected.audioClipTargetsById,
+			audioTargetsBySessionKey: collected.audioTargetsBySessionKey,
+			transitionFrameState: EMPTY_TRANSITION_STATE,
+			transitionCurveById: {},
+		});
+
+		const target = collected.audioTargets[0];
+		if (!target) {
+			throw new Error("target should exist");
+		}
+		expect(target.gains[10]).toBeGreaterThan(0.99);
+		expect(target.gains[40]).toBeGreaterThan(0.99);
+		expect(target.sourceRangeStart).toBeCloseTo(0, 6);
+		expect(target.sourceRangeEnd).toBeCloseTo(2, 6);
 	});
 
 	it("非连续硬切不会归并到同一 session", () => {

@@ -38,6 +38,22 @@ const mocks = vi.hoisted(() => {
 			stop: vi.fn(),
 			onended: null as (() => void) | null,
 		})),
+		createBuffer: vi.fn(
+			(numberOfChannels: number, length: number, sampleRate: number) => {
+				const channels = Array.from(
+					{ length: Math.max(1, numberOfChannels) },
+					() => new Float32Array(Math.max(1, length)),
+				);
+				return {
+					numberOfChannels: Math.max(1, numberOfChannels),
+					length: Math.max(1, length),
+					sampleRate: Math.max(1, sampleRate),
+					duration: Math.max(1, length) / Math.max(1, sampleRate),
+					getChannelData: (channel: number) =>
+						channels[Math.max(0, Math.min(channel, channels.length - 1))]!,
+				} as unknown as AudioBuffer;
+			},
+		),
 	} as unknown as AudioContext;
 	return {
 		context,
@@ -73,6 +89,20 @@ const createSink = () => {
 			})(),
 		),
 	} as unknown as AudioBufferSink;
+};
+
+const createMockAudioBuffer = (
+	values: number[],
+	sampleRate = 10,
+): AudioBuffer => {
+	const data = Float32Array.from(values);
+	return {
+		numberOfChannels: 1,
+		length: data.length,
+		sampleRate,
+		duration: data.length / sampleRate,
+		getChannelData: () => data,
+	} as unknown as AudioBuffer;
 };
 
 describe("audioPlayback runtime sharing", () => {
@@ -244,6 +274,62 @@ describe("audioPlayback runtime sharing", () => {
 		const firstStopCallArg = firstSource?.stop.mock.calls[0]?.[0];
 		expect(firstStopCallArg).toBeGreaterThan(0.12);
 		expect(firstStopCallArg).toBeLessThan(0.13);
+
+		controller.dispose();
+	});
+
+	it("倒放指令会复用反向缓存，不重复重建 source", async () => {
+		const reverseBuffer = createMockAudioBuffer([0.1, 0.2, 0.3, 0.4], 10);
+		const sink = {
+			buffers: vi.fn(() =>
+				(async function* () {
+					yield {
+						timestamp: 0,
+						duration: reverseBuffer.duration,
+						buffer: reverseBuffer,
+					};
+				})(),
+			),
+		} as unknown as AudioBufferSink;
+		const controller = createAudioPlaybackController({
+			getTimeline: () => baseTimeline,
+			getFps: () => 30,
+			getState: () => ({
+				uri: "reverse.mp3",
+				audioSink: sink,
+				audioDuration: 2,
+			}),
+			getRuntimeKey: () => "session:reverse",
+		});
+
+		await controller.stepPlayback({
+			timelineTimeSeconds: 1,
+			gain: 1,
+			activeWindow: { start: 0, end: 2 },
+			sourceTime: 1.5,
+			sourceRange: { start: 0, end: 2 },
+			reversed: true,
+		});
+		(mocks.context as { currentTime: number }).currentTime = 0.1;
+		await controller.stepPlayback({
+			timelineTimeSeconds: 1.05,
+			gain: 1,
+			activeWindow: { start: 0, end: 2 },
+			sourceTime: 1.45,
+			sourceRange: { start: 0, end: 2 },
+			reversed: true,
+		});
+
+		expect(sink.buffers).toHaveBeenCalledTimes(1);
+		expect(mocks.context.createBuffer).toHaveBeenCalledTimes(1);
+		const createBufferSourceMock = mocks.context.createBufferSource as unknown as {
+			mock: {
+				results: Array<{ value: { start: ReturnType<typeof vi.fn> } }>;
+			};
+		};
+		const source = createBufferSourceMock.mock.results[0]?.value;
+		const offset = source?.start.mock.calls[0]?.[1];
+		expect(offset).toBeCloseTo(0.5, 3);
 
 		controller.dispose();
 	});

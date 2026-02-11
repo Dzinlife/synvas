@@ -22,6 +22,7 @@ type AudioWaveformCanvasProps = {
 	timelineScale: number;
 	offsetFrames: number;
 	scrollLeft: number;
+	reversed?: boolean;
 	color: string;
 	className?: string;
 };
@@ -49,6 +50,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 	timelineScale,
 	offsetFrames,
 	scrollLeft,
+	reversed = false,
 	color,
 	className,
 }) => {
@@ -145,19 +147,43 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 				Math.floor(canvasOffsetX / requestStepPx) * requestStepPx -
 					requestOverscanPx,
 			);
-			const requestEndX = Math.min(
-				clipWidth,
-				Math.ceil((canvasOffsetX + canvasWidth) / requestStepPx) *
-					requestStepPx +
-					requestOverscanPx,
-			);
-			const requestWidth = Math.max(1e-6, requestEndX - requestStartX);
-			const viewportSourceStart =
-				offsetSeconds + canvasOffsetX / safePixelsPerSecond;
-			const viewportSourceEnd =
-				offsetSeconds + (canvasOffsetX + canvasWidth) / safePixelsPerSecond;
-			const sourceStart = offsetSeconds + requestStartX / safePixelsPerSecond;
-			const sourceEnd = offsetSeconds + requestEndX / safePixelsPerSecond;
+				const requestEndX = Math.min(
+					clipWidth,
+					Math.ceil((canvasOffsetX + canvasWidth) / requestStepPx) *
+						requestStepPx +
+						requestOverscanPx,
+				);
+				const requestWidth = Math.max(1e-6, requestEndX - requestStartX);
+				const viewportSourceStartRaw = reversed
+					? offsetSeconds +
+						clipDurationSeconds -
+						(canvasOffsetX + canvasWidth) / safePixelsPerSecond
+					: offsetSeconds + canvasOffsetX / safePixelsPerSecond;
+				const viewportSourceEndRaw = reversed
+					? offsetSeconds +
+						clipDurationSeconds -
+						canvasOffsetX / safePixelsPerSecond
+					: offsetSeconds + (canvasOffsetX + canvasWidth) / safePixelsPerSecond;
+				const sourceStartRaw = reversed
+					? offsetSeconds +
+						clipDurationSeconds -
+						requestEndX / safePixelsPerSecond
+					: offsetSeconds + requestStartX / safePixelsPerSecond;
+				const sourceEndRaw = reversed
+					? offsetSeconds +
+						clipDurationSeconds -
+						requestStartX / safePixelsPerSecond
+					: offsetSeconds + requestEndX / safePixelsPerSecond;
+				const viewportSourceStart = Math.min(
+					viewportSourceStartRaw,
+					viewportSourceEndRaw,
+				);
+				const viewportSourceEnd = Math.max(
+					viewportSourceStartRaw,
+					viewportSourceEndRaw,
+				);
+				const sourceStart = Math.min(sourceStartRaw, sourceEndRaw);
+				const sourceEnd = Math.max(sourceStartRaw, sourceEndRaw);
 			if (
 				!Number.isFinite(sourceStart) ||
 				!Number.isFinite(sourceEnd) ||
@@ -177,15 +203,16 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 				currentAudioDuration,
 				currentGainDb.toFixed(3),
 			].join("|");
-			const requestKey = [
-				identityKey,
-				`${sourceStart.toFixed(6)}-${sourceEnd.toFixed(6)}`,
-				`${requestStartX.toFixed(3)}-${requestEndX.toFixed(3)}`,
-				requestWidth.toFixed(3),
-				canvasHeight,
-				pixelRatio,
-				timelineScale.toFixed(4),
-			].join("|");
+				const requestKey = [
+					identityKey,
+					`${sourceStart.toFixed(6)}-${sourceEnd.toFixed(6)}`,
+					`${requestStartX.toFixed(3)}-${requestEndX.toFixed(3)}`,
+					requestWidth.toFixed(3),
+					canvasHeight,
+					pixelRatio,
+					timelineScale.toFixed(4),
+					reversed ? "1" : "0",
+				].join("|");
 
 			if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
 				canvas.width = targetWidth;
@@ -210,15 +237,17 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 						loaded.waveform.width / Math.max(1e-6, loadedDuration);
 					const sourceCropX =
 						(overlapStart - loaded.windowStart) * sourceScaleX;
-					const sourceCropWidth = Math.max(
-						1,
-						(overlapEnd - overlapStart) * sourceScaleX,
-					);
-					const drawScaleX = canvasWidth / Math.max(1e-6, viewportDuration);
-					const drawX = (overlapStart - viewportSourceStart) * drawScaleX;
-					const drawWidth = (overlapEnd - overlapStart) * drawScaleX;
-					ctx.drawImage(
-						loaded.waveform,
+						const sourceCropWidth = Math.max(
+							1,
+							(overlapEnd - overlapStart) * sourceScaleX,
+						);
+						const drawScaleX = canvasWidth / Math.max(1e-6, viewportDuration);
+						const drawX = reversed
+							? (viewportSourceEnd - overlapEnd) * drawScaleX
+							: (overlapStart - viewportSourceStart) * drawScaleX;
+						const drawWidth = (overlapEnd - overlapStart) * drawScaleX;
+						ctx.drawImage(
+							loaded.waveform,
 						sourceCropX,
 						0,
 						sourceCropWidth,
@@ -295,16 +324,17 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 		} catch (error) {
 			console.error("Failed to render waveform:", error);
 		}
-	}, [
-		uri,
-		clipDurationSeconds,
-		offsetSeconds,
-		fps,
-		timelineScale,
-		color,
-		getAudioDuration,
-		getGainDb,
-		getAudioSink,
+		}, [
+			uri,
+			clipDurationSeconds,
+			offsetSeconds,
+			fps,
+			timelineScale,
+			reversed,
+			color,
+			getAudioDuration,
+			getGainDb,
+			getAudioSink,
 	]);
 
 	const scheduleGenerate = useCallback(() => {
@@ -327,17 +357,18 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 			renderTokenRef.current += 1;
 		}
 		scheduleGenerate();
-	}, [
-		uri,
-		audioDuration,
-		gainDb,
-		audioSink,
-		offsetSeconds,
-		clipDurationSeconds,
-		start,
-		scrollLeft,
-		scheduleGenerate,
-	]);
+		}, [
+			uri,
+			audioDuration,
+			gainDb,
+			audioSink,
+			offsetSeconds,
+			clipDurationSeconds,
+			reversed,
+			start,
+			scrollLeft,
+			scheduleGenerate,
+		]);
 
 	useLayoutEffect(() => {
 		const canvas = canvasRef.current;

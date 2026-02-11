@@ -471,13 +471,14 @@ export const VideoClipTimeline: React.FC<VideoClipTimelineProps> = ({
 							audioDuration={audioDuration}
 							start={start}
 							end={end}
-							fps={fps}
-							timelineScale={timelineScale}
-							offsetFrames={timelineOffsetFrames}
-							scrollLeft={scrollLeft}
-							gainDb={clipGainDb}
-							color={
-								isTrackMuted
+								fps={fps}
+								timelineScale={timelineScale}
+								offsetFrames={timelineOffsetFrames}
+								scrollLeft={scrollLeft}
+								reversed={Boolean(reversed)}
+								gainDb={clipGainDb}
+								color={
+									isTrackMuted
 									? "rgba(163, 163, 163, 0.85)"
 									: "rgba(59, 130, 246, 0.9)"
 							}

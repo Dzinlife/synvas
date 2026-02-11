@@ -21,6 +21,7 @@ const AUDIO_EPSILON = 1e-6;
 
 type ExportAudioTimeline = {
 	start?: number;
+	end?: number;
 	offset?: number;
 };
 
@@ -29,6 +30,7 @@ export type ExportAudioRenderTarget = {
 	timeline: ExportAudioTimeline;
 	audioSink: AudioBufferSink;
 	audioDuration: number;
+	reversed: boolean;
 	enabled: boolean;
 	gains: Float32Array;
 	hasAudibleFrame: boolean;
@@ -130,6 +132,8 @@ const decodeTarget = async ({
 		enabled: target.enabled,
 		clipStartSeconds: 0,
 		clipOffsetSeconds: 0,
+		clipDurationSeconds: 0,
+		reversed: target.reversed,
 		decodeStartSeconds: decodeStart,
 		decodeEndSeconds: decodeEnd,
 		sourceData,
@@ -153,6 +157,11 @@ const resolvePreparedTarget = async ({
 	if (!decoded) return null;
 	decoded.clipStartSeconds = framesToSeconds(target.timeline.start ?? 0, fps);
 	decoded.clipOffsetSeconds = framesToSeconds(target.timeline.offset ?? 0, fps);
+	decoded.clipDurationSeconds = framesToSeconds(
+		(target.timeline.end ?? 0) - (target.timeline.start ?? 0),
+		fps,
+	);
+	decoded.reversed = target.reversed;
 	return decoded;
 };
 

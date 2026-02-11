@@ -189,6 +189,9 @@ export const detachVideoClipAudio = ({
 	const uri = getVideoUri(videoElement);
 	if (!uri) return elements;
 	if (hasSourceAudioTrack === false) return elements;
+	const sourceReversed = Boolean(
+		(videoElement.props as { reversed?: unknown } | undefined)?.reversed,
+	);
 
 	const mutedVideo = setVideoSourceAudioMuted(videoElement, true);
 	const nextElements = [...elements];
@@ -208,6 +211,7 @@ export const detachVideoClipAudio = ({
 		name: videoElement.name ? `${videoElement.name} 音频` : "分离音频",
 		props: {
 			uri,
+			...(sourceReversed ? { reversed: true } : {}),
 		},
 		...(videoElement.transform
 			? {

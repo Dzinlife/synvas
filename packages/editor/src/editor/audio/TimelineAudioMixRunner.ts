@@ -95,6 +95,13 @@ export const runTimelineAudioMixFrame = (
 		timeline: target.timeline,
 		audioDuration: target.audioDuration,
 		enabled: target.enabled,
+		reversed: Boolean(
+			(
+				elementsById.get(target.id)?.props as
+					| { reversed?: unknown }
+					| undefined
+			)?.reversed,
+		),
 	}));
 	const plan = buildTransitionAudioMixPlan({
 		displayTimeFrames: args.displayTime,

@@ -692,6 +692,7 @@ export function useExternalMaterialDnd({
 							name: item.file.name,
 							props: {
 								uri: item.uri,
+								reversed: false,
 							},
 							transform: createTransformMeta({
 								width: 1920,

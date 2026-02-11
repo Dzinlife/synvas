@@ -5,6 +5,8 @@ export type PreparedMixTarget = {
 	enabled: boolean;
 	clipStartSeconds: number;
 	clipOffsetSeconds: number;
+	clipDurationSeconds: number;
+	reversed: boolean;
 	decodeStartSeconds: number;
 	decodeEndSeconds: number;
 	sourceData: Float32Array;
@@ -65,13 +67,17 @@ export const mixTargetsIntoBlock = ({
 			continue;
 		}
 
+		const initialTimelineTime =
+			exportStartSeconds + outputStartFrame / safeSampleRate;
+		const initialSourceTime = target.reversed
+			? target.clipOffsetSeconds +
+				target.clipDurationSeconds -
+				(initialTimelineTime - target.clipStartSeconds)
+			: target.clipOffsetSeconds +
+				(initialTimelineTime - target.clipStartSeconds);
 		let sourceFrameFloat =
-			outputStartFrame +
-			(exportStartSeconds -
-				target.clipStartSeconds +
-				target.clipOffsetSeconds -
-				target.decodeStartSeconds) *
-				safeSampleRate;
+			(initialSourceTime - target.decodeStartSeconds) * safeSampleRate;
+		const sourceStep = target.reversed ? -1 : 1;
 		let gainFrameFloat = outputStartFrame * gainStep;
 		const sourceLastFrame = target.sourceFrameCount - 1;
 
@@ -98,7 +104,7 @@ export const mixTargetsIntoBlock = ({
 				}
 			}
 
-			sourceFrameFloat += 1;
+			sourceFrameFloat += sourceStep;
 			gainFrameFloat += gainStep;
 		}
 	}

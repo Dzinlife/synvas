@@ -7,7 +7,10 @@ import {
 	restoreVideoClipAudio,
 } from "./videoClipAudioSeparation";
 
-const createVideoElement = (id: string): TimelineElement => {
+const createVideoElement = (
+	id: string,
+	options?: { reversed?: boolean },
+): TimelineElement => {
 	return {
 		id,
 		type: "VideoClip",
@@ -15,6 +18,7 @@ const createVideoElement = (id: string): TimelineElement => {
 		name: "video",
 		props: {
 			uri: "file:///video.mp4",
+			reversed: Boolean(options?.reversed),
 		},
 		transform: createTransformMeta({
 			width: 1920,
@@ -57,6 +61,19 @@ describe("videoClipAudioSeparation", () => {
 		expect(detached?.timeline.start).toBe(10);
 		expect(detached?.timeline.end).toBe(100);
 		expect(detached?.timeline.offset).toBe(7);
+	});
+
+	it("倒放视频分离时会继承 AudioClip 倒放属性", () => {
+		const video = createVideoElement("video-1", { reversed: true });
+		const next = detachVideoClipAudio({
+			elements: [video],
+			videoId: video.id,
+			fps: 30,
+		});
+		const detached = next.find((element) => element.type === "AudioClip");
+		expect((detached?.props as { reversed?: boolean } | undefined)?.reversed).toBe(
+			true,
+		);
 	});
 
 	it("分离会把 VideoClip 标记为 muteSourceAudio", () => {
