@@ -24,9 +24,6 @@ const useVideoClipSelector = createModelSelector<
 	VideoClipInternal
 >();
 
-// 低于该帧数的时间抖动不触发 seek（按时间线 FPS 计算）
-const SEEK_SKIP_FRAMES = 1.5;
-
 const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	// 渲染时优先使用导出帧
 	const currentTimeFrames = useRenderTime();
@@ -84,14 +81,12 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 	);
 	// 跟踪播放状态
 	const wasPlayingRef = useRef(false);
-	const lastVideoTimeRef = useRef<number | null>(null);
 	const wasExportingRef = useRef(false);
 
 	useEffect(() => {
 		void playbackEpoch;
 		// sink 切换后重置播放状态，确保重新启动流式播放
 		wasPlayingRef.current = false;
-		lastVideoTimeRef.current = null;
 	}, [playbackEpoch]);
 
 	// 处理播放状态变化
@@ -108,7 +103,6 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 		}
 
 		const safeFps = Number.isFinite(fps) && fps > 0 ? Math.round(fps) : 30;
-		const seekSkipSeconds = SEEK_SKIP_FRAMES / safeFps;
 		const startSeconds = framesToSeconds(timeline.start ?? 0, safeFps);
 		const currentSeconds = framesToSeconds(currentTimeFrames, fps);
 		const clipDurationSeconds = framesToSeconds(
@@ -147,15 +141,7 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 			stopPlayback();
 		}
 
-		// 非播放状态：使用 seek（拖动时间轴）
-		if (
-			lastVideoTimeRef.current !== null &&
-			Math.abs(lastVideoTimeRef.current - videoTime) < seekSkipSeconds
-		) {
-			return; // 时间变化太小，跳过
-		}
-
-		lastVideoTimeRef.current = videoTime;
+		// 非播放状态：直接 seek，保证逐帧拖动时每一帧都刷新
 		seekToTime(videoTime);
 	}, [
 		props.uri,
@@ -178,7 +164,6 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 			// 导出期间只重置状态，不停止流式播放，避免频繁重启
 			wasExportingRef.current = true;
 			wasPlayingRef.current = false;
-			lastVideoTimeRef.current = null;
 			return;
 		}
 		if (wasExportingRef.current) {
