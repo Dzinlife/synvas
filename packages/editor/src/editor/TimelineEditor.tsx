@@ -161,7 +161,7 @@ const TimelineEditor = () => {
 	const setScrollLeft = useTimelineStore((state) => state.setScrollLeft);
 	const setPreviewTime = useTimelineStore((state) => state.setPreviewTime);
 	const { previewAxisEnabled } = usePreviewAxis();
-	const { isPlaying } = usePlaybackControl();
+	const { isPlaying, pause } = usePlaybackControl();
 	const { currentTime, setCurrentTime: seekTo } = useCurrentTime();
 	const { fps } = useFps();
 	const { timelineScale } = useTimelineScale();
@@ -276,6 +276,7 @@ const TimelineEditor = () => {
 	);
 	const handleElementContextMenu = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>, elementId: string) => {
+			pause();
 			const isSelectedElement = selectedIds.includes(elementId);
 			const targetIds = isSelectedElement ? selectedIds : [elementId];
 			const targetPrimaryId = isSelectedElement
@@ -295,7 +296,7 @@ const TimelineEditor = () => {
 				primaryId: targetPrimaryId,
 			});
 		},
-		[primaryId, selectedIds, setSelection],
+		[pause, primaryId, selectedIds, setSelection],
 	);
 
 	const rippleEditingRef = useRef(rippleEditingEnabled);
@@ -1263,6 +1264,7 @@ const TimelineEditor = () => {
 	const mainTrackLocked = tracks[0]?.locked ?? false;
 	const handleTimelineContextMenu = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
+			pause();
 			const target = event.target as HTMLElement;
 			if (target.closest("[data-timeline-element]")) return;
 			event.preventDefault();
@@ -1303,7 +1305,7 @@ const TimelineEditor = () => {
 				},
 			});
 		},
-		[closeContextMenu, otherTrackCount, ratio, scrollLeft],
+		[closeContextMenu, otherTrackCount, pause, ratio, scrollLeft],
 	);
 	const contextMenuActions = useMemo<TimelineContextMenuAction[]>(() => {
 		if (!contextMenuState.open) return [];

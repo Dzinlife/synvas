@@ -627,7 +627,10 @@ export const useTimelineStore = create<TimelineStore>()(
 
 		undo: () => {
 			set((state) => {
-				if (state.historyPast.length === 0) return state;
+				if (state.historyPast.length === 0) {
+					if (!state.isPlaying) return state;
+					return { isPlaying: false };
+				}
 				const previous = state.historyPast[state.historyPast.length - 1];
 				const nextPast = state.historyPast.slice(0, -1);
 				const nextFuture = [
@@ -648,13 +651,17 @@ export const useTimelineStore = create<TimelineStore>()(
 					historyFuture: nextFuture,
 					selectedIds: selection.selectedIds,
 					primarySelectedId: selection.primarySelectedId,
+					isPlaying: false,
 				};
 			});
 		},
 
 		redo: () => {
 			set((state) => {
-				if (state.historyFuture.length === 0) return state;
+				if (state.historyFuture.length === 0) {
+					if (!state.isPlaying) return state;
+					return { isPlaying: false };
+				}
 				const next = state.historyFuture[0];
 				const nextFuture = state.historyFuture.slice(1);
 				const nextPast = trimHistory(
@@ -675,6 +682,7 @@ export const useTimelineStore = create<TimelineStore>()(
 					historyFuture: nextFuture,
 					selectedIds: selection.selectedIds,
 					primarySelectedId: selection.primarySelectedId,
+					isPlaying: false,
 				};
 			});
 		},
