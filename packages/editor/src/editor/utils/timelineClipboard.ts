@@ -4,13 +4,10 @@ import {
 	finalizeTimelineElements,
 	type TimelinePostProcessOptions,
 } from "./mainTrackMagnet";
+import { reflowInsertedElementsOnTracks } from "./insertedTrackReflow";
 import {
-	findAvailableTrack,
-	getElementRole,
 	getStoredTrackAssignments,
-	getTrackCount,
 	insertTrackAt,
-	resolveDropTargetForRole,
 } from "./trackAssignment";
 import { collectLinkedTransitions, isTransitionElement } from "./transitions";
 
@@ -180,58 +177,6 @@ const shiftElementsForGapInsert = (
 	return didChange ? shifted : elements;
 };
 
-const reconcilePastedElementTracks = (
-	baseElements: TimelineElement[],
-	pastedElements: TimelineElement[],
-): TimelineElement[] => {
-	if (pastedElements.length === 0) return pastedElements;
-
-	const reconciled = pastedElements.map((element) => element);
-	const orderedPastedIds = reconciled
-		.slice()
-		.sort(sortByTimeline)
-		.map((element) => element.id);
-
-	for (const elementId of orderedPastedIds) {
-		const targetIndex = reconciled.findIndex(
-			(element) => element.id === elementId,
-		);
-		if (targetIndex < 0) continue;
-		const target = reconciled[targetIndex];
-		const merged = [...baseElements, ...reconciled];
-		const assignments = getStoredTrackAssignments(merged);
-		const role = getElementRole(target);
-		const resolvedDropTarget = resolveDropTargetForRole(
-			{
-				type: "track",
-				trackIndex: getTrackIndex(target),
-			},
-			role,
-			merged,
-			assignments,
-		);
-		const finalTrack = findAvailableTrack(
-			target.timeline.start,
-			target.timeline.end,
-			resolvedDropTarget.trackIndex,
-			role,
-			merged,
-			assignments,
-			target.id,
-			getTrackCount(assignments),
-		);
-		reconciled[targetIndex] = {
-			...target,
-			timeline: {
-				...target.timeline,
-				trackIndex: finalTrack,
-			},
-		};
-	}
-
-	return reconciled;
-};
-
 export const pasteTimelineClipboardPayload = (
 	options: PasteTimelineClipboardOptions,
 ): PasteTimelineClipboardResult => {
@@ -282,7 +227,7 @@ export const pasteTimelineClipboardPayload = (
 		targetType === "gap"
 			? shiftElementsForGapInsert(options.elements, targetTrackIndex)
 			: options.elements;
-	const reconciledPastedElements = reconcilePastedElementTracks(
+	const reconciledPastedElements = reflowInsertedElementsOnTracks(
 		shiftedElements,
 		pastedElements,
 	);

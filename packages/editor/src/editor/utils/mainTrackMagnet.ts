@@ -2,6 +2,7 @@ import type { TimelineElement } from "core/dsl/types";
 import {
 	compactMainTrackElements as compactMainTrackElementsCore,
 	finalizeTimelineElements as finalizeTimelineElementsCore,
+	insertElementIntoMainTrack as insertElementIntoMainTrackCore,
 	type MainTrackMagnetOptions,
 	shiftMainTrackElementsAfter as shiftMainTrackElementsAfterCore,
 	type TimelinePostProcessOptions,
@@ -42,4 +43,19 @@ export const shiftMainTrackElementsAfter = (
 		newEnd,
 		delta,
 		withResolveRole(options),
+	);
+
+export const insertElementIntoMainTrack = (
+	elements: TimelineElement[],
+	targetId: string,
+	dropStart: number,
+	options: TimelinePostProcessOptions,
+	targetOverride?: TimelineElement,
+): TimelineElement[] =>
+	insertElementIntoMainTrackCore(
+		elements,
+		targetId,
+		dropStart,
+		withResolveRole(options),
+		targetOverride,
 	);

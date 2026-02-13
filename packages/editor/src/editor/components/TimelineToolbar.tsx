@@ -28,12 +28,15 @@ import {
 	useTimelineHistory,
 	useTimelineScale,
 	useTimelineStore,
+	useTracks,
 } from "../contexts/TimelineContext";
+import { getAudioTrackControlState } from "../utils/audioTrackState";
 import {
 	isTransitionElement,
 	reconcileTransitions,
 } from "../utils/transitions";
 import AsrDialog from "./AsrDialog";
+import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
 import { buildSplitElements } from "./timelineSplit";
 
 const isSplittableClip = (element: TimelineElement) =>
@@ -92,17 +95,30 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const [isExporting, setIsExporting] = useState(false);
 	const [isVideoExporting, setIsVideoExporting] = useState(false);
 	const { snapEnabled, setSnapEnabled } = useSnap();
-	const { autoAttach, setAutoAttach } = useAttachments();
+	const { attachments, autoAttach, setAutoAttach } = useAttachments();
 	const { rippleEditingEnabled, setRippleEditingEnabled } = useRippleEditing();
 	const { previewAxisEnabled, setPreviewAxisEnabled } = usePreviewAxis();
 	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { canUndo, canRedo, undo, redo } = useTimelineHistory();
 	const { elements, setElements } = useElements();
-	const { primaryId } = useMultiSelect();
+	const { selectedIds, primaryId } = useMultiSelect();
 	const { fps } = useFps();
+	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
 	const audioSettings = useTimelineStore((state) => state.audioSettings);
 	const setAudioSettings = useTimelineStore((state) => state.setAudioSettings);
+	const trackLockedMap = useMemo(() => {
+		const map = new Map<number, boolean>(
+			tracks.map((track, index) => [index, track.locked ?? false]),
+		);
+		for (const trackIndexRaw of Object.keys(audioTrackStates)) {
+			const trackIndex = Number(trackIndexRaw);
+			if (!Number.isFinite(trackIndex)) continue;
+			const state = getAudioTrackControlState(audioTrackStates, trackIndex);
+			map.set(trackIndex, state.locked);
+		}
+		return map;
+	}, [tracks, audioTrackStates]);
 
 	// 全局空格键播放/暂停
 	useEffect(() => {
@@ -311,6 +327,16 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		if (currentTime >= target.timeline.end) return null;
 		return target;
 	}, [currentTime, elements, primaryId]);
+	const freezeCandidate = useMemo(
+		() =>
+			resolveFreezeCandidate({
+				elements,
+				selectedIds,
+				primaryId,
+				currentTime,
+			}),
+		[currentTime, elements, primaryId, selectedIds],
+	);
 
 	const handleSplit = useCallback(() => {
 		if (!splitCandidate) return;
@@ -342,6 +368,31 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			return reconcileTransitions(remapped, fps);
 		});
 	}, [currentTime, fps, setElements, splitCandidate]);
+	const handleFreeze = useCallback(() => {
+		if (!freezeCandidate) return;
+		setElements((prev) =>
+			applyFreezeFrame({
+				elements: prev,
+				candidate: freezeCandidate,
+				splitFrame: clampFrame(currentTime),
+				fps,
+				rippleEditingEnabled,
+				attachments,
+				autoAttach,
+				trackLockedMap,
+				createElementId,
+			}),
+		);
+	}, [
+		freezeCandidate,
+		setElements,
+		currentTime,
+		fps,
+		rippleEditingEnabled,
+		attachments,
+		autoAttach,
+		trackLockedMap,
+	]);
 
 	return (
 		<div className={cn("flex items-center gap-3 px-4", className)}>
@@ -395,6 +446,20 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 				title="在当前时间点分割选中片段"
 			>
 				分割
+			</button>
+			<button
+				type="button"
+				onClick={handleFreeze}
+				disabled={!freezeCandidate}
+				className={cn(
+					"px-2 py-1 text-xs rounded transition-colors",
+					freezeCandidate
+						? "bg-cyan-600 text-white hover:bg-cyan-500"
+						: "bg-neutral-800 text-neutral-500 cursor-not-allowed",
+				)}
+				title="在当前时间点插入 3 秒定格"
+			>
+				定格
 			</button>
 			{/* 开关按钮组 */}
 			<div className="flex items-center gap-2 ml-4">

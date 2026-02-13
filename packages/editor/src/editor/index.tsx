@@ -16,6 +16,7 @@ import TimelineEditor from "./TimelineEditor";
 import "@/dsl/AudioClip";
 import "@/dsl/VideoClip";
 import "@/dsl/ColorFilterLayer";
+import "@/dsl/FreezeFrame";
 import "@/dsl/HalationFilterLayer";
 import "@/dsl/Image";
 import "@/dsl/Lottie";

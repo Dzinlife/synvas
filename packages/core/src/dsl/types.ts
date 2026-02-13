@@ -127,6 +127,7 @@ export interface ClipMeta {
 
 export const ELEMENT_TYPE_VALUES = [
 	"VideoClip",
+	"FreezeFrame",
 	"AudioClip",
 	"Transition",
 	"Filter",

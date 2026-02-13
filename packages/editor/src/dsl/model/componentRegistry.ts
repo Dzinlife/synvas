@@ -44,6 +44,7 @@ export interface DSLComponentDefinition<Props = any, Internal = any> {
 		icon?: React.ComponentType; // 图标组件
 		description?: string; // 描述
 		defaultProps?: Partial<Props>; // 默认 props
+		hiddenInMaterialLibrary?: boolean; // 是否在素材库隐藏
 	};
 }
 

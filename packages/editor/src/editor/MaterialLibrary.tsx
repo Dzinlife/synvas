@@ -267,41 +267,44 @@ const buildMaterialProps = (
 };
 
 const buildMaterialItems = (): MaterialItem[] => {
-	return componentRegistry.getAll().map((definition) => {
-		const preset = MATERIAL_PRESETS[definition.component] ?? {};
-		const name = preset.name ?? definition.meta.name;
-		const type = preset.type ?? resolveMaterialType(definition.type);
-		const uri = preset.uri ?? definition.component;
-		const thumbnailUrl =
-			preset.thumbnailUrl ?? buildSvgThumbnail(name, "#0f172a");
-		const props = buildMaterialProps(
-			{
-				type: definition.type,
-				meta: {
-					defaultProps:
-						(definition.meta.defaultProps as
-							| Record<string, unknown>
-							| undefined) ?? undefined,
+	return componentRegistry
+		.getAll()
+		.filter((definition) => !definition.meta.hiddenInMaterialLibrary)
+		.map((definition) => {
+			const preset = MATERIAL_PRESETS[definition.component] ?? {};
+			const name = preset.name ?? definition.meta.name;
+			const type = preset.type ?? resolveMaterialType(definition.type);
+			const uri = preset.uri ?? definition.component;
+			const thumbnailUrl =
+				preset.thumbnailUrl ?? buildSvgThumbnail(name, "#0f172a");
+			const props = buildMaterialProps(
+				{
+					type: definition.type,
+					meta: {
+						defaultProps:
+							(definition.meta.defaultProps as
+								| Record<string, unknown>
+								| undefined) ?? undefined,
+					},
 				},
-			},
-			preset,
-		);
+				preset,
+			);
 
-		return {
-			id: `material-${definition.component}`,
-			type,
-			name,
-			uri,
-			thumbnailUrl,
-			width: preset.width ?? 1920,
-			height: preset.height ?? 1080,
-			duration: preset.duration,
-			component: definition.component,
-			elementType: definition.type,
-			props,
-			trackRole: definition.meta.trackRole,
-		};
-	});
+			return {
+				id: `material-${definition.component}`,
+				type,
+				name,
+				uri,
+				thumbnailUrl,
+				width: preset.width ?? 1920,
+				height: preset.height ?? 1080,
+				duration: preset.duration,
+				component: definition.component,
+				elementType: definition.type,
+				props,
+				trackRole: definition.meta.trackRole,
+			};
+		});
 };
 
 const resolveMaterialDuration = (item: MaterialItem, fps: number): number => {
