@@ -36,6 +36,7 @@ import {
 	reconcileTransitions,
 } from "../utils/transitions";
 import AsrDialog from "./AsrDialog";
+import ExportVideoDialog, { type ExportVideoOptions } from "./ExportVideoDialog";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
 import { buildSplitElements } from "./timelineSplit";
 
@@ -105,8 +106,15 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const { fps } = useFps();
 	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
+	const canvasSize = useTimelineStore((state) => state.canvasSize);
 	const audioSettings = useTimelineStore((state) => state.audioSettings);
 	const setAudioSettings = useTimelineStore((state) => state.setAudioSettings);
+	const timelineEndFrame = useMemo(() => {
+		return elements.reduce(
+			(max, element) => Math.max(max, Math.round(element.timeline.end ?? 0)),
+			0,
+		);
+	}, [elements]);
 	const trackLockedMap = useMemo(() => {
 		const map = new Map<number, boolean>(
 			tracks.map((track, index) => [index, track.locked ?? false]),
@@ -176,17 +184,12 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		}
 	}, [canvasRef, isExporting, isVideoExporting]);
 
-	const handleExportVideo = useCallback(async () => {
-		if (isExporting || isVideoExporting) return;
-		setIsVideoExporting(true);
-		try {
-			await exportTimelineAsVideo({
-				fps,
-			});
-		} finally {
-			setIsVideoExporting(false);
-		}
-	}, [fps, isExporting, isVideoExporting]);
+	const handleExportVideo = useCallback(
+		async (options: ExportVideoOptions) => {
+			await exportTimelineAsVideo(options);
+		},
+		[],
+	);
 
 	const handleScaleChange = useCallback(
 		(value: number | readonly number[]) => {
@@ -713,14 +716,14 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			>
 				{isExporting ? "Exporting..." : "Export"}
 			</button>
-			<button
-				type="button"
-				onClick={handleExportVideo}
+			<ExportVideoDialog
 				disabled={isExporting || isVideoExporting}
-				className="px-3 py-1 text-sm rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white"
-			>
-				{isVideoExporting ? "导出中..." : "导出视频"}
-			</button>
+				defaultFps={fps}
+				timelineEndFrame={timelineEndFrame}
+				canvasSize={canvasSize}
+				onExport={handleExportVideo}
+				onExportingChange={setIsVideoExporting}
+			/>
 		</div>
 	);
 };

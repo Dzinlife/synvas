@@ -51,6 +51,8 @@ export const exportTimelineAsVideo = async (options?: {
 	fps?: number;
 	startFrame?: number;
 	endFrame?: number;
+	signal?: AbortSignal;
+	onFrame?: (frame: number) => void;
 }): Promise<void> => {
 	const timelineState = useTimelineStore.getState();
 	const elements = timelineState.elements;
@@ -101,9 +103,11 @@ export const exportTimelineAsVideo = async (options?: {
 					getAudioPlaybackSessionKey(elements, elementId),
 				dspConfig: timelineState.audioSettings,
 			},
+			signal: options?.signal,
 			waitForReady: () => waitForStaticModelsReady(elements),
 			onFrame: (frame) => {
 				timelineState.setExportTime(frame);
+				options?.onFrame?.(frame);
 			},
 		});
 	} finally {

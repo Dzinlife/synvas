@@ -19,6 +19,21 @@ import {
 
 const AUDIO_EPSILON = 1e-6;
 
+const createAbortError = (): Error => {
+	if (typeof DOMException !== "undefined") {
+		return new DOMException("已取消", "AbortError");
+	}
+	const error = new Error("已取消");
+	error.name = "AbortError";
+	return error;
+};
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+	if (signal?.aborted) {
+		throw createAbortError();
+	}
+};
+
 type ExportAudioTimeline = {
 	start?: number;
 	end?: number;
@@ -56,11 +71,14 @@ const decodeTarget = async ({
 	target,
 	sampleRate,
 	numberOfChannels,
+	signal,
 }: {
 	target: ExportAudioRenderTarget;
 	sampleRate: number;
 	numberOfChannels: number;
+	signal?: AbortSignal;
 }): Promise<PreparedMixTarget | null> => {
+	throwIfAborted(signal);
 	const decodeStart = Math.max(0, target.sourceRangeStart);
 	const decodeEnd = Math.min(target.audioDuration, target.sourceRangeEnd);
 	if (decodeEnd - decodeStart <= AUDIO_EPSILON) return null;
@@ -80,6 +98,7 @@ const decodeTarget = async ({
 		decodeStart,
 		decodeEnd,
 	)) {
+		throwIfAborted(signal);
 		const normalized = normalizeWrappedBuffer(wrapped);
 		if (!normalized) continue;
 		const chunkStart = normalized.timestamp;
@@ -147,13 +166,20 @@ const resolvePreparedTarget = async ({
 	fps,
 	sampleRate,
 	numberOfChannels,
+	signal,
 }: {
 	target: ExportAudioRenderTarget;
 	fps: number;
 	sampleRate: number;
 	numberOfChannels: number;
+	signal?: AbortSignal;
 }): Promise<PreparedMixTarget | null> => {
-	const decoded = await decodeTarget({ target, sampleRate, numberOfChannels });
+	const decoded = await decodeTarget({
+		target,
+		sampleRate,
+		numberOfChannels,
+		signal,
+	});
 	if (!decoded) return null;
 	decoded.clipStartSeconds = framesToSeconds(target.timeline.start ?? 0, fps);
 	decoded.clipOffsetSeconds = framesToSeconds(target.timeline.offset ?? 0, fps);
@@ -206,6 +232,7 @@ export const renderMixedAudioForExport = async ({
 	fps,
 	audioSource,
 	dspConfig,
+	signal,
 }: {
 	targets: ExportAudioRenderTarget[];
 	startFrame: number;
@@ -213,7 +240,9 @@ export const renderMixedAudioForExport = async ({
 	fps: number;
 	audioSource: AudioSampleSource;
 	dspConfig?: PartialExportAudioDspSettings;
+	signal?: AbortSignal;
 }): Promise<boolean> => {
+	throwIfAborted(signal);
 	const activeTargets = targets.filter(
 		(target) =>
 			target.enabled &&
@@ -231,11 +260,13 @@ export const renderMixedAudioForExport = async ({
 
 	const preparedTargets: PreparedMixTarget[] = [];
 	for (const target of activeTargets) {
+		throwIfAborted(signal);
 		const prepared = await resolvePreparedTarget({
 			target,
 			fps,
 			sampleRate,
 			numberOfChannels,
+			signal,
 		});
 		if (!prepared) continue;
 		preparedTargets.push(prepared);
@@ -256,6 +287,7 @@ export const renderMixedAudioForExport = async ({
 	const blockBuffer = new Float32Array(blockSize * numberOfChannels);
 
 	for (let frameStart = 0; frameStart < totalFrames; frameStart += blockSize) {
+		throwIfAborted(signal);
 		const blockFrames = Math.min(blockSize, totalFrames - frameStart);
 		const block = blockBuffer.subarray(0, blockFrames * numberOfChannels);
 		mixTargetsIntoBlock({
@@ -288,6 +320,7 @@ export const renderMixedAudioForExport = async ({
 		});
 		await audioSource.add(audioSample);
 		audioSample.close();
+		throwIfAborted(signal);
 	}
 
 	return true;

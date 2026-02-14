@@ -56,6 +56,7 @@ export type ExportTimelineAsVideoOptions = {
 	filename?: string;
 	startFrame?: number;
 	endFrame?: number;
+	signal?: AbortSignal;
 	audio?: ExportTimelineAudioOptions;
 	getModelStore?: NonNullable<
 		Parameters<typeof buildSkiaRenderStateCore>[0]["prepare"]
@@ -122,6 +123,28 @@ const cleanupWebGLContext = (canvas: HTMLCanvasElement | OffscreenCanvas) => {
 };
 
 const OPFS_CLEANUP_DELAY_MS = 10 * 60_000;
+
+const createAbortError = (): Error => {
+	if (typeof DOMException !== "undefined") {
+		return new DOMException("已取消", "AbortError");
+	}
+	const error = new Error("已取消");
+	error.name = "AbortError";
+	return error;
+};
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+	if (signal?.aborted) {
+		throw createAbortError();
+	}
+};
+
+const isAbortError = (error: unknown): boolean => {
+	if (error instanceof DOMException) {
+		return error.name === "AbortError";
+	}
+	return error instanceof Error && error.name === "AbortError";
+};
 
 const createWebGLSurfaceForExport = (
 	canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -516,8 +539,11 @@ export const exportTimelineAsVideoCore = async (
 		throw new Error("导出失败：时间轴为空");
 	}
 
+	throwIfAborted(options.signal);
 	if (options.waitForReady) {
+		throwIfAborted(options.signal);
 		await options.waitForReady();
+		throwIfAborted(options.signal);
 	}
 
 	const totalFrames = endFrame - startFrame;
@@ -533,12 +559,15 @@ export const exportTimelineAsVideoCore = async (
 	let surface: JsiSkSurface | null = null;
 	let webglCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
 	let outputTarget: ExportOutputTarget | null = null;
+	let output: Output<Mp4OutputFormat, BufferTarget | StreamTarget> | null = null;
 	let shouldCleanupOutputTargetImmediately = true;
 
 	try {
+		throwIfAborted(options.signal);
 		outputTarget = await createExportOutputTarget();
+		throwIfAborted(options.signal);
 		console.info(`[Export] output target: ${outputTarget.kind}`);
-		const output = new Output({
+		output = new Output({
 			format: new Mp4OutputFormat(),
 			target: outputTarget.target,
 		});
@@ -568,7 +597,9 @@ export const exportTimelineAsVideoCore = async (
 			output.addAudioTrack(audioSource);
 		}
 
+		throwIfAborted(options.signal);
 		await output.start();
+		throwIfAborted(options.signal);
 
 		root = new SkiaSGRoot(Skia);
 		const webglResult = createWebGLSurfaceForExport(
@@ -607,6 +638,7 @@ export const exportTimelineAsVideoCore = async (
 		};
 
 		for (let frame = startFrame; frame < endFrame; frame += 1) {
+			throwIfAborted(options.signal);
 			options.onFrame?.(frame);
 			const frameState = await buildFrameState(frame);
 			if (!frameState) {
@@ -614,6 +646,7 @@ export const exportTimelineAsVideoCore = async (
 			}
 
 			try {
+				throwIfAborted(options.signal);
 				if (audioTargetsBySessionKey.size > 0) {
 					applyAudioMixPlanAtFrame({
 						frame,
@@ -628,13 +661,16 @@ export const exportTimelineAsVideoCore = async (
 				}
 
 				await frameState.ready;
+				throwIfAborted(options.signal);
 
 				await root.render(frameState.children);
 				// 渲染树已包含全屏背景 Fill，避免额外 clear 触发 CanvasKit 崩溃路径
 				root.drawOnCanvas(skiaCanvas);
 				surface.flush();
+				throwIfAborted(options.signal);
 
 				await videoSource.add(frame / fps, 1 / fps);
+				throwIfAborted(options.signal);
 			} finally {
 				frameState.dispose?.();
 			}
@@ -643,6 +679,7 @@ export const exportTimelineAsVideoCore = async (
 		console.log("video canvas rendered");
 
 		if (audioSource && audioTargets.length > 0) {
+			throwIfAborted(options.signal);
 			await renderMixedAudioForExport({
 				targets: audioTargets,
 				startFrame,
@@ -650,14 +687,19 @@ export const exportTimelineAsVideoCore = async (
 				fps,
 				audioSource,
 				dspConfig: options.audio?.dspConfig,
+				signal: options.signal,
 			});
+			throwIfAborted(options.signal);
 		}
 
 		console.log("audio mixed");
 
+		throwIfAborted(options.signal);
 		await output.finalize();
 		console.log("output finalized");
+		throwIfAborted(options.signal);
 		const blob = await outputTarget.resolveBlob();
+		throwIfAborted(options.signal);
 		const filename = options.filename ?? `timeline-${Date.now()}.mp4`;
 		downloadBlob(blob, filename);
 		console.log("blob downloaded");
@@ -666,6 +708,13 @@ export const exportTimelineAsVideoCore = async (
 			scheduleDeferredCleanup(outputTarget);
 			shouldCleanupOutputTargetImmediately = false;
 		}
+	} catch (error) {
+		if (options.signal?.aborted || isAbortError(error)) {
+			try {
+				await output?.cancel();
+			} catch {}
+		}
+		throw error;
 	} finally {
 		if (shouldCleanupOutputTargetImmediately) {
 			await outputTarget?.cleanup();
