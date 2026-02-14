@@ -39,14 +39,25 @@ const ElementSettingsPanel: React.FC = () => {
 	const SettingComponent = selectedDefinition?.Setting;
 
 	const updateSelectedElement = useCallback(
-		(updater: (element: TimelineElement) => TimelineElement) => {
+		(
+			updater: (element: TimelineElement) => TimelineElement,
+			options?: { history?: boolean },
+		) => {
 			if (!selectedElementId) return;
-			setElements((prev) =>
-				prev.map((element) => {
-					if (element.id !== selectedElementId) return element;
-					const nextElement = updater(element);
-					return nextElement;
-				}),
+			setElements(
+				(prev) => {
+					let didChange = false;
+					const nextElements = prev.map((element) => {
+						if (element.id !== selectedElementId) return element;
+						const nextElement = updater(element);
+						if (nextElement !== element) {
+							didChange = true;
+						}
+						return nextElement;
+					});
+					return didChange ? nextElements : prev;
+				},
+				options,
 			);
 		},
 		[selectedElementId, setElements],

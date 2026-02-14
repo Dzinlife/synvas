@@ -1,8 +1,10 @@
 import type { TimelineElement } from "core/dsl/types";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { Input } from "@/components/ui/input";
+import { ScrubbableNumberInput } from "@/components/ui/scrubbable-number-input";
 import {
 	clampNumber,
+	roundToDecimals,
 	resolveInputNumber,
 	resolveRenderOpacity,
 	resolveRenderVisible,
@@ -10,7 +12,10 @@ import {
 
 interface CommonElementSettingsPanelProps {
 	element: TimelineElement;
-	updateElement: (updater: (element: TimelineElement) => TimelineElement) => void;
+	updateElement: (
+		updater: (element: TimelineElement) => TimelineElement,
+		options?: { history?: boolean },
+	) => void;
 }
 
 const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
@@ -19,6 +24,7 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 }) => {
 	const transform = element.transform;
 	const hasTransform = Boolean(transform);
+	const isTransformScrubbingRef = useRef(false);
 
 	const updateName = useCallback(
 		(value: string) => {
@@ -56,7 +62,7 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 			updateElement((current) => {
 				const currentOpacity = resolveRenderOpacity(current);
 				const resolved = clampNumber(
-					resolveInputNumber(rawValue, currentOpacity),
+					roundToDecimals(resolveInputNumber(rawValue, currentOpacity)),
 					0,
 					1,
 				);
@@ -79,6 +85,7 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 			updater: (
 				transformMeta: NonNullable<TimelineElement["transform"]>,
 			) => NonNullable<TimelineElement["transform"]>,
+			options?: { history?: boolean },
 		) => {
 			updateElement((current) => {
 				if (!current.transform) return current;
@@ -89,15 +96,29 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 							...current,
 							transform: nextTransform,
 						};
-			});
+			}, options);
 		},
 		[updateElement],
 	);
 
+	const getTransformUpdateOptions = useCallback(() => {
+		return isTransformScrubbingRef.current ? { history: false } : undefined;
+	}, []);
+
+	const handleTransformScrubStart = useCallback(() => {
+		if (isTransformScrubbingRef.current) return;
+		isTransformScrubbingRef.current = true;
+		updateElement((current) => ({ ...current }), { history: true });
+	}, [updateElement]);
+
+	const handleTransformScrubEnd = useCallback(() => {
+		isTransformScrubbingRef.current = false;
+	}, []);
+
 	const updatePositionX = useCallback(
-		(rawValue: string) => {
+		(value: number) => {
 			updateTransform((currentTransform) => {
-				const nextValue = resolveInputNumber(rawValue, currentTransform.position.x);
+				const nextValue = roundToDecimals(value);
 				if (nextValue === currentTransform.position.x) return currentTransform;
 				return {
 					...currentTransform,
@@ -106,15 +127,15 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 						x: nextValue,
 					},
 				};
-			});
+			}, getTransformUpdateOptions());
 		},
-		[updateTransform],
+		[getTransformUpdateOptions, updateTransform],
 	);
 
 	const updatePositionY = useCallback(
-		(rawValue: string) => {
+		(value: number) => {
 			updateTransform((currentTransform) => {
-				const nextValue = resolveInputNumber(rawValue, currentTransform.position.y);
+				const nextValue = roundToDecimals(value);
 				if (nextValue === currentTransform.position.y) return currentTransform;
 				return {
 					...currentTransform,
@@ -123,19 +144,15 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 						y: nextValue,
 					},
 				};
-			});
+			}, getTransformUpdateOptions());
 		},
-		[updateTransform],
+		[getTransformUpdateOptions, updateTransform],
 	);
 
 	const updateAnchorX = useCallback(
-		(rawValue: string) => {
+		(value: number) => {
 			updateTransform((currentTransform) => {
-				const nextValue = clampNumber(
-					resolveInputNumber(rawValue, currentTransform.anchor.x),
-					0,
-					1,
-				);
+				const nextValue = clampNumber(roundToDecimals(value), 0, 1);
 				if (nextValue === currentTransform.anchor.x) return currentTransform;
 				return {
 					...currentTransform,
@@ -144,19 +161,15 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 						x: nextValue,
 					},
 				};
-			});
+			}, getTransformUpdateOptions());
 		},
-		[updateTransform],
+		[getTransformUpdateOptions, updateTransform],
 	);
 
 	const updateAnchorY = useCallback(
-		(rawValue: string) => {
+		(value: number) => {
 			updateTransform((currentTransform) => {
-				const nextValue = clampNumber(
-					resolveInputNumber(rawValue, currentTransform.anchor.y),
-					0,
-					1,
-				);
+				const nextValue = clampNumber(roundToDecimals(value), 0, 1);
 				if (nextValue === currentTransform.anchor.y) return currentTransform;
 				return {
 					...currentTransform,
@@ -165,15 +178,15 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 						y: nextValue,
 					},
 				};
-			});
+			}, getTransformUpdateOptions());
 		},
-		[updateTransform],
+		[getTransformUpdateOptions, updateTransform],
 	);
 
 	const updateScaleX = useCallback(
-		(rawValue: string) => {
+		(value: number) => {
 			updateTransform((currentTransform) => {
-				const nextValue = resolveInputNumber(rawValue, currentTransform.scale.x);
+				const nextValue = roundToDecimals(value);
 				if (nextValue === currentTransform.scale.x) return currentTransform;
 				return {
 					...currentTransform,
@@ -182,15 +195,15 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 						x: nextValue,
 					},
 				};
-			});
+			}, getTransformUpdateOptions());
 		},
-		[updateTransform],
+		[getTransformUpdateOptions, updateTransform],
 	);
 
 	const updateScaleY = useCallback(
-		(rawValue: string) => {
+		(value: number) => {
 			updateTransform((currentTransform) => {
-				const nextValue = resolveInputNumber(rawValue, currentTransform.scale.y);
+				const nextValue = roundToDecimals(value);
 				if (nextValue === currentTransform.scale.y) return currentTransform;
 				return {
 					...currentTransform,
@@ -199,15 +212,15 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 						y: nextValue,
 					},
 				};
-			});
+			}, getTransformUpdateOptions());
 		},
-		[updateTransform],
+		[getTransformUpdateOptions, updateTransform],
 	);
 
 	const updateRotation = useCallback(
-		(rawValue: string) => {
+		(value: number) => {
 			updateTransform((currentTransform) => {
-				const nextValue = resolveInputNumber(rawValue, currentTransform.rotation.value);
+				const nextValue = roundToDecimals(value);
 				if (nextValue === currentTransform.rotation.value) return currentTransform;
 				return {
 					...currentTransform,
@@ -216,9 +229,9 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 						value: nextValue,
 					},
 				};
-			});
+			}, getTransformUpdateOptions());
 		},
-		[updateTransform],
+		[getTransformUpdateOptions, updateTransform],
 	);
 
 	return (
@@ -278,131 +291,112 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 				/>
 			</div>
 
-			<div className="grid grid-cols-2 gap-2">
+			<div className="space-y-2">
 				<div className="space-y-1">
-					<label className="block text-xs text-neutral-400 mb-1" htmlFor="position-x">
-						Position X
-					</label>
-					<Input
-						id="position-x"
-						aria-label="Position X"
-						type="number"
-						step={1}
-						disabled={!hasTransform}
-						value={transform?.position.x ?? 0}
-						onChange={(event) => {
-							updatePositionX(event.target.value);
-						}}
-						className="h-8 w-full bg-neutral-800 border-white/10 text-sm text-white placeholder-neutral-500 disabled:opacity-50"
-					/>
-				</div>
-				<div className="space-y-1">
-					<label className="block text-xs text-neutral-400 mb-1" htmlFor="position-y">
-						Position Y
-					</label>
-					<Input
-						id="position-y"
-						aria-label="Position Y"
-						type="number"
-						step={1}
-						disabled={!hasTransform}
-						value={transform?.position.y ?? 0}
-						onChange={(event) => {
-							updatePositionY(event.target.value);
-						}}
-						className="h-8 w-full bg-neutral-800 border-white/10 text-sm text-white placeholder-neutral-500 disabled:opacity-50"
-					/>
+					<div className="text-xs text-neutral-400">Position</div>
+					<div className="grid grid-cols-2 gap-2">
+						<ScrubbableNumberInput
+							id="position-x"
+							ariaLabel="Position X"
+							label="X"
+							step={1}
+							disabled={!hasTransform}
+							value={transform?.position.x ?? 0}
+							onValueChange={updatePositionX}
+							onScrubStart={handleTransformScrubStart}
+							onScrubEnd={handleTransformScrubEnd}
+						/>
+						<ScrubbableNumberInput
+							id="position-y"
+							ariaLabel="Position Y"
+							label="Y"
+							step={1}
+							disabled={!hasTransform}
+							value={transform?.position.y ?? 0}
+							onValueChange={updatePositionY}
+							onScrubStart={handleTransformScrubStart}
+							onScrubEnd={handleTransformScrubEnd}
+						/>
+					</div>
 				</div>
 				<div className="space-y-1">
-					<label className="block text-xs text-neutral-400 mb-1" htmlFor="anchor-x">
-						Anchor X
-					</label>
-					<Input
-						id="anchor-x"
-						aria-label="Anchor X"
-						type="number"
-						min={0}
-						max={1}
-						step={0.01}
-						disabled={!hasTransform}
-						value={transform?.anchor.x ?? 0}
-						onChange={(event) => {
-							updateAnchorX(event.target.value);
-						}}
-						className="h-8 w-full bg-neutral-800 border-white/10 text-sm text-white placeholder-neutral-500 disabled:opacity-50"
-					/>
+					<div className="text-xs text-neutral-400">Anchor</div>
+					<div className="grid grid-cols-2 gap-2">
+						<ScrubbableNumberInput
+							id="anchor-x"
+							ariaLabel="Anchor X"
+							label="X"
+							min={0}
+							max={1}
+							step={0.01}
+							disabled={!hasTransform}
+							value={transform?.anchor.x ?? 0}
+							onValueChange={updateAnchorX}
+							onScrubStart={handleTransformScrubStart}
+							onScrubEnd={handleTransformScrubEnd}
+						/>
+						<ScrubbableNumberInput
+							id="anchor-y"
+							ariaLabel="Anchor Y"
+							label="Y"
+							min={0}
+							max={1}
+							step={0.01}
+							disabled={!hasTransform}
+							value={transform?.anchor.y ?? 0}
+							onValueChange={updateAnchorY}
+							onScrubStart={handleTransformScrubStart}
+							onScrubEnd={handleTransformScrubEnd}
+						/>
+					</div>
 				</div>
 				<div className="space-y-1">
-					<label className="block text-xs text-neutral-400 mb-1" htmlFor="anchor-y">
-						Anchor Y
-					</label>
-					<Input
-						id="anchor-y"
-						aria-label="Anchor Y"
-						type="number"
-						min={0}
-						max={1}
-						step={0.01}
-						disabled={!hasTransform}
-						value={transform?.anchor.y ?? 0}
-						onChange={(event) => {
-							updateAnchorY(event.target.value);
-						}}
-						className="h-8 w-full bg-neutral-800 border-white/10 text-sm text-white placeholder-neutral-500 disabled:opacity-50"
-					/>
+					<div className="text-xs text-neutral-400">Scale</div>
+					<div className="grid grid-cols-2 gap-2">
+						<ScrubbableNumberInput
+							id="scale-x"
+							ariaLabel="Scale X"
+							label="X"
+							step={0.01}
+							disabled={!hasTransform}
+							value={transform?.scale.x ?? 0}
+							onValueChange={updateScaleX}
+							onScrubStart={handleTransformScrubStart}
+							onScrubEnd={handleTransformScrubEnd}
+						/>
+						<ScrubbableNumberInput
+							id="scale-y"
+							ariaLabel="Scale Y"
+							label="Y"
+							step={0.01}
+							disabled={!hasTransform}
+							value={transform?.scale.y ?? 0}
+							onValueChange={updateScaleY}
+							onScrubStart={handleTransformScrubStart}
+							onScrubEnd={handleTransformScrubEnd}
+						/>
+					</div>
 				</div>
-				<div className="space-y-1">
-					<label className="block text-xs text-neutral-400 mb-1" htmlFor="scale-x">
-						Scale X
-					</label>
-					<Input
-						id="scale-x"
-						aria-label="Scale X"
-						type="number"
-						step={0.01}
-						disabled={!hasTransform}
-						value={transform?.scale.x ?? 0}
-						onChange={(event) => {
-							updateScaleX(event.target.value);
-						}}
-						className="h-8 w-full bg-neutral-800 border-white/10 text-sm text-white placeholder-neutral-500 disabled:opacity-50"
-					/>
+					<div className="space-y-1">
+						<div className="text-xs text-neutral-400">Rotation</div>
+						<ScrubbableNumberInput
+							id="rotation"
+							ariaLabel="Rotation (deg)"
+							label="R"
+							format={{
+								style: "unit",
+								unit: "degree",
+								unitDisplay: "narrow",
+							}}
+							step={0.1}
+							disabled={!hasTransform}
+							value={transform?.rotation.value ?? 0}
+							onValueChange={updateRotation}
+							onScrubStart={handleTransformScrubStart}
+							onScrubEnd={handleTransformScrubEnd}
+						/>
+					</div>
 				</div>
-				<div className="space-y-1">
-					<label className="block text-xs text-neutral-400 mb-1" htmlFor="scale-y">
-						Scale Y
-					</label>
-					<Input
-						id="scale-y"
-						aria-label="Scale Y"
-						type="number"
-						step={0.01}
-						disabled={!hasTransform}
-						value={transform?.scale.y ?? 0}
-						onChange={(event) => {
-							updateScaleY(event.target.value);
-						}}
-						className="h-8 w-full bg-neutral-800 border-white/10 text-sm text-white placeholder-neutral-500 disabled:opacity-50"
-					/>
-				</div>
-				<div className="space-y-1 col-span-2">
-					<label className="block text-xs text-neutral-400 mb-1" htmlFor="rotation">
-						Rotation (deg)
-					</label>
-					<Input
-						id="rotation"
-						aria-label="Rotation (deg)"
-						type="number"
-						step={0.1}
-						disabled={!hasTransform}
-						value={transform?.rotation.value ?? 0}
-						onChange={(event) => {
-							updateRotation(event.target.value);
-						}}
-						className="h-8 w-full bg-neutral-800 border-white/10 text-sm text-white placeholder-neutral-500 disabled:opacity-50"
-					/>
-				</div>
-			</div>
 
 			{!hasTransform && (
 				<div className="text-xs text-neutral-500">
