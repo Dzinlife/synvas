@@ -1,9 +1,4 @@
 import type { TimelineElement } from "core/dsl/types";
-import {
-	AUDIO_EXPORT_BLOCK_SIZE_VALUES,
-	AUDIO_EXPORT_SAMPLE_RATE_VALUES,
-	type ExportAudioDspSettings,
-} from "core/editor/audio/dsp/types";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -36,7 +31,10 @@ import {
 	reconcileTransitions,
 } from "../utils/transitions";
 import AsrDialog from "./AsrDialog";
-import ExportVideoDialog, { type ExportVideoOptions } from "./ExportVideoDialog";
+import ExportVideoDialog, {
+	type ExportVideoOptions,
+} from "./ExportVideoDialog";
+import TimelineMinimap from "./TimelineMinimap";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
 import { buildSplitElements } from "./timelineSplit";
 
@@ -50,16 +48,6 @@ const createElementId = () => {
 	return `clip-${Date.now().toString(36)}-${Math.random()
 		.toString(36)
 		.slice(2, 6)}`;
-};
-
-const clampNumber = (value: number, min: number, max: number): number =>
-	Math.min(max, Math.max(min, value));
-
-const parseNumberInput = (value: string): number | null => {
-	if (value.trim() === "") return null;
-	const next = Number(value);
-	if (!Number.isFinite(next)) return null;
-	return next;
 };
 
 const remapTransitionsAfterSplit = (
@@ -107,14 +95,13 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
 	const canvasSize = useTimelineStore((state) => state.canvasSize);
-	const audioSettings = useTimelineStore((state) => state.audioSettings);
-	const setAudioSettings = useTimelineStore((state) => state.setAudioSettings);
 	const timelineEndFrame = useMemo(() => {
 		return elements.reduce(
 			(max, element) => Math.max(max, Math.round(element.timeline.end ?? 0)),
 			0,
 		);
 	}, [elements]);
+	const timelinePaddingLeft = 48;
 	const trackLockedMap = useMemo(() => {
 		const map = new Map<number, boolean>(
 			tracks.map((track, index) => [index, track.locked ?? false]),
@@ -184,12 +171,9 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		}
 	}, [canvasRef, isExporting, isVideoExporting]);
 
-	const handleExportVideo = useCallback(
-		async (options: ExportVideoOptions) => {
-			await exportTimelineAsVideo(options);
-		},
-		[],
-	);
+	const handleExportVideo = useCallback(async (options: ExportVideoOptions) => {
+		await exportTimelineAsVideo(options);
+	}, []);
 
 	const handleScaleChange = useCallback(
 		(value: number | readonly number[]) => {
@@ -198,128 +182,6 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			setTimelineScale(nextValue);
 		},
 		[setTimelineScale],
-	);
-
-	const updateAudioSettings = useCallback(
-		(updater: (prev: ExportAudioDspSettings) => ExportAudioDspSettings) => {
-			const prev = useTimelineStore.getState().audioSettings;
-			setAudioSettings(updater(prev));
-		},
-		[setAudioSettings],
-	);
-
-	const updateCompressor = useCallback(
-		(
-			updater: (
-				prev: ExportAudioDspSettings["compressor"],
-			) => ExportAudioDspSettings["compressor"],
-		) => {
-			updateAudioSettings((prev) => ({
-				...prev,
-				compressor: updater(prev.compressor),
-			}));
-		},
-		[updateAudioSettings],
-	);
-
-	const handleSampleRateChange = useCallback(
-		(value: number) => {
-			if (value !== 44100 && value !== 48000) return;
-			updateAudioSettings((prev) => ({ ...prev, exportSampleRate: value }));
-		},
-		[updateAudioSettings],
-	);
-
-	const handleBlockSizeChange = useCallback(
-		(value: number) => {
-			if (value !== 256 && value !== 512 && value !== 1024) return;
-			updateAudioSettings((prev) => ({ ...prev, exportBlockSize: value }));
-		},
-		[updateAudioSettings],
-	);
-
-	const handleMasterGainChange = useCallback(
-		(value: number) => {
-			if (!Number.isFinite(value)) return;
-			updateAudioSettings((prev) => ({
-				...prev,
-				masterGainDb: clampNumber(value, -24, 24),
-			}));
-		},
-		[updateAudioSettings],
-	);
-
-	const handleCompressorToggle = useCallback(() => {
-		updateCompressor((prev) => ({
-			...prev,
-			enabled: !prev.enabled,
-		}));
-	}, [updateCompressor]);
-
-	const handleThresholdChange = useCallback(
-		(value: number) => {
-			if (!Number.isFinite(value)) return;
-			updateCompressor((prev) => ({
-				...prev,
-				thresholdDb: clampNumber(value, -60, 0),
-			}));
-		},
-		[updateCompressor],
-	);
-
-	const handleRatioChange = useCallback(
-		(value: number) => {
-			if (!Number.isFinite(value)) return;
-			updateCompressor((prev) => ({
-				...prev,
-				ratio: clampNumber(value, 1, 20),
-			}));
-		},
-		[updateCompressor],
-	);
-
-	const handleKneeChange = useCallback(
-		(value: number) => {
-			if (!Number.isFinite(value)) return;
-			updateCompressor((prev) => ({
-				...prev,
-				kneeDb: clampNumber(value, 0, 24),
-			}));
-		},
-		[updateCompressor],
-	);
-
-	const handleAttackChange = useCallback(
-		(value: number) => {
-			if (!Number.isFinite(value)) return;
-			updateCompressor((prev) => ({
-				...prev,
-				attackMs: clampNumber(value, 0.1, 200),
-			}));
-		},
-		[updateCompressor],
-	);
-
-	const handleReleaseChange = useCallback(
-		(value: number) => {
-			if (!Number.isFinite(value)) return;
-			updateCompressor((prev) => ({
-				...prev,
-				releaseMs: clampNumber(value, 10, 1200),
-			}));
-		},
-		[updateCompressor],
-	);
-
-	const handleMakeupChange = useCallback(
-		(value: number) => {
-			if (!Number.isFinite(value)) return;
-			updateCompressor((prev) => ({
-				...prev,
-				makeupGainDb: clampNumber(value, -24, 24),
-			}));
-		},
-		[updateCompressor],
 	);
 
 	const splitCandidate = useMemo(() => {
@@ -537,176 +399,9 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 					className="w-16"
 				/>
 			</div>
-			<div className="ml-1 flex items-center gap-2 rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1">
-				<span className="text-[11px] text-neutral-300">DSP</span>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					SR
-					<select
-						value={audioSettings.exportSampleRate}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleSampleRateChange(parsed);
-						}}
-						className="h-6 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none"
-					>
-						{AUDIO_EXPORT_SAMPLE_RATE_VALUES.map((sampleRate) => (
-							<option key={sampleRate} value={sampleRate}>
-								{sampleRate}
-							</option>
-						))}
-					</select>
-				</label>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					Block
-					<select
-						value={audioSettings.exportBlockSize}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleBlockSizeChange(parsed);
-						}}
-						className="h-6 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none"
-					>
-						{AUDIO_EXPORT_BLOCK_SIZE_VALUES.map((blockSize) => (
-							<option key={blockSize} value={blockSize}>
-								{blockSize}
-							</option>
-						))}
-					</select>
-				</label>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					Master
-					<input
-						type="number"
-						step={0.1}
-						min={-24}
-						max={24}
-						value={audioSettings.masterGainDb}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleMasterGainChange(parsed);
-						}}
-						className="h-6 w-14 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none"
-					/>
-				</label>
-				<button
-					type="button"
-					onClick={handleCompressorToggle}
-					className={cn(
-						"px-2 py-1 text-[11px] rounded transition-colors",
-						audioSettings.compressor.enabled
-							? "bg-blue-600 text-white hover:bg-blue-500"
-							: "bg-neutral-700 text-neutral-200 hover:bg-neutral-600",
-					)}
-				>
-					Comp
-				</button>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					Thr
-					<input
-						type="number"
-						step={0.1}
-						min={-60}
-						max={0}
-						value={audioSettings.compressor.thresholdDb}
-						disabled={!audioSettings.compressor.enabled}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleThresholdChange(parsed);
-						}}
-						className="h-6 w-12 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none disabled:opacity-40"
-					/>
-				</label>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					Ratio
-					<input
-						type="number"
-						step={0.1}
-						min={1}
-						max={20}
-						value={audioSettings.compressor.ratio}
-						disabled={!audioSettings.compressor.enabled}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleRatioChange(parsed);
-						}}
-						className="h-6 w-12 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none disabled:opacity-40"
-					/>
-				</label>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					Knee
-					<input
-						type="number"
-						step={0.1}
-						min={0}
-						max={24}
-						value={audioSettings.compressor.kneeDb}
-						disabled={!audioSettings.compressor.enabled}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleKneeChange(parsed);
-						}}
-						className="h-6 w-12 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none disabled:opacity-40"
-					/>
-				</label>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					Atk
-					<input
-						type="number"
-						step={0.1}
-						min={0.1}
-						max={200}
-						value={audioSettings.compressor.attackMs}
-						disabled={!audioSettings.compressor.enabled}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleAttackChange(parsed);
-						}}
-						className="h-6 w-12 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none disabled:opacity-40"
-					/>
-				</label>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					Rel
-					<input
-						type="number"
-						step={1}
-						min={10}
-						max={1200}
-						value={audioSettings.compressor.releaseMs}
-						disabled={!audioSettings.compressor.enabled}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleReleaseChange(parsed);
-						}}
-						className="h-6 w-12 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none disabled:opacity-40"
-					/>
-				</label>
-				<label className="flex items-center gap-1 text-[11px] text-neutral-300">
-					Makeup
-					<input
-						type="number"
-						step={0.1}
-						min={-24}
-						max={24}
-						value={audioSettings.compressor.makeupGainDb}
-						disabled={!audioSettings.compressor.enabled}
-						onChange={(event) => {
-							const parsed = parseNumberInput(event.target.value);
-							if (parsed === null) return;
-							handleMakeupChange(parsed);
-						}}
-						className="h-6 w-12 rounded bg-neutral-900 px-1 text-[11px] text-neutral-100 outline-none disabled:opacity-40"
-					/>
-				</label>
+			<div className="ml-1 flex-1 min-w-[220px]">
+				<TimelineMinimap fps={fps} timelinePaddingLeft={timelinePaddingLeft} />
 			</div>
-			<div className="flex-1" />
 			<AsrDialog />
 			<button
 				type="button"

@@ -159,6 +159,12 @@ type TimelineContextMenuState =
 const TimelineEditor = () => {
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
 	const setScrollLeft = useTimelineStore((state) => state.setScrollLeft);
+	const setTimelineMaxScrollLeft = useTimelineStore(
+		(state) => state.setTimelineMaxScrollLeft,
+	);
+	const setTimelineViewportWidth = useTimelineStore(
+		(state) => state.setTimelineViewportWidth,
+	);
 	const setPreviewTime = useTimelineStore((state) => state.setPreviewTime);
 	const { previewAxisEnabled } = usePreviewAxis();
 	const { isPlaying, pause } = usePlaybackControl();
@@ -465,8 +471,40 @@ const TimelineEditor = () => {
 	}, []);
 
 	const ratio = getPixelsPerFrame(fps, timelineScale);
-
 	const timelinePaddingLeft = 48;
+
+	const timelineContentEndFrame = useMemo(() => {
+		return elements.reduce((max, element) => {
+			return Math.max(max, Math.round(element.timeline.end ?? 0));
+		}, 0);
+	}, [elements]);
+
+	const timelineMaxScrollLeft = useMemo(() => {
+		const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 0;
+		const safeViewportWidth = Number.isFinite(rulerWidth)
+			? Math.max(0, rulerWidth)
+			: 0;
+		if (safeRatio <= 0 || safeViewportWidth <= 0) return 0;
+		const contentEndFrame = Math.max(1, timelineContentEndFrame);
+		const visibleFrameCount = safeViewportWidth / safeRatio;
+		// 专业 NLE 通常会在末尾保留一段可编辑缓冲，避免时间线“顶死”
+		const tailPaddingFrame = Math.max(fps * 2, visibleFrameCount * 0.25);
+		return Math.max(
+			0,
+			(contentEndFrame + tailPaddingFrame) * safeRatio +
+				timelinePaddingLeft -
+				safeViewportWidth,
+		);
+	}, [fps, ratio, rulerWidth, timelineContentEndFrame, timelinePaddingLeft]);
+
+	useEffect(() => {
+		setTimelineViewportWidth(rulerWidth);
+	}, [rulerWidth, setTimelineViewportWidth]);
+
+	useEffect(() => {
+		setTimelineMaxScrollLeft(timelineMaxScrollLeft);
+	}, [setTimelineMaxScrollLeft, timelineMaxScrollLeft]);
+
 	const zoomAnchorRef = useRef<{ clientX: number } | null>(null);
 	const prevScaleRef = useRef(timelineScale);
 
@@ -1025,13 +1063,15 @@ const TimelineEditor = () => {
 		}
 
 		const currentScrollLeft = scrollLeftRef.current;
-		if (currentScrollLeft <= 0.5) {
+		const offsetX = anchorX - leftColumnWidth - timelinePaddingLeft;
+		const timeAtAnchor = Math.max(0, (offsetX + currentScrollLeft) / prevRatio);
+		const isAtTimelineOrigin = currentScrollLeft <= 0.5;
+		const isAnchorAfterContentEnd = timeAtAnchor > timelineContentEndFrame;
+		if (isAtTimelineOrigin && isAnchorAfterContentEnd) {
 			prevScaleRef.current = timelineScale;
 			zoomAnchorRef.current = null;
 			return;
 		}
-		const offsetX = anchorX - leftColumnWidth - timelinePaddingLeft;
-		const timeAtAnchor = Math.max(0, (offsetX + currentScrollLeft) / prevRatio);
 		const nextScrollLeft = Math.max(0, timeAtAnchor * nextRatio - offsetX);
 
 		if (Number.isFinite(nextScrollLeft)) {
@@ -1040,7 +1080,14 @@ const TimelineEditor = () => {
 
 		prevScaleRef.current = timelineScale;
 		zoomAnchorRef.current = null;
-	}, [fps, leftColumnWidth, setScrollLeft, timelineScale, timelinePaddingLeft]);
+	}, [
+		fps,
+		leftColumnWidth,
+		setScrollLeft,
+		timelineContentEndFrame,
+		timelineScale,
+		timelinePaddingLeft,
+	]);
 
 	// 自动滚动效果（拖拽到边缘时触发）
 	useEffect(() => {

@@ -150,6 +150,10 @@ interface TimelineStore {
 	autoScrollSpeedY: number; // 垂直滚动速度，负数向上，正数向下
 	// 时间线滚动位置
 	scrollLeft: number;
+	// 时间线可滚动最大值
+	timelineMaxScrollLeft: number;
+	// 时间线可视区域宽度（不含左侧轨道列）
+	timelineViewportWidth: number;
 	setFps: (fps: number) => void;
 	setCurrentTime: (time: number) => void;
 	seekTo: (time: number) => void;
@@ -211,6 +215,8 @@ interface TimelineStore {
 	setAutoScrollSpeedY: (speed: number) => void;
 	// 滚动位置方法
 	setScrollLeft: (scrollLeft: number) => void;
+	setTimelineMaxScrollLeft: (maxScrollLeft: number) => void;
+	setTimelineViewportWidth: (width: number) => void;
 	setTimelineScale: (scale: number) => void;
 	getElementById: (id: string) => TimelineElement | null;
 }
@@ -526,6 +532,8 @@ export const useTimelineStore = create<TimelineStore>()(
 		autoScrollSpeedY: 0,
 		// 滚动位置初始值
 		scrollLeft: 0,
+		timelineMaxScrollLeft: 0,
+		timelineViewportWidth: 0,
 		getElementById: (id: string) => elementIndexById.get(id) ?? null,
 
 		setFps: (fps: number) => {
@@ -1215,7 +1223,38 @@ export const useTimelineStore = create<TimelineStore>()(
 
 		// 滚动位置方法
 		setScrollLeft: (scrollLeft: number) => {
-			set({ scrollLeft });
+			set((state) => {
+				const nextScrollLeft = Number.isFinite(scrollLeft)
+					? Math.min(
+							Math.max(0, scrollLeft),
+							Math.max(0, state.timelineMaxScrollLeft),
+						)
+					: state.scrollLeft;
+				if (nextScrollLeft === state.scrollLeft) return state;
+				return { scrollLeft: nextScrollLeft };
+			});
+		},
+		setTimelineMaxScrollLeft: (maxScrollLeft: number) => {
+			set((state) => {
+				const nextMaxScrollLeft = Number.isFinite(maxScrollLeft)
+					? Math.max(0, maxScrollLeft)
+					: 0;
+				const nextScrollLeft = Math.min(state.scrollLeft, nextMaxScrollLeft);
+				if (
+					nextMaxScrollLeft === state.timelineMaxScrollLeft &&
+					nextScrollLeft === state.scrollLeft
+				) {
+					return state;
+				}
+				return {
+					timelineMaxScrollLeft: nextMaxScrollLeft,
+					scrollLeft: nextScrollLeft,
+				};
+			});
+		},
+		setTimelineViewportWidth: (width: number) => {
+			const nextWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
+			set({ timelineViewportWidth: nextWidth });
 		},
 	})),
 );
@@ -2079,6 +2118,9 @@ export const TimelineProvider = ({
 				elements,
 				tracks,
 				audioTrackStates: {},
+				scrollLeft: 0,
+				timelineMaxScrollLeft: 0,
+				timelineViewportWidth: 0,
 				canvasSize: initialCanvasSize ?? { width: 1920, height: 1080 },
 				fps: normalizeFps(initialFps ?? DEFAULT_FPS),
 				...(settingsState ?? {}),
@@ -2090,13 +2132,21 @@ export const TimelineProvider = ({
 			useTimelineStore.setState({
 				tracks: initialTracks,
 				audioTrackStates: {},
+				scrollLeft: 0,
+				timelineMaxScrollLeft: 0,
+				timelineViewportWidth: 0,
 				...(settingsState ?? {}),
 			});
 			useTimelineStore.getState().resetHistory();
 			return;
 		}
 		if (settingsState) {
-			useTimelineStore.setState(settingsState);
+			useTimelineStore.setState({
+				scrollLeft: 0,
+				timelineMaxScrollLeft: 0,
+				timelineViewportWidth: 0,
+				...settingsState,
+			});
 		}
 	}, []);
 
@@ -2109,6 +2159,9 @@ export const TimelineProvider = ({
 				elements,
 				tracks,
 				audioTrackStates: {},
+				scrollLeft: 0,
+				timelineMaxScrollLeft: 0,
+				timelineViewportWidth: 0,
 			});
 			useTimelineStore.getState().resetHistory();
 		}
@@ -2119,6 +2172,9 @@ export const TimelineProvider = ({
 			useTimelineStore.setState({
 				tracks: initialTracks,
 				audioTrackStates: {},
+				scrollLeft: 0,
+				timelineMaxScrollLeft: 0,
+				timelineViewportWidth: 0,
 			});
 			useTimelineStore.getState().resetHistory();
 		}
