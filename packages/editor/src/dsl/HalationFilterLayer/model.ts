@@ -9,8 +9,6 @@ export interface HalationFilterLayerProps {
 	diffusion?: number;
 	warmness?: number;
 	chromaticShift?: number;
-	shape?: "circle" | "rect";
-	cornerRadius?: number;
 }
 
 export const HALATION_FILTER_DEFAULT_PROPS: Required<HalationFilterLayerProps> =
@@ -21,8 +19,6 @@ export const HALATION_FILTER_DEFAULT_PROPS: Required<HalationFilterLayerProps> =
 		diffusion: 0.55,
 		warmness: 0.6,
 		chromaticShift: 1.2,
-		shape: "rect",
-		cornerRadius: 0,
 	};
 
 export type HalationFilterLayerModelStore =

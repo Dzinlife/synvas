@@ -1,5 +1,4 @@
-import { Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
+import { DialSlider } from "@/components/ui/dial-slider";
 import { getTransformSize } from "@/dsl/transform";
 import type { DSLComponentSettingProps } from "../model/componentRegistry";
 import {
@@ -41,37 +40,16 @@ const NumberControl: React.FC<NumberControlProps> = ({
 	step,
 	onChange,
 }) => {
-	// const precision = getStepPrecision(step);
-
 	return (
-		<div className="space-y-1.5">
-			<div className="flex items-center justify-between text-xs text-neutral-400">
-				<span>{label}</span>
-				{/* <span className="tabular-nums">{value.toFixed(precision)}</span> */}
-			</div>
-			<div className="flex items-center gap-2">
-				<Slider
-					aria-label={`${label} slider`}
-					min={min}
-					max={max}
-					step={step}
-					value={[value]}
-					onValueChange={(next) => {
-						const nextValue = Array.isArray(next) ? next[0] : next;
-						if (!Number.isFinite(nextValue)) return;
-						onChange(nextValue);
-					}}
-					className="py-1 flex-1"
-				/>
-				<Input
-					aria-label={`${label} input`}
-					className="h-8 w-12 text-xs p-0 text-center"
-					value={value.toString()}
-					onChange={(e) => {
-						onChange(Number(e.target.value));
-					}}
-				/>
-			</div>
+		<div className="py-0.5">
+			<DialSlider
+				label={label}
+				value={value}
+				onChange={onChange}
+				min={min}
+				max={max}
+				step={step}
+			/>
 		</div>
 	);
 };
@@ -115,22 +93,13 @@ export const HalationFilterLayerSetting: React.FC<
 		0,
 		8,
 	);
-	const shape =
-		element.props.shape === "circle" || element.props.shape === "rect"
-			? element.props.shape
-			: HALATION_FILTER_DEFAULT_PROPS.shape;
+
 	const transformSize = element.transform
 		? getTransformSize(element.transform)
 		: { width: 0, height: 0 };
 	const cornerRadiusMax = Math.max(
 		0,
 		Math.min(transformSize.width, transformSize.height) / 2,
-	);
-	const cornerRadius = resolveNumber(
-		element.props.cornerRadius,
-		HALATION_FILTER_DEFAULT_PROPS.cornerRadius,
-		0,
-		cornerRadiusMax,
 	);
 
 	const setNumberProp = (
@@ -213,51 +182,6 @@ export const HalationFilterLayerSetting: React.FC<
 					setNumberProp("chromaticShift", value, 0, 8);
 				}}
 			/>
-
-			<div className="space-y-1.5">
-				<div className="text-xs text-neutral-400">Shape</div>
-				<div className="grid grid-cols-2 gap-2">
-					<button
-						type="button"
-						onClick={() => {
-							updateProps({ shape: "rect" });
-						}}
-						className={`rounded-md border px-2 py-1 text-xs transition-colors ${
-							shape === "rect"
-								? "border-blue-500 bg-blue-500/20 text-blue-300"
-								: "border-white/10 bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
-						}`}
-					>
-						Rect
-					</button>
-					<button
-						type="button"
-						onClick={() => {
-							updateProps({ shape: "circle" });
-						}}
-						className={`rounded-md border px-2 py-1 text-xs transition-colors ${
-							shape === "circle"
-								? "border-blue-500 bg-blue-500/20 text-blue-300"
-								: "border-white/10 bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
-						}`}
-					>
-						Circle
-					</button>
-				</div>
-			</div>
-
-			{shape === "rect" && (
-				<NumberControl
-					label="Corner Radius"
-					value={cornerRadius}
-					min={0}
-					max={cornerRadiusMax}
-					step={1}
-					onChange={(value) => {
-						setNumberProp("cornerRadius", value, 0, cornerRadiusMax);
-					}}
-				/>
-			)}
 		</div>
 	);
 };
