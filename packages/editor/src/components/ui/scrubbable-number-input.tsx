@@ -11,7 +11,9 @@ const resolveStep = (step: number | undefined): number => {
 	return step;
 };
 
-const resolvePixelSensitivity = (pixelSensitivity: number | undefined): number => {
+const resolvePixelSensitivity = (
+	pixelSensitivity: number | undefined,
+): number => {
 	if (
 		typeof pixelSensitivity !== "number" ||
 		!Number.isFinite(pixelSensitivity) ||
@@ -127,7 +129,7 @@ export function ScrubbableNumberInput({
 			max={max}
 			disabled={disabled}
 			className={cn(
-				"flex h-8 w-full items-center gap-3 rounded-lg border border-white/6 bg-neutral-800/90 px-3 transition-colors focus-within:border-white/20",
+				"group flex h-9 w-full items-center rounded-lg border border-transparent bg-neutral-800/90 pr-3 transition-colors focus-within:border-white/20",
 				"data-disabled:cursor-not-allowed data-disabled:opacity-50",
 				className,
 			)}
@@ -137,7 +139,7 @@ export function ScrubbableNumberInput({
 				tabIndex={disabled ? -1 : 0}
 				aria-label={`${ariaLabel} drag handle`}
 				style={{ touchAction: "none" }}
-				className="cursor-ew-resize select-none text-sm text-neutral-400"
+				className="flex h-full shrink-0 cursor-ew-resize select-none items-center pl-3 pr-3 text-sm text-neutral-400"
 				onPointerDown={(event) => {
 					const isMainButton = event.button === 0;
 					if (disabled || !isMainButton) return;
@@ -165,7 +167,9 @@ export function ScrubbableNumberInput({
 					if (previousClientX === null) return;
 
 					remainderRef.current += event.clientX - previousClientX;
-					const stepCount = Math.trunc(remainderRef.current / safePixelSensitivity);
+					const stepCount = Math.trunc(
+						remainderRef.current / safePixelSensitivity,
+					);
 					if (stepCount === 0) return;
 					remainderRef.current -= stepCount * safePixelSensitivity;
 
@@ -205,20 +209,20 @@ export function ScrubbableNumberInput({
 			>
 				{label}
 			</span>
-				<NumberFieldPrimitive.Input
-					ref={visibleInputRef}
-					aria-label={ariaLabel}
+			<NumberFieldPrimitive.Input
+				ref={visibleInputRef}
+				aria-label={ariaLabel}
 				onKeyDown={(event) => {
 					if (event.key !== "Enter") return;
 					if (event.nativeEvent.isComposing) return;
 					event.preventDefault();
 					event.currentTarget.blur();
 				}}
-					className={cn(
-						"w-full min-w-0 border-0 bg-transparent p-0 text-left text-sm font-medium tabular-nums text-white",
-						"focus:outline-none",
-					)}
-				/>
-			</NumberFieldPrimitive.Root>
-		);
+				className={cn(
+					"w-full min-w-0 border-0 bg-transparent p-0 text-left text-sm font-medium tabular-nums text-white/70 focus:text-white group-hover:text-white",
+					"focus:outline-none",
+				)}
+			/>
+		</NumberFieldPrimitive.Root>
+	);
 }

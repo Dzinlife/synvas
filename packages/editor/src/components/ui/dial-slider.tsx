@@ -11,6 +11,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { cn } from "@/lib/utils";
 
 export interface DialSliderProps {
 	label: string;
@@ -355,23 +356,27 @@ export function DialSlider({
 	const fillBackground = isActive
 		? "rgba(255, 255, 255, 0.15)"
 		: "rgba(255, 255, 255, 0.11)";
+	const hashMarkClassName = cn(
+		"absolute top-1/2 h-2 w-px -translate-x-1/2 -translate-y-1/2 rounded-full transition-[background] duration-200",
+		isActive ? "bg-white/15" : "bg-white/0",
+	);
 
 	const hashMarks = Array.from({ length: 9 }, (_, i) => {
 		const pct = (i + 1) * 10;
 		return (
 			<div
 				key={`dial-slider-hashmark-${pct}`}
-				className="dialkit-slider-hashmark"
+				className={hashMarkClassName}
 				style={{ left: `${pct}%` }}
 			/>
 		);
 	});
 
 	return (
-		<div ref={wrapperRef} className="dialkit-slider-wrapper">
+		<div ref={wrapperRef} className="relative h-9">
 			<motion.div
 				ref={trackRef}
-				className={`dialkit-slider ${isActive ? "dialkit-slider-active" : ""}`}
+				className="absolute top-0 left-0 h-full w-full cursor-pointer select-none overflow-hidden touch-none [background:var(--dial-surface,rgba(255,255,255,0.05))] [border-radius:var(--dial-radius,8px)]"
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}
@@ -379,23 +384,21 @@ export function DialSlider({
 				onMouseLeave={() => setIsHovered(false)}
 				style={{ width: rubberBandWidth, x: rubberBandX }}
 			>
-				<div className="dialkit-slider-hashmarks">{hashMarks}</div>
+				<div className="pointer-events-none absolute inset-0">{hashMarks}</div>
 
 				<motion.div
-					className="dialkit-slider-fill"
+					className="pointer-events-none absolute top-0 bottom-0 left-0 transition-[background] duration-150"
 					style={{
 						background: fillBackground,
 						width: fillWidth,
-						transition: "background 0.15s",
 					}}
 				/>
 
 				<motion.div
-					className="dialkit-slider-handle"
+					className="pointer-events-none absolute top-1/2 h-5 w-[3px] rounded-full bg-white/90"
 					style={{
 						left: handleLeft,
 						y: "-50%",
-						background: "rgba(255, 255, 255, 0.9)",
 					}}
 					animate={{
 						opacity: handleOpacity,
@@ -409,7 +412,10 @@ export function DialSlider({
 					}}
 				/>
 
-				<span ref={labelRef} className="dialkit-slider-label">
+				<span
+					ref={labelRef}
+					className="pointer-events-none absolute top-1/2 left-[10px] translate-y-[calc(-50%-0.5px)] text-[13px] font-medium [color:var(--dial-text-label,rgba(255,255,255,0.7))] transition-[color] duration-150"
+				>
 					{label}
 				</span>
 
@@ -417,7 +423,7 @@ export function DialSlider({
 					<input
 						ref={inputRef}
 						type="text"
-						className="dialkit-slider-input"
+						className="absolute top-1/2 right-[10px] w-[4ch] min-w-[3ch] max-w-[6ch] -translate-y-1/2 border-0 border-b [border-bottom-color:var(--dial-text-label,rgba(255,255,255,0.7))] bg-transparent p-0 pb-px text-right text-[13px] font-medium font-mono [color:var(--dial-text-label,rgba(255,255,255,0.7))] outline-none focus:text-white"
 						value={inputValue}
 						onChange={handleInputChange}
 						onKeyDown={handleInputKeyDown}
@@ -429,9 +435,13 @@ export function DialSlider({
 					<button
 						type="button"
 						ref={valueButtonRef}
-						className={`dialkit-slider-value ${
-							isValueEditable ? "dialkit-slider-value-editable" : ""
-						}`}
+						className={cn(
+							"absolute top-1/2 right-[10px] translate-y-[calc(-50%+0.5px)] appearance-none border-0 border-b border-b-transparent bg-transparent p-0 pb-px text-[13px] font-medium font-mono [color:var(--dial-text-label,rgba(255,255,255,0.7))] transition-[color,border-color] duration-150",
+							isValueEditable &&
+								"[border-bottom-color:var(--dial-text-label,rgba(255,255,255,0.7))]",
+							isActive && "text-white",
+							isValueEditable ? "cursor-text" : "cursor-default",
+						)}
 						onMouseEnter={() => setIsValueHovered(true)}
 						onMouseLeave={() => setIsValueHovered(false)}
 						onClick={handleValueClick}
@@ -440,7 +450,6 @@ export function DialSlider({
 								e.stopPropagation();
 							}
 						}}
-						style={{ cursor: isValueEditable ? "text" : "default" }}
 					>
 						{displayValueWithUnit}
 					</button>

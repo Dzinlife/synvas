@@ -1,13 +1,14 @@
 import type { TimelineElement } from "core/dsl/types";
 import { useCallback, useRef } from "react";
+import { DialSlider } from "@/components/ui/dial-slider";
 import { Input } from "@/components/ui/input";
 import { ScrubbableNumberInput } from "@/components/ui/scrubbable-number-input";
 import {
 	clampNumber,
-	roundToDecimals,
 	resolveInputNumber,
 	resolveRenderOpacity,
 	resolveRenderVisible,
+	roundToDecimals,
 } from "./commonElementSettingUtils";
 
 interface CommonElementSettingsPanelProps {
@@ -221,7 +222,8 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 		(value: number) => {
 			updateTransform((currentTransform) => {
 				const nextValue = roundToDecimals(value);
-				if (nextValue === currentTransform.rotation.value) return currentTransform;
+				if (nextValue === currentTransform.rotation.value)
+					return currentTransform;
 				return {
 					...currentTransform,
 					rotation: {
@@ -239,7 +241,10 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 			<div className="text-xs font-medium text-neutral-300">通用属性</div>
 
 			<div className="space-y-1">
-				<label className="block text-xs text-neutral-400 mb-1" htmlFor="common-name">
+				<label
+					className="block text-xs text-neutral-400 mb-1"
+					htmlFor="common-name"
+				>
 					Name
 				</label>
 				<Input
@@ -256,7 +261,10 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 
 			<div className="space-y-1">
 				<div className="flex items-center justify-between">
-					<label className="block text-xs text-neutral-400" htmlFor="common-visible">
+					<label
+						className="block text-xs text-neutral-400"
+						htmlFor="common-visible"
+					>
 						Visible
 					</label>
 					<input
@@ -273,21 +281,13 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 			</div>
 
 			<div className="space-y-1">
-				<label className="block text-xs text-neutral-400 mb-1" htmlFor="common-opacity">
-					Opacity
-				</label>
-				<Input
-					id="common-opacity"
-					aria-label="Opacity"
-					type="number"
+				<DialSlider
+					label="Opacity"
+					value={resolveRenderOpacity(element)}
+					onChange={(value) => updateRenderOpacity(String(value))}
 					min={0}
 					max={1}
 					step={0.01}
-					value={resolveRenderOpacity(element)}
-					onChange={(event) => {
-						updateRenderOpacity(event.target.value);
-					}}
-					className="h-8 w-full bg-neutral-800 border-white/10 text-sm text-white placeholder-neutral-500"
 				/>
 			</div>
 
@@ -377,26 +377,26 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 						/>
 					</div>
 				</div>
-					<div className="space-y-1">
-						<div className="text-xs text-neutral-400">Rotation</div>
-						<ScrubbableNumberInput
-							id="rotation"
-							ariaLabel="Rotation (deg)"
-							label="R"
-							format={{
-								style: "unit",
-								unit: "degree",
-								unitDisplay: "narrow",
-							}}
-							step={0.1}
-							disabled={!hasTransform}
-							value={transform?.rotation.value ?? 0}
-							onValueChange={updateRotation}
-							onScrubStart={handleTransformScrubStart}
-							onScrubEnd={handleTransformScrubEnd}
-						/>
-					</div>
+				<div className="space-y-1">
+					<div className="text-xs text-neutral-400">Rotation</div>
+					<ScrubbableNumberInput
+						id="rotation"
+						ariaLabel="Rotation (deg)"
+						label="R"
+						format={{
+							style: "unit",
+							unit: "degree",
+							unitDisplay: "narrow",
+						}}
+						step={0.1}
+						disabled={!hasTransform}
+						value={transform?.rotation.value ?? 0}
+						onValueChange={updateRotation}
+						onScrubStart={handleTransformScrubStart}
+						onScrubEnd={handleTransformScrubEnd}
+					/>
 				</div>
+			</div>
 
 			{!hasTransform && (
 				<div className="text-xs text-neutral-500">

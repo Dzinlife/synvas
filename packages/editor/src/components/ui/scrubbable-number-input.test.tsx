@@ -21,6 +21,21 @@ describe("ScrubbableNumberInput", () => {
 		expect(input.value).toBe("548");
 	});
 
+	it("拖拽命中区域包含左右内边距", () => {
+		render(
+			<ScrubbableNumberInput
+				ariaLabel="Position Padding"
+				label="P"
+				value={0}
+				onValueChange={vi.fn()}
+			/>,
+		);
+
+		const dragHandle = screen.getByLabelText("Position Padding drag handle");
+		expect(dragHandle.className).toContain("pl-3");
+		expect(dragHandle.className).toContain("pr-3");
+	});
+
 	it("输入文本时不立即触发回调，blur 时提交", () => {
 		const onValueChange = vi.fn();
 		render(
@@ -94,7 +109,11 @@ describe("ScrubbableNumberInput", () => {
 		);
 
 		const dragHandle = screen.getByLabelText("Position Y drag handle");
-		fireEvent.pointerDown(dragHandle, { button: 0, clientX: 100, pointerId: 1 });
+		fireEvent.pointerDown(dragHandle, {
+			button: 0,
+			clientX: 100,
+			pointerId: 1,
+		});
 		fireEvent.pointerMove(dragHandle, { clientX: 104, pointerId: 1 });
 		fireEvent.pointerUp(dragHandle, { pointerId: 1 });
 
@@ -118,7 +137,11 @@ describe("ScrubbableNumberInput", () => {
 		);
 
 		const dragHandle = screen.getByLabelText("Position L drag handle");
-		fireEvent.pointerDown(dragHandle, { button: 0, clientX: 100, pointerId: 1 });
+		fireEvent.pointerDown(dragHandle, {
+			button: 0,
+			clientX: 100,
+			pointerId: 1,
+		});
 		fireEvent.pointerMove(dragHandle, { clientX: 102, pointerId: 1 });
 		fireEvent.pointerMove(dragHandle, { clientX: 106, pointerId: 1 });
 		fireEvent.pointerUp(dragHandle, { pointerId: 1 });
@@ -140,7 +163,11 @@ describe("ScrubbableNumberInput", () => {
 
 		const input = screen.getByLabelText("Position Z") as HTMLInputElement;
 		const dragHandle = screen.getByLabelText("Position Z drag handle");
-		fireEvent.pointerDown(dragHandle, { button: 0, clientX: 100, pointerId: 1 });
+		fireEvent.pointerDown(dragHandle, {
+			button: 0,
+			clientX: 100,
+			pointerId: 1,
+		});
 
 		expect(document.activeElement).toBe(input);
 	});
@@ -159,7 +186,11 @@ describe("ScrubbableNumberInput", () => {
 		const dragHandle = screen.getByLabelText("Position W drag handle");
 		expect(document.activeElement).not.toBe(input);
 
-		fireEvent.pointerDown(dragHandle, { button: 0, clientX: 100, pointerId: 1 });
+		fireEvent.pointerDown(dragHandle, {
+			button: 0,
+			clientX: 100,
+			pointerId: 1,
+		});
 		expect(document.activeElement).toBe(input);
 		fireEvent.pointerUp(dragHandle, { pointerId: 1 });
 
@@ -181,7 +212,11 @@ describe("ScrubbableNumberInput", () => {
 		input.focus();
 		expect(document.activeElement).toBe(input);
 
-		fireEvent.pointerDown(dragHandle, { button: 0, clientX: 100, pointerId: 1 });
+		fireEvent.pointerDown(dragHandle, {
+			button: 0,
+			clientX: 100,
+			pointerId: 1,
+		});
 		fireEvent.pointerUp(dragHandle, { pointerId: 1 });
 
 		expect(document.activeElement).toBe(input);
