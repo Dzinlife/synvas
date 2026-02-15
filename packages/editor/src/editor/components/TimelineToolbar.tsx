@@ -10,6 +10,12 @@ import {
 	ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
+import {
+	AutoAttachIcon,
+	RippleEditingIcon,
+	ScrollPreviewIcon,
+	SnapIcon,
+} from "@/components/icons";
 import { Slider } from "@/components/ui/slider";
 import {
 	Tooltip,
@@ -309,7 +315,24 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			</div>
 			<div className="right-section flex flex-1 shrink-2 items-center justify-end gap-2">
 				{/* 开关按钮组 */}
-				<div className="flex items-center gap-0.5 ml-4 rounded-full p-0.5 bg-black/20">
+				<div className="flex items-center gap-1 px-1 rounded-full bg-black/20">
+					<Tooltip>
+						<TooltipTrigger
+							delay={0}
+							type="button"
+							onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
+							aria-label="波纹编辑"
+							className={cn(
+								"size-8 rounded-full transition flex items-center justify-center",
+								rippleEditingEnabled
+									? "text-orange-500"
+									: "text-neutral-400 scale-90",
+							)}
+						>
+							<RippleEditingIcon className="size-8" />
+						</TooltipTrigger>
+						<TooltipContent>主轨波纹编辑</TooltipContent>
+					</Tooltip>
 					<Tooltip>
 						<TooltipTrigger
 							type="button"
@@ -317,11 +340,11 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 							onClick={() => setSnapEnabled(!snapEnabled)}
 							aria-label="吸附"
 							className={cn(
-								"size-7 rounded-full transition flex items-center justify-center active:scale-105 active:bg-black/20",
-								snapEnabled ? "text-[#aedd81] scale-115" : "text-neutral-400",
+								"size-8 rounded-full transition flex items-center justify-center",
+								snapEnabled ? "text-orange-500" : "text-neutral-400 scale-90",
 							)}
 						>
-							<Sparkles className="size-3.5" />
+							<SnapIcon className="size-8" />
 						</TooltipTrigger>
 						<TooltipContent>水平吸附</TooltipContent>
 					</Tooltip>
@@ -332,31 +355,15 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 							onClick={() => setAutoAttach(!autoAttach)}
 							aria-label="联动"
 							className={cn(
-								"size-7 rounded-full transition flex items-center justify-center active:scale-105 active:bg-black/20",
-								autoAttach ? "text-[#aedd81] scale-115" : "text-neutral-400",
+								"size-8 rounded-full transition flex items-center justify-center",
+								autoAttach ? "text-orange-500" : "text-neutral-400 scale-90",
 							)}
 						>
-							<Layers className="size-3.5" />
+							<AutoAttachIcon className="size-8" />
 						</TooltipTrigger>
 						<TooltipContent>主轴联动</TooltipContent>
 					</Tooltip>
-					<Tooltip>
-						<TooltipTrigger
-							delay={0}
-							type="button"
-							onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
-							aria-label="波纹编辑"
-							className={cn(
-								"size-7 rounded-full transition flex items-center justify-center active:scale-105 active:bg-black/20",
-								rippleEditingEnabled
-									? "text-[#aedd81] scale-115"
-									: "text-neutral-400",
-							)}
-						>
-							<Film className="size-3.5" />
-						</TooltipTrigger>
-						<TooltipContent>主轨波纹编辑</TooltipContent>
-					</Tooltip>
+
 					<Tooltip>
 						<TooltipTrigger
 							delay={0}
@@ -364,13 +371,13 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 							onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}
 							aria-label="预览轴"
 							className={cn(
-								"size-7 rounded-full transition flex items-center justify-center active:scale-105 active:bg-black/20",
+								"size-8 rounded-full transition flex items-center justify-center",
 								previewAxisEnabled
-									? "text-[#aedd81] scale-115"
-									: "text-neutral-400",
+									? "text-orange-500"
+									: "text-neutral-400 scale-90",
 							)}
 						>
-							<Eye className="size-3.5" />
+							<ScrollPreviewIcon className="size-8" />
 						</TooltipTrigger>
 						<TooltipContent>预览轴</TooltipContent>
 					</Tooltip>

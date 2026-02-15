@@ -16,3 +16,85 @@ export const LottieIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => {
 		</svg>
 	);
 };
+
+export const RippleEditingIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
+	props,
+) => {
+	return (
+		<svg
+			width="32"
+			height="32"
+			viewBox="0 0 32 32"
+			fill="none"
+			stroke="currentColor"
+			aria-hidden="true"
+			{...props}
+		>
+			<path d="M6 16L9 19M6 16L9 13M6 16H16" />
+			<path d="M26 16L23 19M26 16L23 13M26 16H16" />
+			<path d="M16 7V25" />
+		</svg>
+	);
+};
+
+export const ScrollPreviewIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
+	props,
+) => {
+	return (
+		<svg
+			width="32"
+			height="32"
+			viewBox="0 0 32 32"
+			fill="none"
+			stroke="currentColor"
+			aria-hidden="true"
+			{...props}
+		>
+			<path d="M15 17.5H6C5.72386 17.5 5.5 17.2761 5.5 17V10C5.5 9.72386 5.72386 9.5 6 9.5H25C25.2761 9.5 25.5 9.72386 25.5 10V16.5" />
+			<path d="M12.5 6L12.5 25" />
+			<path d="M19.7972 24.4931L16.1733 15.4333C16.108 15.27 16.27 15.108 16.4333 15.1733L25.4931 18.7972C25.666 18.8664 25.6588 19.1137 25.482 19.1727L21.5949 20.4684C21.5351 20.4883 21.4883 20.5351 21.4684 20.5949L20.1727 24.482C20.1137 24.6588 19.8664 24.666 19.7972 24.4931Z" />
+		</svg>
+	);
+};
+
+export const SnapIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => {
+	return (
+		<svg
+			width="32"
+			height="32"
+			viewBox="0 0 32 32"
+			fill="none"
+			stroke="currentColor"
+			aria-hidden="true"
+			{...props}
+		>
+			<rect x="4" y="12.5" width="11" height="7" rx="0.5" />
+			<rect x="17" y="12.5" width="11" height="7" rx="0.5" />
+			<path d="M16 9V5" />
+			<path d="M16 23V27" />
+			<path d="M20.5 9.5L23.5 7.5" />
+			<path d="M20.5 22.5L23.5 24.5" />
+			<path d="M11.5 9.5L8.5 7.5" />
+			<path d="M11.5 22.5L8.5 24.5" />
+		</svg>
+	);
+};
+
+export const AutoAttachIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
+	props,
+) => {
+	return (
+		<svg
+			width="32"
+			height="32"
+			viewBox="0 0 32 32"
+			fill="none"
+			stroke="currentColor"
+			aria-hidden="true"
+			{...props}
+		>
+			<path d="M15.5 14.5H19C19.2761 14.5 19.5 14.7239 19.5 15V22C19.5 22.2761 19.2761 22.5 19 22.5H6C5.72386 22.5 5.5 22.2761 5.5 22V15C5.5 14.7239 5.72386 14.5 6 14.5H11.5" />
+			<path d="M21.5 17.5H27C27.2761 17.5 27.5 17.2761 27.5 17V10C27.5 9.72386 27.2761 9.5 27 9.5H14C13.7239 9.5 13.5 9.72386 13.5 10V17C13.5 17.2761 13.7239 17.5 14 17.5H17.5" />
+		</svg>
+	);
+};
