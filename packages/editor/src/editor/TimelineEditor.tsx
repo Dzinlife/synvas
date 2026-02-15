@@ -1234,28 +1234,18 @@ const TimelineEditor = () => {
 				onMouseLeave={handleMouseLeave}
 				{...bindRulerDrag()}
 			>
-				{isExternalDragActive && (
-					<div className="absolute inset-0 z-90 pointer-events-none">
-						{/* 外部拖拽高亮提示 */}
-						<div className="absolute inset-3 rounded-2xl border border-blue-500/60 bg-blue-500/10 shadow-[0_0_30px_rgba(59,130,246,0.25)]" />
-						<div className="absolute top-6 left-1/2 -translate-x-1/2 rounded-full bg-blue-500/15 text-blue-200 text-xs px-3 py-1 border border-blue-500/30 backdrop-blur">
-							松手导入素材到时间线
-						</div>
-					</div>
-				)}
-				<div className="flex bg-neutral-800/10 border border-white/10 rounded-full mx-4 backdrop-blur-2xl overflow-hidden">
+				<div className="flex overflow-hidden">
 					<div
-						className="border-r border-white/10"
-						style={{ width: leftColumnWidth - 16 - 1 }}
+						// className="border-r border-white/10"
+						className="relative"
+						style={{ width: leftColumnWidth }}
 					>
-						<div className="h-full text-[11px] flex items-center justify-end pr-6 font-mono text-neutral-300">
+						<div className="absolute top-0 right-0 w-px h-full bg-linear-to-t from-white/10 to-transparent"></div>
+						{/* <div className="h-full text-[11px] flex items-center justify-end pr-6 font-mono text-neutral-300">
 							{formatTimecode(currentTime, fps)}
-						</div>
+						</div> */}
 					</div>
-					<div
-						ref={rulerContainerRef}
-						className="overflow-hidden bg-neutral-800/30 flex-1"
-					>
+					<div ref={rulerContainerRef} className="overflow-hidden flex-1">
 						<TimelineRuler
 							scrollLeft={scrollLeft}
 							ratio={ratio}
@@ -1265,6 +1255,7 @@ const TimelineEditor = () => {
 						/>
 					</div>
 				</div>
+				<div className="h-px w-full bg-neutral-200/10 backdrop-blur-2xl backdrop-saturate-150 backdrop-brightness-150"></div>
 			</div>
 		);
 	}, [
@@ -1844,18 +1835,18 @@ const TimelineEditor = () => {
 			className="relative bg-neutral-800 h-full flex flex-col min-h-0 w-full overflow-hidden"
 			onMouseLeave={handleMouseLeave}
 		>
-			<div className="pointer-events-none absolute top-0 left-0 w-full h-19 z-50 bg-linear-to-b from-neutral-800 via-neutral-800 via-70% to-transparent"></div>
-			<ProgressiveBlur
+			<div className="pointer-events-none absolute top-0 left-0 w-full h-18 z-50 bg-linear-to-b from-neutral-800 to-neutral-800/80 backdrop-blur-2xl"></div>
+			{/* <ProgressiveBlur
 				position="top"
 				className="absolute top-0 w-full h-20 z-60 "
 				blurLevels={[0.5, 4, 16, 16, 16, 16, 16, 16]}
-			/>
+			/> */}
 			<TimelineToolbar className="h-12 z-60" />
 			{timeStamps}
 			<div
 				ref={scrollAreaRef}
 				data-timeline-scroll-area
-				className="relative w-full flex-1 min-h-0 flex flex-col -mt-18 overflow-hidden"
+				className="relative w-full flex-1 min-h-0 flex flex-col -mt-19 overflow-hidden"
 				onMouseMove={(e) => {
 					handleMouseMove(e);
 					handleSelectionMouseMove(e);

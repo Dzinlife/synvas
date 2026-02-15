@@ -9,8 +9,11 @@ function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
 function DropdownMenuTrigger({
 	className,
 	children,
+	chevron,
 	...props
-}: MenuPrimitive.Trigger.Props) {
+}: MenuPrimitive.Trigger.Props & {
+	chevron?: React.ReactNode | null;
+}) {
 	return (
 		<MenuPrimitive.Trigger
 			className={cn(
@@ -20,7 +23,7 @@ function DropdownMenuTrigger({
 			{...props}
 		>
 			{children}
-			<ChevronDownIcon className="-mr-1" />
+			{chevron !== null && (chevron ?? <ChevronDownIcon className="-mr-1" />)}
 		</MenuPrimitive.Trigger>
 	);
 }

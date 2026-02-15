@@ -2,6 +2,7 @@
 
 import type { TimelineElement } from "core/dsl/types";
 import type Konva from "konva";
+import { EllipsisIcon } from "lucide-react";
 import React, {
 	useCallback,
 	useEffect,
@@ -18,13 +19,24 @@ import {
 } from "react-konva";
 import type { CanvasRef } from "react-skia-lite";
 import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { exportCanvasAsImage } from "@/dsl/export";
 import { transformMetaToRenderLayout } from "@/dsl/layout";
 import { usePreview } from "./contexts/PreviewProvider";
-import { useTimelineStore, useTracks } from "./contexts/TimelineContext";
+import {
+	usePlaybackControl,
+	useTimelineStore,
+	useTracks,
+} from "./contexts/TimelineContext";
 import { buildKonvaTree } from "./preview/buildSkiaTree";
 import { LabelLayer } from "./preview/LabelLayer";
 import { SkiaPreviewCanvas } from "./preview/SkiaPreviewCanvas";
@@ -34,6 +46,7 @@ import { usePreviewInteractions } from "./preview/usePreviewInteractions";
 const Preview = () => {
 	const renderElementsRef = useRef<TimelineElement[]>([]);
 	const { tracks } = useTracks();
+	const { isPlaying, togglePlay } = usePlaybackControl();
 
 	const { getDisplayTime, getElements } = useMemo(
 		() => useTimelineStore.getState(),
@@ -158,6 +171,20 @@ const Preview = () => {
 		width: 0,
 		height: 0,
 	});
+	const [isExportingFrame, setIsExportingFrame] = useState(false);
+
+	const handleExportFrame = useCallback(async () => {
+		if (isExportingFrame) return;
+		setIsExportingFrame(true);
+		try {
+			await exportCanvasAsImage(skiaCanvasRef.current, {
+				format: "png",
+				waitForReady: true,
+			});
+		} finally {
+			setIsExportingFrame(false);
+		}
+	}, [isExportingFrame]);
 
 	// Sync canvas ref to context for export functionality
 	useEffect(() => {
@@ -693,6 +720,24 @@ const Preview = () => {
 					</TooltipTrigger>
 					<TooltipContent>重置视图位置</TooltipContent>
 				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger
+						type="button"
+						onClick={togglePlay}
+						style={{
+							background: "transparent",
+							border: "none",
+							color: "white",
+							cursor: "pointer",
+							padding: "4px 8px",
+							borderRadius: 4,
+							fontSize: 12,
+						}}
+					>
+						{isPlaying ? "⏸" : "▶"}
+					</TooltipTrigger>
+					<TooltipContent>播放 / 暂停</TooltipContent>
+				</Tooltip>
 				<input
 					type="range"
 					min={0.1}
@@ -710,6 +755,28 @@ const Preview = () => {
 					)}
 					%
 				</span>
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						chevron={null}
+						className="size-8 border-none rounded-full bg-transparent px-2 text-xs text-white hover:bg-white/10 data-popup-open:bg-white/15"
+					>
+						<EllipsisIcon className="size-4" />
+					</DropdownMenuTrigger>
+					<DropdownMenuContent
+						align="center"
+						side="top"
+						className="min-w-[148px]"
+					>
+						<DropdownMenuItem
+							onClick={() => {
+								void handleExportFrame();
+							}}
+							disabled={isExportingFrame}
+						>
+							{isExportingFrame ? "导出中..." : "导出静帧画面"}
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
 			</div>
 		</div>
 	);

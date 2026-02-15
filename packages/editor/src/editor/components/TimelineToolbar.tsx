@@ -1,16 +1,23 @@
 import type { TimelineElement } from "core/dsl/types";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { buildSplitElements } from "core/editor/command/split";
+import {
+	Eye,
+	Film,
+	Layers,
+	Sparkles,
+	Split,
+	ZoomIn,
+	ZoomOut,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo } from "react";
 import { Slider } from "@/components/ui/slider";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { exportCanvasAsImage } from "@/dsl/export";
-import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import { cn } from "@/lib/utils";
 import { clampFrame } from "@/utils/timecode";
-import { usePreview } from "../contexts/PreviewProvider";
 import {
 	useAttachments,
 	useElements,
@@ -30,16 +37,14 @@ import {
 	isTransitionElement,
 	reconcileTransitions,
 } from "../utils/transitions";
-import AsrDialog from "./AsrDialog";
-import ExportVideoDialog, {
-	type ExportVideoOptions,
-} from "./ExportVideoDialog";
 import TimelineMinimap from "./TimelineMinimap";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
-import { buildSplitElements } from "core/editor/command/split";
 
 const isSplittableClip = (element: TimelineElement) =>
 	element.type === "VideoClip" || element.type === "AudioClip";
+const MIN_TIMELINE_SCALE = 0.01;
+const MAX_TIMELINE_SCALE = 10;
+const TIMELINE_SCALE_STEP = 0.1;
 
 const createElementId = () => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -79,29 +84,24 @@ const remapTransitionsAfterSplit = (
 };
 
 const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
-	const { isPlaying, togglePlay } = usePlaybackControl();
-	const { canvasRef } = usePreview();
-	const [isExporting, setIsExporting] = useState(false);
-	const [isVideoExporting, setIsVideoExporting] = useState(false);
+	const { togglePlay } = usePlaybackControl();
 	const { snapEnabled, setSnapEnabled } = useSnap();
 	const { attachments, autoAttach, setAutoAttach } = useAttachments();
 	const { rippleEditingEnabled, setRippleEditingEnabled } = useRippleEditing();
 	const { previewAxisEnabled, setPreviewAxisEnabled } = usePreviewAxis();
 	const { timelineScale, setTimelineScale } = useTimelineScale();
-	const { canUndo, canRedo, undo, redo } = useTimelineHistory();
+	const { undo, redo } = useTimelineHistory();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId } = useMultiSelect();
 	const { fps } = useFps();
 	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
-	const canvasSize = useTimelineStore((state) => state.canvasSize);
-	const timelineEndFrame = useMemo(() => {
-		return elements.reduce(
-			(max, element) => Math.max(max, Math.round(element.timeline.end ?? 0)),
-			0,
-		);
-	}, [elements]);
 	const timelinePaddingLeft = 48;
+	const primarySelectedElement = useMemo(() => {
+		if (!primaryId) return null;
+		return elements.find((element) => element.id === primaryId) ?? null;
+	}, [elements, primaryId]);
+
 	const trackLockedMap = useMemo(() => {
 		const map = new Map<number, boolean>(
 			tracks.map((track, index) => [index, track.locked ?? false]),
@@ -157,24 +157,6 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [togglePlay, undo, redo]);
 
-	const handleExport = useCallback(async () => {
-		if (isExporting || isVideoExporting) return;
-
-		setIsExporting(true);
-		try {
-			await exportCanvasAsImage(canvasRef.current, {
-				format: "png",
-				waitForReady: true,
-			});
-		} finally {
-			setIsExporting(false);
-		}
-	}, [canvasRef, isExporting, isVideoExporting]);
-
-	const handleExportVideo = useCallback(async (options: ExportVideoOptions) => {
-		await exportTimelineAsVideo(options);
-	}, []);
-
 	const handleScaleChange = useCallback(
 		(value: number | readonly number[]) => {
 			const nextValue = Array.isArray(value) ? value[0] : value;
@@ -183,15 +165,28 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		},
 		[setTimelineScale],
 	);
+	const handleDecreaseScale = useCallback(() => {
+		const nextScale = Math.max(
+			MIN_TIMELINE_SCALE,
+			timelineScale - TIMELINE_SCALE_STEP,
+		);
+		setTimelineScale(Number(nextScale.toFixed(2)));
+	}, [setTimelineScale, timelineScale]);
+	const handleIncreaseScale = useCallback(() => {
+		const nextScale = Math.min(
+			MAX_TIMELINE_SCALE,
+			timelineScale + TIMELINE_SCALE_STEP,
+		);
+		setTimelineScale(Number(nextScale.toFixed(2)));
+	}, [setTimelineScale, timelineScale]);
 
 	const splitCandidate = useMemo(() => {
-		if (!primaryId) return null;
-		const target = elements.find((el) => el.id === primaryId) ?? null;
+		const target = primarySelectedElement;
 		if (!target || !isSplittableClip(target)) return null;
 		if (currentTime <= target.timeline.start) return null;
 		if (currentTime >= target.timeline.end) return null;
 		return target;
-	}, [currentTime, elements, primaryId]);
+	}, [currentTime, primarySelectedElement]);
 	const freezeCandidate = useMemo(
 		() =>
 			resolveFreezeCandidate({
@@ -261,164 +256,164 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 
 	return (
 		<div className={cn("flex items-center gap-3 px-4", className)}>
-			<div className="flex items-center gap-2">
-				<button
-					type="button"
-					onClick={undo}
-					disabled={!canUndo}
-					className={cn(
-						"px-2 py-1 text-xs rounded transition-colors",
-						canUndo
-							? "bg-neutral-700 text-white hover:bg-neutral-600"
-							: "bg-neutral-800 text-neutral-500 cursor-not-allowed",
-					)}
-					title="撤销 (Ctrl/Cmd+Z)"
-				>
-					撤销
-				</button>
-				<button
-					type="button"
-					onClick={redo}
-					disabled={!canRedo}
-					className={cn(
-						"px-2 py-1 text-xs rounded transition-colors",
-						canRedo
-							? "bg-neutral-700 text-white hover:bg-neutral-600"
-							: "bg-neutral-800 text-neutral-500 cursor-not-allowed",
-					)}
-					title="重做 (Ctrl/Cmd+Shift+Z / Ctrl+Y)"
-				>
-					重做
-				</button>
+			<div className="left-section flex flex-1 items-center gap-3 shrink-0">
+				<div className="flex items-center gap-0.5 bg-black/20 rounded-full p-0.5">
+					<Tooltip>
+						<TooltipTrigger delay={0}>
+							<button
+								type="button"
+								onClick={handleSplit}
+								disabled={!splitCandidate}
+								className={cn(
+									"size-7 flex items-center justify-center text-xs transition rounded-full",
+									splitCandidate
+										? " text-white hover:scale-115"
+										: " text-neutral-500 cursor-not-allowed",
+								)}
+								aria-label="分割片段"
+							>
+								<Split className="size-3.5" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>在当前时间点分割选中片段</TooltipContent>
+					</Tooltip>
+
+					<Tooltip>
+						<TooltipTrigger delay={0}>
+							<button
+								type="button"
+								onClick={handleFreeze}
+								disabled={!freezeCandidate}
+								className={cn(
+									"size-7 flex items-center justify-center text-xs transition rounded-full",
+									freezeCandidate
+										? "text-white hover:scale-115"
+										: "text-neutral-500 cursor-not-allowed",
+								)}
+								aria-label="定格片段"
+							>
+								<Sparkles className="size-3.5" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>在当前时间点插入 3 秒定格</TooltipContent>
+					</Tooltip>
+				</div>
 			</div>
-			<button
-				type="button"
-				onClick={togglePlay}
-				className="w-8 h-8 flex items-center justify-center rounded bg-neutral-700 hover:bg-neutral-600 text-white"
-			>
-				{isPlaying ? "⏸" : "▶"}
-			</button>
-			<button
-				type="button"
-				onClick={handleSplit}
-				disabled={!splitCandidate}
-				className={cn(
-					"px-2 py-1 text-xs rounded transition-colors",
-					splitCandidate
-						? "bg-amber-600 text-white hover:bg-amber-500"
-						: "bg-neutral-800 text-neutral-500 cursor-not-allowed",
-				)}
-				title="在当前时间点分割选中片段"
-			>
-				分割
-			</button>
-			<button
-				type="button"
-				onClick={handleFreeze}
-				disabled={!freezeCandidate}
-				className={cn(
-					"px-2 py-1 text-xs rounded transition-colors",
-					freezeCandidate
-						? "bg-cyan-600 text-white hover:bg-cyan-500"
-						: "bg-neutral-800 text-neutral-500 cursor-not-allowed",
-				)}
-				title="在当前时间点插入 3 秒定格"
-			>
-				定格
-			</button>
-			{/* 开关按钮组 */}
-			<div className="flex items-center gap-2 ml-4">
-				<Tooltip>
-					<TooltipTrigger
-						type="button"
-						onClick={() => setSnapEnabled(!snapEnabled)}
-						className={cn(
-							"px-2 py-1 text-xs rounded transition-colors",
-							snapEnabled
-								? "bg-green-600 text-white"
-								: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
-						)}
-					>
-						吸附
-					</TooltipTrigger>
-					<TooltipContent>水平吸附</TooltipContent>
-				</Tooltip>
-				<Tooltip>
-					<TooltipTrigger
-						type="button"
-						onClick={() => setAutoAttach(!autoAttach)}
-						className={cn(
-							"px-2 py-1 text-xs rounded transition-colors",
-							autoAttach
-								? "bg-green-600 text-white"
-								: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
-						)}
-					>
-						联动
-					</TooltipTrigger>
-					<TooltipContent>主轴联动</TooltipContent>
-				</Tooltip>
-				<Tooltip>
-					<TooltipTrigger
-						type="button"
-						onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
-						className={cn(
-							"px-2 py-1 text-xs rounded transition-colors",
-							rippleEditingEnabled
-								? "bg-green-600 text-white"
-								: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
-						)}
-					>
-						波纹编辑
-					</TooltipTrigger>
-					<TooltipContent>主轨波纹编辑</TooltipContent>
-				</Tooltip>
-				<Tooltip>
-					<TooltipTrigger
-						type="button"
-						onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}
-						className={cn(
-							"px-2 py-1 text-xs rounded transition-colors",
-							previewAxisEnabled
-								? "bg-green-600 text-white"
-								: "bg-neutral-700 text-neutral-400 hover:bg-neutral-600",
-						)}
-					>
-						预览轴
-					</TooltipTrigger>
-					<TooltipContent>预览轴</TooltipContent>
-				</Tooltip>
+			<div className="center-section flex-1 flex justify-center">
+				<div className="flex-1 min-w-[220px] max-w-[640px]">
+					<TimelineMinimap
+						fps={fps}
+						timelinePaddingLeft={timelinePaddingLeft}
+					/>
+				</div>
 			</div>
-			<div className="flex items-center gap-2">
-				<Slider
-					min={0.01}
-					max={10}
-					step={0.1}
-					value={[timelineScale]}
-					onValueChange={handleScaleChange}
-					className="w-16"
-				/>
+			<div className="right-section flex flex-1 shrink-2 items-center justify-end gap-2">
+				{/* 开关按钮组 */}
+				<div className="flex items-center gap-0.5 ml-4 rounded-full p-0.5 bg-black/20">
+					<Tooltip>
+						<TooltipTrigger
+							type="button"
+							delay={0}
+							onClick={() => setSnapEnabled(!snapEnabled)}
+							aria-label="吸附"
+							className={cn(
+								"size-7 rounded-full transition flex items-center justify-center active:scale-105 active:bg-black/20",
+								snapEnabled ? "text-[#aedd81] scale-115" : "text-neutral-400",
+							)}
+						>
+							<Sparkles className="size-3.5" />
+						</TooltipTrigger>
+						<TooltipContent>水平吸附</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger
+							type="button"
+							delay={0}
+							onClick={() => setAutoAttach(!autoAttach)}
+							aria-label="联动"
+							className={cn(
+								"size-7 rounded-full transition flex items-center justify-center active:scale-105 active:bg-black/20",
+								autoAttach ? "text-[#aedd81] scale-115" : "text-neutral-400",
+							)}
+						>
+							<Layers className="size-3.5" />
+						</TooltipTrigger>
+						<TooltipContent>主轴联动</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger
+							delay={0}
+							type="button"
+							onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
+							aria-label="波纹编辑"
+							className={cn(
+								"size-7 rounded-full transition flex items-center justify-center active:scale-105 active:bg-black/20",
+								rippleEditingEnabled
+									? "text-[#aedd81] scale-115"
+									: "text-neutral-400",
+							)}
+						>
+							<Film className="size-3.5" />
+						</TooltipTrigger>
+						<TooltipContent>主轨波纹编辑</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger
+							delay={0}
+							type="button"
+							onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}
+							aria-label="预览轴"
+							className={cn(
+								"size-7 rounded-full transition flex items-center justify-center active:scale-105 active:bg-black/20",
+								previewAxisEnabled
+									? "text-[#aedd81] scale-115"
+									: "text-neutral-400",
+							)}
+						>
+							<Eye className="size-3.5" />
+						</TooltipTrigger>
+						<TooltipContent>预览轴</TooltipContent>
+					</Tooltip>
+				</div>
+				<div className="group flex items-center gap-0.5 rounded-full p-0.5 bg-black/20 px-1">
+					<button
+						type="button"
+						onClick={handleDecreaseScale}
+						disabled={timelineScale <= MIN_TIMELINE_SCALE}
+						className={cn(
+							"size-6 rounded-full flex items-center justify-center transition-colors",
+							timelineScale > MIN_TIMELINE_SCALE
+								? "text-neutral-500 hover:text-neutral-400"
+								: "text-neutral-700 cursor-not-allowed",
+						)}
+						title="缩小时间轴"
+					>
+						<ZoomOut className="size-3.5" />
+					</button>
+					<Slider
+						min={MIN_TIMELINE_SCALE}
+						max={MAX_TIMELINE_SCALE}
+						step={TIMELINE_SCALE_STEP}
+						value={[timelineScale]}
+						onValueChange={handleScaleChange}
+						className="w-16 opacity-60 group-hover:opacity-100"
+					/>
+					<button
+						type="button"
+						onClick={handleIncreaseScale}
+						disabled={timelineScale >= MAX_TIMELINE_SCALE}
+						className={cn(
+							"size-6 rounded-full flex items-center justify-center transition-colors",
+							timelineScale < MAX_TIMELINE_SCALE
+								? "text-neutral-500 hover:text-neutral-400"
+								: "text-neutral-700 cursor-not-allowed",
+						)}
+						title="放大时间轴"
+					>
+						<ZoomIn className="size-3.5" />
+					</button>
+				</div>
 			</div>
-			<div className="ml-1 flex-1 min-w-[220px]">
-				<TimelineMinimap fps={fps} timelinePaddingLeft={timelinePaddingLeft} />
-			</div>
-			<AsrDialog />
-			<button
-				type="button"
-				onClick={handleExport}
-				disabled={isExporting || isVideoExporting}
-				className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white"
-			>
-				{isExporting ? "Exporting..." : "Export"}
-			</button>
-			<ExportVideoDialog
-				disabled={isExporting || isVideoExporting}
-				defaultFps={fps}
-				timelineEndFrame={timelineEndFrame}
-				canvasSize={canvasSize}
-				onExport={handleExportVideo}
-				onExportingChange={setIsVideoExporting}
-			/>
 		</div>
 	);
 };

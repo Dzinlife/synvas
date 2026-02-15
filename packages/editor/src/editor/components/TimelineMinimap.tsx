@@ -24,6 +24,7 @@ interface DragState {
 }
 
 const MIN_VIEWPORT_WIDTH_PX = 12;
+const MAX_SEGMENT_HEIGHT_PX = 5;
 
 const clamp = (value: number, min: number, max: number): number => {
 	return Math.min(max, Math.max(min, value));
@@ -32,11 +33,17 @@ const clamp = (value: number, min: number, max: number): number => {
 const resolveSegmentColor = (elementType: TimelineElement["type"]) => {
 	switch (elementType) {
 		case "VideoClip":
-			return "rgba(96, 165, 250, 0.72)";
+			return "#4995FF";
 		case "AudioClip":
-			return "rgba(52, 211, 153, 0.72)";
+			return "#34d399";
+		case "Image":
+			return "#FFFA62";
+		case "FreezeFrame":
+			return "#FFFA62";
+		case "Filter":
+			return "#EB61E7";
 		default:
-			return "rgba(252, 211, 77, 0.68)";
+			return "#fcd34d";
 	}
 };
 
@@ -94,6 +101,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 			trackOrder.map((trackIndex, laneIndex) => [trackIndex, laneIndex]),
 		);
 	}, [trackOrder]);
+	const laneCount = Math.max(1, trackOrder.length);
 	const visibleFrameCount =
 		pixelsPerFrame > 0 ? viewportWidth / pixelsPerFrame : 0;
 	const maxScrollLeft = Math.max(0, timelineMaxScrollLeft);
@@ -108,11 +116,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 	);
 
 	const segments = useMemo(() => {
-		const laneCount = Math.max(1, trackOrder.length);
-		const laneHeight = 100 / laneCount;
-		const lanePadding = Math.min(2, laneHeight * 0.2);
-
-		return elements
+		const nextSegments = elements
 			.map((element) => {
 				const startFrame = Math.max(0, Math.round(element.timeline.start ?? 0));
 				const rawEndFrame = Math.round(element.timeline.end ?? startFrame + 1);
@@ -133,13 +137,16 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 					id: element.id,
 					leftPercent,
 					widthPercent,
-					topPercent: laneIndex * laneHeight + lanePadding,
-					heightPercent: Math.max(2, laneHeight - lanePadding * 2),
+					laneIndex,
 					color: resolveSegmentColor(element.type),
 				};
 			})
 			.filter((segment) => segment.leftPercent <= 100);
-	}, [elements, timelineVisualEndFrame, trackLaneMap, trackOrder]);
+		nextSegments.sort(
+			(a, b) => a.laneIndex - b.laneIndex || a.leftPercent - b.leftPercent,
+		);
+		return nextSegments;
+	}, [elements, timelineVisualEndFrame, trackLaneMap]);
 
 	const visibleStartFrame = clamp(
 		(scrollLeft - timelinePaddingLeft) / pixelsPerFrame,
@@ -207,23 +214,47 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		ctx.clearRect(0, 0, containerWidth, containerHeight);
 
+		const laneHeight =
+			laneCount > 0
+				? Math.min(MAX_SEGMENT_HEIGHT_PX, containerHeight / laneCount)
+				: 0;
+		const lanePadding = Math.min(1, laneHeight * 0.2);
+		const segmentHeight = Math.max(0, laneHeight - lanePadding * 2);
+		const segmentGroupHeight = laneHeight * laneCount;
+		const offsetY = Math.max(0, (containerHeight - segmentGroupHeight) / 2);
+
 		// 用 canvas 绘制海量元素缩略块，避免大量 DOM 节点渲染开销
-		for (const segment of segments) {
-			const x = (segment.leftPercent / 100) * containerWidth;
-			const y = (segment.topPercent / 100) * containerHeight;
-			const width = Math.max(
+		for (let i = 0; i < segments.length; i++) {
+			const segment = segments[i];
+			if (!segment) continue;
+
+			const prevSegment = segments[i - 1];
+			const nextSegment = segments[i + 1];
+			const hasPrevSibling = prevSegment?.laneIndex === segment.laneIndex;
+			const hasNextSibling = nextSegment?.laneIndex === segment.laneIndex;
+			const baseInsetLeft = hasPrevSibling ? lanePadding / 2 : 0;
+			const baseInsetRight = hasNextSibling ? lanePadding / 2 : 0;
+
+			const rawX = (segment.leftPercent / 100) * containerWidth;
+			const rawWidth = Math.max(
 				(segment.widthPercent / 100) * containerWidth,
 				0.5,
 			);
-			const height = Math.max(
-				(segment.heightPercent / 100) * containerHeight,
-				1,
-			);
+			const totalBaseInset = baseInsetLeft + baseInsetRight;
+			const maxInset = Math.max(0, rawWidth - 0.5);
+			const insetScale =
+				totalBaseInset > 0 ? Math.min(1, maxInset / totalBaseInset) : 0;
+			const insetLeft = baseInsetLeft * insetScale;
+			const insetRight = baseInsetRight * insetScale;
+			const x = rawX + insetLeft;
+			const y = offsetY + segment.laneIndex * laneHeight + lanePadding;
+			const width = Math.max(rawWidth - insetLeft - insetRight, 0.5);
+			const height = segmentHeight;
 			if (x > containerWidth) continue;
 			ctx.fillStyle = segment.color;
 			ctx.fillRect(x, y, Math.min(width, containerWidth - x), height);
 		}
-	}, [containerHeight, containerWidth, segments]);
+	}, [containerHeight, containerWidth, laneCount, segments]);
 
 	const handlePointerDown = useCallback(
 		(event: ReactPointerEvent<HTMLDivElement>) => {
@@ -339,7 +370,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 			ref={setContainerElement}
 			aria-label="timeline minimap"
 			className={cn(
-				"relative h-8 w-full rounded border border-neutral-700 bg-neutral-900/70 overflow-hidden touch-none select-none",
+				"relative h-8 w-full rounded border-transparent grayscale opacity-50 hover:grayscale-30 hover:opacity-100 bg-neutral-900/90 overflow-hidden touch-none select-none transition-all",
 				className,
 			)}
 			onPointerDown={handlePointerDown}
@@ -356,7 +387,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 			<div className="absolute inset-0 bg-linear-to-r from-neutral-800/30 via-neutral-700/10 to-neutral-800/30" />
 			<div
 				data-minimap-viewport="true"
-				className="absolute top-0 bottom-0 rounded border border-blue-300/80 bg-blue-400/20 cursor-grab active:cursor-grabbing"
+				className="absolute top-0 bottom-0 border border-transparent bg-white/5 backdrop-brightness-150 cursor-grab hover:bg-white/10 active:bg-white/15 active:cursor-grabbing transition"
 				style={{
 					left: `${viewportLeftPercent}%`,
 					width: `${viewportWidthPercent}%`,
