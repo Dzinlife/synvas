@@ -3,6 +3,13 @@ import {
 	DEFAULT_TIMELINE_SETTINGS,
 	type TimelineSettings,
 } from "core/editor/timelineLoader";
+import type { TimelineCommandSnapshot } from "core/editor/command/types";
+import {
+	createTrackLockedMap,
+	resolveMovedChildrenTracks,
+	resolveTrackPlacementWithStoredAssignments,
+} from "core/editor/command/move";
+import { pruneAudioTrackStates } from "core/editor/command/postProcess";
 import {
 	createContext,
 	useCallback,
@@ -20,7 +27,6 @@ import type {
 	ExtendedDropTarget,
 	TimelineTrack,
 } from "../timeline/types";
-import type { TimelineCommandSnapshot } from "./timelineCommandAdapters";
 import { findAttachments } from "../utils/attachments";
 import {
 	type AudioTrackControlStateMap,
@@ -39,12 +45,7 @@ import {
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
 import { MAIN_TRACK_ID, reconcileTracks } from "../utils/trackState";
-import { pruneAudioTrackStates } from "../utils/audioTrackStatePrune";
-import {
-	createTrackLockedMap,
-	resolveMovedChildrenTracks,
-	resolveTrackPlacementWithStoredAssignments,
-} from "./timelineMoveEngine";
+import { resolveTimelineElementRole } from "../utils/resolveRole";
 
 // Ghost 元素状态类型
 export interface DragGhostState {
@@ -1671,6 +1672,7 @@ export const useTrackAssignments = () => {
 						dropTarget: resolvedDropTarget,
 						assignments: currentAssignments,
 						originalTrack: originalElement?.timeline.trackIndex ?? 0,
+						resolveRole: resolveTimelineElementRole,
 					});
 
 				const targetTrackId = tracks[finalTrack]?.id;
@@ -1760,6 +1762,7 @@ export const useTrackAssignments = () => {
 						dropTarget: resolvedDropTarget,
 						assignments: currentAssignments,
 						originalTrack: originalElement?.timeline.trackIndex ?? 0,
+						resolveRole: resolveTimelineElementRole,
 					});
 
 				const targetTrackId = tracks[finalTrack]?.id;
@@ -1810,7 +1813,9 @@ export const useTrackAssignments = () => {
 				});
 
 				// 第三步：为附属元素重新计算轨道位置（处理重叠）
-				updated = resolveMovedChildrenTracks(updated, movedChildren);
+				updated = resolveMovedChildrenTracks(updated, movedChildren, {
+					resolveRole: resolveTimelineElementRole,
+				});
 
 				const finalized = finalizeTimelineElements(updated, {
 					rippleEditingEnabled,

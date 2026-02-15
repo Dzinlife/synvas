@@ -1,0 +1,25 @@
+{
+  "name": "@ai-nle/agent-cli",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "lint": "biome lint",
+    "format": "biome format",
+    "check": "biome check",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "core": "workspace:*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.4",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}

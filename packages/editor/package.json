@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-nle/agent-cli": "workspace:*",
     "@base-ui/react": "^1.1.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@tanstack/react-query": "^5.90.16",

@@ -36,7 +36,7 @@ import ExportVideoDialog, {
 } from "./ExportVideoDialog";
 import TimelineMinimap from "./TimelineMinimap";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
-import { buildSplitElements } from "./timelineSplit";
+import { buildSplitElements } from "core/editor/command/split";
 
 const isSplittableClip = (element: TimelineElement) =>
 	element.type === "VideoClip" || element.type === "AudioClip";

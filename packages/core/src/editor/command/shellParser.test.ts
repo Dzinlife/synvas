@@ -37,7 +37,9 @@ describe("shellParser", () => {
 	});
 
 	it("批量解析会返回错误列表", () => {
-		const batch = parseShellCommandBatch(`timeline.seek --time 10\nunknown.cmd --x 1`);
+		const batch = parseShellCommandBatch(
+			`timeline.seek --time 10\nunknown.cmd --x 1`,
+		);
 		expect(batch.commands).toHaveLength(1);
 		expect(batch.errors).toHaveLength(1);
 		expect(batch.errors[0]?.error).toContain("未知命令");

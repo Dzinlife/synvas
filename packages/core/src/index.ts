@@ -19,3 +19,4 @@ export * from "./editor/utils/timelineTime";
 export * from "./editor/utils/audioTrackState";
 export * from "./editor/utils/trackAudibility";
 export * from "./editor/utils/videoSourceAudio";
+export * from "./editor/command";

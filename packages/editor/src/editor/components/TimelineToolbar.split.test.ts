@@ -1,6 +1,6 @@
 import type { TimelineElement } from "core/dsl/types";
 import { describe, expect, it } from "vitest";
-import { buildSplitElements } from "./timelineSplit";
+import { buildSplitElements } from "core/editor/command/split";
 
 const createVideoClip = ({
 	id,

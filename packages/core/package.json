@@ -8,12 +8,15 @@
     "./asr/*": "./src/asr/*",
     "./dsl/*": "./src/dsl/*",
     "./dsl/*/*": "./src/dsl/*/*",
+    "./editor/command": "./src/editor/command/index.ts",
+    "./editor/command/*": "./src/editor/command/*",
     "./editor/*": "./src/editor/*",
     "./editor/*/*": "./src/editor/*/*",
     "./utils/*": "./src/utils/*"
   },
   "types": "./src/index.ts",
   "scripts": {
+    "test": "vitest run",
     "lint": "biome lint",
     "format": "biome format",
     "check": "biome check",
@@ -34,6 +37,7 @@
     "@biomejs/biome": "2.2.4",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
   }
 }

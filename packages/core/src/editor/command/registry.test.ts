@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getCommandDescriptor, listCommands } from "./registry";
 
-describe("agent-cli registry", () => {
+describe("command registry", () => {
 	it("所有 v1 命令都标记为 requiresShell=false", () => {
 		const commands = listCommands();
 		expect(commands.length).toBeGreaterThan(0);

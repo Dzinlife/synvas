@@ -1,3 +1,7 @@
+import type { TimelineElement } from "../../dsl/types";
+import type { TimelineTrack } from "../timeline/types";
+import type { AudioTrackControlStateMap } from "../utils/audioTrackState";
+
 export type CommandMode = "state" | "runtime";
 
 export type CommandSchemaValueType =
@@ -40,54 +44,33 @@ export interface ParsedCommandError {
 	raw: string;
 }
 
-export interface PlanContext {
-	baseRevision: number;
-}
-
-export interface PlanDraft {
-	id: string;
-	baseRevision: number;
-	commands: ParsedCommand[];
-	summaryText: string;
-}
-
-export interface DryRunChange {
-	field: string;
-	before: string;
-	after: string;
-}
-
-export interface DryRunReport {
-	ok: boolean;
-	summaryText: string;
-	changes: DryRunChange[];
-	rebasedFromRevision?: number;
-	error?: string;
-}
-
-export interface ConfirmedPlan extends PlanDraft {
-	confirmedAt: number;
-}
-
-export interface UndoToken {
-	historyIndexBefore: number;
-	historyIndexAfter: number;
-}
-
-export interface ApplyResult {
-	ok: boolean;
-	revision: number;
-	executed: number;
-	undoToken?: UndoToken;
-	rebasedFromRevision?: number;
-	rebaseRequired?: boolean;
-	plan?: PlanDraft;
-	summaryText?: string;
-	error?: string;
-}
-
 export interface CommandHelpDoc {
 	commandId?: string;
 	text: string;
 	commands?: CommandDescriptor[];
+}
+
+export interface TimelineCommandSnapshot {
+	revision: number;
+	fps: number;
+	currentTime: number;
+	elements: TimelineElement[];
+	tracks: TimelineTrack[];
+	audioTrackStates: AudioTrackControlStateMap;
+	autoAttach: boolean;
+	rippleEditingEnabled: boolean;
+}
+
+export interface TimelineCommandApplyResult {
+	ok: boolean;
+	changed: boolean;
+	snapshot: TimelineCommandSnapshot;
+	error?: string;
+}
+
+export interface SnapshotExecutionResult {
+	ok: boolean;
+	executed: number;
+	snapshot: TimelineCommandSnapshot;
+	error?: string;
 }

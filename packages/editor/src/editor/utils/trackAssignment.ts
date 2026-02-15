@@ -20,6 +20,7 @@ import {
 	MAIN_TRACK_INDEX,
 	normalizeStoredTrackIndices,
 	normalizeTrackAssignments,
+	resolveDropTargetForRole as resolveDropTargetForRoleCore,
 } from "core/editor/utils/trackAssignment";
 import { getTrackConfig } from "../timeline/trackConfig";
 import type { TimelineTrack } from "../timeline/types";
@@ -396,25 +397,6 @@ export function getDropTargetFromHeights(
 	return { type: "track", trackIndex };
 }
 
-function pickNearestTrackIndex(
-	targetIndex: number,
-	candidates: number[],
-): number | null {
-	if (candidates.length === 0) return null;
-	let best: number | null = null;
-	let bestDistance = Infinity;
-	for (const candidate of candidates) {
-		const distance = Math.abs(candidate - targetIndex);
-		if (distance < bestDistance) {
-			bestDistance = distance;
-			best = candidate;
-		} else if (distance === bestDistance && best !== null) {
-			best = Math.min(best, candidate);
-		}
-	}
-	return best;
-}
-
 /**
  * 根据 role 调整拖拽目标（同角色优先，其次空轨道，否则插入新轨道）
  */
@@ -424,67 +406,9 @@ export function resolveDropTargetForRole(
 	elements: TimelineElement[],
 	assignments: Map<string, number>,
 ): DropTarget {
-	if (role === "audio") {
-		const targetTrack =
-			dropTarget.trackIndex < MAIN_TRACK_INDEX ? dropTarget.trackIndex : -1;
-		if (dropTarget.type === "gap") {
-			return { type: "gap", trackIndex: targetTrack };
-		}
-		return { type: "track", trackIndex: targetTrack };
-	}
-
-	if (dropTarget.trackIndex < MAIN_TRACK_INDEX) {
-		return {
-			type: "track",
-			trackIndex: role === "clip" ? MAIN_TRACK_INDEX : MAIN_TRACK_INDEX + 1,
-		};
-	}
-
-	if (dropTarget.type === "gap") {
-		if (role !== "clip" && dropTarget.trackIndex <= MAIN_TRACK_INDEX) {
-			return { type: "gap", trackIndex: MAIN_TRACK_INDEX + 1 };
-		}
-		return dropTarget;
-	}
-
-	const maxIndex = Math.max(0, ...assignments.values());
-	const roleMap = getTrackRoleMap(elements, assignments);
-	const isCompatible = (index: number) =>
-		isRoleCompatibleWithTrack(role, index) &&
-		(!roleMap.has(index) || roleMap.get(index) === role);
-
-	if (isCompatible(dropTarget.trackIndex)) {
-		return dropTarget;
-	}
-
-	const indices = Array.from({ length: maxIndex + 1 }, (_, i) => i).filter(
-		(index) => role === "clip" || index !== MAIN_TRACK_INDEX,
-	);
-	const sameRoleCandidates = indices.filter(
-		(index) => roleMap.get(index) === role,
-	);
-	const nearestSameRole = pickNearestTrackIndex(
-		dropTarget.trackIndex,
-		sameRoleCandidates,
-	);
-	if (nearestSameRole !== null) {
-		return { type: "track", trackIndex: nearestSameRole };
-	}
-
-	const emptyCandidates = indices.filter((index) => !roleMap.has(index));
-	const nearestEmpty = pickNearestTrackIndex(
-		dropTarget.trackIndex,
-		emptyCandidates,
-	);
-	if (nearestEmpty !== null) {
-		return { type: "track", trackIndex: nearestEmpty };
-	}
-
-	const insertIndex =
-		role === "clip"
-			? dropTarget.trackIndex
-			: Math.max(MAIN_TRACK_INDEX + 1, dropTarget.trackIndex);
-	return { type: "gap", trackIndex: insertIndex };
+	return resolveDropTargetForRoleCore(dropTarget, role, elements, assignments, {
+		resolveRole,
+	});
 }
 
 /**

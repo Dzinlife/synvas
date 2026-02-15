@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/dsl/types";
+import type { TimelineElement } from "../../dsl/types";
 import { updateElementTime } from "../utils/timelineTime";
 
 const normalizeOffsetFrames = (value: unknown): number => {

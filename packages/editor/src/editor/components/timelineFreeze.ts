@@ -6,7 +6,7 @@ import { insertElementIntoMainTrack } from "../utils/mainTrackMagnet";
 import { buildTimelineMeta } from "../utils/timelineTime";
 import { reflowInsertedElementsOnTracks } from "../utils/insertedTrackReflow";
 import { isTransitionElement, reconcileTransitions } from "../utils/transitions";
-import { buildSplitElements } from "./timelineSplit";
+import { buildSplitElements } from "core/editor/command/split";
 
 const MAIN_TRACK_INDEX = 0;
 const DEFAULT_FREEZE_DURATION_SECONDS = 3;

@@ -1,18 +1,14 @@
-import type { TimelineElement } from "core/dsl/types";
-import { afterEach, describe, expect, it } from "vitest";
-import { applyPlan, confirmPlan, createPlan } from "@/agent-cli";
-import type { ParsedCommand } from "@/agent-cli";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
-import {
-	applyTimelineCommandToSnapshot,
-	type TimelineCommandSnapshot,
-} from "@/editor/contexts/timelineCommandAdapters";
+import type { TimelineElement } from "../../dsl/types";
+import type { TimelineTrack } from "../timeline/types";
+import { describe, expect, it } from "vitest";
+import { applyTimelineCommandToSnapshot } from "./reducer";
+import type { TimelineCommandSnapshot } from "./types";
 
 const createTrack = (
 	id: string,
 	role: "clip" | "overlay",
 	options?: { locked?: boolean },
-) => ({
+): TimelineTrack => ({
 	id,
 	role,
 	hidden: false,
@@ -68,13 +64,7 @@ const unwrapMoveResult = (
 	});
 };
 
-const initialStoreState = useTimelineStore.getState();
-
-afterEach(() => {
-	useTimelineStore.setState(initialStoreState, true);
-});
-
-describe("timeline.element.move integration", () => {
+describe("timeline.element.move", () => {
 	it("保持元素时长不变", () => {
 		const snapshot = createSnapshot();
 		const result = unwrapMoveResult(snapshot, {
@@ -139,7 +129,10 @@ describe("timeline.element.move integration", () => {
 				createElement("parent", 0, 30, 0, "main-track"),
 				createElement("child", 10, 20, 1, "overlay-track"),
 			],
-			tracks: [createTrack("main-track", "clip"), createTrack("overlay-track", "overlay")],
+			tracks: [
+				createTrack("main-track", "clip"),
+				createTrack("overlay-track", "overlay"),
+			],
 			autoAttach: true,
 		});
 		const result = unwrapMoveResult(snapshot, {
@@ -158,7 +151,10 @@ describe("timeline.element.move integration", () => {
 				createElement("parent", 0, 30, 0, "main-track"),
 				createElement("child", 10, 20, 1, "overlay-track"),
 			],
-			tracks: [createTrack("main-track", "clip"), createTrack("overlay-track", "overlay")],
+			tracks: [
+				createTrack("main-track", "clip"),
+				createTrack("overlay-track", "overlay"),
+			],
 			autoAttach: false,
 		});
 		const result = unwrapMoveResult(snapshot, {
@@ -196,38 +192,5 @@ describe("timeline.element.move integration", () => {
 		expect(sourceResult.error).toContain("源轨道已锁定");
 		expect(targetResult.ok).toBe(false);
 		expect(targetResult.error).toContain("目标轨道已锁定");
-	});
-
-	it("apply 后应完成 reconcile 并补齐 trackId", () => {
-		useTimelineStore.setState({
-			elements: [createElement("clip-1", 0, 30, 0, "main-track")],
-			tracks: [createTrack("main-track", "clip")],
-			historyPast: [],
-			historyFuture: [],
-		});
-		const commands: ParsedCommand[] = [
-			{
-				id: "timeline.element.move",
-				args: {
-					id: "clip-1",
-					start: 0,
-					trackIndex: 3,
-				},
-				raw: "timeline.element.move --id clip-1 --start 0 --track-index 3",
-			},
-		];
-		const baseRevision = useTimelineStore.getState().getRevision();
-		const plan = createPlan(commands, { baseRevision });
-		const confirmed = confirmPlan(plan.id);
-		expect(confirmed).not.toBeNull();
-
-		const result = applyPlan(confirmed!);
-		expect(result.ok).toBe(true);
-		const stateAfter = useTimelineStore.getState();
-		const moved = stateAfter.elements.find((element) => element.id === "clip-1");
-		expect((moved?.timeline.trackIndex ?? -1) >= 1).toBe(true);
-		const movedTrackIndex = moved?.timeline.trackIndex ?? 0;
-		expect(stateAfter.tracks[movedTrackIndex]).toBeTruthy();
-		expect(moved?.timeline.trackId).toBe(stateAfter.tracks[movedTrackIndex]?.id);
 	});
 });

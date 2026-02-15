@@ -1,31 +1,19 @@
-import type { TimelineElement } from "core/dsl/types";
-import type { ParsedCommand } from "@/agent-cli/types";
-import { buildSplitElements } from "../components/timelineSplit";
-import { applyMoveCommand } from "./timelineMoveEngine";
+import type { TimelineElement } from "../../dsl/types";
+import { buildSplitElements } from "./split";
+import { applyMoveCommand, type CommandRoleOptions } from "./move";
+import type {
+	ParsedCommand,
+	TimelineCommandApplyResult,
+	TimelineCommandSnapshot,
+} from "./types";
 import {
 	type AudioTrackControlStateMap,
 	getAudioTrackControlState,
 } from "../utils/audioTrackState";
 import { updateElementTime } from "../utils/timelineTime";
-import type { TimelineTrack } from "../timeline/types";
 
-export interface TimelineCommandSnapshot {
-	revision: number;
-	fps: number;
-	currentTime: number;
-	elements: TimelineElement[];
-	tracks: TimelineTrack[];
-	audioTrackStates: AudioTrackControlStateMap;
-	autoAttach: boolean;
-	rippleEditingEnabled: boolean;
-}
-
-export interface TimelineCommandApplyResult {
-	ok: boolean;
-	changed: boolean;
-	snapshot: TimelineCommandSnapshot;
-	error?: string;
-}
+const META_COMMANDS = new Set(["help", "schema", "examples"]);
+const HISTORY_COMMANDS = new Set(["timeline.undo", "timeline.redo"]);
 
 type TrackFlag = "hidden" | "locked" | "muted" | "solo";
 type AudioTrackFlag = Exclude<TrackFlag, "hidden">;
@@ -355,7 +343,7 @@ const applyTrackFlag = (
 			audioTrackStates: {
 				...snapshot.audioTrackStates,
 				[trackIndexValue]: nextState,
-			},
+			} as AudioTrackControlStateMap,
 		},
 	};
 };
@@ -381,9 +369,6 @@ const applySeek = (
 	};
 };
 
-const META_COMMANDS = new Set(["help", "schema", "examples"]);
-const HISTORY_COMMANDS = new Set(["timeline.undo", "timeline.redo"]);
-
 export const isMetaCommand = (commandId: string): boolean => {
 	return META_COMMANDS.has(commandId);
 };
@@ -395,6 +380,7 @@ export const isHistoryCommand = (commandId: string): boolean => {
 export const applyTimelineCommandToSnapshot = (
 	snapshot: TimelineCommandSnapshot,
 	command: ParsedCommand,
+	options?: CommandRoleOptions,
 ): TimelineCommandApplyResult => {
 	if (isMetaCommand(command.id) || isHistoryCommand(command.id)) {
 		return {
@@ -410,7 +396,7 @@ export const applyTimelineCommandToSnapshot = (
 		case "timeline.element.remove":
 			return applyRemoveElement(draft, command.args);
 		case "timeline.element.move":
-			return applyMoveCommand(draft, command.args);
+			return applyMoveCommand(draft, command.args, options);
 		case "timeline.element.trim":
 			return applyTrimElement(draft, command.args);
 		case "timeline.element.split":

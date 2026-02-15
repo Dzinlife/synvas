@@ -1,24 +1,15 @@
-import { useMemo, useState } from "react";
 import {
-	applyPlan,
-	confirmPlan,
-	createPlan,
-	dryRunPlan,
-	executeMetaCommandText,
-	getCommandExamplesText,
-	getCommandHelp,
-	getCommandSchemaText,
-	parseShellCommandBatch,
-} from "@/agent-cli";
-import type {
-	ConfirmedPlan,
-	DryRunReport,
-	ParsedCommand,
-	PlanDraft,
-} from "@/agent-cli";
+	createAgentCliRuntime,
+	type ConfirmedPlan,
+	type DryRunReport,
+	type ParsedCommand,
+	type PlanDraft,
+} from "@ai-nle/agent-cli";
+import { isMetaCommand } from "core/editor/command/reducer";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { isMetaCommand } from "../contexts/timelineCommandAdapters";
-import { useTimelineStore } from "../contexts/TimelineContext";
+import { createTimelineStoreAgentCliHost } from "../agent-cli/createTimelineStoreAgentCliHost";
+import { resolveTimelineElementRole } from "../utils/resolveRole";
 
 const renderDryRunDetails = (report: DryRunReport | null): string => {
 	if (!report) return "";
@@ -41,16 +32,21 @@ const AgentCliPanel = () => {
 	const [confirmedPlan, setConfirmedPlan] = useState<ConfirmedPlan | null>(null);
 	const [outputText, setOutputText] = useState("");
 
-	const currentRevision = useTimelineStore((state) => state.getRevision());
-	const getSnapshot = useTimelineStore((state) => state.getCommandSnapshot);
+	const runtime = useMemo(
+		() =>
+			createAgentCliRuntime(createTimelineStoreAgentCliHost(), {
+				resolveRole: resolveTimelineElementRole,
+			}),
+		[],
+	);
 
 	const parsedPreview = useMemo(() => {
 		if (!commandText.trim()) return { commands: [], errors: [] };
-		return parseShellCommandBatch(commandText);
-	}, [commandText]);
+		return runtime.parseShellCommandBatch(commandText);
+	}, [runtime, commandText]);
 
 	const handleCreatePlan = () => {
-		const parsed = parseShellCommandBatch(commandText);
+		const parsed = runtime.parseShellCommandBatch(commandText);
 		if (parsed.errors.length > 0) {
 			setOutputText(parsed.errors.map((error) => error.error).join("\n"));
 			setPlan(null);
@@ -67,28 +63,22 @@ const AgentCliPanel = () => {
 		const metaCommands = parsed.commands.filter((command) =>
 			isMetaCommand(command.id),
 		);
-			if (metaCommands.length > 0) {
-				if (parsed.commands.length > 1) {
-					setOutputText("help/schema/examples 不能与其他命令混合执行");
-					setPlan(null);
-					setConfirmedPlan(null);
-					return;
-				}
-			const metaCommand = metaCommands[0] as ParsedCommand;
-			const text = executeMetaCommandText(metaCommand, {
-				help: (id?: string) => getCommandHelp(id).text,
-				schema: (id: string) => getCommandSchemaText(id),
-				examples: (id: string) => getCommandExamplesText(id),
-			});
-				setOutputText(text ?? "");
+		if (metaCommands.length > 0) {
+			if (parsed.commands.length > 1) {
+				setOutputText("help/schema/examples 不能与其他命令混合执行");
 				setPlan(null);
 				setConfirmedPlan(null);
 				return;
 			}
+			const metaCommand = metaCommands[0] as ParsedCommand;
+			const text = runtime.executeMetaCommandText(metaCommand);
+			setOutputText(text ?? "");
+			setPlan(null);
+			setConfirmedPlan(null);
+			return;
+		}
 
-		const nextPlan = createPlan(parsed.commands, {
-			baseRevision: currentRevision,
-		});
+		const nextPlan = runtime.createPlan(parsed.commands);
 		setPlan(nextPlan);
 		setConfirmedPlan(null);
 		setOutputText(`计划已生成\n${nextPlan.summaryText}`);
@@ -99,7 +89,7 @@ const AgentCliPanel = () => {
 			setOutputText("请先生成计划");
 			return;
 		}
-		const report = dryRunPlan(plan, getSnapshot());
+		const report = runtime.dryRunPlan(plan);
 		setOutputText(renderDryRunDetails(report));
 	};
 
@@ -108,7 +98,7 @@ const AgentCliPanel = () => {
 			setOutputText("请先生成计划");
 			return;
 		}
-		const confirmed = confirmPlan(plan.id);
+		const confirmed = runtime.confirmPlan(plan.id);
 		if (!confirmed) {
 			setOutputText("计划不存在，请重新生成");
 			return;
@@ -122,11 +112,11 @@ const AgentCliPanel = () => {
 			setOutputText("请先确认计划");
 			return;
 		}
-		const result = applyPlan(confirmedPlan);
+		const result = runtime.applyPlan(confirmedPlan);
 		if (!result.ok && result.rebaseRequired && result.plan) {
 			setPlan(result.plan);
 			setConfirmedPlan(null);
-			const report = dryRunPlan(result.plan, getSnapshot());
+			const report = runtime.dryRunPlan(result.plan);
 			setOutputText(
 				[
 					"计划已自动 rebase，请重新确认。",

@@ -1,9 +1,5 @@
-import type { TrackRole } from "core/dsl/types";
-import type {
-	TimelineCommandApplyResult,
-	TimelineCommandSnapshot,
-} from "./timelineCommandAdapters";
-import type { DropTarget } from "../timeline/types";
+import type { TrackRole } from "../../dsl/types";
+import type { DropTarget, TimelineTrack } from "../timeline/types";
 import { findAttachments } from "../utils/attachments";
 import {
 	type AudioTrackControlStateMap,
@@ -14,6 +10,7 @@ import {
 	insertElementIntoMainTrack,
 } from "../utils/mainTrackMagnet";
 import {
+	type ResolveRole,
 	getElementRole,
 	getStoredTrackAssignments,
 	hasOverlapOnStoredTrack,
@@ -23,7 +20,10 @@ import {
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
 import { updateElementTime } from "../utils/timelineTime";
-import type { TimelineTrack } from "../timeline/types";
+import type {
+	TimelineCommandApplyResult,
+	TimelineCommandSnapshot,
+} from "./types";
 
 export interface TrackPlacementResult {
 	finalTrack: number;
@@ -33,6 +33,10 @@ export interface TrackPlacementResult {
 interface MoveChildTimeRange {
 	start: number;
 	end: number;
+}
+
+export interface CommandRoleOptions {
+	resolveRole?: ResolveRole;
 }
 
 const toFiniteNumber = (value: unknown): number | null => {
@@ -84,12 +88,18 @@ const resolveAudioDropResult = (
 	end: number,
 	dropTarget: DropTarget,
 	assignments: Map<string, number>,
+	options?: CommandRoleOptions,
 ): TrackPlacementResult => {
 	const targetTrack =
 		dropTarget.trackIndex < MAIN_TRACK_INDEX ? dropTarget.trackIndex : -1;
 	const hasConflict = (trackIndex: number) =>
-		hasRoleConflictOnStoredTrack("audio", trackIndex, entries, elementId) ||
-		hasOverlapOnStoredTrack(start, end, trackIndex, entries, elementId);
+		hasRoleConflictOnStoredTrack(
+			"audio",
+			trackIndex,
+			entries,
+			elementId,
+			options,
+		) || hasOverlapOnStoredTrack(start, end, trackIndex, entries, elementId);
 
 	if (dropTarget.type === "gap") {
 		return {
@@ -120,6 +130,7 @@ export const resolveTrackPlacementWithStoredAssignments = (args: {
 	dropTarget: DropTarget;
 	assignments: Map<string, number>;
 	originalTrack: number;
+	resolveRole?: ResolveRole;
 }): TrackPlacementResult => {
 	const {
 		entries,
@@ -130,7 +141,9 @@ export const resolveTrackPlacementWithStoredAssignments = (args: {
 		dropTarget,
 		assignments,
 		originalTrack,
+		resolveRole,
 	} = args;
+	const roleOptions: CommandRoleOptions = { resolveRole };
 	if (role === "audio") {
 		return resolveAudioDropResult(
 			entries,
@@ -139,6 +152,7 @@ export const resolveTrackPlacementWithStoredAssignments = (args: {
 			end,
 			dropTarget,
 			assignments,
+			roleOptions,
 		);
 	}
 
@@ -148,8 +162,13 @@ export const resolveTrackPlacementWithStoredAssignments = (args: {
 		...timedEntries.map((element) => element.timeline.trackIndex ?? 0),
 	);
 	const hasTrackConflict = (trackIndex: number) =>
-		hasRoleConflictOnStoredTrack(role, trackIndex, timedEntries, elementId) ||
-		hasOverlapOnStoredTrack(start, end, trackIndex, timedEntries, elementId);
+		hasRoleConflictOnStoredTrack(
+			role,
+			trackIndex,
+			timedEntries,
+			elementId,
+			roleOptions,
+		) || hasOverlapOnStoredTrack(start, end, trackIndex, timedEntries, elementId);
 
 	if (dropTarget.type === "gap") {
 		const gapTrackIndex = dropTarget.trackIndex;
@@ -207,6 +226,7 @@ export const resolveTrackPlacementWithStoredAssignments = (args: {
 export const resolveMovedChildrenTracks = (
 	nextElements: TimelineCommandSnapshot["elements"],
 	movedChildren: Map<string, MoveChildTimeRange>,
+	options?: CommandRoleOptions,
 ): TimelineCommandSnapshot["elements"] => {
 	if (movedChildren.size === 0) return nextElements;
 
@@ -215,7 +235,7 @@ export const resolveMovedChildrenTracks = (
 		const child = updated.find((element) => element.id === childId);
 		if (!child) continue;
 
-		const childRole = getElementRole(child);
+		const childRole = getElementRole(child, options);
 		const currentTrack =
 			child.timeline.trackIndex ?? (childRole === "audio" ? -1 : 1);
 		let availableTrack = currentTrack;
@@ -227,7 +247,15 @@ export const resolveMovedChildrenTracks = (
 				...updated.map((element) => element.timeline.trackIndex ?? 0),
 			);
 			for (let track = currentTrack; track >= minStoredTrack - 1; track -= 1) {
-				if (hasRoleConflictOnStoredTrack(childRole, track, updated, childId)) {
+				if (
+					hasRoleConflictOnStoredTrack(
+						childRole,
+						track,
+						updated,
+						childId,
+						options,
+					)
+				) {
 					continue;
 				}
 				if (
@@ -249,7 +277,15 @@ export const resolveMovedChildrenTracks = (
 				...updated.map((element) => element.timeline.trackIndex ?? 0),
 			);
 			for (let track = currentTrack; track <= maxStoredTrack + 1; track += 1) {
-				if (hasRoleConflictOnStoredTrack(childRole, track, updated, childId)) {
+				if (
+					hasRoleConflictOnStoredTrack(
+						childRole,
+						track,
+						updated,
+						childId,
+						options,
+					)
+				) {
 					continue;
 				}
 				if (
@@ -287,6 +323,7 @@ export const resolveMovedChildrenTracks = (
 export const applyMoveCommand = (
 	snapshot: TimelineCommandSnapshot,
 	args: Record<string, unknown>,
+	options?: CommandRoleOptions,
 ): TimelineCommandApplyResult => {
 	const id = toStringValue(args.id);
 	if (!id) {
@@ -396,7 +433,7 @@ export const applyMoveCommand = (
 	const nextStart = Math.max(0, nextStartRaw);
 	const nextEnd = nextStart + duration;
 
-	const role = getElementRole(target);
+	const role = getElementRole(target, options);
 	const assignments = getStoredTrackAssignments(snapshot.elements);
 	const baseDropTarget: DropTarget = {
 		type: "track",
@@ -407,6 +444,7 @@ export const applyMoveCommand = (
 		role,
 		snapshot.elements,
 		assignments,
+		options,
 	);
 	const shouldUseRippleMove =
 		snapshot.rippleEditingEnabled &&
@@ -423,6 +461,7 @@ export const applyMoveCommand = (
 				autoAttach: snapshot.autoAttach,
 				fps: snapshot.fps,
 				trackLockedMap,
+				resolveRole: options?.resolveRole,
 			},
 		);
 		if (nextElements === snapshot.elements) {
@@ -447,6 +486,7 @@ export const applyMoveCommand = (
 		dropTarget: resolvedDropTarget,
 		assignments,
 		originalTrack: sourceTrackIndex,
+		resolveRole: options?.resolveRole,
 	});
 	const finalTrack = placement.finalTrack;
 	if (trackLockedMap.get(finalTrack)) {
@@ -535,7 +575,7 @@ export const applyMoveCommand = (
 			}
 			return timed;
 		});
-		updated = resolveMovedChildrenTracks(updated, movedChildren);
+		updated = resolveMovedChildrenTracks(updated, movedChildren, options);
 	}
 
 	const finalized = finalizeTimelineElements(updated, {
@@ -544,6 +584,7 @@ export const applyMoveCommand = (
 		autoAttach: snapshot.autoAttach,
 		fps: snapshot.fps,
 		trackLockedMap,
+		resolveRole: options?.resolveRole,
 	});
 	if (finalized !== snapshot.elements) {
 		didChange = true;

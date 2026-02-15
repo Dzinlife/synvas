@@ -1,7 +1,11 @@
 import type { TimelineElement } from "core/dsl/types";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyPlan, confirmPlan, createPlan } from "@/agent-cli";
-import type { ParsedCommand } from "@/agent-cli";
+import {
+	createAgentCliRuntime,
+	type ParsedCommand,
+} from "@ai-nle/agent-cli";
+import { createTimelineStoreAgentCliHost } from "../agent-cli/createTimelineStoreAgentCliHost";
+import { resolveTimelineElementRole } from "../utils/resolveRole";
 import { useTimelineStore } from "./TimelineContext";
 
 const createElement = (id: string, start: number, end: number): TimelineElement => ({
@@ -28,6 +32,9 @@ afterEach(() => {
 
 describe("TimelineContext batch history", () => {
 	it("批次命令执行后应只产生一次 history entry，且一次 undo 可完整回退", () => {
+		const runtime = createAgentCliRuntime(createTimelineStoreAgentCliHost(), {
+			resolveRole: resolveTimelineElementRole,
+		});
 		useTimelineStore.setState({
 			elements: [createElement("clip-1", 0, 30)],
 			tracks: [
@@ -65,12 +72,12 @@ describe("TimelineContext batch history", () => {
 		];
 
 		const baseRevision = useTimelineStore.getState().getRevision();
-		const plan = createPlan(commands, { baseRevision });
-		const confirmed = confirmPlan(plan.id);
+		const plan = runtime.createPlan(commands, { baseRevision });
+		const confirmed = runtime.confirmPlan(plan.id);
 		expect(confirmed).not.toBeNull();
 
 		const historyBefore = useTimelineStore.getState().historyPast.length;
-		const result = applyPlan(confirmed!);
+		const result = runtime.applyPlan(confirmed!);
 		expect(result.ok).toBe(true);
 		expect(result.executed).toBe(2);
 		const stateAfter = useTimelineStore.getState();
