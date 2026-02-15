@@ -48,7 +48,7 @@ const Preview = () => {
 	const { tracks } = useTracks();
 	const { isPlaying, togglePlay } = usePlaybackControl();
 
-	const { getDisplayTime, getElements } = useMemo(
+	const { getRenderTime, getElements } = useMemo(
 		() => useTimelineStore.getState(),
 		[],
 	);
@@ -384,7 +384,7 @@ const Preview = () => {
 
 	useEffect(() => {
 		const updateKonvaElements = () => {
-			const displayTime = getDisplayTime();
+			const displayTime = getRenderTime();
 			const allElements = getElements();
 			const orderedElements = buildKonvaTree({
 				elements: allElements,
@@ -415,13 +415,13 @@ const Preview = () => {
 			unsub1();
 			unsub2();
 		};
-	}, [getDisplayTime, getElements, sortByTrackIndex, tracks]);
+	}, [getElements, getRenderTime, sortByTrackIndex, tracks]);
 
 	useEffect(() => {
 		return useTimelineStore.subscribe(
 			(state) => state.elements,
 			(newElements) => {
-				const time = getDisplayTime();
+				const time = getRenderTime();
 				const orderedElements = buildKonvaTree({
 					elements: newElements,
 					displayTime: time,
@@ -437,7 +437,7 @@ const Preview = () => {
 				fireImmediately: true,
 			},
 		);
-	}, [getDisplayTime, sortByTrackIndex, tracks]);
+	}, [getRenderTime, sortByTrackIndex, tracks]);
 
 	const stageWidth = containerDimensions.width || canvasWidth;
 	const stageHeight = containerDimensions.height || canvasHeight;
@@ -484,7 +484,7 @@ const Preview = () => {
 						getTrackIndexForElement={getTrackIndexForElement}
 						sortByTrackIndex={sortByTrackIndex}
 						getElements={getElements}
-						getDisplayTime={getDisplayTime}
+						getRenderTime={getRenderTime}
 						canvasRef={skiaCanvasRef}
 					/>
 				</div>

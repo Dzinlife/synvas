@@ -20,7 +20,7 @@ interface SkiaPreviewCanvasProps {
 	getTrackIndexForElement: (element: TimelineElement) => number;
 	sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
 	getElements: () => TimelineElement[];
-	getDisplayTime: () => number;
+	getRenderTime: () => number;
 	canvasRef?: React.RefObject<CanvasRef | null>;
 }
 
@@ -35,7 +35,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	getTrackIndexForElement,
 	sortByTrackIndex,
 	getElements,
-	getDisplayTime,
+	getRenderTime,
 	canvasRef,
 }) => {
 	const internalCanvasRef = useRef<CanvasRef>(null);
@@ -144,8 +144,8 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	);
 
 	const renderSkia = useCallback(() => {
-		runRender(getElements(), getDisplayTime());
-	}, [getDisplayTime, getElements, runRender]);
+		runRender(getElements(), getRenderTime());
+	}, [getElements, getRenderTime, runRender]);
 
 	useEffect(() => {
 		const unsub1 = useTimelineStore.subscribe(
@@ -167,13 +167,13 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			(state) => state.elements,
 			(newElements) => {
 				invalidateBuffer();
-				runRender(newElements, getDisplayTime());
+				runRender(newElements, getRenderTime());
 			},
 			{
 				fireImmediately: true,
 			},
 		);
-	}, [getDisplayTime, invalidateBuffer, runRender]);
+	}, [getRenderTime, invalidateBuffer, runRender]);
 
 	useEffect(() => {
 		// 构建输入（fps/轨道/尺寸等）变化时保守失效，避免复用旧条件下的缓存。

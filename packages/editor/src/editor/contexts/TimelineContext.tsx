@@ -194,6 +194,7 @@ interface TimelineStore {
 	setCanvasSize: (size: { width: number; height: number }) => void;
 	getCurrentTime: () => number;
 	getDisplayTime: () => number; // 返回 previewTime ?? currentTime
+	getRenderTime: () => number;
 	getElements: () => TimelineElement[];
 	getCanvasSize: () => { width: number; height: number };
 	play: () => void;
@@ -321,6 +322,45 @@ const pruneSelectionForTrackLock = (
 			? state.primarySelectedId
 			: (nextSelected[nextSelected.length - 1] ?? null);
 	return { selectedIds: nextSelected, primarySelectedId: nextPrimary };
+};
+
+const resolveTimelineEndFrame = (elements: TimelineElement[]): number => {
+	return Math.max(
+		0,
+		elements.reduce((maxFrame, element) => {
+			const endFrame = Math.round(element.timeline.end ?? 0);
+			return Math.max(maxFrame, endFrame);
+		}, 0),
+	);
+};
+
+const resolveStartPlaybackPatch = (
+	state: Pick<TimelineStore, "currentTime" | "previewTime" | "elements">,
+): Pick<TimelineStore, "isPlaying" | "currentTime" | "previewTime"> => {
+	const timelineEndFrame = resolveTimelineEndFrame(state.elements);
+	if (state.currentTime >= timelineEndFrame) {
+		return {
+			isPlaying: false,
+			currentTime: timelineEndFrame,
+			previewTime: null,
+		};
+	}
+	return {
+		isPlaying: true,
+		currentTime: state.currentTime,
+		previewTime: null,
+	};
+};
+
+const resolveRenderDisplayTime = (params: {
+	displayTime: number;
+	elements: TimelineElement[];
+}): number => {
+	const { displayTime, elements } = params;
+	const timelineEndFrame = resolveTimelineEndFrame(elements);
+	if (timelineEndFrame <= 0) return displayTime;
+	if (displayTime !== timelineEndFrame) return displayTime;
+	return Math.max(0, timelineEndFrame - 1);
 };
 
 export const useTimelineStore = create<TimelineStore>()(
@@ -931,6 +971,9 @@ export const useTimelineStore = create<TimelineStore>()(
 			const { previewTime, currentTime, previewAxisEnabled } = get();
 			return previewAxisEnabled ? (previewTime ?? currentTime) : currentTime;
 		},
+		getRenderTime: () => {
+			return resolveRenderTime(get());
+		},
 
 		getElements: () => {
 			return get().elements;
@@ -943,13 +986,15 @@ export const useTimelineStore = create<TimelineStore>()(
 		play: () => {
 			set((state) => {
 				if (state.isPlaying) return state;
-				if (state.previewTime === null) {
-					return { isPlaying: true };
+				const nextPlaybackState = resolveStartPlaybackPatch(state);
+				if (
+					state.isPlaying === nextPlaybackState.isPlaying &&
+					state.currentTime === nextPlaybackState.currentTime &&
+					state.previewTime === nextPlaybackState.previewTime
+				) {
+					return state;
 				}
-				return {
-					isPlaying: true,
-					previewTime: null, // 开始播放时清空预览时间，确保画面跟随播放
-				};
+				return nextPlaybackState;
 			});
 		},
 
@@ -963,13 +1008,15 @@ export const useTimelineStore = create<TimelineStore>()(
 				if (!nextIsPlaying) {
 					return { isPlaying: false };
 				}
-				if (state.previewTime === null) {
-					return { isPlaying: true };
+				const nextPlaybackState = resolveStartPlaybackPatch(state);
+				if (
+					state.isPlaying === nextPlaybackState.isPlaying &&
+					state.currentTime === nextPlaybackState.currentTime &&
+					state.previewTime === nextPlaybackState.previewTime
+				) {
+					return state;
 				}
-				return {
-					isPlaying: true,
-					previewTime: null, // 启动播放时移除 hover 预览状态
-				};
+				return nextPlaybackState;
 			});
 		},
 		setIsExporting: (isExporting: boolean) => {
@@ -1091,54 +1138,54 @@ export const useTimelineStore = create<TimelineStore>()(
 				};
 			});
 		},
-			setTimelineViewportWidth: (width: number) => {
-				const nextWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
-				set({ timelineViewportWidth: nextWidth });
-			},
-			getRevision: () => get().revision,
-			getCommandSnapshot: () => {
-				const state = get();
-				return {
-					revision: state.revision,
-					fps: state.fps,
-					currentTime: state.currentTime,
-					elements: state.elements,
-					tracks: state.tracks,
-					audioTrackStates: state.audioTrackStates,
-					autoAttach: state.autoAttach,
-					rippleEditingEnabled: state.rippleEditingEnabled,
-				};
-			},
-			applyCommandSnapshot: (
-				snapshot: TimelineCommandSnapshot,
-				options?: { history?: boolean },
-			) => {
-				set((state) => {
-					const nextCurrentTime = clampFrame(snapshot.currentTime);
-					const didChange =
-						state.currentTime !== nextCurrentTime ||
-						state.elements !== snapshot.elements ||
-						state.tracks !== snapshot.tracks ||
-						state.audioTrackStates !== snapshot.audioTrackStates ||
-						state.autoAttach !== snapshot.autoAttach ||
-						state.rippleEditingEnabled !== snapshot.rippleEditingEnabled;
-					if (!didChange) return state;
+		setTimelineViewportWidth: (width: number) => {
+			const nextWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
+			set({ timelineViewportWidth: nextWidth });
+		},
+		getRevision: () => get().revision,
+		getCommandSnapshot: () => {
+			const state = get();
+			return {
+				revision: state.revision,
+				fps: state.fps,
+				currentTime: state.currentTime,
+				elements: state.elements,
+				tracks: state.tracks,
+				audioTrackStates: state.audioTrackStates,
+				autoAttach: state.autoAttach,
+				rippleEditingEnabled: state.rippleEditingEnabled,
+			};
+		},
+		applyCommandSnapshot: (
+			snapshot: TimelineCommandSnapshot,
+			options?: { history?: boolean },
+		) => {
+			set((state) => {
+				const nextCurrentTime = clampFrame(snapshot.currentTime);
+				const didChange =
+					state.currentTime !== nextCurrentTime ||
+					state.elements !== snapshot.elements ||
+					state.tracks !== snapshot.tracks ||
+					state.audioTrackStates !== snapshot.audioTrackStates ||
+					state.autoAttach !== snapshot.autoAttach ||
+					state.rippleEditingEnabled !== snapshot.rippleEditingEnabled;
+				if (!didChange) return state;
 
 				const selection = reconcileSelection(
 					snapshot.elements,
 					state.selectedIds,
 					state.primarySelectedId,
 				);
-					const nextStateBase = {
-						currentTime: nextCurrentTime,
-						elements: snapshot.elements,
-						tracks: snapshot.tracks,
-						audioTrackStates: snapshot.audioTrackStates,
-						autoAttach: snapshot.autoAttach,
-						rippleEditingEnabled: snapshot.rippleEditingEnabled,
-						selectedIds: selection.selectedIds,
-						primarySelectedId: selection.primarySelectedId,
-					};
+				const nextStateBase = {
+					currentTime: nextCurrentTime,
+					elements: snapshot.elements,
+					tracks: snapshot.tracks,
+					audioTrackStates: snapshot.audioTrackStates,
+					autoAttach: snapshot.autoAttach,
+					rippleEditingEnabled: snapshot.rippleEditingEnabled,
+					selectedIds: selection.selectedIds,
+					primarySelectedId: selection.primarySelectedId,
+				};
 				if (options?.history === false) {
 					return nextStateBase;
 				}
@@ -1248,11 +1295,16 @@ useTimelineStore.subscribe(
 	{ equalityFn: isRevisionDepsEqual },
 );
 
-// 渲染时间：导出时使用导出帧，否则跟随预览/播放
+// 渲染时间：导出时使用导出帧；预览在末尾帧时回退一帧，避免结束黑屏
 const resolveRenderTime = (state: TimelineStore): number => {
 	if (state.isExporting && state.exportTime !== null) return state.exportTime;
-	if (state.isPlaying) return state.currentTime;
-	return state.previewTime ?? state.currentTime;
+	const displayTime = state.isPlaying
+		? state.currentTime
+		: (state.previewTime ?? state.currentTime);
+	return resolveRenderDisplayTime({
+		displayTime,
+		elements: state.elements,
+	});
 };
 
 export const useRenderTime = () => {
@@ -2147,6 +2199,14 @@ export const TimelineProvider = ({
 					const animate = (now: number) => {
 						const state = useTimelineStore.getState();
 						if (!state.isPlaying) return;
+						const timelineEndFrame = resolveTimelineEndFrame(state.elements);
+						if (state.currentTime >= timelineEndFrame) {
+							if (state.currentTime !== timelineEndFrame) {
+								state.setCurrentTime(timelineEndFrame);
+							}
+							state.pause();
+							return;
+						}
 
 						const context = getAudioContext();
 						// 用户主动 seek 时重置时钟基准，避免被播放循环覆盖
@@ -2176,7 +2236,14 @@ export const TimelineProvider = ({
 								const nextTime = clampFrame(
 									clockStartFrameRef.current + elapsed * state.fps,
 								);
-								state.setCurrentTime(nextTime);
+								if (nextTime >= timelineEndFrame) {
+									state.setCurrentTime(timelineEndFrame);
+									state.pause();
+									return;
+								}
+								if (nextTime !== state.currentTime) {
+									state.setCurrentTime(nextTime);
+								}
 							}
 						} else {
 							if (
@@ -2190,7 +2257,14 @@ export const TimelineProvider = ({
 								const nextTime = clampFrame(
 									clockStartFrameRef.current + elapsed * state.fps,
 								);
-								state.setCurrentTime(nextTime);
+								if (nextTime >= timelineEndFrame) {
+									state.setCurrentTime(timelineEndFrame);
+									state.pause();
+									return;
+								}
+								if (nextTime !== state.currentTime) {
+									state.setCurrentTime(nextTime);
+								}
 							}
 						}
 
