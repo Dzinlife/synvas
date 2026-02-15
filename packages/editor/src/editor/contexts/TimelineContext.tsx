@@ -1,4 +1,4 @@
-import type { TimelineElement, TrackRole } from "core/dsl/types";
+import type { TimelineElement } from "core/dsl/types";
 import {
 	DEFAULT_TIMELINE_SETTINGS,
 	type TimelineSettings,
@@ -20,6 +20,7 @@ import type {
 	ExtendedDropTarget,
 	TimelineTrack,
 } from "../timeline/types";
+import type { TimelineCommandSnapshot } from "./timelineCommandAdapters";
 import { findAttachments } from "../utils/attachments";
 import {
 	type AudioTrackControlStateMap,
@@ -35,13 +36,15 @@ import {
 	getStoredTrackAssignments,
 	getTrackFromY,
 	getYFromTrack,
-	hasOverlapOnStoredTrack,
-	hasRoleConflictOnStoredTrack,
-	insertTrackAt,
-	MAIN_TRACK_INDEX,
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
 import { MAIN_TRACK_ID, reconcileTracks } from "../utils/trackState";
+import { pruneAudioTrackStates } from "../utils/audioTrackStatePrune";
+import {
+	createTrackLockedMap,
+	resolveMovedChildrenTracks,
+	resolveTrackPlacementWithStoredAssignments,
+} from "./timelineMoveEngine";
 
 // Ghost 元素状态类型
 export interface DragGhostState {
@@ -154,6 +157,8 @@ interface TimelineStore {
 	timelineMaxScrollLeft: number;
 	// 时间线可视区域宽度（不含左侧轨道列）
 	timelineViewportWidth: number;
+	// 版本号（用于命令计划重基线）
+	revision: number;
 	setFps: (fps: number) => void;
 	setCurrentTime: (time: number) => void;
 	seekTo: (time: number) => void;
@@ -219,6 +224,12 @@ interface TimelineStore {
 	setTimelineViewportWidth: (width: number) => void;
 	setTimelineScale: (scale: number) => void;
 	getElementById: (id: string) => TimelineElement | null;
+	getRevision: () => number;
+	getCommandSnapshot: () => TimelineCommandSnapshot;
+	applyCommandSnapshot: (
+		snapshot: TimelineCommandSnapshot,
+		options?: { history?: boolean },
+	) => void;
 }
 
 interface TimelineHistorySnapshot {
@@ -311,180 +322,6 @@ const pruneSelectionForTrackLock = (
 	return { selectedIds: nextSelected, primarySelectedId: nextPrimary };
 };
 
-const pruneAudioTrackStates = (
-	elements: TimelineElement[],
-	audioTrackStates: AudioTrackControlStateMap,
-): AudioTrackControlStateMap => {
-	// 保留默认音轨（-1）的状态，避免面板交互在空轨时被立即清空
-	const activeTrackIndices = new Set<number>([-1]);
-	for (const element of elements) {
-		const trackIndex = element.timeline.trackIndex ?? 0;
-		if (trackIndex < 0) {
-			activeTrackIndices.add(trackIndex);
-		}
-	}
-	const currentEntries = Object.entries(audioTrackStates);
-	if (currentEntries.length === 0) return audioTrackStates;
-	let didChange = false;
-	const nextStates: AudioTrackControlStateMap = {};
-	for (const [trackIndexRaw, state] of currentEntries) {
-		const trackIndex = Number(trackIndexRaw);
-		if (!activeTrackIndices.has(trackIndex)) {
-			didChange = true;
-			continue;
-		}
-		nextStates[trackIndex] = state;
-	}
-	if (!didChange) return audioTrackStates;
-	return nextStates;
-};
-
-interface TrackPlacementResult {
-	finalTrack: number;
-	updatedAssignments: Map<string, number>;
-}
-
-const buildTimedEntries = (
-	entries: TimelineElement[],
-	elementId: string,
-	start: number,
-	end: number,
-): TimelineElement[] =>
-	entries.map((el) => {
-		if (el.id !== elementId) return el;
-		return {
-			...el,
-			timeline: { ...el.timeline, start, end },
-		};
-	});
-
-const resolveAudioDropResult = (
-	entries: TimelineElement[],
-	elementId: string,
-	start: number,
-	end: number,
-	dropTarget: DropTarget,
-	assignments: Map<string, number>,
-): TrackPlacementResult => {
-	const targetTrack =
-		dropTarget.trackIndex < MAIN_TRACK_INDEX ? dropTarget.trackIndex : -1;
-	const hasConflict = (trackIndex: number) =>
-		hasRoleConflictOnStoredTrack("audio", trackIndex, entries, elementId) ||
-		hasOverlapOnStoredTrack(start, end, trackIndex, entries, elementId);
-
-	if (dropTarget.type === "gap") {
-		return {
-			finalTrack: targetTrack,
-			updatedAssignments: insertTrackAt(targetTrack, assignments),
-		};
-	}
-
-	if (!hasConflict(targetTrack)) {
-		return {
-			finalTrack: targetTrack,
-			updatedAssignments: assignments,
-		};
-	}
-
-	return {
-		finalTrack: targetTrack,
-		updatedAssignments: insertTrackAt(targetTrack, assignments),
-	};
-};
-
-const resolveTrackPlacementWithStoredAssignments = (args: {
-	entries: TimelineElement[];
-	elementId: string;
-	start: number;
-	end: number;
-	role: TrackRole;
-	dropTarget: DropTarget;
-	assignments: Map<string, number>;
-	originalTrack: number;
-}): TrackPlacementResult => {
-	const {
-		entries,
-		elementId,
-		start,
-		end,
-		role,
-		dropTarget,
-		assignments,
-		originalTrack,
-	} = args;
-	if (role === "audio") {
-		return resolveAudioDropResult(
-			entries,
-			elementId,
-			start,
-			end,
-			dropTarget,
-			assignments,
-		);
-	}
-
-	const timedEntries = buildTimedEntries(entries, elementId, start, end);
-	const maxStoredTrack = Math.max(
-		0,
-		...timedEntries.map((el) => el.timeline.trackIndex ?? 0),
-	);
-	const hasTrackConflict = (trackIndex: number) =>
-		hasRoleConflictOnStoredTrack(role, trackIndex, timedEntries, elementId) ||
-		hasOverlapOnStoredTrack(start, end, trackIndex, timedEntries, elementId);
-
-	if (dropTarget.type === "gap") {
-		const gapTrackIndex = dropTarget.trackIndex;
-		const belowTrack = gapTrackIndex - 1;
-		const aboveTrack = gapTrackIndex;
-		const belowIsDestination =
-			belowTrack >= 0 &&
-			belowTrack !== originalTrack &&
-			!hasTrackConflict(belowTrack);
-		const aboveIsDestination =
-			aboveTrack <= maxStoredTrack &&
-			aboveTrack !== originalTrack &&
-			!hasTrackConflict(aboveTrack);
-
-		if (belowIsDestination) {
-			return {
-				finalTrack: belowTrack,
-				updatedAssignments: assignments,
-			};
-		}
-		if (aboveIsDestination) {
-			return {
-				finalTrack: aboveTrack,
-				updatedAssignments: assignments,
-			};
-		}
-		return {
-			finalTrack: gapTrackIndex,
-			updatedAssignments: insertTrackAt(gapTrackIndex, assignments),
-		};
-	}
-
-	const targetTrack = dropTarget.trackIndex;
-	if (!hasTrackConflict(targetTrack)) {
-		return {
-			finalTrack: targetTrack,
-			updatedAssignments: assignments,
-		};
-	}
-
-	const aboveTrack = targetTrack + 1;
-	if (aboveTrack <= maxStoredTrack && !hasTrackConflict(aboveTrack)) {
-		return {
-			finalTrack: aboveTrack,
-			updatedAssignments: assignments,
-		};
-	}
-
-	return {
-		finalTrack: targetTrack + 1,
-		updatedAssignments: insertTrackAt(targetTrack + 1, assignments),
-	};
-};
-
 export const useTimelineStore = create<TimelineStore>()(
 	subscribeWithSelector((set, get) => ({
 		fps: DEFAULT_FPS,
@@ -534,6 +371,7 @@ export const useTimelineStore = create<TimelineStore>()(
 		scrollLeft: 0,
 		timelineMaxScrollLeft: 0,
 		timelineViewportWidth: 0,
+		revision: 0,
 		getElementById: (id: string) => elementIndexById.get(id) ?? null,
 
 		setFps: (fps: number) => {
@@ -1252,9 +1090,67 @@ export const useTimelineStore = create<TimelineStore>()(
 				};
 			});
 		},
-		setTimelineViewportWidth: (width: number) => {
-			const nextWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
-			set({ timelineViewportWidth: nextWidth });
+			setTimelineViewportWidth: (width: number) => {
+				const nextWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
+				set({ timelineViewportWidth: nextWidth });
+			},
+			getRevision: () => get().revision,
+			getCommandSnapshot: () => {
+				const state = get();
+				return {
+					revision: state.revision,
+					fps: state.fps,
+					currentTime: state.currentTime,
+					elements: state.elements,
+					tracks: state.tracks,
+					audioTrackStates: state.audioTrackStates,
+					autoAttach: state.autoAttach,
+					rippleEditingEnabled: state.rippleEditingEnabled,
+				};
+			},
+			applyCommandSnapshot: (
+				snapshot: TimelineCommandSnapshot,
+				options?: { history?: boolean },
+			) => {
+				set((state) => {
+					const nextCurrentTime = clampFrame(snapshot.currentTime);
+					const didChange =
+						state.currentTime !== nextCurrentTime ||
+						state.elements !== snapshot.elements ||
+						state.tracks !== snapshot.tracks ||
+						state.audioTrackStates !== snapshot.audioTrackStates ||
+						state.autoAttach !== snapshot.autoAttach ||
+						state.rippleEditingEnabled !== snapshot.rippleEditingEnabled;
+					if (!didChange) return state;
+
+				const selection = reconcileSelection(
+					snapshot.elements,
+					state.selectedIds,
+					state.primarySelectedId,
+				);
+					const nextStateBase = {
+						currentTime: nextCurrentTime,
+						elements: snapshot.elements,
+						tracks: snapshot.tracks,
+						audioTrackStates: snapshot.audioTrackStates,
+						autoAttach: snapshot.autoAttach,
+						rippleEditingEnabled: snapshot.rippleEditingEnabled,
+						selectedIds: selection.selectedIds,
+						primarySelectedId: selection.primarySelectedId,
+					};
+				if (options?.history === false) {
+					return nextStateBase;
+				}
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				return {
+					...nextStateBase,
+					historyPast: nextPast,
+					historyFuture: [],
+				};
+			});
 		},
 	})),
 );
@@ -1265,6 +1161,90 @@ useTimelineStore.subscribe(
 	(elements) => {
 		syncElementIndex(elements);
 	},
+);
+
+interface TimelineRevisionDeps {
+	fps: number;
+	timelineScale: number;
+	currentTime: number;
+	previewTime: number | null;
+	previewAxisEnabled: boolean;
+	elements: TimelineElement[];
+	tracks: TimelineTrack[];
+	audioTrackStates: AudioTrackControlStateMap;
+	isPlaying: boolean;
+	isExporting: boolean;
+	exportTime: number | null;
+	seekEpoch: number;
+	selectedIds: string[];
+	primarySelectedId: string | null;
+	snapEnabled: boolean;
+	autoAttach: boolean;
+	rippleEditingEnabled: boolean;
+	scrollLeft: number;
+	timelineMaxScrollLeft: number;
+	timelineViewportWidth: number;
+}
+
+const selectRevisionDeps = (state: TimelineStore): TimelineRevisionDeps => ({
+	fps: state.fps,
+	timelineScale: state.timelineScale,
+	currentTime: state.currentTime,
+	previewTime: state.previewTime,
+	previewAxisEnabled: state.previewAxisEnabled,
+	elements: state.elements,
+	tracks: state.tracks,
+	audioTrackStates: state.audioTrackStates,
+	isPlaying: state.isPlaying,
+	isExporting: state.isExporting,
+	exportTime: state.exportTime,
+	seekEpoch: state.seekEpoch,
+	selectedIds: state.selectedIds,
+	primarySelectedId: state.primarySelectedId,
+	snapEnabled: state.snapEnabled,
+	autoAttach: state.autoAttach,
+	rippleEditingEnabled: state.rippleEditingEnabled,
+	scrollLeft: state.scrollLeft,
+	timelineMaxScrollLeft: state.timelineMaxScrollLeft,
+	timelineViewportWidth: state.timelineViewportWidth,
+});
+
+const isRevisionDepsEqual = (
+	prev: TimelineRevisionDeps,
+	next: TimelineRevisionDeps,
+): boolean => {
+	return (
+		prev.fps === next.fps &&
+		prev.timelineScale === next.timelineScale &&
+		prev.currentTime === next.currentTime &&
+		prev.previewTime === next.previewTime &&
+		prev.previewAxisEnabled === next.previewAxisEnabled &&
+		prev.elements === next.elements &&
+		prev.tracks === next.tracks &&
+		prev.audioTrackStates === next.audioTrackStates &&
+		prev.isPlaying === next.isPlaying &&
+		prev.isExporting === next.isExporting &&
+		prev.exportTime === next.exportTime &&
+		prev.seekEpoch === next.seekEpoch &&
+		prev.selectedIds === next.selectedIds &&
+		prev.primarySelectedId === next.primarySelectedId &&
+		prev.snapEnabled === next.snapEnabled &&
+		prev.autoAttach === next.autoAttach &&
+		prev.rippleEditingEnabled === next.rippleEditingEnabled &&
+		prev.scrollLeft === next.scrollLeft &&
+		prev.timelineMaxScrollLeft === next.timelineMaxScrollLeft &&
+		prev.timelineViewportWidth === next.timelineViewportWidth
+	);
+};
+
+useTimelineStore.subscribe(
+	selectRevisionDeps,
+	() => {
+		useTimelineStore.setState((state) => ({
+			revision: state.revision + 1,
+		}));
+	},
+	{ equalityFn: isRevisionDepsEqual },
 );
 
 // 渲染时间：导出时使用导出帧，否则跟随预览/播放
@@ -1605,18 +1585,10 @@ export const useTrackAssignments = () => {
 		(state) => state.rippleEditingEnabled,
 	);
 	const { attachments, autoAttach } = useAttachments();
-	const trackLockedMap = useMemo(() => {
-		const map = new Map<number, boolean>(
-			tracks.map((track, index) => [index, track.locked ?? false]),
-		);
-		for (const trackIndexRaw of Object.keys(audioTrackStates)) {
-			const trackIndex = Number(trackIndexRaw);
-			if (!Number.isFinite(trackIndex)) continue;
-			const state = getAudioTrackControlState(audioTrackStates, trackIndex);
-			map.set(trackIndex, state.locked);
-		}
-		return map;
-	}, [tracks, audioTrackStates]);
+	const trackLockedMap = useMemo(
+		() => createTrackLockedMap(tracks, audioTrackStates),
+		[tracks, audioTrackStates],
+	);
 
 	// 基于 elements 计算轨道分配
 	const trackAssignments = useMemo(() => {
@@ -1820,8 +1792,17 @@ export const useTrackAssignments = () => {
 				});
 
 				// 第二步：更新附属元素的时间（保持原轨道）
+				const movedChildren = new Map(
+					unlockedChildren.map((child) => [
+						child.id,
+						{
+							start: child.start,
+							end: child.end,
+						},
+					]),
+				);
 				updated = updated.map((el) => {
-					const childMove = unlockedChildren.find((c) => c.id === el.id);
+					const childMove = movedChildren.get(el.id);
 					if (childMove) {
 						return updateElementTime(el, childMove.start, childMove.end, fps);
 					}
@@ -1829,100 +1810,7 @@ export const useTrackAssignments = () => {
 				});
 
 				// 第三步：为附属元素重新计算轨道位置（处理重叠）
-				// 按照原轨道顺序逐个处理，如果有重叠则向上查找
-				for (const childMove of unlockedChildren) {
-					const child = updated.find((el) => el.id === childMove.id);
-					if (!child) continue;
-
-					const childRole = getElementRole(child);
-					const currentTrack =
-						child.timeline.trackIndex ?? (childRole === "audio" ? -1 : 1);
-					let availableTrack = currentTrack;
-					// 基于存储轨道判断，避免 assignTracks 提前重排掩盖重叠
-					if (childRole === "audio") {
-						const minStoredTrack = Math.min(
-							-1,
-							...updated.map((el) => el.timeline.trackIndex ?? 0),
-						);
-						for (
-							let track = currentTrack;
-							track >= minStoredTrack - 1;
-							track--
-						) {
-							if (
-								hasRoleConflictOnStoredTrack(
-									childRole,
-									track,
-									updated,
-									childMove.id,
-								)
-							) {
-								continue;
-							}
-							if (
-								!hasOverlapOnStoredTrack(
-									childMove.start,
-									childMove.end,
-									track,
-									updated,
-									childMove.id,
-								)
-							) {
-								availableTrack = track;
-								break;
-							}
-						}
-					} else {
-						const maxStoredTrack = Math.max(
-							0,
-							...updated.map((el) => el.timeline.trackIndex ?? 0),
-						);
-						for (
-							let track = currentTrack;
-							track <= maxStoredTrack + 1;
-							track++
-						) {
-							if (
-								hasRoleConflictOnStoredTrack(
-									childRole,
-									track,
-									updated,
-									childMove.id,
-								)
-							) {
-								continue;
-							}
-							if (
-								!hasOverlapOnStoredTrack(
-									childMove.start,
-									childMove.end,
-									track,
-									updated,
-									childMove.id,
-								)
-							) {
-								availableTrack = track;
-								break;
-							}
-						}
-					}
-
-					// 如果需要移动到新轨道
-					if (availableTrack !== currentTrack) {
-						updated = updated.map((el) => {
-							if (el.id === childMove.id) {
-								return {
-									...el,
-									timeline: {
-										...el.timeline,
-										trackIndex: availableTrack,
-									},
-								};
-							}
-							return el;
-						});
-					}
-				}
+				updated = resolveMovedChildrenTracks(updated, movedChildren);
 
 				const finalized = finalizeTimelineElements(updated, {
 					rippleEditingEnabled,

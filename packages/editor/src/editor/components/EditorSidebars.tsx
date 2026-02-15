@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useSelectedElement } from "../contexts/TimelineContext";
 import MaterialLibrary from "../MaterialLibrary";
+import AgentCliPanel from "./AgentCliPanel";
 import ElementSettingsPanel from "./ElementSettingsPanel";
 import TranscriptPanel from "./TranscriptPanel";
 
@@ -30,7 +31,7 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
 			<div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
 				<button
 					type="button"
-					className="flex items-center gap-2 text-sm font-medium text-white"
+					className="flex items-center gap-2 text-sm font-medium text-white select-text"
 					onClick={onToggle}
 				>
 					<span>{title}</span>
@@ -41,7 +42,7 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
 				)}
 			</div>
 			{isOpen && (
-				<div className="px-3 py-2 max-h-full overflow-y-auto min-h-0">
+				<div className="px-3 py-2 max-h-full overflow-y-auto min-h-0 select-text">
 					{children}
 				</div>
 			)}
@@ -55,6 +56,7 @@ const EditorSidebars: React.FC = () => {
 		material: true,
 		element: false,
 		transcript: true,
+		agentCli: false,
 	});
 
 	// 选中元素时自动收起素材库，并展开设置面板
@@ -71,7 +73,7 @@ const EditorSidebars: React.FC = () => {
 	}, [selectedElement?.id]);
 
 	const togglePanel = useCallback(
-		(panelId: "material" | "element" | "transcript") => {
+		(panelId: "material" | "element" | "transcript" | "agentCli") => {
 			if (panelId === "element" && !selectedElement) {
 				return;
 			}
@@ -138,6 +140,14 @@ const EditorSidebars: React.FC = () => {
 					widthClassName="w-64"
 				>
 					<TranscriptPanel />
+				</SidebarPanel>
+				<SidebarPanel
+					title="协作命令"
+					isOpen={panelOpenState.agentCli}
+					onToggle={() => togglePanel("agentCli")}
+					widthClassName="w-80"
+				>
+					<AgentCliPanel />
 				</SidebarPanel>
 			</div>
 		</div>
