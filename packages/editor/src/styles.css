@@ -5,6 +5,7 @@
 @source "../../ai-nle-web/src/**/*.{ts,tsx}";
 @source "../../ai-nle-electron/src/**/*.{ts,tsx}";
 @import "tw-animate-css";
+@import "@fontsource/barlow";
 @import "@fontsource-variable/inter";
 
 :root {
@@ -44,9 +45,9 @@
 
 body {
   @apply m-0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-    sans-serif;
+  font-family: "Barlow", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+    "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans",
+    "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
