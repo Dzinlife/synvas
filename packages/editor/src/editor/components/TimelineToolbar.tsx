@@ -43,13 +43,15 @@ import {
 	isTransitionElement,
 	reconcileTransitions,
 } from "../utils/transitions";
+import {
+	MAX_TIMELINE_SCALE,
+	MIN_TIMELINE_SCALE,
+} from "../utils/timelineZoom";
 import TimelineMinimap from "./TimelineMinimap";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
 
 const isSplittableClip = (element: TimelineElement) =>
 	element.type === "VideoClip" || element.type === "AudioClip";
-const MIN_TIMELINE_SCALE = 0.01;
-const MAX_TIMELINE_SCALE = 10;
 const TIMELINE_SCALE_STEP = 0.1;
 
 const createElementId = () => {
@@ -102,7 +104,11 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const { fps } = useFps();
 	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
+	const timelineViewportWidth = useTimelineStore(
+		(state) => state.timelineViewportWidth,
+	);
 	const timelinePaddingLeft = 48;
+	const centerAnchorOffset = Math.max(0, timelineViewportWidth) / 2;
 	const primarySelectedElement = useMemo(() => {
 		if (!primaryId) return null;
 		return elements.find((element) => element.id === primaryId) ?? null;
@@ -167,24 +173,30 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		(value: number | readonly number[]) => {
 			const nextValue = Array.isArray(value) ? value[0] : value;
 			if (!Number.isFinite(nextValue)) return;
-			setTimelineScale(nextValue);
+			setTimelineScale(nextValue, {
+				anchorOffsetPx: centerAnchorOffset,
+			});
 		},
-		[setTimelineScale],
+		[centerAnchorOffset, setTimelineScale],
 	);
 	const handleDecreaseScale = useCallback(() => {
 		const nextScale = Math.max(
 			MIN_TIMELINE_SCALE,
 			timelineScale - TIMELINE_SCALE_STEP,
 		);
-		setTimelineScale(Number(nextScale.toFixed(2)));
-	}, [setTimelineScale, timelineScale]);
+		setTimelineScale(Number(nextScale.toFixed(2)), {
+			anchorOffsetPx: centerAnchorOffset,
+		});
+	}, [centerAnchorOffset, setTimelineScale, timelineScale]);
 	const handleIncreaseScale = useCallback(() => {
 		const nextScale = Math.min(
 			MAX_TIMELINE_SCALE,
 			timelineScale + TIMELINE_SCALE_STEP,
 		);
-		setTimelineScale(Number(nextScale.toFixed(2)));
-	}, [setTimelineScale, timelineScale]);
+		setTimelineScale(Number(nextScale.toFixed(2)), {
+			anchorOffsetPx: centerAnchorOffset,
+		});
+	}, [centerAnchorOffset, setTimelineScale, timelineScale]);
 
 	const splitCandidate = useMemo(() => {
 		const target = primarySelectedElement;

@@ -10,6 +10,10 @@ import {
 import { cn } from "@/lib/utils";
 import { useTimelineStore } from "../contexts/TimelineContext";
 import { getPixelsPerFrame } from "../utils/timelineScale";
+import {
+	MAX_TIMELINE_SCALE,
+	MIN_TIMELINE_SCALE,
+} from "../utils/timelineZoom";
 
 interface TimelineMinimapProps {
 	fps: number;
@@ -17,14 +21,20 @@ interface TimelineMinimapProps {
 	className?: string;
 }
 
+type DragMode = "move-viewport" | "resize-left" | "resize-right";
+
 interface DragState {
+	mode: DragMode;
 	pointerId: number;
 	startClientX: number;
 	startFrame: number;
+	startVisibleFrameCount: number;
+	visualFrameSpan: number;
 }
 
 const MIN_VIEWPORT_WIDTH_PX = 12;
 const MAX_SEGMENT_HEIGHT_PX = 5;
+const MIN_HANDLE_HIT_WIDTH_PX = 10;
 
 const clamp = (value: number, min: number, max: number): number => {
 	return Math.min(max, Math.max(min, value));
@@ -62,6 +72,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 		(state) => state.timelineViewportWidth,
 	);
 	const setScrollLeft = useTimelineStore((state) => state.setScrollLeft);
+	const setTimelineScale = useTimelineStore((state) => state.setTimelineScale);
 
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -181,6 +192,24 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 		},
 		[maxStartFrame, pixelsPerFrame, setScrollLeft, timelinePaddingLeft],
 	);
+	const setScaleByVisibleFrameCount = useCallback(
+		(nextVisibleFrameCount: number, anchorOffsetPx: number) => {
+			if (viewportWidth <= 0) return;
+			const safeVisibleFrameCount = Math.max(nextVisibleFrameCount, 1e-6);
+			const basePixelsPerFrame = getPixelsPerFrame(fps, 1);
+			if (!Number.isFinite(basePixelsPerFrame) || basePixelsPerFrame <= 0) {
+				return;
+			}
+			const nextPixelsPerFrame = viewportWidth / safeVisibleFrameCount;
+			const nextScale = clamp(
+				nextPixelsPerFrame / basePixelsPerFrame,
+				MIN_TIMELINE_SCALE,
+				MAX_TIMELINE_SCALE,
+			);
+			setTimelineScale(nextScale, { anchorOffsetPx });
+		},
+		[fps, setTimelineScale, viewportWidth],
+	);
 
 	const updateContainerWidth = useCallback(() => {
 		const rect = containerRef.current?.getBoundingClientRect();
@@ -265,6 +294,24 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 			updateContainerWidth();
 
 			const target = event.target as HTMLElement;
+			const resizeHandle = target.closest(
+				"[data-minimap-resize-handle]",
+			) as HTMLElement | null;
+			const resizeHandleSide = resizeHandle?.dataset.minimapResizeHandle;
+			if (resizeHandleSide === "left" || resizeHandleSide === "right") {
+				event.preventDefault();
+				container.setPointerCapture?.(event.pointerId);
+				setDragState({
+					mode:
+						resizeHandleSide === "left" ? "resize-left" : "resize-right",
+					pointerId: event.pointerId,
+					startClientX: event.clientX,
+					startFrame: visibleStartFrame,
+					startVisibleFrameCount: visibleFrameCount,
+					visualFrameSpan: timelineVisualEndFrame,
+				});
+				return;
+			}
 			const isViewportHandle = Boolean(
 				target.closest('[data-minimap-viewport="true"]'),
 			);
@@ -273,9 +320,12 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 				event.preventDefault();
 				container.setPointerCapture?.(event.pointerId);
 				setDragState({
+					mode: "move-viewport",
 					pointerId: event.pointerId,
 					startClientX: event.clientX,
 					startFrame: visibleStartFrame,
+					startVisibleFrameCount: visibleFrameCount,
+					visualFrameSpan: timelineVisualEndFrame,
 				});
 				return;
 			}
@@ -308,10 +358,41 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 			if (rect.width <= 0) return;
 
 			const deltaX = event.clientX - dragState.startClientX;
-			const frameDelta = (deltaX / rect.width) * timelineVisualEndFrame;
-			setViewportStartFrame(dragState.startFrame + frameDelta);
+			const frameDelta = (deltaX / rect.width) * dragState.visualFrameSpan;
+			if (dragState.mode === "move-viewport") {
+				setViewportStartFrame(dragState.startFrame + frameDelta);
+				return;
+			}
+			if (viewportWidth <= 0) return;
+			const minVisibleFrameCount = viewportWidth / getPixelsPerFrame(
+				fps,
+				MAX_TIMELINE_SCALE,
+			);
+			const maxVisibleFrameCount = viewportWidth / getPixelsPerFrame(
+				fps,
+				MIN_TIMELINE_SCALE,
+			);
+			if (
+				!Number.isFinite(minVisibleFrameCount) ||
+				!Number.isFinite(maxVisibleFrameCount) ||
+				minVisibleFrameCount <= 0 ||
+				maxVisibleFrameCount <= 0
+			) {
+				return;
+			}
+			const nextVisibleFrameCount = clamp(
+				dragState.mode === "resize-left"
+					? dragState.startVisibleFrameCount - frameDelta
+					: dragState.startVisibleFrameCount + frameDelta,
+				Math.min(minVisibleFrameCount, maxVisibleFrameCount),
+				Math.max(minVisibleFrameCount, maxVisibleFrameCount),
+			);
+			setScaleByVisibleFrameCount(
+				nextVisibleFrameCount,
+				dragState.mode === "resize-left" ? viewportWidth : 0,
+			);
 		},
-		[dragState, setViewportStartFrame, timelineVisualEndFrame],
+		[dragState, fps, setScaleByVisibleFrameCount, setViewportStartFrame, viewportWidth],
 	);
 
 	const stopDragging = useCallback((pointerId?: number) => {
@@ -393,7 +474,29 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 					width: `${viewportWidthPercent}%`,
 					minWidth: `${MIN_VIEWPORT_WIDTH_PX}px`,
 				}}
-			/>
+			>
+				{/* 左右手柄用于直接调整缩放比例，保持对侧边界稳定 */}
+				<div
+					data-minimap-resize-handle="left"
+					className="absolute top-0 bottom-0 left-0 touch-none cursor-ew-resize"
+					style={{
+						width: `${MIN_HANDLE_HIT_WIDTH_PX}px`,
+						transform: "translateX(-50%)",
+					}}
+				>
+					<div className="absolute top-1 bottom-1 left-1/2 w-px -translate-x-1/2 rounded-full bg-white/60" />
+				</div>
+				<div
+					data-minimap-resize-handle="right"
+					className="absolute top-0 bottom-0 right-0 touch-none cursor-ew-resize"
+					style={{
+						width: `${MIN_HANDLE_HIT_WIDTH_PX}px`,
+						transform: "translateX(50%)",
+					}}
+				>
+					<div className="absolute top-1 bottom-1 left-1/2 w-px -translate-x-1/2 rounded-full bg-white/60" />
+				</div>
+			</div>
 		</section>
 	);
 };

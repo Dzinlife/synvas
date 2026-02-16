@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import TimelineToolbar from "./TimelineToolbar";
+
+const { setTimelineScaleMock } = vi.hoisted(() => ({
+	setTimelineScaleMock: vi.fn(),
+}));
 
 vi.mock("react-skia-lite", () => ({
 	Skia: {},
@@ -18,6 +22,7 @@ vi.mock("../contexts/TimelineContext", () => {
 	const storeState = {
 		currentTime: 0,
 		canvasSize: { width: 1920, height: 1080 },
+		timelineViewportWidth: 320,
 	};
 	const useTimelineStore = ((selector: (state: typeof storeState) => unknown) =>
 		selector(
@@ -64,7 +69,7 @@ vi.mock("../contexts/TimelineContext", () => {
 		}),
 		useTimelineScale: () => ({
 			timelineScale: 1,
-			setTimelineScale: noop,
+			setTimelineScale: setTimelineScaleMock,
 		}),
 		useTimelineStore,
 		useTracks: () => ({
@@ -86,11 +91,24 @@ vi.mock("./TimelineMinimap", () => ({
 	default: () => <section aria-label="timeline minimap" />,
 }));
 
+afterEach(() => {
+	cleanup();
+});
+
 describe("TimelineToolbar minimap", () => {
+	it("缩放按钮会使用中心锚点更新时间轴缩放", () => {
+		setTimelineScaleMock.mockClear();
+		render(<TimelineToolbar />);
+		fireEvent.click(screen.getByTitle("放大时间轴"));
+		expect(setTimelineScaleMock).toHaveBeenCalledWith(1.1, {
+			anchorOffsetPx: 160,
+		});
+	});
+
 	it("隐藏 DSP 控件并显示 minimap", () => {
 		render(<TimelineToolbar />);
 		expect(screen.queryByText("DSP")).toBeNull();
 		expect(screen.queryByText("Master")).toBeNull();
-		expect(screen.getByLabelText("timeline minimap")).toBeTruthy();
+		expect(screen.getAllByLabelText("timeline minimap").length).toBe(1);
 	});
 });

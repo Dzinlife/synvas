@@ -34,6 +34,11 @@ import {
 } from "../utils/audioTrackState";
 import { finalizeTimelineElements } from "../utils/mainTrackMagnet";
 import type { SnapPoint } from "../utils/snap";
+import { getPixelsPerFrame } from "../utils/timelineScale";
+import {
+	MAX_TIMELINE_SCALE,
+	MIN_TIMELINE_SCALE,
+} from "../utils/timelineZoom";
 import { updateElementTime } from "../utils/timelineTime";
 import {
 	findAvailableTrack,
@@ -74,6 +79,7 @@ export const DEFAULT_AUTO_SCROLL_CONFIG: AutoScrollConfig = {
 };
 
 const DEFAULT_FPS = 30;
+const TIMELINE_PADDING_LEFT = 48;
 const normalizeFps = (value: number): number => {
 	if (!Number.isFinite(value) || value <= 0) return DEFAULT_FPS;
 	return Math.round(value);
@@ -224,7 +230,13 @@ interface TimelineStore {
 	setScrollLeft: (scrollLeft: number) => void;
 	setTimelineMaxScrollLeft: (maxScrollLeft: number) => void;
 	setTimelineViewportWidth: (width: number) => void;
-	setTimelineScale: (scale: number) => void;
+	setTimelineScale: (
+		scale: number,
+		options?: {
+			anchorOffsetPx?: number;
+			preserveOriginWhenAnchorAfterContentEnd?: boolean;
+		},
+	) => void;
 	getElementById: (id: string) => TimelineElement | null;
 	getRevision: () => number;
 	getCommandSnapshot: () => TimelineCommandSnapshot;
@@ -419,9 +431,71 @@ export const useTimelineStore = create<TimelineStore>()(
 			set({ fps: normalizeFps(fps) });
 		},
 
-		setTimelineScale: (scale: number) => {
-			const nextScale = Number.isFinite(scale) ? scale : 1;
-			set({ timelineScale: nextScale });
+		setTimelineScale: (
+			scale: number,
+			options?: {
+				anchorOffsetPx?: number;
+				preserveOriginWhenAnchorAfterContentEnd?: boolean;
+			},
+		) => {
+			set((state) => {
+				const parsedScale = Number.isFinite(scale) ? scale : 1;
+				const nextScale = Math.min(
+					MAX_TIMELINE_SCALE,
+					Math.max(MIN_TIMELINE_SCALE, parsedScale),
+				);
+				const prevRatio = getPixelsPerFrame(state.fps, state.timelineScale);
+				const nextRatio = getPixelsPerFrame(state.fps, nextScale);
+				if (
+					!Number.isFinite(prevRatio) ||
+					prevRatio <= 0 ||
+					!Number.isFinite(nextRatio) ||
+					nextRatio <= 0
+				) {
+					if (state.timelineScale === nextScale) return state;
+					return { timelineScale: nextScale };
+				}
+
+				const viewportWidth = Math.max(0, state.timelineViewportWidth);
+				const anchorBase = Number.isFinite(options?.anchorOffsetPx ?? NaN)
+					? (options?.anchorOffsetPx as number)
+					: viewportWidth / 2;
+				const anchorOffsetPx = Math.min(
+					Math.max(anchorBase, 0),
+					Math.max(0, viewportWidth),
+				);
+				const currentScrollLeft = Math.max(0, state.scrollLeft);
+				const timeAtAnchor = Math.max(
+					0,
+					(currentScrollLeft + anchorOffsetPx - TIMELINE_PADDING_LEFT) /
+						prevRatio,
+				);
+				const shouldPreserveOrigin =
+					options?.preserveOriginWhenAnchorAfterContentEnd &&
+					currentScrollLeft <= 0.5 &&
+					timeAtAnchor > resolveTimelineEndFrame(state.elements);
+				const rawNextScrollLeft = shouldPreserveOrigin
+					? 0
+					: Math.max(
+							0,
+							timeAtAnchor * nextRatio +
+								TIMELINE_PADDING_LEFT -
+								anchorOffsetPx,
+						);
+				const nextScrollLeft = Number.isFinite(rawNextScrollLeft)
+					? rawNextScrollLeft
+					: state.scrollLeft;
+				if (
+					state.timelineScale === nextScale &&
+					state.scrollLeft === nextScrollLeft
+				) {
+					return state;
+				}
+				return {
+					timelineScale: nextScale,
+					scrollLeft: nextScrollLeft,
+				};
+			});
 		},
 
 		setCurrentTime: (time: number) => {

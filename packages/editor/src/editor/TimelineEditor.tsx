@@ -63,6 +63,10 @@ import {
 	buildTrackLayout,
 	getTrackHeightByRole,
 } from "./utils/trackAssignment";
+import {
+	MAX_TIMELINE_SCALE,
+	MIN_TIMELINE_SCALE,
+} from "./utils/timelineZoom";
 import { reconcileTransitions } from "./utils/transitions";
 import {
 	detachVideoClipAudio,
@@ -170,7 +174,7 @@ const TimelineEditor = () => {
 	const { isPlaying, pause } = usePlaybackControl();
 	const { currentTime, setCurrentTime: seekTo } = useCurrentTime();
 	const { fps } = useFps();
-	const { timelineScale } = useTimelineScale();
+	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId, deselectAll, setSelection } =
 		useMultiSelect();
@@ -504,9 +508,6 @@ const TimelineEditor = () => {
 	useEffect(() => {
 		setTimelineMaxScrollLeft(timelineMaxScrollLeft);
 	}, [setTimelineMaxScrollLeft, timelineMaxScrollLeft]);
-
-	const zoomAnchorRef = useRef<{ clientX: number } | null>(null);
-	const prevScaleRef = useRef(timelineScale);
 
 	// 同步 scrollLeft 到全局拖拽 store
 	const setTimelineScrollLeft = useDragStore(
@@ -967,12 +968,23 @@ const TimelineEditor = () => {
 				const currentScale = useTimelineStore.getState().timelineScale;
 				const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
 				const nextScale = Math.min(
-					10,
-					Math.max(0.01, currentScale * zoomFactor),
+					MAX_TIMELINE_SCALE,
+					Math.max(MIN_TIMELINE_SCALE, currentScale * zoomFactor),
 				);
-
-				zoomAnchorRef.current = { clientX: e.clientX };
-				useTimelineStore.getState().setTimelineScale(nextScale);
+				const rect = scrollArea.getBoundingClientRect();
+				const viewportWidth = Math.max(
+					0,
+					useTimelineStore.getState().timelineViewportWidth,
+				);
+				const rawAnchorOffset = e.clientX - rect.left - leftColumnWidth;
+				const anchorOffsetPx = Math.min(
+					Math.max(rawAnchorOffset, 0),
+					viewportWidth,
+				);
+				setTimelineScale(nextScale, {
+					anchorOffsetPx,
+					preserveOriginWhenAnchorAfterContentEnd: true,
+				});
 				return;
 			}
 
@@ -1033,61 +1045,7 @@ const TimelineEditor = () => {
 			scrollArea.removeEventListener("touchstart", handleTouchStart);
 			scrollArea.removeEventListener("touchmove", handleTouchMove);
 		};
-	}, []);
-
-	useEffect(() => {
-		const scrollArea = scrollAreaRef.current;
-		if (!scrollArea) {
-			prevScaleRef.current = timelineScale;
-			return;
-		}
-
-		const prevScale = prevScaleRef.current;
-		if (prevScale === timelineScale) return;
-
-		const rect = scrollArea.getBoundingClientRect();
-		const anchorX = (() => {
-			const anchor = zoomAnchorRef.current;
-			const rawX = anchor
-				? anchor.clientX - rect.left
-				: leftColumnWidth + (scrollArea.clientWidth - leftColumnWidth) / 2;
-			return Math.max(0, Math.min(scrollArea.clientWidth, rawX));
-		})();
-
-		const prevRatio = getPixelsPerFrame(fps, prevScale);
-		const nextRatio = getPixelsPerFrame(fps, timelineScale);
-		if (!Number.isFinite(prevRatio) || !Number.isFinite(nextRatio)) {
-			prevScaleRef.current = timelineScale;
-			zoomAnchorRef.current = null;
-			return;
-		}
-
-		const currentScrollLeft = scrollLeftRef.current;
-		const offsetX = anchorX - leftColumnWidth - timelinePaddingLeft;
-		const timeAtAnchor = Math.max(0, (offsetX + currentScrollLeft) / prevRatio);
-		const isAtTimelineOrigin = currentScrollLeft <= 0.5;
-		const isAnchorAfterContentEnd = timeAtAnchor > timelineContentEndFrame;
-		if (isAtTimelineOrigin && isAnchorAfterContentEnd) {
-			prevScaleRef.current = timelineScale;
-			zoomAnchorRef.current = null;
-			return;
-		}
-		const nextScrollLeft = Math.max(0, timeAtAnchor * nextRatio - offsetX);
-
-		if (Number.isFinite(nextScrollLeft)) {
-			setScrollLeft(nextScrollLeft);
-		}
-
-		prevScaleRef.current = timelineScale;
-		zoomAnchorRef.current = null;
-	}, [
-		fps,
-		leftColumnWidth,
-		setScrollLeft,
-		timelineContentEndFrame,
-		timelineScale,
-		timelinePaddingLeft,
-	]);
+	}, [leftColumnWidth, setScrollLeft, setTimelineScale]);
 
 	// 自动滚动效果（拖拽到边缘时触发）
 	useEffect(() => {
