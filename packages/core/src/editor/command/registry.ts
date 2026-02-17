@@ -127,6 +127,31 @@ const COMMANDS: CommandDescriptor[] = [
 		requiresShell: false,
 	},
 	{
+		id: "timeline.element.transcribe",
+		summary: "为音视频片段执行转写",
+		mode: "runtime",
+		schema: {
+			type: "object",
+			properties: {
+				id: { type: "string", description: "目标 VideoClip/AudioClip id", required: true },
+				language: {
+					type: "string",
+					description: "转写语言（可选，默认 auto）",
+				},
+				force: {
+					type: "boolean",
+					description: "强制重转写（可选，默认 false）",
+				},
+			},
+			required: ["id"],
+		},
+		examples: [
+			"timeline.element.transcribe --id clip-1",
+			"timeline.element.transcribe --id clip-1 --language zh --force true",
+		],
+		requiresShell: false,
+	},
+	{
 		id: "timeline.track.set-flag",
 		summary: "设置轨道或音轨开关状态",
 		mode: "state",

@@ -7,6 +7,7 @@ import {
 } from "@ai-nle/agent-cli";
 import { isMetaCommand } from "core/editor/command/reducer";
 import { useMemo, useState } from "react";
+import { useAsrClient } from "@/asr";
 import { Button } from "@/components/ui/button";
 import { createTimelineStoreAgentCliHost } from "../agent-cli/createTimelineStoreAgentCliHost";
 import { resolveTimelineElementRole } from "../utils/resolveRole";
@@ -31,13 +32,14 @@ const AgentCliPanel = () => {
 	const [plan, setPlan] = useState<PlanDraft | null>(null);
 	const [confirmedPlan, setConfirmedPlan] = useState<ConfirmedPlan | null>(null);
 	const [outputText, setOutputText] = useState("");
+	const asrClient = useAsrClient();
 
 	const runtime = useMemo(
 		() =>
-			createAgentCliRuntime(createTimelineStoreAgentCliHost(), {
+			createAgentCliRuntime(createTimelineStoreAgentCliHost({ asrClient }), {
 				resolveRole: resolveTimelineElementRole,
 			}),
-		[],
+		[asrClient],
 	);
 
 	const parsedPreview = useMemo(() => {

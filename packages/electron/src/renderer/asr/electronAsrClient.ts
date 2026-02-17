@@ -151,8 +151,7 @@ const toTranscriptWords = (segment: WhisperSegment): TranscriptWord[] => {
 					word.end >= word.start,
 			)
 			.map((word) => ({
-				id: createId("word"),
-				text: String(word.text ?? "").trim(),
+				text: word.text,
 				start: word.start,
 				end: word.end,
 			}));
@@ -161,7 +160,6 @@ const toTranscriptWords = (segment: WhisperSegment): TranscriptWord[] => {
 	// 退化：没有词级时间戳时，把整段当作一个 word。
 	return [
 		{
-			id: createId("word"),
 			text,
 			start: segment.start,
 			end: segment.end,

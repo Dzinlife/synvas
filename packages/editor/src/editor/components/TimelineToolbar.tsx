@@ -2,6 +2,7 @@ import type { TimelineElement } from "core/dsl/types";
 import { buildSplitElements } from "core/editor/command/split";
 import {
 	Film,
+	Mic,
 	Sparkles,
 	Split,
 	ZoomIn,
@@ -14,6 +15,7 @@ import {
 	ScrollPreviewIcon,
 	SnapIcon,
 } from "@/components/icons";
+import { isSupportedSourceMediaUri } from "@/asr";
 import {
 	Dialog,
 	DialogContent,
@@ -42,6 +44,7 @@ import {
 	usePreviewAxis,
 	useRippleEditing,
 	useSnap,
+	useSources,
 	useTimelineHistory,
 	useTimelineScale,
 	useTimelineStore,
@@ -57,6 +60,7 @@ import {
 	MIN_TIMELINE_SCALE,
 } from "../utils/timelineZoom";
 import TimelineMinimap from "./TimelineMinimap";
+import SmartSpeechCutDialog from "./SmartSpeechCutDialog";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
 import {
 	analyzeVideoChangeForElement,
@@ -117,6 +121,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const { undo, redo } = useTimelineHistory();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId } = useMultiSelect();
+	const { sources } = useSources();
 	const { fps } = useFps();
 	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
@@ -143,6 +148,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		return map;
 	}, [tracks, audioTrackStates]);
 	const [quickSplitOpen, setQuickSplitOpen] = useState(false);
+	const [speechCutOpen, setSpeechCutOpen] = useState(false);
 	const [quickSplitSensitivity, setQuickSplitSensitivity] = useState(
 		QUICK_SPLIT_DEFAULTS.sensitivity,
 	);
@@ -260,6 +266,26 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			}),
 		[currentTime, elements, primaryId, selectedIds],
 	);
+	const speechCutCandidate = useMemo(() => {
+		const target = primarySelectedElement;
+		if (!target) return null;
+		if (selectedIds.length !== 1 || selectedIds[0] !== target.id) return null;
+		if (target.type !== "VideoClip" && target.type !== "AudioClip") return null;
+		if (!target.sourceId) return null;
+		const source = sources.find((item) => item.id === target.sourceId);
+		if (!source) return null;
+		if (source.kind !== "video" && source.kind !== "audio") return null;
+		if (!isSupportedSourceMediaUri(source.uri)) return null;
+		return {
+			elementId: target.id,
+			sourceId: source.id,
+		};
+	}, [primarySelectedElement, selectedIds, sources]);
+
+	useEffect(() => {
+		if (speechCutCandidate) return;
+		setSpeechCutOpen(false);
+	}, [speechCutCandidate]);
 
 	const handleOpenQuickSplit = useCallback(() => {
 		if (!quickSplitCandidate) return;
@@ -433,6 +459,25 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 							</button>
 						</TooltipTrigger>
 						<TooltipContent>根据画面变化自动生成切点</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger delay={0}>
+							<button
+								type="button"
+								onClick={() => setSpeechCutOpen(true)}
+								disabled={!speechCutCandidate}
+								className={cn(
+									"size-7 flex items-center justify-center text-xs transition rounded-full",
+									speechCutCandidate
+										? "text-white hover:scale-115"
+										: "text-neutral-500 cursor-not-allowed",
+								)}
+								aria-label="智能剪口播"
+							>
+								<Mic className="size-3.5" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>智能剪口播</TooltipContent>
 					</Tooltip>
 
 					<Tooltip>
@@ -728,6 +773,12 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 					</div>
 				</DialogContent>
 			</Dialog>
+			<SmartSpeechCutDialog
+				open={speechCutOpen}
+				onOpenChange={setSpeechCutOpen}
+				elementId={speechCutCandidate?.elementId ?? null}
+				sourceId={speechCutCandidate?.sourceId ?? null}
+			/>
 		</>
 	);
 };

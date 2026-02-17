@@ -10,7 +10,6 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import AsrDialog from "@/editor/components/AsrDialog";
 import ExportVideoDialog from "@/editor/components/ExportVideoDialog";
 import {
 	useTimelineHistory,
@@ -140,7 +139,6 @@ export default function Header() {
 							canvasSize={canvasSize}
 							onExport={handleExportVideo}
 						/>
-						<AsrDialog />
 					</>
 				)}
 				<DropdownMenu>

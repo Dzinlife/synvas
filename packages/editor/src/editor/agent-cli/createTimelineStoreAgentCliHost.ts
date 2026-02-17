@@ -1,4 +1,6 @@
 import type { AgentCliHost, ParsedCommand } from "@ai-nle/agent-cli";
+import type { AsrClient } from "@/asr";
+import { isSupportedSourceMediaUri, transcribeSourceById } from "@/asr";
 import { useTimelineStore } from "../contexts/TimelineContext";
 import {
 	analyzeVideoChangeForElement,
@@ -17,6 +19,15 @@ const toStringValue = (value: unknown): string | null => {
 	if (typeof value !== "string") return null;
 	const trimmed = value.trim();
 	return trimmed.length > 0 ? trimmed : null;
+};
+
+const toBooleanValue = (value: unknown): boolean | null => {
+	if (typeof value === "boolean") return value;
+	if (typeof value !== "string") return null;
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "true" || normalized === "1") return true;
+	if (normalized === "false" || normalized === "0") return false;
+	return null;
 };
 
 const normalizeQuickSplitMode = (value: unknown): QuickSplitMode => {
@@ -95,13 +106,113 @@ const executeQuickSplitCommand = async (command: ParsedCommand) => {
 	};
 };
 
-export const createTimelineStoreAgentCliHost = (): AgentCliHost => {
+const executeTranscribeCommand = async (
+	command: ParsedCommand,
+	asrClient: AsrClient | undefined,
+) => {
+	if (!asrClient) {
+		return {
+			ok: false,
+			changed: false,
+			error: "当前 host 未注入 ASR 客户端",
+		};
+	}
+
+	const id = toStringValue(command.args.id);
+	if (!id) {
+		return {
+			ok: false,
+			changed: false,
+			error: "timeline.element.transcribe 缺少 --id 参数",
+		};
+	}
+
+	const snapshot = useTimelineStore.getState().getCommandSnapshot();
+	const target = snapshot.elements.find((element) => element.id === id);
+	if (!target || (target.type !== "VideoClip" && target.type !== "AudioClip")) {
+		return {
+			ok: false,
+			changed: false,
+			error: `目标元素不是可转写片段: ${id}`,
+		};
+	}
+
+	const sourceId = target.sourceId;
+	if (!sourceId) {
+		return {
+			ok: false,
+			changed: false,
+			error: `目标片段缺少 sourceId: ${id}`,
+		};
+	}
+	const source = snapshot.sources.find((item) => item.id === sourceId);
+	if (!source) {
+		return {
+			ok: false,
+			changed: false,
+			error: `未找到目标 source: ${sourceId}`,
+		};
+	}
+	if (source.kind !== "video" && source.kind !== "audio") {
+		return {
+			ok: false,
+			changed: false,
+			error: `目标 source 类型不支持转写: ${source.kind}`,
+		};
+	}
+	if (!isSupportedSourceMediaUri(source.uri)) {
+		return {
+			ok: false,
+			changed: false,
+			error: `目标 source URI 不支持转写: ${source.uri}`,
+		};
+	}
+
+	const language = toStringValue(command.args.language) ?? "auto";
+	const force = toBooleanValue(command.args.force) ?? false;
+	if (!force && source.data?.asr) {
+		return {
+			ok: true,
+			changed: false,
+			summaryText: "当前 source 已有转写，已跳过。",
+		};
+	}
+
+	const controller = new AbortController();
+	const result = await transcribeSourceById({
+		sourceId,
+		asrClient,
+		language,
+		force,
+		signal: controller.signal,
+	});
+	if (result.status === "skipped") {
+		return {
+			ok: true,
+			changed: false,
+			summaryText: result.summaryText,
+		};
+	}
+	return {
+		ok: true,
+		changed: result.changed,
+		summaryText: result.summaryText,
+	};
+};
+
+export interface CreateTimelineStoreAgentCliHostOptions {
+	asrClient?: AsrClient;
+}
+
+export const createTimelineStoreAgentCliHost = (
+	options?: CreateTimelineStoreAgentCliHostOptions,
+): AgentCliHost => {
 	return {
 		getSnapshot() {
 			return useTimelineStore.getState().getCommandSnapshot();
 		},
-		applySnapshot(snapshot, options) {
-			useTimelineStore.getState().applyCommandSnapshot(snapshot, options);
+		applySnapshot(snapshot, applyOptions) {
+			useTimelineStore.getState().applyCommandSnapshot(snapshot, applyOptions);
 		},
 		getRevision() {
 			return useTimelineStore.getState().getRevision();
@@ -118,6 +229,9 @@ export const createTimelineStoreAgentCliHost = (): AgentCliHost => {
 		executeRuntimeCommand(command) {
 			if (command.id === "timeline.element.quick-split") {
 				return executeQuickSplitCommand(command);
+			}
+			if (command.id === "timeline.element.transcribe") {
+				return executeTranscribeCommand(command, options?.asrClient);
 			}
 			return Promise.resolve({
 				ok: false,

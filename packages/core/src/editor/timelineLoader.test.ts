@@ -121,9 +121,11 @@ describe("timelineLoader source schema", () => {
 			asr: {
 				id: "transcript-1",
 				source: {
-					type: "opfs-audio",
-					uri: "opfs://projects/project-1/audios/voice.wav",
-					fileName: "voice.wav",
+					type: "timeline-source",
+					sourceId: "source-video-1",
+					kind: "video",
+					uri: "file:///clip.mp4",
+					fileName: "clip.mp4",
 					duration: 2.5,
 				},
 				language: "zh",
@@ -150,5 +152,28 @@ describe("timelineLoader source schema", () => {
 		};
 		const loaded = loadTimelineFromObject(timeline);
 		expect(loaded.sources[0]?.data?.asr?.id).toBe("transcript-1");
+	});
+
+	it("不兼容旧版 opfs-audio 转写结构", () => {
+		const timeline = createBaseTimeline();
+		(timeline.sources[0] as TimelineSource).data = {
+			asr: {
+				id: "transcript-1",
+				source: {
+					type: "opfs-audio",
+					uri: "opfs://projects/project-1/audios/voice.wav",
+					fileName: "voice.wav",
+					duration: 2.5,
+				},
+				language: "zh",
+				model: "tiny",
+				createdAt: 1,
+				updatedAt: 2,
+				segments: [],
+			},
+		} as unknown as TimelineSource["data"];
+		expect(() => loadTimelineFromObject(timeline)).toThrow(
+			"sources[0].data.asr.source.type",
+		);
 	});
 });

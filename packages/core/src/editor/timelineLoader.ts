@@ -139,8 +139,10 @@ const transcriptSegmentSchema = z.object({
 });
 
 const transcriptSourceSchema = z.object({
-	type: z.literal("opfs-audio"),
-	uri: z.string().startsWith("opfs://projects/"),
+	type: z.literal("timeline-source"),
+	sourceId: nonEmptyStringSchema,
+	kind: z.enum(["video", "audio"]),
+	uri: nonEmptyStringSchema,
 	fileName: z.string(),
 	duration: finiteNumberSchema.refine((value) => value >= 0, {
 		message: "must be a non-negative number",

@@ -1,7 +1,6 @@
 export type AsrModelSize = "tiny" | "large-v3-turbo";
 
 export type TranscriptWord = {
-	id: string;
 	text: string;
 	start: number;
 	end: number;
@@ -17,7 +16,9 @@ export type TranscriptSegment = {
 };
 
 export type TranscriptSource = {
-	type: "opfs-audio";
+	type: "timeline-source";
+	sourceId: string;
+	kind: "video" | "audio";
 	uri: string;
 	fileName: string;
 	duration: number;

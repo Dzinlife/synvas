@@ -17,6 +17,7 @@ describe("command registry", () => {
 		expect(getCommandDescriptor("timeline.element.trim")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.element.split")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.element.quick-split")).toBeTruthy();
+		expect(getCommandDescriptor("timeline.element.transcribe")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.track.set-flag")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.seek")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.undo")).toBeTruthy();
@@ -44,5 +45,15 @@ describe("command registry", () => {
 		expect(quickSplit?.schema.properties.sensitivity).toBeTruthy();
 		expect(quickSplit?.schema.properties.minSegmentSeconds).toBeTruthy();
 		expect(quickSplit?.schema.properties.mode).toBeTruthy();
+	});
+
+	it("transcribe 命令应标记为 runtime 且支持 force 参数", () => {
+		const transcribe = getCommandDescriptor("timeline.element.transcribe");
+		expect(transcribe).toBeTruthy();
+		expect(transcribe?.mode).toBe("runtime");
+		expect(transcribe?.schema.required).toEqual(["id"]);
+		expect(transcribe?.schema.properties.id).toBeTruthy();
+		expect(transcribe?.schema.properties.language).toBeTruthy();
+		expect(transcribe?.schema.properties.force).toBeTruthy();
 	});
 });

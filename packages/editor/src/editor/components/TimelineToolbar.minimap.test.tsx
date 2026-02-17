@@ -57,6 +57,9 @@ vi.mock("../contexts/TimelineContext", () => {
 			rippleEditingEnabled: false,
 			setRippleEditingEnabled: noop,
 		}),
+		useSources: () => ({
+			sources: [],
+		}),
 		useSnap: () => ({
 			snapEnabled: true,
 			setSnapEnabled: noop,
@@ -78,10 +81,6 @@ vi.mock("../contexts/TimelineContext", () => {
 		}),
 	};
 });
-
-vi.mock("./AsrDialog", () => ({
-	default: () => <div>ASR</div>,
-}));
 
 vi.mock("./ExportVideoDialog", () => ({
 	default: () => <div>ExportVideoDialog</div>,
