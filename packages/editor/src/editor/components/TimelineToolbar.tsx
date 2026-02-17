@@ -1,21 +1,25 @@
 import type { TimelineElement } from "core/dsl/types";
 import { buildSplitElements } from "core/editor/command/split";
 import {
-	Eye,
 	Film,
-	Layers,
 	Sparkles,
 	Split,
 	ZoomIn,
 	ZoomOut,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	AutoAttachIcon,
 	RippleEditingIcon,
 	ScrollPreviewIcon,
 	SnapIcon,
 } from "@/components/icons";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import {
 	Tooltip,
@@ -49,6 +53,13 @@ import {
 } from "../utils/timelineZoom";
 import TimelineMinimap from "./TimelineMinimap";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
+import {
+	analyzeVideoChangeForElement,
+	applyQuickSplitFrames,
+	QUICK_SPLIT_DEFAULTS,
+	resolveQuickSplitCandidate,
+	type QuickSplitMode,
+} from "./timelineQuickSplit";
 
 const isSplittableClip = (element: TimelineElement) =>
 	element.type === "VideoClip" || element.type === "AudioClip";
@@ -126,6 +137,25 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		}
 		return map;
 	}, [tracks, audioTrackStates]);
+	const [quickSplitOpen, setQuickSplitOpen] = useState(false);
+	const [quickSplitSensitivity, setQuickSplitSensitivity] = useState(
+		QUICK_SPLIT_DEFAULTS.sensitivity,
+	);
+	const [quickSplitMinSegmentSeconds, setQuickSplitMinSegmentSeconds] = useState(
+		QUICK_SPLIT_DEFAULTS.minSegmentSeconds,
+	);
+	const [quickSplitMode, setQuickSplitMode] = useState<QuickSplitMode>(
+		QUICK_SPLIT_DEFAULTS.mode,
+	);
+	const [quickSplitStatus, setQuickSplitStatus] = useState<string | null>(null);
+	const [quickSplitRunning, setQuickSplitRunning] = useState(false);
+	const quickSplitAbortRef = useRef<AbortController | null>(null);
+
+	useEffect(() => {
+		return () => {
+			quickSplitAbortRef.current?.abort();
+		};
+	}, []);
 
 	// 全局空格键播放/暂停
 	useEffect(() => {
@@ -205,6 +235,15 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		if (currentTime >= target.timeline.end) return null;
 		return target;
 	}, [currentTime, primarySelectedElement]);
+	const quickSplitCandidate = useMemo(
+		() =>
+			resolveQuickSplitCandidate({
+				elements,
+				selectedIds,
+				primaryId,
+			}),
+		[elements, selectedIds, primaryId],
+	);
 	const freezeCandidate = useMemo(
 		() =>
 			resolveFreezeCandidate({
@@ -215,6 +254,69 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			}),
 		[currentTime, elements, primaryId, selectedIds],
 	);
+
+	const handleOpenQuickSplit = useCallback(() => {
+		if (!quickSplitCandidate) return;
+		setQuickSplitStatus(null);
+		setQuickSplitOpen(true);
+	}, [quickSplitCandidate]);
+
+	const handleCancelQuickSplit = useCallback(() => {
+		quickSplitAbortRef.current?.abort();
+	}, []);
+
+	const handleRunQuickSplit = useCallback(async () => {
+		if (!quickSplitCandidate || quickSplitRunning) return;
+		const controller = new AbortController();
+		quickSplitAbortRef.current = controller;
+		setQuickSplitRunning(true);
+		setQuickSplitStatus("正在分析画面变化...");
+		try {
+			const analysis = await analyzeVideoChangeForElement({
+				element: quickSplitCandidate,
+				fps,
+				sensitivity: quickSplitSensitivity,
+				minSegmentSeconds: quickSplitMinSegmentSeconds,
+				mode: quickSplitMode,
+				signal: controller.signal,
+			});
+			if (controller.signal.aborted) return;
+			if (analysis.splitFrames.length === 0) {
+				setQuickSplitStatus("未检测到明显变化切点。");
+				return;
+			}
+			setElements((prev) =>
+				applyQuickSplitFrames({
+					elements: prev,
+					targetId: quickSplitCandidate.id,
+					splitFrames: analysis.splitFrames,
+					fps,
+					createElementId,
+				}),
+			);
+			setQuickSplitStatus(`快速分割完成，新增 ${analysis.splitFrames.length} 个切点。`);
+		} catch (error) {
+			if (controller.signal.aborted) {
+				setQuickSplitStatus("已取消快速分割。");
+				return;
+			}
+			const message = error instanceof Error ? error.message : String(error);
+			setQuickSplitStatus(`快速分割失败：${message}`);
+		} finally {
+			if (quickSplitAbortRef.current === controller) {
+				quickSplitAbortRef.current = null;
+			}
+			setQuickSplitRunning(false);
+		}
+	}, [
+		quickSplitCandidate,
+		quickSplitRunning,
+		fps,
+		quickSplitSensitivity,
+		quickSplitMinSegmentSeconds,
+		quickSplitMode,
+		setElements,
+	]);
 
 	const handleSplit = useCallback(() => {
 		if (!splitCandidate) return;
@@ -273,12 +375,13 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	]);
 
 	return (
-		<div className={cn("flex items-center gap-3 px-4", className)}>
-			<div className="left-section flex flex-1 items-center gap-3 shrink-0">
-				<div className="flex items-center gap-0.5 bg-black/20 rounded-full p-0.5">
-					<Tooltip>
-						<TooltipTrigger delay={0}>
-							<button
+		<>
+			<div className={cn("flex items-center gap-3 px-4", className)}>
+				<div className="left-section flex flex-1 items-center gap-3 shrink-0">
+					<div className="flex items-center gap-0.5 bg-black/20 rounded-full p-0.5">
+						<Tooltip>
+							<TooltipTrigger delay={0}>
+								<button
 								type="button"
 								onClick={handleSplit}
 								disabled={!splitCandidate}
@@ -294,6 +397,25 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 							</button>
 						</TooltipTrigger>
 						<TooltipContent>在当前时间点分割选中片段</TooltipContent>
+					</Tooltip>
+					<Tooltip>
+						<TooltipTrigger delay={0}>
+							<button
+								type="button"
+								onClick={handleOpenQuickSplit}
+								disabled={!quickSplitCandidate}
+								className={cn(
+									"size-7 flex items-center justify-center text-xs transition rounded-full",
+									quickSplitCandidate
+										? "text-white hover:scale-115"
+										: "text-neutral-500 cursor-not-allowed",
+								)}
+								aria-label="快速分割"
+							>
+								<Film className="size-3.5" />
+							</button>
+						</TooltipTrigger>
+						<TooltipContent>根据画面变化自动生成切点</TooltipContent>
 					</Tooltip>
 
 					<Tooltip>
@@ -316,16 +438,16 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 						<TooltipContent>在当前时间点插入 3 秒定格</TooltipContent>
 					</Tooltip>
 				</div>
-			</div>
-			<div className="center-section flex-1 flex justify-center">
-				<div className="flex-1 min-w-[220px] max-w-[640px]">
-					<TimelineMinimap
-						fps={fps}
-						timelinePaddingLeft={timelinePaddingLeft}
-					/>
 				</div>
-			</div>
-			<div className="right-section flex flex-1 shrink-2 items-center justify-end gap-2">
+				<div className="center-section flex-1 flex justify-center">
+					<div className="flex-1 min-w-[220px] max-w-[640px]">
+						<TimelineMinimap
+							fps={fps}
+							timelinePaddingLeft={timelinePaddingLeft}
+						/>
+					</div>
+				</div>
+				<div className="right-section flex flex-1 shrink-2 items-center justify-end gap-2">
 				{/* 开关按钮组 */}
 				<div className="flex items-center gap-1 px-1 rounded-full bg-black/20">
 					<Tooltip>
@@ -430,10 +552,145 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 						title="放大时间轴"
 					>
 						<ZoomIn className="size-3.5" />
-					</button>
+						</button>
+					</div>
 				</div>
 			</div>
-		</div>
+			<Dialog
+				open={quickSplitOpen}
+				onOpenChange={(open) => {
+					if (!open && quickSplitRunning) return;
+					setQuickSplitOpen(open);
+					if (open) {
+						setQuickSplitStatus(null);
+					}
+				}}
+			>
+				<DialogContent className="max-w-md">
+					<div className="grid gap-4 p-4">
+						<div className="space-y-1">
+							<DialogTitle>视频快速分割</DialogTitle>
+							<DialogDescription>
+								根据画面变化强度自动生成切割点，适合快速粗剪。
+							</DialogDescription>
+						</div>
+						<div className="grid gap-2">
+							<label
+								htmlFor="quick-split-sensitivity"
+								className="text-xs text-neutral-300"
+							>
+								变化强度（0-100）
+							</label>
+							<input
+								id="quick-split-sensitivity"
+								type="number"
+								min={0}
+								max={100}
+								step={1}
+								value={quickSplitSensitivity}
+								disabled={quickSplitRunning}
+								onChange={(event) => {
+									const value = Number(event.target.value);
+									if (!Number.isFinite(value)) return;
+									setQuickSplitSensitivity(
+										Math.max(0, Math.min(100, Math.round(value))),
+									);
+								}}
+								className="h-8 rounded border border-white/15 bg-neutral-900 px-2 text-sm text-neutral-100 outline-none focus:border-blue-400"
+							/>
+						</div>
+						<div className="grid gap-2">
+							<label
+								htmlFor="quick-split-min-segment"
+								className="text-xs text-neutral-300"
+							>
+								最短片段时长（秒）
+							</label>
+							<input
+								id="quick-split-min-segment"
+								type="number"
+								min={0.2}
+								max={5}
+								step={0.1}
+								value={quickSplitMinSegmentSeconds}
+								disabled={quickSplitRunning}
+								onChange={(event) => {
+									const value = Number(event.target.value);
+									if (!Number.isFinite(value)) return;
+									setQuickSplitMinSegmentSeconds(
+										Number(Math.max(0.2, Math.min(5, value)).toFixed(2)),
+									);
+								}}
+								className="h-8 rounded border border-white/15 bg-neutral-900 px-2 text-sm text-neutral-100 outline-none focus:border-blue-400"
+							/>
+						</div>
+						<div className="grid gap-2">
+							<label
+								htmlFor="quick-split-mode"
+								className="text-xs text-neutral-300"
+							>
+								分析速度
+							</label>
+							<select
+								id="quick-split-mode"
+								value={quickSplitMode}
+								disabled={quickSplitRunning}
+								onChange={(event) => {
+									const value = event.target.value;
+									if (value === "fast" || value === "fine") {
+										setQuickSplitMode(value);
+										return;
+									}
+									setQuickSplitMode("balanced");
+								}}
+								className="h-8 rounded border border-white/15 bg-neutral-900 px-2 text-sm text-neutral-100 outline-none focus:border-blue-400"
+							>
+								<option value="fast">极速</option>
+								<option value="balanced">平衡</option>
+								<option value="fine">精细</option>
+							</select>
+						</div>
+						<div className="min-h-5 text-xs text-neutral-400">
+							{quickSplitStatus ?? "选择参数后执行快速分割。"}
+						</div>
+						<div className="flex justify-end gap-2">
+							{quickSplitRunning ? (
+								<button
+									type="button"
+									onClick={handleCancelQuickSplit}
+									className="rounded bg-neutral-700 px-3 py-1.5 text-xs text-neutral-100 transition hover:bg-neutral-600"
+								>
+									取消
+								</button>
+							) : (
+								<button
+									type="button"
+									onClick={() => setQuickSplitOpen(false)}
+									className="rounded bg-neutral-800 px-3 py-1.5 text-xs text-neutral-100 transition hover:bg-neutral-700"
+								>
+									关闭
+								</button>
+							)}
+							<button
+								type="button"
+								disabled={!quickSplitCandidate || quickSplitRunning}
+								onClick={() => {
+									void handleRunQuickSplit();
+								}}
+								className={cn(
+									"rounded px-3 py-1.5 text-xs transition",
+									quickSplitCandidate && !quickSplitRunning
+										? "bg-blue-600 text-white hover:bg-blue-500"
+										: "bg-neutral-700 text-neutral-500 cursor-not-allowed",
+								)}
+							>
+								{quickSplitRunning ? "分析中..." : "开始分割"}
+							</button>
+						</div>
+					</div>
+				</DialogContent>
+			</Dialog>
+		</>
 	);
 };
 

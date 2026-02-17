@@ -5,7 +5,7 @@ import {
 } from "core/editor/command/help";
 import { executePlanOnSnapshot } from "core/editor/command/postProcess";
 import { isHistoryCommand, isMetaCommand } from "core/editor/command/reducer";
-import { listCommands } from "core/editor/command/registry";
+import { getCommandDescriptor, listCommands } from "core/editor/command/registry";
 import {
 	parseShellCommand,
 	parseShellCommandBatch,
@@ -74,11 +74,67 @@ const buildChanges = (
 	return changes;
 };
 
+const isRuntimeCommand = (command: ParsedCommand): boolean =>
+	getCommandDescriptor(command.id)?.mode === "runtime";
+
+const validateRuntimeCommandShape = (command: ParsedCommand): string | null => {
+	const descriptor = getCommandDescriptor(command.id);
+	if (!descriptor || descriptor.mode !== "runtime") return null;
+	const required = descriptor.schema.required ?? [];
+	for (const key of required) {
+		const value = command.args[key];
+		if (value === undefined || value === null) {
+			return `${command.id} 缺少必填参数: ${key}`;
+		}
+		if (typeof value === "string" && value.trim().length === 0) {
+			return `${command.id} 参数 ${key} 不能为空`;
+		}
+	}
+	return null;
+};
+
+const validateRuntimeCommands = (commands: ParsedCommand[]): string | null => {
+	for (const command of commands) {
+		if (!isRuntimeCommand(command)) continue;
+		const shapeError = validateRuntimeCommandShape(command);
+		if (shapeError) return shapeError;
+	}
+	return null;
+};
+
 const dryRunPlanInternal = (
 	plan: PlanDraft,
 	snapshot: TimelineCommandSnapshot,
+	host: AgentCliHost,
 	options?: AgentCliRuntimeOptions,
 ): DryRunReport => {
+	const runtimeShapeError = validateRuntimeCommands(plan.commands);
+	if (runtimeShapeError) {
+		return {
+			ok: false,
+			summaryText: "Dry-run 失败",
+			changes: [],
+			error: runtimeShapeError,
+		};
+	}
+
+	const runtimeCount = plan.commands.filter(isRuntimeCommand).length;
+	if (runtimeCount > 0) {
+		if (!host.executeRuntimeCommand) {
+			return {
+				ok: false,
+				summaryText: "Dry-run 失败",
+				changes: [],
+				error: "当前 host 不支持 runtime 命令执行",
+			};
+		}
+		return {
+			ok: true,
+			summaryText: `Dry-run 成功，包含 ${runtimeCount} 条 runtime 命令。dry-run 仅做可执行性校验，不执行视频分析。`,
+			changes: [],
+		};
+	}
+
 	const hasHistoryCommand = plan.commands.some((command) =>
 		isHistoryCommand(command.id),
 	);
@@ -89,6 +145,7 @@ const dryRunPlanInternal = (
 			changes: [],
 		};
 	}
+
 	const execution = executePlanOnSnapshot(plan.commands, snapshot, {
 		resolveRole: options?.resolveRole,
 	});
@@ -130,6 +187,89 @@ export const createAgentCliRuntime = (
 		return false;
 	};
 
+	const buildRebaseResult = (
+		plan: PlanDraft,
+		baseSnapshot: TimelineCommandSnapshot,
+	): ApplyResult => {
+		const rebasedPlan = planner.upsertPlanDraft(
+			rebasePlan(plan, baseSnapshot.revision),
+		);
+		const report = dryRunPlanInternal(rebasedPlan, baseSnapshot, host, options);
+		return {
+			ok: false,
+			revision: baseSnapshot.revision,
+			executed: 0,
+			rebaseRequired: true,
+			rebasedFromRevision: plan.baseRevision,
+			plan: rebasedPlan,
+			summaryText: report.summaryText,
+			error: report.error,
+		};
+	};
+
+	const applyStateOrHistoryPlan = (
+		plan: PlanDraft,
+		baseSnapshot: TimelineCommandSnapshot,
+	): ApplyResult => {
+		const hasHistoryCommand = plan.commands.some((command) =>
+			isHistoryCommand(command.id),
+		);
+		if (hasHistoryCommand && plan.commands.length > 1) {
+			return {
+				ok: false,
+				revision: baseSnapshot.revision,
+				executed: 0,
+				error: "timeline.undo/redo 不能与其他命令混合批量执行",
+			};
+		}
+
+		if (hasHistoryCommand) {
+			let executed = 0;
+			for (const command of plan.commands) {
+				if (executeHistoryCommand(command.id)) {
+					executed += 1;
+				}
+			}
+			return {
+				ok: true,
+				revision: host.getRevision(),
+				executed,
+				summaryText: `已执行 ${executed} 条历史命令。`,
+			};
+		}
+
+		const execution = executePlanOnSnapshot(plan.commands, baseSnapshot, {
+			resolveRole: options?.resolveRole,
+		});
+		if (!execution.ok) {
+			return {
+				ok: false,
+				revision: baseSnapshot.revision,
+				executed: execution.executed,
+				error: execution.error,
+			};
+		}
+
+		const historyIndexBefore = host.getHistoryPastLength();
+		if (execution.executed > 0) {
+			host.applySnapshot(execution.snapshot, { history: true });
+		}
+		const historyIndexAfter = host.getHistoryPastLength();
+		return {
+			ok: true,
+			revision: host.getRevision(),
+			executed: execution.executed,
+			undoToken: {
+				historyIndexBefore,
+				historyIndexAfter,
+			},
+			summaryText:
+				execution.executed > 0
+					? `执行完成，共 ${execution.executed} 条命令已生效。`
+					: "执行完成，无状态变化。",
+		};
+	};
+
 	return {
 		listCommands() {
 			return listCommands();
@@ -152,7 +292,7 @@ export const createAgentCliRuntime = (
 		},
 		dryRunPlan(plan: PlanDraft, snapshot?: TimelineCommandSnapshot): DryRunReport {
 			const currentSnapshot = snapshot ?? host.getSnapshot();
-			return dryRunPlanInternal(plan, currentSnapshot, options);
+			return dryRunPlanInternal(plan, currentSnapshot, host, options);
 		},
 		confirmPlan(planId: string) {
 			return planner.confirmPlan(planId);
@@ -160,78 +300,138 @@ export const createAgentCliRuntime = (
 		applyPlan(plan): ApplyResult {
 			const baseSnapshot = host.getSnapshot();
 			if (plan.baseRevision !== baseSnapshot.revision) {
-				const rebasedPlan = planner.upsertPlanDraft(
-					rebasePlan(plan, baseSnapshot.revision),
+				return buildRebaseResult(plan, baseSnapshot);
+			}
+
+			const runtimeCount = plan.commands.filter(isRuntimeCommand).length;
+			if (runtimeCount > 0) {
+				return {
+					ok: false,
+					revision: baseSnapshot.revision,
+					executed: 0,
+					error: "计划包含 runtime 命令，请使用 applyPlanAsync 执行",
+				};
+			}
+
+			return applyStateOrHistoryPlan(plan, baseSnapshot);
+		},
+		async applyPlanAsync(plan): Promise<ApplyResult> {
+			const baseSnapshot = host.getSnapshot();
+			if (plan.baseRevision !== baseSnapshot.revision) {
+				return buildRebaseResult(plan, baseSnapshot);
+			}
+
+			const runtimeCount = plan.commands.filter(isRuntimeCommand).length;
+			if (runtimeCount === 0) {
+				return applyStateOrHistoryPlan(plan, baseSnapshot);
+			}
+
+			const runtimeShapeError = validateRuntimeCommands(plan.commands);
+			if (runtimeShapeError) {
+				return {
+					ok: false,
+					revision: baseSnapshot.revision,
+					executed: 0,
+					error: runtimeShapeError,
+				};
+			}
+
+			if (!host.executeRuntimeCommand) {
+				return {
+					ok: false,
+					revision: baseSnapshot.revision,
+					executed: 0,
+					error: "当前 host 不支持 runtime 命令执行",
+				};
+			}
+
+			let executed = 0;
+			let pendingStateCommands: ParsedCommand[] = [];
+			const summaries: string[] = [];
+			const pushRuntimeSummary = (summary?: string) => {
+				if (!summary || summary.length === 0) return;
+				summaries.push(summary);
+			};
+			const flushStateCommands = (): ApplyResult | null => {
+				if (pendingStateCommands.length === 0) return null;
+				const stateSnapshot = host.getSnapshot();
+				const execution = executePlanOnSnapshot(
+					pendingStateCommands,
+					stateSnapshot,
+					{
+						resolveRole: options?.resolveRole,
+					},
 				);
-				const report = dryRunPlanInternal(rebasedPlan, baseSnapshot, options);
-				return {
-					ok: false,
-					revision: baseSnapshot.revision,
-					executed: 0,
-					rebaseRequired: true,
-					rebasedFromRevision: plan.baseRevision,
-					plan: rebasedPlan,
-					summaryText: report.summaryText,
-					error: report.error,
-				};
-			}
+				pendingStateCommands = [];
+				if (!execution.ok) {
+					return {
+						ok: false,
+						revision: stateSnapshot.revision,
+						executed,
+						error: execution.error,
+					};
+				}
+				if (execution.executed > 0) {
+					host.applySnapshot(execution.snapshot, { history: true });
+					executed += execution.executed;
+				}
+				return null;
+			};
 
-			const hasHistoryCommand = plan.commands.some((command) =>
-				isHistoryCommand(command.id),
-			);
-			if (hasHistoryCommand && plan.commands.length > 1) {
-				return {
-					ok: false,
-					revision: baseSnapshot.revision,
-					executed: 0,
-					error: "timeline.undo/redo 不能与其他命令混合批量执行",
-				};
-			}
-
-			if (hasHistoryCommand) {
-				let executed = 0;
-				for (const command of plan.commands) {
+			for (const command of plan.commands) {
+				if (isHistoryCommand(command.id)) {
+					const flushError = flushStateCommands();
+					if (flushError) return flushError;
 					if (executeHistoryCommand(command.id)) {
 						executed += 1;
+						continue;
 					}
+					return {
+						ok: false,
+						revision: host.getRevision(),
+						executed,
+						error: `不支持的历史命令: ${command.id}`,
+					};
 				}
-				return {
-					ok: true,
-					revision: host.getRevision(),
-					executed,
-					summaryText: `已执行 ${executed} 条历史命令。`,
-				};
+				if (!isRuntimeCommand(command)) {
+					pendingStateCommands.push(command);
+					continue;
+				}
+
+				const flushError = flushStateCommands();
+				if (flushError) return flushError;
+				const result = await host.executeRuntimeCommand(command);
+				if (!result.ok) {
+					return {
+						ok: false,
+						revision: host.getRevision(),
+						executed,
+						error: result.error ?? `${command.id} 执行失败`,
+					};
+				}
+				if (result.changed) {
+					executed += 1;
+				}
+				pushRuntimeSummary(result.summaryText);
 			}
 
-			const execution = executePlanOnSnapshot(plan.commands, baseSnapshot, {
-				resolveRole: options?.resolveRole,
-			});
-			if (!execution.ok) {
-				return {
-					ok: false,
-					revision: baseSnapshot.revision,
-					executed: execution.executed,
-					error: execution.error,
-				};
+			const flushError = flushStateCommands();
+			if (flushError) return flushError;
+
+			const defaultSummary =
+				executed > 0
+					? `执行完成，共 ${executed} 条命令已生效。`
+					: "执行完成，无状态变化。";
+			if (summaries.length > 0 && summaries[summaries.length - 1] !== defaultSummary) {
+				summaries.push(defaultSummary);
 			}
 
-			const historyIndexBefore = host.getHistoryPastLength();
-			if (execution.executed > 0) {
-				host.applySnapshot(execution.snapshot, { history: true });
-			}
-			const historyIndexAfter = host.getHistoryPastLength();
 			return {
 				ok: true,
 				revision: host.getRevision(),
-				executed: execution.executed,
-				undoToken: {
-					historyIndexBefore,
-					historyIndexAfter,
-				},
+				executed,
 				summaryText:
-					execution.executed > 0
-						? `执行完成，共 ${execution.executed} 条命令已生效。`
-						: "执行完成，无状态变化。",
+					summaries.join("\n") || defaultSummary,
 			};
 		},
 		executeMetaCommandText(command: ParsedCommand): string | null {

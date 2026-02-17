@@ -107,12 +107,12 @@ const AgentCliPanel = () => {
 		setOutputText("计划已确认，可执行 apply");
 	};
 
-	const handleApply = () => {
+	const handleApply = async () => {
 		if (!confirmedPlan) {
 			setOutputText("请先确认计划");
 			return;
 		}
-		const result = runtime.applyPlan(confirmedPlan);
+		const result = await runtime.applyPlanAsync(confirmedPlan);
 		if (!result.ok && result.rebaseRequired && result.plan) {
 			setPlan(result.plan);
 			setConfirmedPlan(null);
@@ -161,7 +161,12 @@ const AgentCliPanel = () => {
 				<Button onClick={handleConfirm} className="h-7 px-2 text-xs">
 					确认计划
 				</Button>
-				<Button onClick={handleApply} className="h-7 px-2 text-xs">
+				<Button
+					onClick={() => {
+						void handleApply();
+					}}
+					className="h-7 px-2 text-xs"
+				>
 					应用计划
 				</Button>
 			</div>

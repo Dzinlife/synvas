@@ -61,6 +61,13 @@ export interface ApplyResult {
 	error?: string;
 }
 
+export interface RuntimeCommandResult {
+	ok: boolean;
+	changed: boolean;
+	summaryText?: string;
+	error?: string;
+}
+
 export interface AgentCliHost {
 	getSnapshot(): TimelineCommandSnapshot;
 	applySnapshot(
@@ -71,6 +78,9 @@ export interface AgentCliHost {
 	getHistoryPastLength(): number;
 	undo(): void;
 	redo(): void;
+	executeRuntimeCommand?: (
+		command: ParsedCommand,
+	) => Promise<RuntimeCommandResult>;
 }
 
 export interface AgentCliRuntime {
@@ -86,6 +96,7 @@ export interface AgentCliRuntime {
 	dryRunPlan(plan: PlanDraft, snapshot?: TimelineCommandSnapshot): DryRunReport;
 	confirmPlan(planId: string): ConfirmedPlan | null;
 	applyPlan(plan: ConfirmedPlan): ApplyResult;
+	applyPlanAsync(plan: ConfirmedPlan): Promise<ApplyResult>;
 	executeMetaCommandText(command: ParsedCommand): string | null;
 }
 

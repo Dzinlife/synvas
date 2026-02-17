@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { TimelineElement } from "core/dsl/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { useTimelineStore } from "../contexts/TimelineContext";
@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe("AgentCliPanel", () => {
-	it("支持计划->dry-run->确认->应用流程", () => {
+	it("支持计划->dry-run->确认->应用流程", async () => {
 		useTimelineStore.setState({
 			elements: [createElement("clip-1", 0, 30)],
 			tracks: [
@@ -64,7 +64,9 @@ describe("AgentCliPanel", () => {
 		expect(screen.getByText(/计划已确认/)).toBeTruthy();
 
 		fireEvent.click(screen.getByRole("button", { name: "应用计划" }));
-		expect(screen.getByText(/执行完成/)).toBeTruthy();
+		await waitFor(() => {
+			expect(screen.getByText(/执行完成/)).toBeTruthy();
+		});
 		expect(useTimelineStore.getState().elements).toHaveLength(0);
 	});
 });

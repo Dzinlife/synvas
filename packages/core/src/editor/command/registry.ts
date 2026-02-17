@@ -98,6 +98,35 @@ const COMMANDS: CommandDescriptor[] = [
 		requiresShell: false,
 	},
 	{
+		id: "timeline.element.quick-split",
+		summary: "按画面变化强度自动分割视频片段",
+		mode: "runtime",
+		schema: {
+			type: "object",
+			properties: {
+				id: { type: "string", description: "目标 VideoClip id", required: true },
+				sensitivity: {
+					type: "number",
+					description: "变化强度阈值（0-100，可选，默认 55）",
+				},
+				minSegmentSeconds: {
+					type: "number",
+					description: "最短片段时长（秒，可选，默认 0.8）",
+				},
+				mode: {
+					type: "string",
+					description: "分析速度（fast|balanced|fine，可选，默认 balanced）",
+				},
+			},
+			required: ["id"],
+		},
+		examples: [
+			"timeline.element.quick-split --id clip-1",
+			"timeline.element.quick-split --id clip-1 --sensitivity 70 --min-segment-seconds 0.6 --mode fine",
+		],
+		requiresShell: false,
+	},
+	{
 		id: "timeline.track.set-flag",
 		summary: "设置轨道或音轨开关状态",
 		mode: "state",

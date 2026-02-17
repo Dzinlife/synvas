@@ -16,6 +16,7 @@ describe("command registry", () => {
 		expect(getCommandDescriptor("timeline.element.move")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.element.trim")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.element.split")).toBeTruthy();
+		expect(getCommandDescriptor("timeline.element.quick-split")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.track.set-flag")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.seek")).toBeTruthy();
 		expect(getCommandDescriptor("timeline.undo")).toBeTruthy();
@@ -32,5 +33,16 @@ describe("command registry", () => {
 		expect(move?.schema.properties.start).toBeTruthy();
 		expect(move?.schema.properties.delta).toBeTruthy();
 		expect(move?.schema.properties.end).toBeUndefined();
+	});
+
+	it("quick-split 命令应标记为 runtime 且包含 id 必填", () => {
+		const quickSplit = getCommandDescriptor("timeline.element.quick-split");
+		expect(quickSplit).toBeTruthy();
+		expect(quickSplit?.mode).toBe("runtime");
+		expect(quickSplit?.schema.required).toEqual(["id"]);
+		expect(quickSplit?.schema.properties.id).toBeTruthy();
+		expect(quickSplit?.schema.properties.sensitivity).toBeTruthy();
+		expect(quickSplit?.schema.properties.minSegmentSeconds).toBeTruthy();
+		expect(quickSplit?.schema.properties.mode).toBeTruthy();
 	});
 });
