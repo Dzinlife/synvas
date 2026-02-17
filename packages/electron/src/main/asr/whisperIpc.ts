@@ -396,9 +396,6 @@ export const registerWhisperIpc = (): void => {
 					"-ojf",
 					"-of",
 					outPrefix,
-					"-ml",
-					"1",
-					"--split-on-word",
 				];
 				if (forcedBackend === "cpu") {
 					args.push("--no-gpu");
