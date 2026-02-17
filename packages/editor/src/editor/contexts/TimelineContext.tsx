@@ -1,4 +1,7 @@
-import type { TimelineElement } from "core/dsl/types";
+import type {
+	TimelineElement,
+	TimelineSource,
+} from "core/dsl/types";
 import {
 	DEFAULT_TIMELINE_SETTINGS,
 	type TimelineSettings,
@@ -123,6 +126,15 @@ const cloneAudioSettings = (
 	};
 };
 
+const createSourceId = (): string => {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return `source-${crypto.randomUUID()}`;
+	}
+	return `source-${Date.now().toString(36)}-${Math.random()
+		.toString(36)
+		.slice(2, 8)}`;
+};
+
 interface TimelineStore {
 	fps: number;
 	timelineScale: number;
@@ -130,6 +142,7 @@ interface TimelineStore {
 	previewTime: number | null; // hover 时的临时预览时间
 	previewAxisEnabled: boolean; // 预览轴是否启用
 	elements: TimelineElement[];
+	sources: TimelineSource[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	historyPast: TimelineHistorySnapshot[];
@@ -177,6 +190,12 @@ interface TimelineStore {
 			| ((prev: TimelineElement[]) => TimelineElement[]),
 		options?: { history?: boolean },
 	) => void;
+	setSources: (
+		sources:
+			| TimelineSource[]
+			| ((prev: TimelineSource[]) => TimelineSource[]),
+		options?: { history?: boolean },
+	) => void;
 	setTracks: (
 		tracks: TimelineTrack[] | ((prev: TimelineTrack[]) => TimelineTrack[]),
 	) => void;
@@ -202,6 +221,7 @@ interface TimelineStore {
 	getDisplayTime: () => number; // 返回 previewTime ?? currentTime
 	getRenderTime: () => number;
 	getElements: () => TimelineElement[];
+	getSources: () => TimelineSource[];
 	getCanvasSize: () => { width: number; height: number };
 	play: () => void;
 	pause: () => void;
@@ -238,6 +258,20 @@ interface TimelineStore {
 		},
 	) => void;
 	getElementById: (id: string) => TimelineElement | null;
+	getSourceById: (id: string) => TimelineSource | null;
+	findSourceByUri: (uri: string) => TimelineSource | null;
+	ensureSourceByUri: (params: {
+		uri: string;
+		kind: TimelineSource["kind"];
+		name?: string;
+	}) => string;
+	updateSourceData: (
+		sourceId: string,
+		updater: (
+			prev: TimelineSource["data"] | undefined,
+		) => TimelineSource["data"] | undefined,
+		options?: { history?: boolean },
+	) => void;
 	getRevision: () => number;
 	getCommandSnapshot: () => TimelineCommandSnapshot;
 	applyCommandSnapshot: (
@@ -248,6 +282,7 @@ interface TimelineStore {
 
 interface TimelineHistorySnapshot {
 	elements: TimelineElement[];
+	sources: TimelineSource[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	rippleEditingEnabled: boolean;
@@ -282,6 +317,7 @@ const trimHistory = (
 
 const buildHistorySnapshot = (state: {
 	elements: TimelineElement[];
+	sources: TimelineSource[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	rippleEditingEnabled: boolean;
@@ -289,6 +325,7 @@ const buildHistorySnapshot = (state: {
 	// 使用不可变快照复用元素/轨道引用，避免深拷贝占用内存
 	return {
 		elements: state.elements,
+		sources: state.sources,
 		tracks: state.tracks,
 		audioTrackStates: state.audioTrackStates,
 		rippleEditingEnabled: state.rippleEditingEnabled,
@@ -383,6 +420,7 @@ export const useTimelineStore = create<TimelineStore>()(
 		previewTime: null,
 		previewAxisEnabled: true,
 		elements: [],
+		sources: [],
 		tracks: [
 			{
 				id: MAIN_TRACK_ID,
@@ -426,6 +464,68 @@ export const useTimelineStore = create<TimelineStore>()(
 		timelineViewportWidth: 0,
 		revision: 0,
 		getElementById: (id: string) => elementIndexById.get(id) ?? null,
+		getSourceById: (id: string) => {
+			return get().sources.find((source) => source.id === id) ?? null;
+		},
+		findSourceByUri: (uri: string) => {
+			return get().sources.find((source) => source.uri === uri) ?? null;
+		},
+		ensureSourceByUri: ({ uri, kind, name }) => {
+			let resolvedId: string | null = null;
+			set((state) => {
+				const existed = state.sources.find((source) => source.uri === uri);
+				if (existed) {
+					resolvedId = existed.id;
+					return state;
+				}
+				const nextSource: TimelineSource = {
+					id: createSourceId(),
+					uri,
+					kind,
+					...(name ? { name } : {}),
+				};
+				resolvedId = nextSource.id;
+				return {
+					sources: [...state.sources, nextSource],
+				};
+			});
+			if (!resolvedId) {
+				throw new Error("failed to ensure source");
+			}
+			return resolvedId;
+		},
+		updateSourceData: (sourceId, updater, options) => {
+			set((state) => {
+				let didChange = false;
+				const nextSources = state.sources.map((source) => {
+					if (source.id !== sourceId) return source;
+					const nextData = updater(source.data);
+					if (nextData === source.data) {
+						return source;
+					}
+					didChange = true;
+					return {
+						...source,
+						data: nextData,
+					};
+				});
+				if (!didChange) return state;
+				if (options?.history === false) {
+					return {
+						sources: nextSources,
+					};
+				}
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				return {
+					sources: nextSources,
+					historyPast: nextPast,
+					historyFuture: [],
+				};
+			});
+		},
 
 		setFps: (fps: number) => {
 			set({ fps: normalizeFps(fps) });
@@ -553,7 +653,9 @@ export const useTimelineStore = create<TimelineStore>()(
 					typeof elements === "function" ? elements(state.elements) : elements;
 				if (state.elements === nextElements) return state;
 				if (options?.history === false) {
-					return { elements: nextElements };
+					return {
+						elements: nextElements,
+					};
 				}
 				const nextPast = trimHistory(
 					[...state.historyPast, buildHistorySnapshot(state)],
@@ -561,6 +663,33 @@ export const useTimelineStore = create<TimelineStore>()(
 				);
 				return {
 					elements: nextElements,
+					historyPast: nextPast,
+					historyFuture: [],
+				};
+			});
+		},
+
+		setSources: (
+			sources:
+				| TimelineSource[]
+				| ((prev: TimelineSource[]) => TimelineSource[]),
+			options?: { history?: boolean },
+		) => {
+			set((state) => {
+				const nextSources =
+					typeof sources === "function" ? sources(state.sources) : sources;
+				if (state.sources === nextSources) return state;
+				if (options?.history === false) {
+					return {
+						sources: nextSources,
+					};
+				}
+				const nextPast = trimHistory(
+					[...state.historyPast, buildHistorySnapshot(state)],
+					state.historyLimit,
+				);
+				return {
+					sources: nextSources,
 					historyPast: nextPast,
 					historyFuture: [],
 				};
@@ -605,6 +734,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				);
 				return {
 					elements: previous.elements,
+					sources: previous.sources,
 					tracks: previous.tracks,
 					audioTrackStates: previous.audioTrackStates,
 					rippleEditingEnabled: previous.rippleEditingEnabled,
@@ -636,6 +766,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				);
 				return {
 					elements: next.elements,
+					sources: next.sources,
 					tracks: next.tracks,
 					audioTrackStates: next.audioTrackStates,
 					rippleEditingEnabled: next.rippleEditingEnabled,
@@ -1052,6 +1183,9 @@ export const useTimelineStore = create<TimelineStore>()(
 		getElements: () => {
 			return get().elements;
 		},
+		getSources: () => {
+			return get().sources;
+		},
 
 		getCanvasSize: () => {
 			return get().canvasSize;
@@ -1224,6 +1358,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				fps: state.fps,
 				currentTime: state.currentTime,
 				elements: state.elements,
+				sources: state.sources,
 				tracks: state.tracks,
 				audioTrackStates: state.audioTrackStates,
 				autoAttach: state.autoAttach,
@@ -1239,6 +1374,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				const didChange =
 					state.currentTime !== nextCurrentTime ||
 					state.elements !== snapshot.elements ||
+					state.sources !== snapshot.sources ||
 					state.tracks !== snapshot.tracks ||
 					state.audioTrackStates !== snapshot.audioTrackStates ||
 					state.autoAttach !== snapshot.autoAttach ||
@@ -1253,6 +1389,7 @@ export const useTimelineStore = create<TimelineStore>()(
 				const nextStateBase = {
 					currentTime: nextCurrentTime,
 					elements: snapshot.elements,
+					sources: snapshot.sources,
 					tracks: snapshot.tracks,
 					audioTrackStates: snapshot.audioTrackStates,
 					autoAttach: snapshot.autoAttach,
@@ -1292,6 +1429,7 @@ interface TimelineRevisionDeps {
 	previewTime: number | null;
 	previewAxisEnabled: boolean;
 	elements: TimelineElement[];
+	sources: TimelineSource[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	isPlaying: boolean;
@@ -1315,6 +1453,7 @@ const selectRevisionDeps = (state: TimelineStore): TimelineRevisionDeps => ({
 	previewTime: state.previewTime,
 	previewAxisEnabled: state.previewAxisEnabled,
 	elements: state.elements,
+	sources: state.sources,
 	tracks: state.tracks,
 	audioTrackStates: state.audioTrackStates,
 	isPlaying: state.isPlaying,
@@ -1342,6 +1481,7 @@ const isRevisionDepsEqual = (
 		prev.previewTime === next.previewTime &&
 		prev.previewAxisEnabled === next.previewAxisEnabled &&
 		prev.elements === next.elements &&
+		prev.sources === next.sources &&
 		prev.tracks === next.tracks &&
 		prev.audioTrackStates === next.audioTrackStates &&
 		prev.isPlaying === next.isPlaying &&
@@ -1462,6 +1602,24 @@ export const useElements = () => {
 	return {
 		elements,
 		setElements,
+	};
+};
+
+export const useSources = () => {
+	const sources = useTimelineStore((state) => state.sources);
+	const setSources = useTimelineStore((state) => state.setSources);
+	const ensureSourceByUri = useTimelineStore((state) => state.ensureSourceByUri);
+	const findSourceByUri = useTimelineStore((state) => state.findSourceByUri);
+	const getSourceById = useTimelineStore((state) => state.getSourceById);
+	const updateSourceData = useTimelineStore((state) => state.updateSourceData);
+
+	return {
+		sources,
+		setSources,
+		ensureSourceByUri,
+		findSourceByUri,
+		getSourceById,
+		updateSourceData,
 	};
 };
 
@@ -2097,6 +2255,7 @@ export const TimelineProvider = ({
 	children,
 	currentTime: initialCurrentTime,
 	elements: initialElements,
+	sources: initialSources,
 	tracks: initialTracks,
 	canvasSize: initialCanvasSize,
 	fps: initialFps,
@@ -2105,6 +2264,7 @@ export const TimelineProvider = ({
 	children: React.ReactNode;
 	currentTime?: number;
 	elements?: TimelineElement[];
+	sources?: TimelineSource[];
 	tracks?: TimelineTrack[];
 	canvasSize?: { width: number; height: number };
 	fps?: number;
@@ -2135,6 +2295,7 @@ export const TimelineProvider = ({
 			useTimelineStore.setState({
 				currentTime: clampFrame(initialCurrentTime ?? 0),
 				elements,
+				sources: initialSources ?? [],
 				tracks,
 				audioTrackStates: {},
 				scrollLeft: 0,
@@ -2150,6 +2311,7 @@ export const TimelineProvider = ({
 		if (initialTracks) {
 			useTimelineStore.setState({
 				tracks: initialTracks,
+				...(initialSources ? { sources: initialSources } : {}),
 				audioTrackStates: {},
 				scrollLeft: 0,
 				timelineMaxScrollLeft: 0,
@@ -2161,6 +2323,7 @@ export const TimelineProvider = ({
 		}
 		if (settingsState) {
 			useTimelineStore.setState({
+				...(initialSources ? { sources: initialSources } : {}),
 				scrollLeft: 0,
 				timelineMaxScrollLeft: 0,
 				timelineViewportWidth: 0,
@@ -2176,6 +2339,7 @@ export const TimelineProvider = ({
 			const { tracks, elements } = reconcileTracks(initialElements, baseTracks);
 			useTimelineStore.setState({
 				elements,
+				sources: initialSources ?? [],
 				tracks,
 				audioTrackStates: {},
 				scrollLeft: 0,
@@ -2184,12 +2348,13 @@ export const TimelineProvider = ({
 			});
 			useTimelineStore.getState().resetHistory();
 		}
-	}, [initialElements, initialTracks]);
+	}, [initialElements, initialSources, initialTracks]);
 
 	useEffect(() => {
 		if (!initialElements && initialTracks) {
 			useTimelineStore.setState({
 				tracks: initialTracks,
+				...(initialSources ? { sources: initialSources } : {}),
 				audioTrackStates: {},
 				scrollLeft: 0,
 				timelineMaxScrollLeft: 0,
@@ -2197,7 +2362,7 @@ export const TimelineProvider = ({
 			});
 			useTimelineStore.getState().resetHistory();
 		}
-	}, [initialElements, initialTracks]);
+	}, [initialElements, initialSources, initialTracks]);
 
 	useEffect(() => {
 		if (initialCurrentTime !== undefined) {

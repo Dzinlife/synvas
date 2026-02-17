@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { Input } from "@/components/ui/input";
+import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import type { DSLComponentSettingProps } from "../model/componentRegistry";
 import type { VideoClipProps } from "./model";
 
@@ -7,42 +6,20 @@ export const VideoClipSetting = ({
 	element,
 	updateProps,
 }: DSLComponentSettingProps<VideoClipProps>) => {
-	const sourceUri =
-		typeof element.props.uri === "string" ? element.props.uri : "";
 	const reversed = Boolean(element.props.reversed);
-	const [uriDraft, setUriDraft] = useState(sourceUri);
-
-	useEffect(() => {
-		setUriDraft(sourceUri);
-	}, [sourceUri]);
-
-	const commitUri = () => {
-		if (uriDraft === sourceUri) return;
-		updateProps({ uri: uriDraft });
-	};
+	const source = useTimelineStore((state) =>
+		state.getSourceById(element.sourceId ?? ""),
+	);
 
 	return (
 		<div className="space-y-3 pt-2 border-t border-white/10">
 			<div className="text-xs font-medium text-neutral-300">Video</div>
 
 			<div className="space-y-1.5">
-				<div className="text-xs text-neutral-400">Source URI</div>
-				<Input
-					aria-label="Source URI"
-					className="h-8 w-full text-xs px-2"
-					value={uriDraft}
-					onChange={(event) => {
-						setUriDraft(event.target.value);
-					}}
-					onBlur={() => {
-						commitUri();
-					}}
-					onKeyDown={(event) => {
-						if (event.key !== "Enter") return;
-						commitUri();
-						event.currentTarget.blur();
-					}}
-				/>
+				<div className="text-xs text-neutral-400">Source</div>
+				<div className="text-xs text-neutral-200 break-all">
+					{source?.uri ?? "未绑定素材"}
+				</div>
 			</div>
 
 			<div className="space-y-1.5">

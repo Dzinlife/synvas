@@ -25,6 +25,7 @@ const createVideoClip = ({
 	type: "VideoClip",
 	component: "video-clip",
 	name: id,
+	sourceId: `${id}-source`,
 	timeline: {
 		start,
 		end,
@@ -35,7 +36,6 @@ const createVideoClip = ({
 		role: "clip",
 	},
 	props: {
-		uri: `${id}.mp4`,
 		reversed,
 	},
 });
@@ -74,7 +74,7 @@ describe("TimelineToolbar.freeze", () => {
 
 		const next = applyFreezeFrame({
 			elements,
-			candidate: candidate as TimelineElement<{ uri?: string; reversed?: boolean }>,
+			candidate: candidate as TimelineElement<{ reversed?: boolean }>,
 			splitFrame: 80,
 			fps: 30,
 			rippleEditingEnabled: true,
@@ -127,7 +127,7 @@ describe("TimelineToolbar.freeze", () => {
 
 		const next = applyFreezeFrame({
 			elements,
-			candidate: candidate as TimelineElement<{ uri?: string; reversed?: boolean }>,
+			candidate: candidate as TimelineElement<{ reversed?: boolean }>,
 			splitFrame: 30,
 			fps: 30,
 			rippleEditingEnabled: false,
@@ -172,7 +172,7 @@ describe("TimelineToolbar.freeze", () => {
 
 		const next = applyFreezeFrame({
 			elements,
-			candidate: candidate as TimelineElement<{ uri?: string; reversed?: boolean }>,
+			candidate: candidate as TimelineElement<{ reversed?: boolean }>,
 			splitFrame: 30,
 			fps: 30,
 			rippleEditingEnabled: true,
@@ -213,7 +213,7 @@ describe("TimelineToolbar.freeze", () => {
 
 		const next = applyFreezeFrame({
 			elements,
-			candidate: candidate as TimelineElement<{ uri?: string; reversed?: boolean }>,
+			candidate: candidate as TimelineElement<{ reversed?: boolean }>,
 			splitFrame: 130,
 			fps: 30,
 			rippleEditingEnabled: false,

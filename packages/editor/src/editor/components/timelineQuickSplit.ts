@@ -3,6 +3,7 @@ import { buildSplitElements } from "core/editor/command/split";
 import type { CanvasSink } from "mediabunny";
 import { acquireVideoAsset } from "@/dsl/assets/videoAsset";
 import { framesToSeconds } from "@/utils/timecode";
+import { useTimelineStore } from "../contexts/TimelineContext";
 import { isTransitionElement, reconcileTransitions } from "../utils/transitions";
 
 export type QuickSplitMode = "fast" | "balanced" | "fine";
@@ -30,7 +31,6 @@ export interface QuickSplitAnalysis {
 }
 
 type QuickSplitCandidate = TimelineElement<{
-	uri?: string;
 	reversed?: boolean;
 }>;
 
@@ -120,8 +120,7 @@ export const isQuickSplitCandidateElement = (
 	element: TimelineElement | null | undefined,
 ): element is QuickSplitCandidate => {
 	if (!element || element.type !== "VideoClip") return false;
-	const uri = (element.props as { uri?: unknown } | undefined)?.uri;
-	return typeof uri === "string" && uri.length > 0;
+	return typeof element.sourceId === "string" && element.sourceId.length > 0;
 };
 
 export const resolveQuickSplitCandidate = (options: {
@@ -643,7 +642,11 @@ export const analyzeVideoChangeForElement = async (options: {
 		throw new Error("无法创建帧分析上下文");
 	}
 
-	const handle = await acquireVideoAsset(element.props.uri as string);
+	const source = useTimelineStore.getState().getSourceById(element.sourceId ?? "");
+	if (!source?.uri) {
+		throw new Error("视频源不存在或无效");
+	}
+	const handle = await acquireVideoAsset(source.uri);
 	try {
 		const videoSink = handle.asset.createVideoSink();
 		const sampledFrames: number[] = [];

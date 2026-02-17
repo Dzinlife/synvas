@@ -5,7 +5,6 @@ import {
 	readAudioMetadata,
 	writeAudioToOpfs,
 } from "@/asr/opfsAudio";
-import { useTranscriptStore } from "@/asr/transcriptStore";
 import type { AsrJobStatus, AsrModelSize, TranscriptRecord } from "@/asr/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +16,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { useSources } from "@/editor/contexts/TimelineContext";
 import { useProjectStore } from "@/projects/projectStore";
 
 const createId = (prefix: string): string => {
@@ -61,10 +61,7 @@ const formatStatus = (status: AsrJobStatus): string => {
 
 const AsrDialog = () => {
 	const asrClient = useAsrClient();
-	const addTranscript = useTranscriptStore((state) => state.addTranscript);
-	const updateTranscript = useTranscriptStore(
-		(state) => state.updateTranscript,
-	);
+	const { ensureSourceByUri, updateSourceData } = useSources();
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const [open, setOpen] = useState(false);
 	const [file, setFile] = useState<File | null>(null);
@@ -172,6 +169,11 @@ const AsrDialog = () => {
 				throw new Error("当前项目不存在，无法写入 OPFS");
 			}
 			const { uri, fileName } = await writeAudioToOpfs(file, currentProjectId);
+			const sourceId = ensureSourceByUri({
+				uri,
+				kind: "audio",
+				name: fileName,
+			});
 			const now = Date.now();
 			const transcriptId = createId("transcript");
 			const record: TranscriptRecord = {
@@ -188,7 +190,14 @@ const AsrDialog = () => {
 				updatedAt: now,
 				segments: [],
 			};
-			addTranscript(record);
+			updateSourceData(
+				sourceId,
+				(prev) => ({
+					...(prev ?? {}),
+					asr: record,
+				}),
+				{ history: false },
+			);
 			setStatus("running");
 
 			const result = await asrClient.transcribeAudioFile({
@@ -199,36 +208,75 @@ const AsrDialog = () => {
 				signal: controller.signal,
 				onProgress: setProgress,
 				onChunk: (segment) => {
-					updateTranscript(transcriptId, (prev) => {
-						const index = prev.segments.findIndex(
-							(existing) => existing.id === segment.id,
-						);
-						if (index >= 0) {
-							const nextSegments = [...prev.segments];
-							nextSegments[index] = segment;
+					updateSourceData(
+						sourceId,
+						(prevData) => {
+							const prev = prevData?.asr;
+							if (!prev || prev.id !== transcriptId) {
+								return {
+									...(prevData ?? {}),
+									asr: {
+										...record,
+										segments: [segment],
+										updatedAt: Date.now(),
+									},
+								};
+							}
+							const index = prev.segments.findIndex(
+								(existing) => existing.id === segment.id,
+							);
+							if (index >= 0) {
+								const nextSegments = [...prev.segments];
+								nextSegments[index] = segment;
+								return {
+									...(prevData ?? {}),
+									asr: {
+										...prev,
+										segments: nextSegments,
+										updatedAt: Date.now(),
+									},
+								};
+							}
 							return {
-								...prev,
-								segments: nextSegments,
-								updatedAt: Date.now(),
+								...(prevData ?? {}),
+								asr: {
+									...prev,
+									segments: [...prev.segments, segment],
+									updatedAt: Date.now(),
+								},
 							};
-						}
-						return {
-							...prev,
-							segments: [...prev.segments, segment],
-							updatedAt: Date.now(),
-						};
-					});
+						},
+						{ history: false },
+					);
 				},
 			});
 			if (result?.segments?.length) {
-				updateTranscript(transcriptId, (prev) => {
-					if (prev.segments.length > 0) return prev;
-					return {
-						...prev,
-						segments: result.segments,
-						updatedAt: Date.now(),
-					};
-				});
+				updateSourceData(
+					sourceId,
+					(prevData) => {
+						const prev = prevData?.asr;
+						if (!prev || prev.id !== transcriptId) {
+							return {
+								...(prevData ?? {}),
+								asr: {
+									...record,
+									segments: result.segments,
+									updatedAt: Date.now(),
+								},
+							};
+						}
+						if (prev.segments.length > 0) return prevData;
+						return {
+							...(prevData ?? {}),
+							asr: {
+								...prev,
+								segments: result.segments,
+								updatedAt: Date.now(),
+							},
+						};
+					},
+					{ history: false },
+				);
 			}
 			setLastBackend(result?.backend ?? null);
 			setLastDurationMs(result?.durationMs ?? null);
@@ -245,16 +293,16 @@ const AsrDialog = () => {
 			setAbortController(null);
 		}
 	}, [
-		addTranscript,
 		asrClient,
 		backend,
 		currentProjectId,
+		ensureSourceByUri,
 		file,
 		isElectron,
 		isRunning,
 		language,
 		model,
-		updateTranscript,
+		updateSourceData,
 	]);
 
 	const handleAbort = useCallback(() => {

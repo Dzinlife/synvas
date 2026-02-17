@@ -1,9 +1,42 @@
-import type { TimelineElement } from "core/dsl/types";
-import { useEffect, useRef } from "react";
+import type { TimelineElement, TimelineSource } from "core/dsl/types";
+import { isSourceBackedElementType } from "core/dsl/types";
+import { useEffect, useMemo, useRef } from "react";
 import { TimelineAudioMixManager } from "@/editor/audio/TimelineAudioMixManager";
-import { useElements } from "@/editor/contexts/TimelineContext";
+import { useElements, useSources } from "@/editor/contexts/TimelineContext";
 import { componentRegistry } from "./componentRegistry";
 import { modelRegistry } from "./registry";
+
+const buildSourceById = (sources: TimelineSource[]): Map<string, TimelineSource> => {
+	return new Map(sources.map((source) => [source.id, source]));
+};
+
+const resolveModelProps = (
+	element: TimelineElement,
+	sourceById: ReadonlyMap<string, TimelineSource>,
+): Record<string, unknown> => {
+	const props = (element.props ?? {}) as Record<string, unknown>;
+	if (!isSourceBackedElementType(element.type)) return props;
+	if (!element.sourceId) return props;
+	const source = sourceById.get(element.sourceId);
+	if (!source) return props;
+	return {
+		...props,
+		uri: source.uri,
+	};
+};
+
+const arePropsShallowEqual = (
+	left: Record<string, unknown>,
+	right: Record<string, unknown>,
+): boolean => {
+	const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+	for (const key of keys) {
+		if (left[key] !== right[key]) {
+			return false;
+		}
+	}
+	return true;
+};
 
 /**
  * ModelManager - 管理所有 DSL 组件的 Model 生命周期
@@ -18,8 +51,10 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 	children,
 }) => {
 	const { elements } = useElements();
+	const { sources } = useSources();
 	const prevElementsRef = useRef<TimelineElement[]>([]);
 	const initializedRef = useRef(false);
+	const sourceById = useMemo(() => buildSourceById(sources), [sources]);
 
 	// 首次渲染时直接初始化所有 model
 	if (!initializedRef.current && elements.length > 0) {
@@ -36,7 +71,10 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 				continue;
 			}
 
-			const store = definition.createModel(id, element.props);
+			const store = definition.createModel(
+				id,
+				resolveModelProps(element, sourceById),
+			);
 			modelRegistry.register(id, store);
 			store.getState().init();
 		}
@@ -72,7 +110,10 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 				);
 
 				// 创建 model
-				const store = definition.createModel(id, element.props);
+				const store = definition.createModel(
+					id,
+					resolveModelProps(element, sourceById),
+				);
 				modelRegistry.register(id, store);
 
 				// 初始化
@@ -98,12 +139,10 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 			if (store) {
 				const state = store.getState();
 				const currentProps = state.props as Record<string, unknown>;
-				const newProps = element.props as Record<string, unknown>;
+				const newProps = resolveModelProps(element, sourceById);
 
 				// 检查 props 是否有变化（简单的浅比较）
-				const propsChanged = Object.keys(newProps).some(
-					(key) => currentProps[key] !== newProps[key],
-				);
+				const propsChanged = !arePropsShallowEqual(currentProps, newProps);
 
 				if (propsChanged) {
 					state.setProps(newProps);
@@ -112,7 +151,7 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 		}
 
 		prevElementsRef.current = elements;
-	}, [elements]);
+	}, [elements, sourceById]);
 
 	// 组件卸载时清理所有 model
 	useEffect(() => {

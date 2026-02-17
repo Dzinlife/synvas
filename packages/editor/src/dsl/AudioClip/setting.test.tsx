@@ -7,6 +7,16 @@ import { createTransformMeta } from "@/dsl/transform";
 import type { AudioClipProps } from "./model";
 import { AudioClipSetting } from "./setting";
 
+vi.mock("@/editor/contexts/TimelineContext", () => ({
+	useTimelineStore: (selector: (state: { getSourceById: (id: string) => { id: string; uri: string } | null }) => unknown) =>
+		selector({
+			getSourceById: (id: string) =>
+				id === "source-audio-1"
+					? { id: "source-audio-1", uri: "/origin.mp3" }
+					: null,
+		}),
+}));
+
 const createAudioClipElement = (
 	props: Partial<AudioClipProps> = {},
 ): TimelineElement<AudioClipProps> => {
@@ -15,6 +25,7 @@ const createAudioClipElement = (
 		type: "AudioClip",
 		component: "audio-clip",
 		name: "Audio Clip",
+		sourceId: "source-audio-1",
 		transform: createTransformMeta({
 			width: 320,
 			height: 180,
@@ -36,7 +47,6 @@ const createAudioClipElement = (
 			zIndex: 0,
 		},
 		props: {
-			uri: "/voice.mp3",
 			reversed: false,
 			...props,
 		},
@@ -48,21 +58,17 @@ afterEach(() => {
 });
 
 describe("AudioClipSetting", () => {
-	it("仅在 blur 时提交 uri", () => {
+	it("展示绑定素材信息", () => {
 		const updateProps = vi.fn();
 		render(
 			<AudioClipSetting
-				element={createAudioClipElement({ uri: "/origin.mp3" })}
+				element={createAudioClipElement()}
 				updateProps={updateProps}
 			/>,
 		);
 
-		const sourceInput = screen.getByLabelText("Source URI") as HTMLInputElement;
-		fireEvent.change(sourceInput, { target: { value: "/updated.mp3" } });
+		expect(screen.getByText("/origin.mp3")).toBeTruthy();
 		expect(updateProps).not.toHaveBeenCalled();
-
-		fireEvent.blur(sourceInput);
-		expect(updateProps).toHaveBeenCalledWith({ uri: "/updated.mp3" });
 	});
 
 	it("可以切换到倒放", () => {

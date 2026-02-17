@@ -3,7 +3,13 @@
  * 用于展示可拖拽的素材（图片、视频等）
  */
 
-import type { ElementType, TimelineElement, TrackRole } from "core/dsl/types";
+import type {
+	ElementType,
+	TimelineElement,
+	TimelineSource,
+	TrackRole,
+} from "core/dsl/types";
+import { isSourceBackedElementType } from "core/dsl/types";
 import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type React from "react";
 import { useCallback } from "react";
@@ -18,6 +24,7 @@ import {
 	useAttachments,
 	useFps,
 	useRippleEditing,
+	useSources,
 	useTimelineStore,
 } from "./contexts/TimelineContext";
 import {
@@ -328,6 +335,24 @@ const getMaterialRole = (item: MaterialItem): TrackRole => {
 	}
 };
 
+const resolveSourceKindByElementType = (
+	type: ElementType,
+): TimelineSource["kind"] | null => {
+	switch (type) {
+		case "VideoClip":
+		case "FreezeFrame":
+			return "video";
+		case "AudioClip":
+			return "audio";
+		case "Image":
+			return "image";
+		case "Lottie":
+			return "lottie";
+		default:
+			return null;
+	}
+};
+
 const resolveTransitionDrop = (
 	elements: TimelineElement[],
 	trackIndex: number,
@@ -378,6 +403,7 @@ const MaterialLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
 	const currentTime = useTimelineStore((state) => state.currentTime);
+	const { ensureSourceByUri } = useSources();
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
@@ -458,12 +484,30 @@ const MaterialLibrary: React.FC = () => {
 							? Math.min(-1, trackIndex)
 							: Math.max(1, trackIndex)
 						: trackIndex;
+				const nextProps = { ...(item.props ?? {}) } as Record<string, unknown>;
+				const sourceUri =
+					typeof nextProps.uri === "string" ? nextProps.uri : null;
+				const sourceKind = resolveSourceKindByElementType(item.elementType);
+				const sourceId =
+					isSourceBackedElementType(item.elementType) &&
+					sourceUri &&
+					sourceKind
+						? ensureSourceByUri({
+								uri: sourceUri,
+								kind: sourceKind,
+								name: item.name,
+							})
+						: undefined;
+				if (sourceId) {
+					delete nextProps.uri;
+				}
 				const newElement: TimelineElement = {
 					id: `element-${Date.now()}`,
 					type: item.elementType,
 					component: item.component,
 					name: item.name,
-					props: { ...(item.props ?? {}) },
+					...(sourceId ? { sourceId } : {}),
+					props: nextProps,
 					transform: createTransformMeta({
 						width: item.width ?? 1920,
 						height: item.height ?? 1080,
@@ -539,6 +583,7 @@ const MaterialLibrary: React.FC = () => {
 		},
 		[
 			setElements,
+			ensureSourceByUri,
 			rippleEditingEnabled,
 			attachments,
 			autoAttach,
@@ -573,12 +618,30 @@ const MaterialLibrary: React.FC = () => {
 					newId,
 					trackCount,
 				);
+				const nextProps = { ...(item.props ?? {}) } as Record<string, unknown>;
+				const sourceUri =
+					typeof nextProps.uri === "string" ? nextProps.uri : null;
+				const sourceKind = resolveSourceKindByElementType(item.elementType);
+				const sourceId =
+					isSourceBackedElementType(item.elementType) &&
+					sourceUri &&
+					sourceKind
+						? ensureSourceByUri({
+								uri: sourceUri,
+								kind: sourceKind,
+								name: item.name,
+							})
+						: undefined;
+				if (sourceId) {
+					delete nextProps.uri;
+				}
 				const newElement: TimelineElement = {
 					id: newId,
 					type: item.elementType,
 					component: item.component,
 					name: item.name,
-					props: { ...(item.props ?? {}) },
+					...(sourceId ? { sourceId } : {}),
+					props: nextProps,
 					transform: createTransformMeta({
 						width: elementWidth,
 						height: elementHeight,
@@ -604,7 +667,7 @@ const MaterialLibrary: React.FC = () => {
 				return [...prev, newElement];
 			});
 		},
-		[setElements, currentTime, fps],
+		[setElements, currentTime, ensureSourceByUri, fps],
 	);
 
 	return (

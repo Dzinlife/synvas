@@ -24,7 +24,7 @@ const createVideoClip = ({
 	start,
 	end,
 	offset = 0,
-	uri = "a.mp4",
+	sourceId = "source-video-a",
 	reversed = false,
 	trackIndex = 0,
 	muteSourceAudio = false,
@@ -33,7 +33,7 @@ const createVideoClip = ({
 	start: number;
 	end: number;
 	offset?: number;
-	uri?: string;
+	sourceId?: string;
 	reversed?: boolean;
 	trackIndex?: number;
 	muteSourceAudio?: boolean;
@@ -42,8 +42,9 @@ const createVideoClip = ({
 	type: "VideoClip",
 	component: "video-clip",
 	name: id,
+	sourceId,
 	timeline: createTimeline(start, end, offset, trackIndex),
-	props: { uri, reversed },
+	props: { reversed },
 	...(muteSourceAudio
 		? {
 				clip: {
@@ -58,7 +59,7 @@ const createAudioClip = ({
 	start,
 	end,
 	offset = 0,
-	uri = "a.mp3",
+	sourceId = "source-audio-a",
 	reversed = false,
 	trackIndex = -1,
 }: {
@@ -66,7 +67,7 @@ const createAudioClip = ({
 	start: number;
 	end: number;
 	offset?: number;
-	uri?: string;
+	sourceId?: string;
 	reversed?: boolean;
 	trackIndex?: number;
 }): TimelineElement => ({
@@ -74,8 +75,9 @@ const createAudioClip = ({
 	type: "AudioClip",
 	component: "audio-clip",
 	name: id,
+	sourceId,
 	timeline: createTimeline(start, end, offset, trackIndex),
-	props: { uri, reversed },
+	props: { reversed },
 });
 
 const createTransition = ({
@@ -239,7 +241,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 100,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				trackIndex: -1,
 			}),
 			createVideoClip({
@@ -247,13 +249,14 @@ describe("clipContinuityIndex", () => {
 				start: 30,
 				end: 60,
 				offset: 130,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				trackIndex: 1,
 			}),
 		];
 		const key1 = getAudioPlaybackSessionKey(elements, "a1");
 		const key2 = getAudioPlaybackSessionKey(elements, "v2");
 		expect(key1).toBe(key2);
+		expect(key1).toContain("shared.mp4");
 	});
 
 	it("同源跨轨但时间不连续（有 gap）时不会归并", () => {
@@ -263,7 +266,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 100,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				trackIndex: -1,
 			}),
 			createVideoClip({
@@ -271,7 +274,7 @@ describe("clipContinuityIndex", () => {
 				start: 31,
 				end: 60,
 				offset: 131,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				trackIndex: 2,
 			}),
 		];
@@ -287,7 +290,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 40,
 				offset: 100,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				trackIndex: -2,
 			}),
 			createVideoClip({
@@ -295,7 +298,7 @@ describe("clipContinuityIndex", () => {
 				start: 30,
 				end: 60,
 				offset: 130,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				trackIndex: 0,
 			}),
 		];
@@ -311,7 +314,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 0,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				muteSourceAudio: true,
 			}),
 			createAudioClip({
@@ -319,7 +322,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 0,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				trackIndex: -1,
 			}),
 			createVideoClip({
@@ -327,7 +330,7 @@ describe("clipContinuityIndex", () => {
 				start: 30,
 				end: 60,
 				offset: 30,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 			}),
 		];
 		expect(getAudioPlaybackSessionKey(elements, "v1")).toBe("clip:v1");
@@ -343,7 +346,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 0,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				muteSourceAudio: true,
 			}),
 			createAudioClip({
@@ -351,7 +354,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 0,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 				trackIndex: -1,
 			}),
 			createVideoClip({
@@ -359,7 +362,7 @@ describe("clipContinuityIndex", () => {
 				start: 30,
 				end: 60,
 				offset: 30,
-				uri: "shared.mp4",
+				sourceId: "shared.mp4",
 			}),
 			createTransition({
 				id: "t1",
@@ -382,7 +385,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 10,
-				uri: "",
+				sourceId: "",
 			}),
 		];
 		expect(getVideoPlaybackSessionKey(elements, "v1")).toBe("clip:v1");

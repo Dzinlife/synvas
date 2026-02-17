@@ -7,6 +7,16 @@ import { createTransformMeta } from "@/dsl/transform";
 import type { VideoClipProps } from "./model";
 import { VideoClipSetting } from "./setting";
 
+vi.mock("@/editor/contexts/TimelineContext", () => ({
+	useTimelineStore: (selector: (state: { getSourceById: (id: string) => { id: string; uri: string } | null }) => unknown) =>
+		selector({
+			getSourceById: (id: string) =>
+				id === "source-video-1"
+					? { id: "source-video-1", uri: "/origin.mp4" }
+					: null,
+		}),
+}));
+
 const createVideoClipElement = (
 	props: Partial<VideoClipProps> = {},
 ): TimelineElement<VideoClipProps> => {
@@ -15,6 +25,7 @@ const createVideoClipElement = (
 		type: "VideoClip",
 		component: "video-clip",
 		name: "Video Clip",
+		sourceId: "source-video-1",
 		transform: createTransformMeta({
 			width: 320,
 			height: 180,
@@ -36,7 +47,6 @@ const createVideoClipElement = (
 			zIndex: 0,
 		},
 		props: {
-			uri: "/intro.mp4",
 			reversed: false,
 			start: 0,
 			end: 90,
@@ -50,21 +60,17 @@ afterEach(() => {
 });
 
 describe("VideoClipSetting", () => {
-	it("仅在 blur 时提交 uri", () => {
+	it("展示绑定素材信息", () => {
 		const updateProps = vi.fn();
 		render(
 			<VideoClipSetting
-				element={createVideoClipElement({ uri: "/origin.mp4" })}
+				element={createVideoClipElement()}
 				updateProps={updateProps}
 			/>,
 		);
 
-		const sourceInput = screen.getByLabelText("Source URI") as HTMLInputElement;
-		fireEvent.change(sourceInput, { target: { value: "/updated.mp4" } });
+		expect(screen.getByText("/origin.mp4")).toBeTruthy();
 		expect(updateProps).not.toHaveBeenCalled();
-
-		fireEvent.blur(sourceInput);
-		expect(updateProps).toHaveBeenCalledWith({ uri: "/updated.mp4" });
 	});
 
 	it("可以切换到倒放", () => {

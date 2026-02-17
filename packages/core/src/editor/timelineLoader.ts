@@ -1,14 +1,18 @@
 import { z } from "zod";
-import type { TranscriptRecord } from "../asr/types";
 import type {
 	RenderMeta,
 	TimelineElement,
 	TimelineMeta,
+	TimelineSource,
 	TrackRole,
 	TransformMeta,
 	TransitionMeta,
 } from "../dsl/types";
-import { ELEMENT_TYPE_VALUES } from "../dsl/types";
+import {
+	ELEMENT_TYPE_VALUES,
+	isSourceBackedElementType,
+	SOURCE_KIND_VALUES,
+} from "../dsl/types";
 import { framesToTimecode, timecodeToFrames } from "../utils/timecode";
 import {
 	DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,
@@ -29,7 +33,7 @@ export interface TimelineJSON {
 	};
 	settings: TimelineSettings;
 	tracks?: TimelineTrackJSON[];
-	transcripts?: TranscriptRecord[];
+	sources: TimelineSource[];
 	elements: TimelineElement[];
 }
 
@@ -61,8 +65,8 @@ export interface TimelineData {
 	fps: number;
 	canvas: { width: number; height: number };
 	tracks: TimelineTrack[];
+	sources: TimelineSource[];
 	elements: TimelineElement[];
-	transcripts: TranscriptRecord[];
 	settings: TimelineSettings;
 }
 
@@ -153,6 +157,18 @@ const transcriptRecordSchema = z.object({
 	segments: z.array(transcriptSegmentSchema),
 });
 
+const sourceDataSchema = z.object({
+	asr: transcriptRecordSchema.optional(),
+});
+
+const timelineSourceSchema = z.object({
+	id: nonEmptyStringSchema,
+	uri: nonEmptyStringSchema,
+	kind: z.enum(SOURCE_KIND_VALUES),
+	name: z.string().optional(),
+	data: sourceDataSchema.optional(),
+});
+
 const transformMetaSchema: z.ZodType<TransformMeta> = z.object({
 	baseSize: z.object({
 		width: z.number().positive(),
@@ -226,6 +242,7 @@ const timelineElementBaseSchema = z.object({
 	type: elementTypeSchema,
 	component: nonEmptyStringSchema,
 	name: nonEmptyStringSchema,
+	sourceId: nonEmptyStringSchema.optional(),
 	transform: transformMetaSchema.optional(),
 	timeline: z.unknown(),
 	render: z.unknown().optional(),
@@ -243,7 +260,7 @@ const timelineSchema = z.object({
 	}),
 	settings: timelineSettingsSchema,
 	tracks: z.array(z.unknown()).optional(),
-	transcripts: z.array(z.unknown()).optional(),
+	sources: z.array(z.unknown()),
 	elements: z.array(z.unknown()),
 });
 
@@ -319,7 +336,7 @@ export function saveTimelineToJSON(
 	canvasSize: { width: number; height: number } = { width: 1920, height: 1080 },
 	tracks?: TimelineTrack[],
 	settings?: TimelineSettings,
-	transcripts?: TranscriptRecord[],
+	sources?: TimelineSource[],
 ): string {
 	return JSON.stringify(
 		saveTimelineToObject(
@@ -328,7 +345,7 @@ export function saveTimelineToJSON(
 			canvasSize,
 			tracks,
 			settings,
-			transcripts,
+			sources,
 		),
 		null,
 		2,
@@ -344,7 +361,7 @@ export function saveTimelineToObject(
 	canvasSize: { width: number; height: number } = { width: 1920, height: 1080 },
 	tracks?: TimelineTrack[],
 	settings?: TimelineSettings,
-	transcripts?: TranscriptRecord[],
+	sources?: TimelineSource[],
 ): TimelineJSON {
 	const serializedTracks = serializeTracks(tracks);
 	const resolvedSettings: TimelineSettings = {
@@ -363,9 +380,11 @@ export function saveTimelineToObject(
 		fps,
 		canvas: canvasSize,
 		settings: resolvedSettings,
+		sources: sources ?? [],
 		...(serializedTracks ? { tracks: serializedTracks } : {}),
-		...(transcripts ? { transcripts } : {}),
-		elements: elements.map((el) => ensureTimecodes(el, fps)),
+		elements: elements.map((element) =>
+			removeLegacyUriFromProps(ensureTimecodes(element, fps)),
+		),
 	};
 }
 
@@ -375,6 +394,11 @@ export function saveTimelineToObject(
 function validateTimeline(data: unknown): TimelineData {
 	const timeline = parseWithSchema(timelineSchema, data, "timeline");
 	const fps = timeline.fps;
+	const sources = validateSources(timeline.sources, "sources");
+	const sourceIdSet = new Set(sources.map((source) => source.id));
+	const elements = timeline.elements.map((element, index) =>
+		validateElement(element, index, fps, sourceIdSet),
+	);
 
 	return {
 		fps,
@@ -383,11 +407,9 @@ function validateTimeline(data: unknown): TimelineData {
 			height: timeline.canvas.height,
 		},
 		tracks: validateTracks(timeline.tracks, "tracks"),
-		transcripts: validateTranscripts(timeline.transcripts, "transcripts"),
+		sources,
 		settings: validateSettings(timeline.settings, "settings"),
-		elements: timeline.elements.map((element, index) =>
-			validateElement(element, index, fps),
-		),
+		elements,
 	};
 }
 
@@ -398,6 +420,7 @@ function validateElement(
 	el: unknown,
 	index: number,
 	fps: number,
+	sourceIdSet: ReadonlySet<string>,
 ): TimelineElement {
 	const path = `elements[${index}]`;
 	const element = parseWithSchema(timelineElementBaseSchema, el, path);
@@ -425,6 +448,19 @@ function validateElement(
 
 	// props 可以是任意对象
 	const props = (element.props ?? {}) as TimelineElement["props"];
+	const mediaProps = props as { uri?: unknown };
+	if (isSourceBackedElementType(type) && mediaProps.uri !== undefined) {
+		throw new Error(`${path}.props.uri: must use sourceId instead`);
+	}
+
+	if (isSourceBackedElementType(type)) {
+		if (!element.sourceId) {
+			throw new Error(`${path}.sourceId: required for ${type}`);
+		}
+		if (!sourceIdSet.has(element.sourceId)) {
+			throw new Error(`${path}.sourceId: source "${element.sourceId}" not found`);
+		}
+	}
 
 	const clip = element.clip as TimelineElement["clip"];
 	const transition = validateTransition(
@@ -439,6 +475,7 @@ function validateElement(
 		type,
 		component: element.component,
 		name: element.name,
+		sourceId: element.sourceId,
 		transform,
 		timeline,
 		render,
@@ -467,17 +504,17 @@ function validateTracks(tracks: unknown, path: string): TimelineTrack[] {
 	}));
 }
 
-function validateTranscripts(
-	transcripts: unknown,
-	path: string,
-): TranscriptRecord[] {
-	return (
-		parseWithSchema(
-			z.array(transcriptRecordSchema).optional(),
-			transcripts,
-			path,
-		) ?? []
-	);
+function validateSources(sources: unknown, path: string): TimelineSource[] {
+	const parsed = parseWithSchema(z.array(timelineSourceSchema), sources, path);
+	const idSet = new Set<string>();
+	for (let index = 0; index < parsed.length; index += 1) {
+		const source = parsed[index];
+		if (idSet.has(source.id)) {
+			throw new Error(`${path}[${index}].id: duplicated source id "${source.id}"`);
+		}
+		idSet.add(source.id);
+	}
+	return parsed;
 }
 
 function validateSettings(settings: unknown, path: string): TimelineSettings {
@@ -506,6 +543,23 @@ function serializeTracks(
 		solo: track.solo ?? false,
 	}));
 }
+
+const removeLegacyUriFromProps = (
+	element: TimelineElement,
+): TimelineElement => {
+	if (!isSourceBackedElementType(element.type)) {
+		return element;
+	}
+	const currentProps = (element.props ?? {}) as Record<string, unknown>;
+	if (!Object.hasOwn(currentProps, "uri")) {
+		return element;
+	}
+	const { uri: _removed, ...rest } = currentProps;
+	return {
+		...element,
+		props: rest,
+	};
+};
 
 /**
  * 验证 timeline 属性

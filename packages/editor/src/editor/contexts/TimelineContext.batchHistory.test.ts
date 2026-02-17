@@ -27,12 +27,13 @@ const createElement = (
 	id: string,
 	start: number,
 	end: number,
-	options?: { uri?: string },
+	options?: { sourceId?: string },
 ): TimelineElement => ({
 	id,
 	type: "VideoClip",
 	component: "video-clip",
 	name: id,
+	...(options?.sourceId ? { sourceId: options.sourceId } : {}),
 	timeline: {
 		start,
 		end,
@@ -41,9 +42,7 @@ const createElement = (
 		trackIndex: 0,
 		trackId: "main-track",
 	},
-	props: {
-		...(options?.uri ? { uri: options.uri } : {}),
-	},
+	props: {},
 });
 
 const initialState = useTimelineStore.getState();
@@ -131,7 +130,16 @@ describe("TimelineContext batch history", () => {
 			strideFrames: 15,
 		});
 		useTimelineStore.setState({
-			elements: [createElement("clip-1", 0, 30, { uri: "sample.mp4" })],
+			elements: [
+				createElement("clip-1", 0, 30, { sourceId: "source-video-1" }),
+			],
+			sources: [
+				{
+					id: "source-video-1",
+					kind: "video",
+					uri: "sample.mp4",
+				},
+			],
 			tracks: [
 				{
 					id: "main-track",

@@ -439,10 +439,10 @@ export function createVideoClipModel(
 	const shouldUseDedicatedSink = (
 		elements: TimelineElement[],
 		clipId: string,
-		uri?: string,
+		sourceId?: string,
 		currentTime?: number,
 	): boolean => {
-		if (!uri) return false;
+		if (!sourceId) return false;
 		const current = elements.find((el) => el.id === clipId);
 		if (!current) return false;
 		const isCoveredAtTime = (clip: TimelineElement, time?: number): boolean => {
@@ -470,8 +470,7 @@ export function createVideoClipModel(
 
 		const candidates = elements.filter((element) => {
 			if (element.type !== "VideoClip") return false;
-			const otherUri = (element.props as { uri?: string } | undefined)?.uri;
-			if (!otherUri || otherUri !== uri) return false;
+			if (element.sourceId !== sourceId) return false;
 			return isCoveredAtTime(element, currentTime);
 		});
 
@@ -505,9 +504,9 @@ export function createVideoClipModel(
 		const handle = assetHandle;
 		if (!handle) return;
 		const timelineState = useTimelineStore.getState();
-		const { props } = store.getState();
 		const elements = timelineState.elements;
 		const currentTime = timelineState.getDisplayTime();
+		const currentElement = elements.find((el) => el.id === id);
 		const fps = getTimelineFps();
 		const minSwitchIntervalFrames = Math.max(2, Math.round(fps / 10));
 		if (
@@ -519,7 +518,7 @@ export function createVideoClipModel(
 		const shouldDedicated = shouldUseDedicatedSink(
 			elements,
 			id,
-			props.uri,
+			currentElement?.sourceId,
 			currentTime,
 		);
 		if (!shouldDedicated && activeDedicatedSink && currentTime !== undefined) {

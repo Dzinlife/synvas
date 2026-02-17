@@ -5,7 +5,7 @@ type ClipKind = "AudioClip" | "VideoClip";
 type ClipInfo = {
 	id: string;
 	type: ClipKind;
-	uri: string;
+	sourceId: string;
 	trackIndex: number;
 	start: number;
 	end: number;
@@ -139,8 +139,8 @@ const assignSessionKeysForGroup = (
 		}
 		const sessionKey =
 			kind === "audio"
-				? `audio|${current.uri}|${current.reversed}|${chainHeadId}`
-				: `video|${current.trackIndex}|${current.uri}|${current.reversed}|${chainHeadId}`;
+				? `audio|${current.sourceId}|${current.reversed}|${chainHeadId}`
+				: `video|${current.trackIndex}|${current.sourceId}|${current.reversed}|${chainHeadId}`;
 		target.set(current.id, sessionKey);
 	}
 };
@@ -156,16 +156,12 @@ const buildContinuityIndex = (
 
 	for (const element of elements) {
 		if (element.type !== "AudioClip" && element.type !== "VideoClip") continue;
-		const uri =
-			typeof (element.props as { uri?: unknown } | undefined)?.uri === "string"
-				? ((element.props as { uri?: string }).uri ?? "")
-				: "";
-		if (!uri) continue;
+		if (!element.sourceId) continue;
 
 		const clipInfo: ClipInfo = {
 			id: element.id,
 			type: element.type,
-			uri,
+			sourceId: element.sourceId,
 			trackIndex: resolveTrackIndex(element),
 			start: normalizeInt(element.timeline.start, 0),
 			end: normalizeInt(element.timeline.end, 0),
@@ -176,7 +172,7 @@ const buildContinuityIndex = (
 		};
 
 		if (!hasMutedVideoSourceAudio(element)) {
-			const audioGroupKey = `${clipInfo.uri}|${clipInfo.reversed}`;
+			const audioGroupKey = `${clipInfo.sourceId}|${clipInfo.reversed}`;
 			const audioGroup = audioGroups.get(audioGroupKey);
 			if (audioGroup) {
 				audioGroup.push(clipInfo);
@@ -189,7 +185,7 @@ const buildContinuityIndex = (
 			continue;
 		}
 
-		const groupKey = `${clipInfo.trackIndex}|${clipInfo.uri}|${clipInfo.reversed}`;
+		const groupKey = `${clipInfo.trackIndex}|${clipInfo.sourceId}|${clipInfo.reversed}`;
 		const group = videoGroups.get(groupKey);
 		if (group) {
 			group.push(clipInfo);

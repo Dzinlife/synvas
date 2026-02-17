@@ -49,7 +49,7 @@ const createAudioClip = ({
 	start,
 	end,
 	offset = 0,
-	uri = "shared.mp3",
+	sourceId = "shared-source-audio",
 	reversed = false,
 	trackIndex = -1,
 }: {
@@ -57,7 +57,7 @@ const createAudioClip = ({
 	start: number;
 	end: number;
 	offset?: number;
-	uri?: string;
+	sourceId?: string;
 	reversed?: boolean;
 	trackIndex?: number;
 }): TimelineElement => ({
@@ -65,8 +65,9 @@ const createAudioClip = ({
 	type: "AudioClip",
 	component: "audio-clip",
 	name: id,
+	sourceId,
 	timeline: createTimeline(start, end, offset, trackIndex),
-	props: { uri, reversed },
+	props: { reversed },
 });
 
 const createVideoClip = ({
@@ -74,7 +75,7 @@ const createVideoClip = ({
 	start,
 	end,
 	offset = 0,
-	uri = "shared.mp4",
+	sourceId = "shared-source-video",
 	reversed = false,
 	trackIndex = 0,
 }: {
@@ -82,7 +83,7 @@ const createVideoClip = ({
 	start: number;
 	end: number;
 	offset?: number;
-	uri?: string;
+	sourceId?: string;
 	reversed?: boolean;
 	trackIndex?: number;
 }): TimelineElement => ({
@@ -90,8 +91,9 @@ const createVideoClip = ({
 	type: "VideoClip",
 	component: "video-clip",
 	name: id,
+	sourceId,
 	timeline: createTimeline(start, end, offset, trackIndex),
-	props: { uri, reversed },
+	props: { reversed },
 });
 
 const createTransition = ({

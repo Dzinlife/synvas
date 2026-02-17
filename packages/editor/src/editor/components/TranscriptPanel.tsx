@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useTranscriptStore } from "@/asr/transcriptStore";
 import type { TranscriptRecord } from "@/asr/types";
 import {
 	Select,
@@ -8,6 +7,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { useSources } from "../contexts/TimelineContext";
 
 const formatTime = (seconds: number): string => {
 	if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
@@ -30,7 +30,12 @@ const pickDefaultTranscript = (
 };
 
 const TranscriptPanel = () => {
-	const transcripts = useTranscriptStore((state) => state.transcripts);
+	const { sources } = useSources();
+	const transcripts = useMemo(() => {
+		return sources
+			.map((source) => source.data?.asr)
+			.filter((record): record is TranscriptRecord => Boolean(record));
+	}, [sources]);
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const lastSegmentRef = useRef<HTMLDivElement | null>(null);
 	const scrollThrottleRef = useRef<number | null>(null);

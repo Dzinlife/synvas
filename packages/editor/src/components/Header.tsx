@@ -1,7 +1,6 @@
 import { saveTimelineToObject } from "core/editor/timelineLoader";
 import { Check, FolderPlus, Save } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useMemo } from "react";
-import { useTranscriptStore } from "@/asr/transcriptStore";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -46,7 +45,6 @@ export default function Header() {
 
 	const getTimelineSnapshot = useEffectEvent(() => {
 		const state = useTimelineStore.getState();
-		const transcripts = useTranscriptStore.getState().transcripts;
 		return saveTimelineToObject(
 			state.elements,
 			state.fps,
@@ -62,7 +60,7 @@ export default function Header() {
 					compressor: { ...state.audioSettings.compressor },
 				},
 			},
-			transcripts,
+			state.sources,
 		);
 	});
 

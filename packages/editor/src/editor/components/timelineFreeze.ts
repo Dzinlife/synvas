@@ -12,7 +12,6 @@ const MAIN_TRACK_INDEX = 0;
 const DEFAULT_FREEZE_DURATION_SECONDS = 3;
 
 type FreezeCandidate = TimelineElement<{
-	uri?: string;
 	reversed?: boolean;
 }>;
 
@@ -21,8 +20,7 @@ const isFreezeCandidateElement = (
 	currentTime: number,
 ): element is FreezeCandidate => {
 	if (!element || element.type !== "VideoClip") return false;
-	const uri = (element.props as { uri?: unknown }).uri;
-	if (typeof uri !== "string" || uri.length === 0) return false;
+	if (!element.sourceId) return false;
 	if (currentTime <= element.timeline.start) return false;
 	if (currentTime >= element.timeline.end) return false;
 	return true;
@@ -126,8 +124,8 @@ export const applyFreezeFrame = (options: {
 		type: "FreezeFrame",
 		component: "freeze-frame",
 		name: "定格",
+		sourceId: target.sourceId,
 		props: {
-			uri: target.props.uri,
 			sourceElementId: target.id,
 			sourceFrame,
 			sourceTime,

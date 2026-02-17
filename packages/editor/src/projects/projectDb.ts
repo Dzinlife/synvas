@@ -52,7 +52,7 @@ export const buildEmptyTimeline = (): TimelineJSON => ({
 		},
 	},
 	tracks: [],
-	transcripts: [],
+	sources: [],
 	elements: [],
 });
 

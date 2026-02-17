@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranscriptStore } from "@/asr/transcriptStore";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ModelManager } from "@/dsl/model";
@@ -98,17 +97,10 @@ const Editor = () => {
 		(state) => state.currentProjectData,
 	);
 	const initialize = useProjectStore((state) => state.initialize);
-	const setTranscripts = useTranscriptStore((state) => state.setTranscripts);
 
 	useEffect(() => {
 		initialize();
 	}, [initialize]);
-
-	useEffect(() => {
-		if (!currentProjectData) return;
-		// 同步项目转写数据到转写 store
-		setTranscripts(currentProjectData.transcripts ?? []);
-	}, [currentProjectData, setTranscripts]);
 
 	const queryClient = new QueryClient();
 
@@ -122,6 +114,7 @@ const Editor = () => {
 				<Toaster />
 				<TimelineProvider
 					elements={currentProjectData.elements}
+					sources={currentProjectData.sources}
 					tracks={currentProjectData.tracks}
 					canvasSize={currentProjectData.canvas}
 					fps={currentProjectData.fps}

@@ -10,11 +10,10 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { ProgressiveBlur } from "@/components/ui/progressive-blur";
 import { modelRegistry } from "@/dsl/model/registry";
 import TimeIndicatorCanvas from "@/editor/components/TimeIndicatorCanvas";
 import { cn } from "@/lib/utils";
-import { clampFrame, framesToTimecode } from "@/utils/timecode";
+import { clampFrame } from "@/utils/timecode";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
 } from "./components/TimelineContextMenu";
@@ -35,6 +34,7 @@ import {
 	usePreviewAxis,
 	useRippleEditing,
 	useSnap,
+	useSources,
 	useTimelineScale,
 	useTimelineStore,
 	useTrackAssignments,
@@ -59,6 +59,7 @@ import {
 } from "./utils/timelineClipboard";
 import { getPixelsPerFrame } from "./utils/timelineScale";
 import { updateElementTime } from "./utils/timelineTime";
+import { resolveElementSourceUri } from "./utils/source";
 import {
 	buildTrackLayout,
 	getTrackHeightByRole,
@@ -74,10 +75,6 @@ import {
 	restoreVideoClipAudio,
 } from "./utils/videoClipAudioSeparation";
 
-const formatTimecode = (frames: number, fps: number) => {
-	return framesToTimecode(frames, fps);
-};
-
 const normalizeOffsetFrames = (value: unknown): number => {
 	if (!Number.isFinite(value as number)) return 0;
 	return Math.max(0, Math.round(value as number));
@@ -85,15 +82,6 @@ const normalizeOffsetFrames = (value: unknown): number => {
 
 const shouldUpdateOffset = (element: TimelineElementType): boolean => {
 	return element.type === "VideoClip" || element.type === "AudioClip";
-};
-
-const getVideoClipUri = (
-	element: TimelineElementType | undefined,
-): string | null => {
-	if (!element || element.type !== "VideoClip") return null;
-	const uri = (element.props as { uri?: unknown } | undefined)?.uri;
-	if (typeof uri !== "string" || uri.length === 0) return null;
-	return uri;
 };
 
 const getVideoClipHasSourceAudioTrack = (
@@ -174,6 +162,7 @@ const TimelineEditor = () => {
 	const { isPlaying, pause } = usePlaybackControl();
 	const { currentTime, setCurrentTime: seekTo } = useCurrentTime();
 	const { fps } = useFps();
+	const { sources } = useSources();
 	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId, deselectAll, setSelection } =
@@ -1342,7 +1331,7 @@ const TimelineEditor = () => {
 			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
 			const hasSourceAudioTrack =
 				getVideoClipHasSourceAudioTrack(targetElement);
-			const videoUri = getVideoClipUri(targetElement);
+			const videoUri = resolveElementSourceUri(targetElement, sources);
 			if (isSingleVideo && hasSourceAudioTrack) {
 				const isActionDisabled = !videoUri;
 				actions.splice(2, 0, {
@@ -1399,6 +1388,7 @@ const TimelineEditor = () => {
 		pasteFromClipboard,
 		postProcessOptions,
 		setElements,
+		sources,
 		trackLockedMap,
 	]);
 

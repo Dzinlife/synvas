@@ -12,12 +12,13 @@ const createVideoClip = (options: {
 	end: number;
 	offset?: number;
 	reversed?: boolean;
-	uri?: string;
+	sourceId?: string;
 }): TimelineElement => ({
 	id: options.id,
 	type: "VideoClip",
 	component: "video-clip",
 	name: options.id,
+	sourceId: options.sourceId ?? "source-video",
 	timeline: {
 		start: options.start,
 		end: options.end,
@@ -27,7 +28,6 @@ const createVideoClip = (options: {
 		trackIndex: 0,
 	},
 	props: {
-		uri: options.uri ?? "sample.mp4",
 		reversed: options.reversed ?? false,
 	},
 });
@@ -87,7 +87,6 @@ describe("timelineQuickSplit", () => {
 				trackIndex: -1,
 			},
 			props: {
-				uri: "sample.mp3",
 			},
 		};
 
@@ -119,7 +118,7 @@ describe("timelineQuickSplit", () => {
 						id: "clip-2",
 						start: 0,
 						end: 60,
-						uri: "",
+						sourceId: "",
 					}),
 				],
 				selectedIds: ["clip-2"],

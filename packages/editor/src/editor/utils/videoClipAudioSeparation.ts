@@ -13,11 +13,11 @@ const createElementId = () => {
 		.slice(2, 6)}`;
 };
 
-const getVideoUri = (element: TimelineElement): string | null => {
+const getVideoSourceId = (element: TimelineElement): string | null => {
 	if (element.type !== "VideoClip") return null;
-	const uri = (element.props as { uri?: unknown } | undefined)?.uri;
-	if (typeof uri !== "string" || uri.length === 0) return null;
-	return uri;
+	const sourceId = element.sourceId;
+	if (typeof sourceId !== "string" || sourceId.length === 0) return null;
+	return sourceId;
 };
 
 const buildAudioTimelineMeta = (
@@ -186,8 +186,8 @@ export const detachVideoClipAudio = ({
 	if (videoIndex < 0) return elements;
 	const videoElement = elements[videoIndex];
 	if (videoElement.type !== "VideoClip") return elements;
-	const uri = getVideoUri(videoElement);
-	if (!uri) return elements;
+	const sourceId = getVideoSourceId(videoElement);
+	if (!sourceId) return elements;
 	if (hasSourceAudioTrack === false) return elements;
 	const sourceReversed = Boolean(
 		(videoElement.props as { reversed?: unknown } | undefined)?.reversed,
@@ -209,8 +209,8 @@ export const detachVideoClipAudio = ({
 		type: "AudioClip",
 		component: "audio-clip",
 		name: videoElement.name ? `${videoElement.name} 音频` : "分离音频",
+		sourceId,
 		props: {
-			uri,
 			...(sourceReversed ? { reversed: true } : {}),
 		},
 		...(videoElement.transform

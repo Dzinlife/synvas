@@ -1,3 +1,5 @@
+import type { TranscriptRecord } from "../asr/types";
+
 // ============================================================================
 // 新架构：分离的属性系统
 // ============================================================================
@@ -139,6 +141,48 @@ export const ELEMENT_TYPE_VALUES = [
 
 export type ElementType = (typeof ELEMENT_TYPE_VALUES)[number];
 
+export const SOURCE_KIND_VALUES = [
+	"video",
+	"audio",
+	"image",
+	"lottie",
+	"unknown",
+] as const;
+
+export type SourceKind = (typeof SOURCE_KIND_VALUES)[number];
+
+export interface SourceDataSet {
+	asr?: TranscriptRecord;
+	[key: string]: unknown;
+}
+
+export interface TimelineSource {
+	id: string;
+	uri: string;
+	kind: SourceKind;
+	name?: string;
+	data?: SourceDataSet;
+}
+
+export const SOURCE_BACKED_ELEMENT_TYPE_VALUES = [
+	"VideoClip",
+	"AudioClip",
+	"Image",
+	"Lottie",
+	"FreezeFrame",
+] as const;
+
+export type SourceBackedElementType =
+	(typeof SOURCE_BACKED_ELEMENT_TYPE_VALUES)[number];
+
+const sourceBackedElementTypeSet = new Set<ElementType>(
+	SOURCE_BACKED_ELEMENT_TYPE_VALUES,
+);
+
+export const isSourceBackedElementType = (
+	type: ElementType,
+): type is SourceBackedElementType => sourceBackedElementTypeSet.has(type);
+
 /**
  * 转场元信息（仅用于模型层元数据）
  */
@@ -158,6 +202,7 @@ export interface TimelineElement<Props = Record<string, any>> {
 	type: ElementType; // 组件类型 ("Image" | "VideoClip" | "Lottie" | ...)
 	component: string; // 组件实现标识（区分具体实现）
 	name: string; // 显示名称
+	sourceId?: string; // 媒体源标识（共享素材/ASR 等扩展数据）
 
 	transform?: TransformMeta; // 空间属性
 	timeline: TimelineMeta; // 时间属性
