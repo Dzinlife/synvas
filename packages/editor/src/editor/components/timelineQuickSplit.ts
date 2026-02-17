@@ -12,6 +12,7 @@ export interface QuickSplitOptions {
 	minSegmentSeconds: number;
 	mode: QuickSplitMode;
 	signal?: AbortSignal;
+	onProgress?: (progress: number) => void;
 }
 
 export interface QuickSplitAnalysisShot {
@@ -78,6 +79,30 @@ const resolveStrideFrames = (mode: QuickSplitMode, fps: number): number => {
 const normalizeMode = (mode: QuickSplitMode | undefined): QuickSplitMode => {
 	if (mode === "fast" || mode === "fine") return mode;
 	return "balanced";
+};
+
+const createProgressReporter = (
+	onProgress?: (progress: number) => void,
+): ((progress: number) => void) => {
+	const REPORT_MIN_INTERVAL_MS = 500;
+	let lastProgress = -1;
+	let lastEmitTime = 0;
+	return (progress) => {
+		if (!onProgress) return;
+		const normalized = clamp(progress, 0, 1);
+		const now = Date.now();
+		const isBoundary = normalized === 0 || normalized === 1;
+		const isSmallDelta =
+			lastProgress >= 0 &&
+			Math.abs(normalized - lastProgress) < 0.005 &&
+			normalized < 1;
+		const isTooFrequent =
+			lastEmitTime > 0 && now - lastEmitTime < REPORT_MIN_INTERVAL_MS;
+		if (!isBoundary && (isSmallDelta || isTooFrequent)) return;
+		lastProgress = normalized;
+		lastEmitTime = now;
+		onProgress(normalized);
+	};
 };
 
 const createAbortError = (): Error => {
@@ -547,6 +572,7 @@ export const analyzeVideoChangeForElement = async (options: {
 	minSegmentSeconds?: number;
 	mode?: QuickSplitMode;
 	signal?: AbortSignal;
+	onProgress?: (progress: number) => void;
 }): Promise<QuickSplitAnalysis> => {
 	const { element, fps, signal } = options;
 	const mode = normalizeMode(options.mode);
@@ -556,8 +582,11 @@ export const analyzeVideoChangeForElement = async (options: {
 	const minSegmentSeconds = normalizeMinSegmentSeconds(
 		options.minSegmentSeconds ?? QUICK_SPLIT_DEFAULTS.minSegmentSeconds,
 	);
+	const reportProgress = createProgressReporter(options.onProgress);
+	reportProgress(0);
 
 	if (!isQuickSplitCandidateElement(element)) {
+		reportProgress(1);
 		return {
 			sampleFrames: [],
 			scores: [],
@@ -571,6 +600,7 @@ export const analyzeVideoChangeForElement = async (options: {
 	const endFrame = element.timeline.end;
 	const totalFrames = Math.max(0, endFrame - startFrame);
 	if (totalFrames < 2) {
+		reportProgress(1);
 		return {
 			sampleFrames: [],
 			scores: [],
@@ -588,6 +618,7 @@ export const analyzeVideoChangeForElement = async (options: {
 
 	const requestedFrames = collectRequestedFrames(startFrame, endFrame, strideFrames);
 	if (requestedFrames.length < 2) {
+		reportProgress(1);
 		return {
 			sampleFrames: [],
 			scores: [],
@@ -617,7 +648,8 @@ export const analyzeVideoChangeForElement = async (options: {
 		const videoSink = handle.asset.createVideoSink();
 		const sampledFrames: number[] = [];
 		const features: FrameFeatures[] = [];
-		for (const timelineFrame of requestedFrames) {
+		for (let index = 0; index < requestedFrames.length; index += 1) {
+			const timelineFrame = requestedFrames[index] ?? startFrame;
 			throwIfAborted(signal);
 			const timelineTime = framesToSeconds(timelineFrame, fps);
 			const sourceTime = calculateQuickSplitVideoTime({
@@ -633,13 +665,16 @@ export const analyzeVideoChangeForElement = async (options: {
 				Math.max(0, handle.asset.duration - 0.001),
 			);
 			const frameCanvas = await readFrameCanvasAtTime(videoSink, clampedTime, signal);
-			if (!frameCanvas) continue;
-			const frameFeatures = extractFrameFeatures(frameCanvas, scratchCtx);
-			sampledFrames.push(timelineFrame);
-			features.push(frameFeatures);
+			if (frameCanvas) {
+				const frameFeatures = extractFrameFeatures(frameCanvas, scratchCtx);
+				sampledFrames.push(timelineFrame);
+				features.push(frameFeatures);
+			}
+			reportProgress((index + 1) / requestedFrames.length);
 		}
 
 		if (sampledFrames.length < 2 || features.length < 2) {
+			reportProgress(1);
 			return {
 				sampleFrames: sampledFrames,
 				scores: [],
@@ -671,6 +706,7 @@ export const analyzeVideoChangeForElement = async (options: {
 			sampleFrames: sampledFrames,
 			scores,
 		});
+		reportProgress(1);
 
 		return {
 			sampleFrames: sampledFrames,

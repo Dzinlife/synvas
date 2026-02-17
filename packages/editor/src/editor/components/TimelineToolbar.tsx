@@ -20,6 +20,11 @@ import {
 	DialogDescription,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import {
+	Progress,
+	ProgressIndicator,
+	ProgressTrack,
+} from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import {
 	Tooltip,
@@ -148,6 +153,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		QUICK_SPLIT_DEFAULTS.mode,
 	);
 	const [quickSplitStatus, setQuickSplitStatus] = useState<string | null>(null);
+	const [quickSplitProgress, setQuickSplitProgress] = useState(0);
 	const [quickSplitRunning, setQuickSplitRunning] = useState(false);
 	const quickSplitAbortRef = useRef<AbortController | null>(null);
 
@@ -258,6 +264,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const handleOpenQuickSplit = useCallback(() => {
 		if (!quickSplitCandidate) return;
 		setQuickSplitStatus(null);
+		setQuickSplitProgress(0);
 		setQuickSplitOpen(true);
 	}, [quickSplitCandidate]);
 
@@ -270,6 +277,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		const controller = new AbortController();
 		quickSplitAbortRef.current = controller;
 		setQuickSplitRunning(true);
+		setQuickSplitProgress(0);
 		setQuickSplitStatus("正在分析画面变化...");
 		try {
 			const analysis = await analyzeVideoChangeForElement({
@@ -279,8 +287,12 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 				minSegmentSeconds: quickSplitMinSegmentSeconds,
 				mode: quickSplitMode,
 				signal: controller.signal,
+				onProgress(progress) {
+					setQuickSplitProgress(progress);
+				},
 			});
 			if (controller.signal.aborted) return;
+			setQuickSplitProgress(1);
 			if (analysis.splitFrames.length === 0) {
 				setQuickSplitStatus("未检测到明显变化切点。");
 				return;
@@ -297,9 +309,11 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			setQuickSplitStatus(`快速分割完成，新增 ${analysis.splitFrames.length} 个切点。`);
 		} catch (error) {
 			if (controller.signal.aborted) {
+				setQuickSplitProgress(0);
 				setQuickSplitStatus("已取消快速分割。");
 				return;
 			}
+			setQuickSplitProgress(0);
 			const message = error instanceof Error ? error.message : String(error);
 			setQuickSplitStatus(`快速分割失败：${message}`);
 		} finally {
@@ -373,6 +387,9 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		autoAttach,
 		trackLockedMap,
 	]);
+	const quickSplitProgressPercentage = Math.round(
+		Math.max(0, Math.min(1, quickSplitProgress)) * 100,
+	);
 
 	return (
 		<>
@@ -558,13 +575,14 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			</div>
 			<Dialog
 				open={quickSplitOpen}
-				onOpenChange={(open) => {
-					if (!open && quickSplitRunning) return;
-					setQuickSplitOpen(open);
-					if (open) {
-						setQuickSplitStatus(null);
-					}
-				}}
+					onOpenChange={(open) => {
+						if (!open && quickSplitRunning) return;
+						setQuickSplitOpen(open);
+						if (open) {
+							setQuickSplitStatus(null);
+							setQuickSplitProgress(0);
+						}
+					}}
 			>
 				<DialogContent className="max-w-md">
 					<div className="grid gap-4 p-4">
@@ -649,6 +667,26 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 								<option value="balanced">平衡</option>
 								<option value="fine">精细</option>
 							</select>
+						</div>
+						<div className="grid gap-1.5">
+							<div className="flex items-center justify-between text-xs text-neutral-400">
+								<span>分析进度</span>
+								<span className="tabular-nums">
+									{quickSplitProgressPercentage}%
+								</span>
+							</div>
+							<Progress
+								value={quickSplitProgressPercentage}
+								min={0}
+								max={100}
+								aria-label="快速分割进度"
+								aria-valuetext={`${quickSplitProgressPercentage}%`}
+								className="w-full"
+							>
+								<ProgressTrack className="bg-neutral-800/90">
+									<ProgressIndicator className="bg-blue-500 transition-[width] duration-100" />
+								</ProgressTrack>
+							</Progress>
 						</div>
 						<div className="min-h-5 text-xs text-neutral-400">
 							{quickSplitStatus ?? "选择参数后执行快速分割。"}
