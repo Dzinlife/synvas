@@ -14,7 +14,7 @@ function DialogContent({
 	backdropClassName?: string;
 }) {
 	return (
-		<DialogPrimitive.Portal>
+		<DialogPrimitive.Portal className="select-text">
 			<DialogPrimitive.Backdrop
 				className={cn(
 					"fixed inset-0 z-999 bg-black/55 backdrop-blur-[1px] transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0",
@@ -36,10 +36,7 @@ function DialogContent({
 	);
 }
 
-function DialogTitle({
-	className,
-	...props
-}: DialogPrimitive.Title.Props) {
+function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
 	return (
 		<DialogPrimitive.Title
 			className={cn("text-base font-semibold text-neutral-100", className)}

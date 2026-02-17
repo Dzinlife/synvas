@@ -99,7 +99,9 @@ const TranscriptContent: React.FC<{ record: TranscriptRecord | null }> = ({
 								<div className="text-[11px] text-neutral-500 leading-none mb-1">
 									{formatTime(segment.start)}
 								</div>
-								<div className="leading-relaxed text-neutral-100">{segment.text}</div>
+								<div className="leading-relaxed text-neutral-100">
+									{segment.text}
+								</div>
 							</div>
 						);
 					})
@@ -219,8 +221,10 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 								: "当前素材尚未转写，可选择语言并开始转写。"}
 						</DialogDescription>
 					</div>
-					<div className="flex items-center justify-between gap-2 rounded border border-white/10 bg-neutral-950/60 px-3 py-2 text-xs text-neutral-300">
-						<span className="truncate">source: {source?.uri ?? "未选中可转写素材"}</span>
+					<div className="min-w-0 flex items-center justify-between gap-2 rounded-md border border-white/10 bg-neutral-950/60 px-3 py-2 text-xs text-neutral-300">
+						<span className="truncate inline-block">
+							source: {source?.uri ?? "未选中可转写素材"}
+						</span>
 						<Button className="h-7 px-2 text-xs" onClick={handleDebugLog}>
 							调试 ASR
 						</Button>
@@ -229,6 +233,7 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 						<Label>语言</Label>
 						<Select
 							value={language}
+							items={LANGUAGE_OPTIONS}
 							onValueChange={(value) => setLanguage(value ?? "auto")}
 							disabled={!canRun || isRunning}
 						>

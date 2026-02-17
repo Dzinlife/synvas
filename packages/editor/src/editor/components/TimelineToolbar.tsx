@@ -1,32 +1,33 @@
 import type { TimelineElement } from "core/dsl/types";
 import { buildSplitElements } from "core/editor/command/split";
-import {
-	Film,
-	Mic,
-	Sparkles,
-	Split,
-	ZoomIn,
-	ZoomOut,
-} from "lucide-react";
+import { Film, Mic, Sparkles, Split, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isSupportedSourceMediaUri } from "@/asr";
 import {
 	AutoAttachIcon,
 	RippleEditingIcon,
 	ScrollPreviewIcon,
 	SnapIcon,
 } from "@/components/icons";
-import { isSupportedSourceMediaUri } from "@/asr";
 import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
 	Progress,
 	ProgressIndicator,
 	ProgressTrack,
 } from "@/components/ui/progress";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import {
 	Tooltip,
@@ -51,23 +52,20 @@ import {
 	useTracks,
 } from "../contexts/TimelineContext";
 import { getAudioTrackControlState } from "../utils/audioTrackState";
+import { MAX_TIMELINE_SCALE, MIN_TIMELINE_SCALE } from "../utils/timelineZoom";
 import {
 	isTransitionElement,
 	reconcileTransitions,
 } from "../utils/transitions";
-import {
-	MAX_TIMELINE_SCALE,
-	MIN_TIMELINE_SCALE,
-} from "../utils/timelineZoom";
-import TimelineMinimap from "./TimelineMinimap";
 import SmartSpeechCutDialog from "./SmartSpeechCutDialog";
+import TimelineMinimap from "./TimelineMinimap";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
 import {
 	analyzeVideoChangeForElement,
 	applyQuickSplitFrames,
 	QUICK_SPLIT_DEFAULTS,
-	resolveQuickSplitCandidate,
 	type QuickSplitMode,
+	resolveQuickSplitCandidate,
 } from "./timelineQuickSplit";
 
 const isSplittableClip = (element: TimelineElement) =>
@@ -152,9 +150,8 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const [quickSplitSensitivity, setQuickSplitSensitivity] = useState(
 		QUICK_SPLIT_DEFAULTS.sensitivity,
 	);
-	const [quickSplitMinSegmentSeconds, setQuickSplitMinSegmentSeconds] = useState(
-		QUICK_SPLIT_DEFAULTS.minSegmentSeconds,
-	);
+	const [quickSplitMinSegmentSeconds, setQuickSplitMinSegmentSeconds] =
+		useState(QUICK_SPLIT_DEFAULTS.minSegmentSeconds);
 	const [quickSplitMode, setQuickSplitMode] = useState<QuickSplitMode>(
 		QUICK_SPLIT_DEFAULTS.mode,
 	);
@@ -332,7 +329,9 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 					createElementId,
 				}),
 			);
-			setQuickSplitStatus(`快速分割完成，新增 ${analysis.splitFrames.length} 个切点。`);
+			setQuickSplitStatus(
+				`快速分割完成，新增 ${analysis.splitFrames.length} 个切点。`,
+			);
 		} catch (error) {
 			if (controller.signal.aborted) {
 				setQuickSplitProgress(0);
@@ -423,9 +422,8 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 				<div className="left-section flex flex-1 items-center gap-3 shrink-0">
 					<div className="flex items-center gap-0.5 bg-black/20 rounded-full p-0.5">
 						<Tooltip>
-							<TooltipTrigger delay={0}>
-								<button
-								type="button"
+							<TooltipTrigger
+								delay={0}
 								onClick={handleSplit}
 								disabled={!splitCandidate}
 								className={cn(
@@ -437,14 +435,12 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 								aria-label="分割片段"
 							>
 								<Split className="size-3.5" />
-							</button>
-						</TooltipTrigger>
-						<TooltipContent>在当前时间点分割选中片段</TooltipContent>
-					</Tooltip>
-					<Tooltip>
-						<TooltipTrigger delay={0}>
-							<button
-								type="button"
+							</TooltipTrigger>
+							<TooltipContent>在当前时间点分割选中片段</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger
+								delay={0}
 								onClick={handleOpenQuickSplit}
 								disabled={!quickSplitCandidate}
 								className={cn(
@@ -456,14 +452,12 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 								aria-label="快速分割"
 							>
 								<Film className="size-3.5" />
-							</button>
-						</TooltipTrigger>
-						<TooltipContent>根据画面变化自动生成切点</TooltipContent>
-					</Tooltip>
-					<Tooltip>
-						<TooltipTrigger delay={0}>
-							<button
-								type="button"
+							</TooltipTrigger>
+							<TooltipContent>根据画面变化自动生成切点</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger
+								delay={0}
 								onClick={() => setSpeechCutOpen(true)}
 								disabled={!speechCutCandidate}
 								className={cn(
@@ -475,15 +469,13 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 								aria-label="智能剪口播"
 							>
 								<Mic className="size-3.5" />
-							</button>
-						</TooltipTrigger>
-						<TooltipContent>智能剪口播</TooltipContent>
-					</Tooltip>
+							</TooltipTrigger>
+							<TooltipContent>智能剪口播</TooltipContent>
+						</Tooltip>
 
-					<Tooltip>
-						<TooltipTrigger delay={0}>
-							<button
-								type="button"
+						<Tooltip>
+							<TooltipTrigger
+								delay={0}
 								onClick={handleFreeze}
 								disabled={!freezeCandidate}
 								className={cn(
@@ -495,11 +487,10 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 								aria-label="定格片段"
 							>
 								<Sparkles className="size-3.5" />
-							</button>
-						</TooltipTrigger>
-						<TooltipContent>在当前时间点插入 3 秒定格</TooltipContent>
-					</Tooltip>
-				</div>
+							</TooltipTrigger>
+							<TooltipContent>在当前时间点插入 3 秒定格</TooltipContent>
+						</Tooltip>
+					</div>
 				</div>
 				<div className="center-section flex-1 flex justify-center">
 					<div className="flex-1 min-w-[220px] max-w-[640px]">
@@ -510,124 +501,124 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 					</div>
 				</div>
 				<div className="right-section flex flex-1 shrink-2 items-center justify-end gap-2">
-				{/* 开关按钮组 */}
-				<div className="flex items-center gap-1 px-1 rounded-full bg-black/20">
-					<Tooltip>
-						<TooltipTrigger
-							delay={0}
-							type="button"
-							onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
-							aria-label="波纹编辑"
-							className={cn(
-								"size-8 rounded-full transition flex items-center justify-center",
-								rippleEditingEnabled
-									? "text-orange-500"
-									: "text-neutral-400 scale-90",
-							)}
-						>
-							<RippleEditingIcon className="size-8" />
-						</TooltipTrigger>
-						<TooltipContent>主轨波纹编辑</TooltipContent>
-					</Tooltip>
-					<Tooltip>
-						<TooltipTrigger
-							type="button"
-							delay={0}
-							onClick={() => setSnapEnabled(!snapEnabled)}
-							aria-label="吸附"
-							className={cn(
-								"size-8 rounded-full transition flex items-center justify-center",
-								snapEnabled ? "text-orange-500" : "text-neutral-400 scale-90",
-							)}
-						>
-							<SnapIcon className="size-8" />
-						</TooltipTrigger>
-						<TooltipContent>水平吸附</TooltipContent>
-					</Tooltip>
-					<Tooltip>
-						<TooltipTrigger
-							type="button"
-							delay={0}
-							onClick={() => setAutoAttach(!autoAttach)}
-							aria-label="联动"
-							className={cn(
-								"size-8 rounded-full transition flex items-center justify-center",
-								autoAttach ? "text-orange-500" : "text-neutral-400 scale-90",
-							)}
-						>
-							<AutoAttachIcon className="size-8" />
-						</TooltipTrigger>
-						<TooltipContent>主轴联动</TooltipContent>
-					</Tooltip>
+					{/* 开关按钮组 */}
+					<div className="flex items-center gap-1 px-1 rounded-full bg-black/20">
+						<Tooltip>
+							<TooltipTrigger
+								delay={0}
+								type="button"
+								onClick={() => setRippleEditingEnabled(!rippleEditingEnabled)}
+								aria-label="波纹编辑"
+								className={cn(
+									"size-8 rounded-full transition flex items-center justify-center",
+									rippleEditingEnabled
+										? "text-orange-500"
+										: "text-neutral-400 scale-90",
+								)}
+							>
+								<RippleEditingIcon className="size-8" />
+							</TooltipTrigger>
+							<TooltipContent>主轨波纹编辑</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger
+								type="button"
+								delay={0}
+								onClick={() => setSnapEnabled(!snapEnabled)}
+								aria-label="吸附"
+								className={cn(
+									"size-8 rounded-full transition flex items-center justify-center",
+									snapEnabled ? "text-orange-500" : "text-neutral-400 scale-90",
+								)}
+							>
+								<SnapIcon className="size-8" />
+							</TooltipTrigger>
+							<TooltipContent>水平吸附</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger
+								type="button"
+								delay={0}
+								onClick={() => setAutoAttach(!autoAttach)}
+								aria-label="联动"
+								className={cn(
+									"size-8 rounded-full transition flex items-center justify-center",
+									autoAttach ? "text-orange-500" : "text-neutral-400 scale-90",
+								)}
+							>
+								<AutoAttachIcon className="size-8" />
+							</TooltipTrigger>
+							<TooltipContent>主轴联动</TooltipContent>
+						</Tooltip>
 
-					<Tooltip>
-						<TooltipTrigger
-							delay={0}
+						<Tooltip>
+							<TooltipTrigger
+								delay={0}
+								type="button"
+								onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}
+								aria-label="预览轴"
+								className={cn(
+									"size-8 rounded-full transition flex items-center justify-center",
+									previewAxisEnabled
+										? "text-orange-500"
+										: "text-neutral-400 scale-90",
+								)}
+							>
+								<ScrollPreviewIcon className="size-8" />
+							</TooltipTrigger>
+							<TooltipContent>预览轴</TooltipContent>
+						</Tooltip>
+					</div>
+					<div className="group flex items-center gap-0.5 rounded-full p-0.5 bg-black/20 px-1">
+						<button
 							type="button"
-							onClick={() => setPreviewAxisEnabled(!previewAxisEnabled)}
-							aria-label="预览轴"
+							onClick={handleDecreaseScale}
+							disabled={timelineScale <= MIN_TIMELINE_SCALE}
 							className={cn(
-								"size-8 rounded-full transition flex items-center justify-center",
-								previewAxisEnabled
-									? "text-orange-500"
-									: "text-neutral-400 scale-90",
+								"size-6 rounded-full flex items-center justify-center transition-colors",
+								timelineScale > MIN_TIMELINE_SCALE
+									? "text-neutral-500 hover:text-neutral-400"
+									: "text-neutral-700 cursor-not-allowed",
 							)}
+							title="缩小时间轴"
 						>
-							<ScrollPreviewIcon className="size-8" />
-						</TooltipTrigger>
-						<TooltipContent>预览轴</TooltipContent>
-					</Tooltip>
-				</div>
-				<div className="group flex items-center gap-0.5 rounded-full p-0.5 bg-black/20 px-1">
-					<button
-						type="button"
-						onClick={handleDecreaseScale}
-						disabled={timelineScale <= MIN_TIMELINE_SCALE}
-						className={cn(
-							"size-6 rounded-full flex items-center justify-center transition-colors",
-							timelineScale > MIN_TIMELINE_SCALE
-								? "text-neutral-500 hover:text-neutral-400"
-								: "text-neutral-700 cursor-not-allowed",
-						)}
-						title="缩小时间轴"
-					>
-						<ZoomOut className="size-3.5" />
-					</button>
-					<Slider
-						min={MIN_TIMELINE_SCALE}
-						max={MAX_TIMELINE_SCALE}
-						step={TIMELINE_SCALE_STEP}
-						value={[timelineScale]}
-						onValueChange={handleScaleChange}
-						className="w-16 opacity-60 group-hover:opacity-100"
-					/>
-					<button
-						type="button"
-						onClick={handleIncreaseScale}
-						disabled={timelineScale >= MAX_TIMELINE_SCALE}
-						className={cn(
-							"size-6 rounded-full flex items-center justify-center transition-colors",
-							timelineScale < MAX_TIMELINE_SCALE
-								? "text-neutral-500 hover:text-neutral-400"
-								: "text-neutral-700 cursor-not-allowed",
-						)}
-						title="放大时间轴"
-					>
-						<ZoomIn className="size-3.5" />
+							<ZoomOut className="size-3.5" />
+						</button>
+						<Slider
+							min={MIN_TIMELINE_SCALE}
+							max={MAX_TIMELINE_SCALE}
+							step={TIMELINE_SCALE_STEP}
+							value={[timelineScale]}
+							onValueChange={handleScaleChange}
+							className="w-16 opacity-60 group-hover:opacity-100"
+						/>
+						<button
+							type="button"
+							onClick={handleIncreaseScale}
+							disabled={timelineScale >= MAX_TIMELINE_SCALE}
+							className={cn(
+								"size-6 rounded-full flex items-center justify-center transition-colors",
+								timelineScale < MAX_TIMELINE_SCALE
+									? "text-neutral-500 hover:text-neutral-400"
+									: "text-neutral-700 cursor-not-allowed",
+							)}
+							title="放大时间轴"
+						>
+							<ZoomIn className="size-3.5" />
 						</button>
 					</div>
 				</div>
 			</div>
 			<Dialog
 				open={quickSplitOpen}
-					onOpenChange={(open) => {
-						if (!open && quickSplitRunning) return;
-						setQuickSplitOpen(open);
-						if (open) {
-							setQuickSplitStatus(null);
-							setQuickSplitProgress(0);
-						}
-					}}
+				onOpenChange={(open) => {
+					if (!open && quickSplitRunning) return;
+					setQuickSplitOpen(open);
+					if (open) {
+						setQuickSplitStatus(null);
+						setQuickSplitProgress(0);
+					}
+				}}
 			>
 				<DialogContent className="max-w-md">
 					<div className="grid gap-4 p-4">
@@ -644,7 +635,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 							>
 								变化强度（0-100）
 							</label>
-							<input
+							<Input
 								id="quick-split-sensitivity"
 								type="number"
 								min={0}
@@ -669,7 +660,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 							>
 								最短片段时长（秒）
 							</label>
-							<input
+							<Input
 								id="quick-split-min-segment"
 								type="number"
 								min={0.2}
@@ -694,24 +685,33 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 							>
 								分析速度
 							</label>
-							<select
+							<Select
 								id="quick-split-mode"
 								value={quickSplitMode}
 								disabled={quickSplitRunning}
-								onChange={(event) => {
-									const value = event.target.value;
+								items={[
+									{ value: "fast", label: "极速" },
+									{ value: "balanced", label: "平衡" },
+									{ value: "fine", label: "精细" },
+								]}
+								onValueChange={(value) => {
 									if (value === "fast" || value === "fine") {
-										setQuickSplitMode(value);
+										setQuickSplitMode(value as QuickSplitMode);
 										return;
 									}
 									setQuickSplitMode("balanced");
 								}}
-								className="h-8 rounded border border-white/15 bg-neutral-900 px-2 text-sm text-neutral-100 outline-none focus:border-blue-400"
+								// className="h-8 rounded border border-white/15 bg-neutral-900 px-2 text-sm text-neutral-100 outline-none focus:border-blue-400"
 							>
-								<option value="fast">极速</option>
-								<option value="balanced">平衡</option>
-								<option value="fine">精细</option>
-							</select>
+								<SelectTrigger>
+									<SelectValue placeholder="选择分析速度" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="fast">极速</SelectItem>
+									<SelectItem value="balanced">平衡</SelectItem>
+									<SelectItem value="fine">精细</SelectItem>
+								</SelectContent>
+							</Select>
 						</div>
 						<div className="grid gap-1.5">
 							<div className="flex items-center justify-between text-xs text-neutral-400">
