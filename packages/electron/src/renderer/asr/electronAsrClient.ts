@@ -247,9 +247,44 @@ const shouldRepairTokenText = (
 	return tokens.some((token) => hasReplacementChar(token.text));
 };
 
+const collectRepairBoundaries = (
+	segmentText: string,
+	left: number,
+	right: number,
+	locale: string,
+): number[] => {
+	const boundaries = new Set<number>([left, right]);
+	try {
+		const segmenter = new Intl.Segmenter(locale, { granularity: "word" });
+		for (const item of segmenter.segment(segmentText)) {
+			const segStart = item.index;
+			const segEnd = segStart + item.segment.length;
+			if (segEnd <= left || segStart >= right) continue;
+			const clippedStart = Math.max(left, Math.min(right, segStart));
+			const clippedEnd = Math.max(left, Math.min(right, segEnd));
+			boundaries.add(clippedStart);
+			boundaries.add(clippedEnd);
+		}
+	} catch {
+		// Intl.Segmenter 不可用时走字符级兜底。
+	}
+	if (boundaries.size <= 2) {
+		let cursor = left;
+		while (cursor < right) {
+			const codePoint = segmentText.codePointAt(cursor);
+			if (codePoint === undefined) break;
+			const length = codePoint > 0xffff ? 2 : 1;
+			cursor = Math.min(right, cursor + length);
+			boundaries.add(cursor);
+		}
+	}
+	return [...boundaries].sort((a, b) => a - b);
+};
+
 const repairTokenTextsWithAnchors = (
 	segmentText: string,
 	tokens: TimedToken[],
+	locale: string,
 ): RepairedTokenRange[] => {
 	const textLength = segmentText.length;
 	const tokenCount = tokens.length;
@@ -259,7 +294,7 @@ const repairTokenTextsWithAnchors = (
 	let cursor = 0;
 	const pendingIndices: number[] = [];
 
-	// 按时间权重把未知 token 分配到相邻锚点之间的字符区间。
+	// 先按分词边界顺序分配未知 token；边界不足时再按时间权重回退。
 	const flushPending = (from: number, to: number) => {
 		if (pendingIndices.length === 0) return;
 		const left = Math.max(0, Math.min(textLength, from));
@@ -272,6 +307,12 @@ const repairTokenTextsWithAnchors = (
 			}
 			return;
 		}
+		const boundaries = collectRepairBoundaries(
+			segmentText,
+			left,
+			right,
+			locale,
+		);
 		const weights = indices.map((idx) => tokenWeight(tokens[idx]));
 		const totalWeight =
 			weights.reduce((sum, value) => sum + value, 0) ||
@@ -281,11 +322,20 @@ const repairTokenTextsWithAnchors = (
 		for (let i = 0; i < indices.length; i += 1) {
 			const idx = indices[i];
 			const isLast = i === indices.length - 1;
-			if (!isLast) consumedWeight += weights[i];
-			const rawEnd = isLast
-				? right
-				: left + Math.round((consumedWeight / totalWeight) * length);
-			const next = Math.max(current, Math.min(right, rawEnd));
+			if (isLast) {
+				charRanges[idx] = { start: current, end: right };
+				current = right;
+				continue;
+			}
+			consumedWeight += weights[i];
+			const rawEnd = left + Math.round((consumedWeight / totalWeight) * length);
+			let next = Math.max(current, Math.min(right, rawEnd));
+			const snapped = boundaries.find(
+				(boundary) => boundary >= next && boundary > current,
+			);
+			if (snapped !== undefined) {
+				next = Math.max(current, Math.min(right, snapped));
+			}
 			charRanges[idx] = { start: current, end: next };
 			current = next;
 		}
@@ -381,6 +431,7 @@ const buildTimedCharRangesFromTokenText = (
 
 const buildTimedCharRanges = (
 	segment: WhisperSegment,
+	locale: string,
 ): { baseText: string; ranges: TimedCharRange[] } => {
 	const segmentText = normalizeToken(segment.text ?? "");
 	const tokens = collectTimedTokens(segment);
@@ -394,7 +445,7 @@ const buildTimedCharRanges = (
 	// whisper.cpp 可能把 token 文本损坏成 �，优先用 segment.text 修复 token 字符范围。
 	if (shouldRepairTokenText(segmentText, tokens)) {
 		try {
-			const repaired = repairTokenTextsWithAnchors(segmentText, tokens);
+			const repaired = repairTokenTextsWithAnchors(segmentText, tokens, locale);
 			if (repaired.length > 0) {
 				return {
 					baseText: segmentText,
@@ -558,7 +609,10 @@ const buildIndexedWords = (
 	locale: string,
 	language: string,
 ): { text: string; words: IndexedWord[] } => {
-	const { baseText, ranges: timedCharRanges } = buildTimedCharRanges(segment);
+	const { baseText, ranges: timedCharRanges } = buildTimedCharRanges(
+		segment,
+		locale,
+	);
 	const text = baseText;
 	if (!text.trim()) {
 		return { text, words: [] };
