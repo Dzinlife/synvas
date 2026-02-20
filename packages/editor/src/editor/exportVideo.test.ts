@@ -37,7 +37,7 @@ vi.mock("@/editor/playback/clipContinuityIndex", () => ({
 }));
 
 vi.mock("@/editor/preview/buildSkiaTree", () => ({
-	buildSkiaRenderState: vi.fn(),
+	buildSkiaFrameSnapshot: vi.fn(),
 }));
 
 vi.mock("@/editor/contexts/TimelineContext", () => ({
@@ -132,6 +132,9 @@ describe("editor.exportTimelineAsVideo", () => {
 			endFrame: 20,
 			signal: controller.signal,
 		});
+		expect(typeof passed.buildSkiaFrameSnapshot).toBe("function");
+		expect((passed as { buildSkiaRenderState?: unknown }).buildSkiaRenderState)
+			.toBeUndefined();
 		expect(onFrame).toHaveBeenCalledWith(15);
 		expect(timelineState.setExportTime).toHaveBeenCalledWith(10);
 		expect(timelineState.setExportTime).toHaveBeenCalledWith(15);
@@ -157,6 +160,33 @@ describe("editor.exportTimelineAsVideo", () => {
 		expect(timelineState.setPreviewTime).toHaveBeenNthCalledWith(1, null);
 		expect(timelineState.setPreviewTime).toHaveBeenLastCalledWith(44);
 		expect(timelineState.setCurrentTime).toHaveBeenCalledWith(88);
+		expect(timelineState.play).toHaveBeenCalledTimes(1);
+	});
+
+	it("picture 构建失败上抛时同样恢复时间轴状态", async () => {
+		timelineState = createTimelineState({
+			isPlaying: true,
+			currentTime: 48,
+			previewTime: 20,
+			previewAxisEnabled: true,
+			isExporting: false,
+			exportTime: null,
+		});
+		exportTimelineAsVideoCoreMock.mockRejectedValueOnce(
+			new Error("导出失败：无法构建第 12 帧 picture（已中止导出）"),
+		);
+
+		await expect(exportTimelineAsVideo()).rejects.toThrow(
+			"导出失败：无法构建第 12 帧 picture（已中止导出）",
+		);
+
+		expect(timelineState.setIsExporting).toHaveBeenNthCalledWith(1, true);
+		expect(timelineState.setIsExporting).toHaveBeenLastCalledWith(false);
+		expect(timelineState.setPreviewAxisEnabled).toHaveBeenNthCalledWith(1, false);
+		expect(timelineState.setPreviewAxisEnabled).toHaveBeenLastCalledWith(true);
+		expect(timelineState.setPreviewTime).toHaveBeenNthCalledWith(1, null);
+		expect(timelineState.setPreviewTime).toHaveBeenLastCalledWith(20);
+		expect(timelineState.setCurrentTime).toHaveBeenCalledWith(48);
 		expect(timelineState.play).toHaveBeenCalledTimes(1);
 	});
 

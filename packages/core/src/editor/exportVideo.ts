@@ -8,7 +8,7 @@ import {
 	QUALITY_HIGH,
 	StreamTarget,
 } from "mediabunny";
-import { JsiSkSurface, Skia, SkiaSGRoot } from "react-skia-lite";
+import { JsiSkSurface } from "react-skia-lite";
 import type { TimelineElement } from "../dsl/types";
 import { resolveTimelineElementClipGainLinear } from "./audio/clipGain";
 import { renderMixedAudioForExport } from "./audio/dsp/exportRenderer";
@@ -20,16 +20,16 @@ import {
 	buildTransitionAudioMixPlan,
 	type TransitionAudioCurve,
 } from "./audio/transitionAudioMix";
-import type { buildSkiaRenderStateCore } from "./preview/buildSkiaTree";
+import type { buildSkiaFrameSnapshotCore } from "./preview/buildSkiaTree";
 import type { TransitionFrameState } from "./preview/transitionFrameState";
 import type { TimelineTrack } from "./timeline/types";
 import type { AudioTrackControlStateMap } from "./utils/audioTrackState";
 import { isTimelineTrackAudible } from "./utils/trackAudibility";
 import { isVideoSourceAudioMuted } from "./utils/videoSourceAudio";
 
-export type BuildSkiaRenderState = (
-	args: Parameters<typeof buildSkiaRenderStateCore>[0],
-) => ReturnType<typeof buildSkiaRenderStateCore>;
+export type BuildSkiaFrameSnapshot = (
+	args: Parameters<typeof buildSkiaFrameSnapshotCore>[0],
+) => ReturnType<typeof buildSkiaFrameSnapshotCore>;
 
 export type ExportElementAudioSource = {
 	audioSink: AudioBufferSink | null;
@@ -52,14 +52,14 @@ export type ExportTimelineAsVideoOptions = {
 	tracks: TimelineTrack[];
 	fps: number;
 	canvasSize: { width: number; height: number };
-	buildSkiaRenderState: BuildSkiaRenderState;
+	buildSkiaFrameSnapshot: BuildSkiaFrameSnapshot;
 	filename?: string;
 	startFrame?: number;
 	endFrame?: number;
 	signal?: AbortSignal;
 	audio?: ExportTimelineAudioOptions;
 	getModelStore?: NonNullable<
-		Parameters<typeof buildSkiaRenderStateCore>[0]["prepare"]
+		Parameters<typeof buildSkiaFrameSnapshotCore>[0]["prepare"]
 	>["getModelStore"];
 	waitForReady?: () => Promise<void>;
 	onFrame?: (frame: number) => void;
@@ -555,7 +555,6 @@ export const exportTimelineAsVideoCore = async (
 	} = collectExportAudioTargets(options, totalFrames);
 	const transitionCurveById = collectTransitionCurveById(options.elements);
 
-	let root: SkiaSGRoot | null = null;
 	let surface: JsiSkSurface | null = null;
 	let webglCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
 	let outputTarget: ExportOutputTarget | null = null;
@@ -601,7 +600,6 @@ export const exportTimelineAsVideoCore = async (
 		await output.start();
 		throwIfAborted(options.signal);
 
-		root = new SkiaSGRoot(Skia);
 		const webglResult = createWebGLSurfaceForExport(
 			exportCanvas,
 			width,
@@ -620,8 +618,8 @@ export const exportTimelineAsVideoCore = async (
 			throw new Error("导出失败：无法获取 WebGL 画布");
 		}
 
-		const buildFrameState = (targetFrame: number) => {
-			return options.buildSkiaRenderState({
+		const buildFrameSnapshot = (targetFrame: number) => {
+			return options.buildSkiaFrameSnapshot({
 				elements: options.elements,
 				displayTime: targetFrame,
 				tracks: options.tracks,
@@ -633,6 +631,8 @@ export const exportTimelineAsVideoCore = async (
 					canvasSize: { width, height },
 					getModelStore: options.getModelStore,
 					prepareTransitionPictures: true,
+					awaitReady: true,
+					forcePrepareFrames: true,
 				},
 			});
 		};
@@ -640,10 +640,7 @@ export const exportTimelineAsVideoCore = async (
 		for (let frame = startFrame; frame < endFrame; frame += 1) {
 			throwIfAborted(options.signal);
 			options.onFrame?.(frame);
-			const frameState = await buildFrameState(frame);
-			if (!frameState) {
-				continue;
-			}
+			const frameSnapshot = await buildFrameSnapshot(frame);
 
 			try {
 				throwIfAborted(options.signal);
@@ -655,24 +652,28 @@ export const exportTimelineAsVideoCore = async (
 						audioClips,
 						audioClipTargetsById,
 						audioTargetsBySessionKey,
-						transitionFrameState: frameState.transitionFrameState,
+						transitionFrameState: frameSnapshot.transitionFrameState,
 						transitionCurveById,
 					});
 				}
 
-				await frameState.ready;
+				await frameSnapshot.ready;
 				throwIfAborted(options.signal);
 
-				await root.render(frameState.children);
-				// 渲染树已包含全屏背景 Fill，避免额外 clear 触发 CanvasKit 崩溃路径
-				root.drawOnCanvas(skiaCanvas);
+				const picture = frameSnapshot.picture;
+				if (!picture) {
+					throw new Error(
+						`导出失败：无法构建第 ${frame} 帧 picture（已中止导出）`,
+					);
+				}
+				skiaCanvas.drawPicture(picture);
 				surface.flush();
 				throwIfAborted(options.signal);
 
 				await videoSource.add(frame / fps, 1 / fps);
 				throwIfAborted(options.signal);
 			} finally {
-				frameState.dispose?.();
+				frameSnapshot.dispose?.();
 			}
 		}
 
@@ -719,9 +720,6 @@ export const exportTimelineAsVideoCore = async (
 		if (shouldCleanupOutputTargetImmediately) {
 			await outputTarget?.cleanup();
 		}
-		try {
-			root?.unmount();
-		} catch {}
 		try {
 			if (surface && webglCanvas) {
 				surface.ref.delete();

@@ -6,7 +6,7 @@ import {
 import { modelRegistry } from "@/dsl/model/registry";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import { getAudioPlaybackSessionKey } from "@/editor/playback/clipContinuityIndex";
-import { buildSkiaRenderState } from "@/editor/preview/buildSkiaTree";
+import { buildSkiaFrameSnapshot } from "@/editor/preview/buildSkiaTree";
 
 const waitForStaticModelsReady = async (elements: TimelineElement[]) => {
 	const promises: Promise<void>[] = [];
@@ -94,7 +94,7 @@ export const exportTimelineAsVideo = async (options?: {
 			startFrame,
 			endFrame,
 			filename: options?.filename,
-			buildSkiaRenderState,
+			buildSkiaFrameSnapshot,
 			getModelStore: (id) => modelRegistry.get(id),
 			audio: {
 				audioTrackStates: timelineState.audioTrackStates,

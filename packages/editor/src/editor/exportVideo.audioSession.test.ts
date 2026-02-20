@@ -146,9 +146,9 @@ const createOptions = ({
 	tracks,
 	fps: 30,
 	canvasSize: { width: 1920, height: 1080 },
-	buildSkiaRenderState: (() => {
+	buildSkiaFrameSnapshot: (() => {
 		throw new Error("not used in this test");
-	}) as ExportTimelineAsVideoOptions["buildSkiaRenderState"],
+	}) as ExportTimelineAsVideoOptions["buildSkiaFrameSnapshot"],
 	audio: {
 		audioTrackStates,
 		getAudioSourceByElementId: (elementId) => audioSources[elementId] ?? null,

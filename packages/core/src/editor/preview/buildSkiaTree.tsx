@@ -12,11 +12,11 @@ import {
 	resolveTransitionFrameState as resolveTransitionFrameStateCore,
 	type TransitionFrameState,
 } from "./transitionFrameState";
+import { createDisposeScope, type DisposeScope } from "./disposeScope";
 
 type RenderPlan = {
 	node: React.ReactNode | null;
 	ready: Promise<void>;
-	dispose?: () => void;
 };
 
 type RenderPrepareOptions = {
@@ -25,6 +25,8 @@ type RenderPrepareOptions = {
 	canvasSize: { width: number; height: number };
 	getModelStore?: (id: string) => ComponentModelStore | undefined;
 	prepareTransitionPictures?: boolean;
+	forcePrepareFrames?: boolean;
+	awaitReady?: boolean;
 };
 
 type ResolvedComponent = {
@@ -177,7 +179,7 @@ const renderElementNode = (
 	return <TargetRenderer key={target.id} id={target.id} {...target.props} />;
 };
 
-export const buildSkiaRenderStateCore = async (
+const buildSkiaRenderStateWithScopeCore = async (
 	{
 		elements,
 		displayTime,
@@ -194,15 +196,18 @@ export const buildSkiaRenderStateCore = async (
 		prepare?: RenderPrepareOptions;
 	},
 	deps: BuildSkiaDeps,
+	scope: DisposeScope,
 ) => {
 	const visibleElementsForRender = elements.filter(resolveElementVisible);
 	const elementsById = new Map(
 		visibleElementsForRender.map((el) => [el.id, el] as const),
 	);
 	const isExporting = prepare?.isExporting ?? false;
+	const forcePrepareFrames = prepare?.forcePrepareFrames ?? false;
 	const fps = prepare?.fps ?? 0;
 	const canvasSize = prepare?.canvasSize;
 	const getModelStore = prepare?.getModelStore;
+	const shouldAwaitReady = isExporting || (prepare?.awaitReady ?? false);
 	const shouldPrepareTransitionPictures =
 		(prepare?.prepareTransitionPictures ?? false) || isExporting;
 	const transitionPictureSize =
@@ -249,8 +254,8 @@ export const buildSkiaRenderStateCore = async (
 		extra?: Partial<RendererPrepareFrameContext>,
 		force?: boolean,
 	): Promise<void> => {
-		// 预览态也需要强制执行，确保转场截图前视频帧已准备
-		if (!isExporting && !force) return;
+		// 预览态可通过 forcePrepareFrames 触发，确保截图前视频帧已准备
+		if (!isExporting && !forcePrepareFrames && !force) return;
 		const componentDef = deps.resolveComponent(target.component);
 		if (!componentDef?.prepareRenderFrame) return;
 		await componentDef.prepareRenderFrame({
@@ -274,9 +279,11 @@ export const buildSkiaRenderStateCore = async (
 			isTransitionElement,
 			canvasSize,
 		});
-		// 转场渲染需要 picture 时，提前准备帧避免画面停在旧帧
+		// 转场渲染或强制准备时，提前准备帧避免画面停在旧帧
 		const ready = shouldPrepare
 			? runPrepareRenderFrame(target, undefined, !isExporting)
+			: forcePrepareFrames
+				? runPrepareRenderFrame(target)
 			: Promise.resolve();
 		return { node: content, ready };
 	};
@@ -284,6 +291,7 @@ export const buildSkiaRenderStateCore = async (
 	const buildElementPlan = async (
 		element: TimelineElement,
 	): Promise<RenderPlan> => {
+		// TODO: 后续接入 Composition 递归渲染时，在这里为子时间线创建 child scope 并并入当前 scope。
 		if (!isTransitionElement(element)) {
 			return buildPlainElementPlan(element, isExporting);
 		}
@@ -314,7 +322,6 @@ export const buildSkiaRenderStateCore = async (
 		const elementReady = Promise.all([fromPlan.ready, toPlan.ready]);
 		let fromPicture: SkPicture | null = null;
 		let toPicture: SkPicture | null = null;
-		let dispose: (() => void) | undefined;
 		if (transitionPictureSize) {
 			await elementReady;
 			const [fromRendered, toRendered] = await Promise.all([
@@ -327,12 +334,8 @@ export const buildSkiaRenderStateCore = async (
 			]);
 			fromPicture = fromRendered;
 			toPicture = toRendered;
-			if (fromRendered || toRendered) {
-				dispose = () => {
-					fromRendered?.dispose();
-					toRendered?.dispose();
-				};
-			}
+			scope.addDisposable(fromRendered);
+			scope.addDisposable(toRendered);
 		}
 		const TransitionRenderer = transitionDef.Renderer;
 		const transitionNode = (
@@ -359,7 +362,7 @@ export const buildSkiaRenderStateCore = async (
 				toNode: toPlan.node,
 			}),
 		]).then(() => undefined);
-		return { node, ready, dispose };
+		return { node, ready };
 	};
 
 	const plans = await Promise.all(orderedElements.map(buildElementPlan));
@@ -369,14 +372,9 @@ export const buildSkiaRenderStateCore = async (
 		...plans.map((plan) => plan.node),
 	];
 
-	const ready = isExporting
+	const ready = shouldAwaitReady
 		? Promise.all(plans.map((plan) => plan.ready)).then(() => undefined)
 		: Promise.resolve();
-	const dispose = () => {
-		for (const plan of plans) {
-			plan.dispose?.();
-		}
-	};
 
 	return {
 		children,
@@ -384,8 +382,74 @@ export const buildSkiaRenderStateCore = async (
 		visibleElements,
 		transitionFrameState,
 		ready,
-		dispose,
 	};
+};
+
+export const buildSkiaRenderStateCore = async (
+	args: {
+		elements: TimelineElement[];
+		displayTime: number;
+		tracks: TimelineTrack[];
+		getTrackIndexForElement: (element: TimelineElement) => number;
+		sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
+		prepare?: RenderPrepareOptions;
+	},
+	deps: BuildSkiaDeps,
+) => {
+	const scope = createDisposeScope();
+	try {
+		const renderState = await buildSkiaRenderStateWithScopeCore(
+			args,
+			deps,
+			scope,
+		);
+		return {
+			...renderState,
+			dispose: () => scope.dispose(),
+		};
+	} catch (error) {
+		scope.dispose();
+		throw error;
+	}
+};
+
+export const buildSkiaFrameSnapshotCore = async (
+	args: {
+		elements: TimelineElement[];
+		displayTime: number;
+		tracks: TimelineTrack[];
+		getTrackIndexForElement: (element: TimelineElement) => number;
+		sortByTrackIndex: (elements: TimelineElement[]) => TimelineElement[];
+		prepare?: RenderPrepareOptions;
+	},
+	deps: BuildSkiaDeps,
+) => {
+	const scope = createDisposeScope();
+	try {
+		const renderState = await buildSkiaRenderStateWithScopeCore(
+			args,
+			deps,
+			scope,
+		);
+		await renderState.ready;
+		const canvasSize = args.prepare?.canvasSize;
+		if (!canvasSize || canvasSize.width <= 0 || canvasSize.height <= 0) {
+			throw new Error("Failed to build skia frame snapshot: invalid canvas size");
+		}
+		const picture = await deps.renderNodeToPicture(renderState.children, canvasSize);
+		if (!picture) {
+			throw new Error("Failed to build skia frame snapshot: picture is null");
+		}
+		scope.addDisposable(picture);
+		return {
+			...renderState,
+			picture,
+			dispose: () => scope.dispose(),
+		};
+	} catch (error) {
+		scope.dispose();
+		throw error;
+	}
 };
 
 export const buildSkiaTreeCore = async (

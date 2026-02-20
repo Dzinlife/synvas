@@ -2,6 +2,7 @@ import React from "react";
 import type { TimelineElement, TransformMeta } from "core/dsl/types";
 import type { TimelineTrack } from "core/editor/timeline/types";
 import {
+	buildSkiaFrameSnapshotCore,
 	buildSkiaRenderStateCore,
 	type BuildSkiaDeps,
 } from "core/editor/preview/buildSkiaTree";
@@ -368,5 +369,94 @@ describe("buildSkiaTree transform wrapper", () => {
 			(node) => node.type === PlainRenderer,
 		);
 		expect(plainNodes.length).toBe(1);
+	});
+
+	it("统一 dispose 会同时释放整帧 picture 与 transition pictures", async () => {
+		const clipA = createElement({
+			id: "clip-a",
+			type: "Image",
+			component: "image",
+			timeline: {
+				start: 0,
+				end: 30,
+				startTimecode: "00:00:00:00",
+				endTimecode: "00:00:01:00",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+		});
+		const clipB = createElement({
+			id: "clip-b",
+			type: "Image",
+			component: "image",
+			timeline: {
+				start: 30,
+				end: 60,
+				startTimecode: "00:00:01:00",
+				endTimecode: "00:00:02:00",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+		});
+		const transition = createElement({
+			id: "transition-1",
+			type: "Transition",
+			component: "transition/test",
+			timeline: {
+				start: 15,
+				end: 45,
+				startTimecode: "00:00:00:15",
+				endTimecode: "00:00:01:15",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+			transition: {
+				duration: 30,
+				boundry: 30,
+				fromId: "clip-a",
+				toId: "clip-b",
+			},
+		});
+
+		const fromDispose = vi.fn();
+		const toDispose = vi.fn();
+		const frameDispose = vi.fn();
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToPicture: vi
+				.fn()
+				.mockResolvedValueOnce({ dispose: fromDispose } as any)
+				.mockResolvedValueOnce({ dispose: toDispose } as any)
+				.mockResolvedValueOnce({ dispose: frameDispose } as any),
+		};
+
+		const frameSnapshot = await buildSkiaFrameSnapshotCore(
+			{
+				elements: [clipA, clipB, transition],
+				displayTime: 20,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					prepareTransitionPictures: true,
+					forcePrepareFrames: true,
+					awaitReady: true,
+				},
+			},
+			localDeps,
+		);
+
+		frameSnapshot.dispose?.();
+		frameSnapshot.dispose?.();
+
+		expect(fromDispose).toHaveBeenCalledTimes(1);
+		expect(toDispose).toHaveBeenCalledTimes(1);
+		expect(frameDispose).toHaveBeenCalledTimes(1);
 	});
 });

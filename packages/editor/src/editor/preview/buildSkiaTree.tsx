@@ -1,6 +1,7 @@
 import type { RendererPrepareFrameContext } from "core/dsl/model/types";
 import {
 	type BuildSkiaDeps,
+	buildSkiaFrameSnapshotCore,
 	buildSkiaRenderStateCore,
 	buildSkiaTreeCore,
 } from "core/editor/preview/buildSkiaTree";
@@ -19,6 +20,12 @@ export const buildSkiaRenderState = async (
 	args: Parameters<typeof buildSkiaRenderStateCore>[0],
 ) => {
 	return buildSkiaRenderStateCore(args, deps);
+};
+
+export const buildSkiaFrameSnapshot = async (
+	args: Parameters<typeof buildSkiaFrameSnapshotCore>[0],
+) => {
+	return buildSkiaFrameSnapshotCore(args, deps);
 };
 
 export const buildSkiaTree = async (
