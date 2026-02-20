@@ -333,4 +333,45 @@ describe("SkiaPreviewCanvas", () => {
 			expect(buildSkiaFrameSnapshotMock).toHaveBeenCalled();
 		});
 	});
+
+	it("播放中 seek 跳帧时应优先显示目标帧", async () => {
+		let resolveSlowFrame: (() => void) | null = null;
+		timelineStore.setState({ isPlaying: true });
+		buildSkiaFrameSnapshotMock.mockImplementation(({ displayTime }) => {
+			if (displayTime === 0) {
+				return new Promise((resolve) => {
+					resolveSlowFrame = () => {
+						resolve(createFrameSnapshot("frame-0"));
+					};
+				});
+			}
+			return Promise.resolve(createFrameSnapshot(`frame-${displayTime}`));
+		});
+
+		render(
+			<SkiaPreviewCanvas
+				canvasWidth={1920}
+				canvasHeight={1080}
+				tracks={tracks}
+				getTrackIndexForElement={getTrackIndexForElement}
+				sortByTrackIndex={sortByTrackIndex}
+				getElements={() => timelineStore.getState().elements}
+				getRenderTime={() => timelineStore.getState().currentTime}
+			/>,
+		);
+
+		timelineStore.setState({ currentTime: 100 });
+
+		await waitFor(() => {
+			const hasTargetFrameCommit = rootRenderSpy.mock.calls.some((call) => {
+				const node = call[0] as React.ReactElement | undefined;
+				const picture = (node?.props as { picture?: { label?: string } })
+					?.picture;
+				return picture?.label === "frame-100";
+			});
+			expect(hasTargetFrameCommit).toBe(true);
+		});
+
+		resolveSlowFrame?.();
+	});
 });

@@ -41,6 +41,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	const internalCanvasRef = useRef<CanvasRef>(null);
 	const targetCanvasRef = canvasRef ?? internalCanvasRef;
 	const renderTokenRef = useRef(0);
+	const lastRequestedFrameRef = useRef<number | null>(null);
 	const disposeRef = useRef<(() => void) | null>(null);
 	const hasRenderedContentRef = useRef(false);
 	const buildQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -95,6 +96,12 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 
 			const normalizedFps = Number.isFinite(fps) ? Math.round(fps) : 0;
 			const frameIndex = toFrameIndex(displayTime, normalizedFps);
+			const previousRequestedFrame = lastRequestedFrameRef.current;
+			const isDiscontinuousSeek =
+				previousRequestedFrame !== null &&
+				(frameIndex < previousRequestedFrame ||
+					frameIndex > previousRequestedFrame + 1);
+			lastRequestedFrameRef.current = frameIndex;
 			frameControllerRef.current.reconcileFrame(frameIndex);
 
 			const buildFrameSnapshot = (targetFrame: number, useQueue = true) => {
@@ -161,6 +168,40 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 						}
 						disposeRef.current?.();
 						disposeRef.current = frameState.dispose ?? null;
+					})
+					.catch((error) => {
+						if (renderTokenRef.current !== renderToken) {
+							return;
+						}
+						console.error(
+							"Failed to build skia preview frame snapshot:",
+							error,
+						);
+						if (!hasRenderedContentRef.current) {
+							renderBlackFrame();
+							hasRenderedContentRef.current = true;
+						}
+					});
+				return;
+			}
+
+			if (isDiscontinuousSeek) {
+				// 播放中发生 seek/跳帧时，优先直接构建当前帧，避免被旧队列阻塞。
+				frameControllerRef.current.invalidateAll();
+				buildFrameSnapshot(frameIndex, false)
+					.then((frameState) => {
+						if (renderTokenRef.current !== renderToken) {
+							frameState.dispose?.();
+							return;
+						}
+						const rendered = commitCurrentFrame(frameState);
+						if (!rendered) {
+							frameState.dispose?.();
+							return;
+						}
+						disposeRef.current?.();
+						disposeRef.current = frameState.dispose ?? null;
+						frameControllerRef.current.commitFrame(frameIndex, buildFrameSnapshot);
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) {
@@ -262,6 +303,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			disposeRef.current?.();
 			disposeRef.current = null;
 			hasRenderedContentRef.current = false;
+			lastRequestedFrameRef.current = null;
 		};
 	}, []);
 
