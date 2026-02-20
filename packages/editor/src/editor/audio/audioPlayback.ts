@@ -831,9 +831,13 @@ export const createAudioPlaybackController = (
 			deps.getState();
 		if (isLoading || hasError) return;
 		if (!uri || !audioSink || audioDuration <= 0) return;
+		const startAsyncId = runtime.asyncId + 1;
+		runtime.asyncId = startAsyncId;
+		const isStaleStart = () => runtime.asyncId !== startAsyncId;
 
 		const context = await ensureAudioContext();
 		if (!context) return;
+		if (isStaleStart()) return;
 
 		const gainNode = ensureRuntimeGainNode(runtime);
 		if (!gainNode) return;
@@ -866,6 +870,7 @@ export const createAudioPlaybackController = (
 					context,
 					uri,
 				});
+				if (isStaleStart()) return;
 				if (!reverseBuffer) {
 					console.warn("音频倒放缓存构建失败，已停止当前播放。");
 					stopRuntimePlayback(runtime, {
@@ -883,7 +888,6 @@ export const createAudioPlaybackController = (
 				);
 
 				runtime.isPlaybackActive = true;
-				runtime.asyncId += 1;
 				runtime.playbackStartAudioTime = audioStart;
 				runtime.playbackStartContextTime = context.currentTime + 0.05;
 				runtime.playbackDirection = -1;
@@ -929,6 +933,7 @@ export const createAudioPlaybackController = (
 				const firstBuffer = await audioSink.getBuffer(audioStart);
 				sourceSampleRate = firstBuffer?.buffer?.sampleRate ?? Number.NaN;
 			} catch {}
+			if (isStaleStart()) return;
 			if (isSampleRateMismatched(sourceSampleRate, context.sampleRate)) {
 				const forwardBuffer = await ensureRuntimeForwardBuffer({
 					runtime,
@@ -937,6 +942,7 @@ export const createAudioPlaybackController = (
 					context,
 					uri,
 				});
+				if (isStaleStart()) return;
 				if (!forwardBuffer) {
 					console.warn("音频正放缓存构建失败，已停止当前播放。");
 					stopRuntimePlayback(runtime, {
@@ -954,7 +960,6 @@ export const createAudioPlaybackController = (
 				);
 
 				runtime.isPlaybackActive = true;
-				runtime.asyncId += 1;
 				runtime.playbackStartAudioTime = forwardOffset;
 				runtime.playbackStartContextTime = context.currentTime + 0.05;
 				runtime.playbackDirection = 1;
@@ -998,8 +1003,7 @@ export const createAudioPlaybackController = (
 			}
 
 			runtime.isPlaybackActive = true;
-			runtime.asyncId += 1;
-			const currentAsyncId = runtime.asyncId;
+			const currentAsyncId = startAsyncId;
 
 			runtime.playbackStartAudioTime = audioStart;
 			runtime.playbackStartContextTime = context.currentTime + 0.05;
