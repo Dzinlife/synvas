@@ -25,6 +25,7 @@ const PreviewContext = createContext({
 	setPictureSize: (_pictureSize: { width: number; height: number }) => {},
 	setContainerSize: (_containerSize: { width: number; height: number }) => {},
 	zoomLevel: 0.5,
+	fitZoomLevel: 0.5,
 	zoomTransform: "",
 	offsetX: 0,
 	offsetY: 0,
@@ -102,6 +103,9 @@ const PreviewProvider = ({ children }: { children: React.ReactNode }) => {
 	const [zoomLevel, setZoomLevel] = useState(() => {
 		return calculateFitZoomLevel(pictureSize, null);
 	});
+	const fitZoomLevel = useMemo(() => {
+		return calculateFitZoomLevel(pictureSize, containerSize);
+	}, [calculateFitZoomLevel, pictureSize, containerSize]);
 
 	// Pinch zoom state
 	const [pinchState, setPinchState] = useState<PinchState>({
@@ -281,6 +285,7 @@ const PreviewProvider = ({ children }: { children: React.ReactNode }) => {
 			canvasWidth: canvasSize.width,
 			canvasHeight: canvasSize.height,
 			zoomLevel,
+			fitZoomLevel,
 			setZoomLevel: setZoom,
 			setPictureSize: setPicture,
 			setContainerSize: setContainer,
@@ -304,6 +309,7 @@ const PreviewProvider = ({ children }: { children: React.ReactNode }) => {
 		pictureSize,
 		canvasSize,
 		zoomLevel,
+		fitZoomLevel,
 		setZoom,
 		setPicture,
 		setContainer,

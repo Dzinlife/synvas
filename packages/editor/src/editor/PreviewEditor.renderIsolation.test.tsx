@@ -109,10 +109,6 @@ vi.mock("react-konva", async () => {
 	};
 });
 
-vi.mock("./components/PreviewToolbar", () => ({
-	default: () => <div data-testid="preview-toolbar" />,
-}));
-
 vi.mock("./preview/SkiaPreviewCanvas", () => ({
 	SkiaPreviewCanvas: () => <div data-testid="skia-preview-canvas" />,
 }));

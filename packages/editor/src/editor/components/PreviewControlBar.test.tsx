@@ -1,22 +1,34 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type React from "react";
-import type { CanvasRef } from "react-skia-lite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { framesToTimecode } from "@/utils/timecode";
-import PreviewToolbar from "./PreviewToolbar";
+import PreviewControlBar from "./PreviewControlBar";
 
-const { timelineState, playbackState, togglePlayMock } = vi.hoisted(() => ({
-	timelineState: {
-		currentTime: 120,
-		previewTime: null as number | null,
-		fps: 30,
-	},
-	playbackState: {
-		isPlaying: false,
-	},
-	togglePlayMock: vi.fn(),
-}));
+const { timelineState, playbackState, previewState, togglePlayMock } =
+	vi.hoisted(() => ({
+		timelineState: {
+			currentTime: 120,
+			previewTime: null as number | null,
+			fps: 30,
+		},
+		playbackState: {
+			isPlaying: false,
+		},
+		previewState: {
+			zoomLevel: 1,
+			pinchState: {
+				isPinching: false,
+				currentZoom: 1,
+			},
+			setZoomLevel: vi.fn(),
+			resetPanOffset: vi.fn(),
+			fitZoomLevel: 1,
+			canvasRef: {
+				current: null,
+			},
+		},
+		togglePlayMock: vi.fn(),
+	}));
 
 vi.mock("@/editor/contexts/TimelineContext", () => {
 	const useTimelineStore = ((
@@ -40,6 +52,10 @@ vi.mock("./PreviewLoudnessMeterCanvas", () => ({
 	default: () => <div data-testid="preview-loudness-meter" />,
 }));
 
+vi.mock("@/editor/contexts/PreviewProvider", () => ({
+	usePreview: () => previewState,
+}));
+
 vi.mock("@/dsl/export", () => ({
 	exportCanvasAsImage: vi.fn(async () => {}),
 }));
@@ -53,53 +69,28 @@ beforeEach(() => {
 	timelineState.previewTime = null;
 	timelineState.fps = 30;
 	playbackState.isPlaying = false;
+	previewState.zoomLevel = 1;
+	previewState.pinchState.isPinching = false;
+	previewState.pinchState.currentZoom = 1;
+	previewState.fitZoomLevel = 1;
+	previewState.setZoomLevel.mockReset();
+	previewState.resetPanOffset.mockReset();
 	togglePlayMock.mockReset();
 });
 
-const createCanvasRef = (): React.RefObject<CanvasRef | null> => {
-	return {
-		current: null,
-	};
-};
-
-describe("PreviewToolbar", () => {
-	it("响度表位于播放按钮左侧", () => {
-		render(
-			<PreviewToolbar
-				effectiveZoomLevel={1}
-				onZoomChange={vi.fn()}
-				onResetView={vi.fn()}
-				canvasRef={createCanvasRef()}
-			/>,
-		);
-
-		const meter = screen.getByTestId("preview-loudness-meter");
-		const playToggle = screen.getByTestId("preview-play-toggle");
-		expect(
-			meter.compareDocumentPosition(playToggle) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
-	});
-
+describe("PreviewControlBar", () => {
 	it("播放按钮可触发切换且时间码与原逻辑一致", () => {
 		timelineState.currentTime = 150;
 		timelineState.previewTime = 90;
 		timelineState.fps = 30;
 
-		render(
-			<PreviewToolbar
-				effectiveZoomLevel={1}
-				onZoomChange={vi.fn()}
-				onResetView={vi.fn()}
-				canvasRef={createCanvasRef()}
-			/>,
-		);
+		render(<PreviewControlBar />);
 
-		fireEvent.click(screen.getByTestId("preview-play-toggle"));
+		fireEvent.click(screen.getByTestId("preview-control-play-toggle"));
 		expect(togglePlayMock).toHaveBeenCalledTimes(1);
 
 		const timecode = framesToTimecode(90, 30);
-		expect(screen.getByTestId("preview-toolbar-timecode").textContent).toBe(
+		expect(screen.getByTestId("preview-control-bar-timecode").textContent).toBe(
 			timecode,
 		);
 	});

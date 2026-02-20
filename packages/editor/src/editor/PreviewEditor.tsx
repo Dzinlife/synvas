@@ -18,7 +18,6 @@ import {
 } from "react-konva";
 import type { CanvasRef } from "react-skia-lite";
 import { transformMetaToRenderLayout } from "@/dsl/layout";
-import PreviewToolbar from "./components/PreviewToolbar";
 import { usePreview } from "./contexts/PreviewProvider";
 import { useTimelineStore, useTracks } from "./contexts/TimelineContext";
 import { buildKonvaTree } from "./preview/buildSkiaTree";
@@ -46,7 +45,6 @@ const Preview = () => {
 		canvasWidth,
 		canvasHeight,
 		zoomLevel,
-		setZoomLevel,
 		zoomTransform,
 		setContainerSize,
 		offsetX,
@@ -59,7 +57,6 @@ const Preview = () => {
 		// Pan
 		panOffset,
 		setPanOffset,
-		resetPanOffset,
 		// Canvas ref
 		setCanvasRef,
 	} = usePreview();
@@ -413,35 +410,6 @@ const Preview = () => {
 	const effectiveZoomLevel = pinchState.isPinching
 		? pinchState.currentZoom
 		: zoomLevel;
-	const fitZoomLevel = useMemo(() => {
-		const { width: containerWidth, height: containerHeight } =
-			containerDimensions;
-		if (
-			containerWidth <= 0 ||
-			containerHeight <= 0 ||
-			pictureWidth <= 0 ||
-			pictureHeight <= 0
-		) {
-			return 0.5;
-		}
-		const paddingRatio = 0.95;
-		const availableWidth = containerWidth * paddingRatio;
-		const availableHeight = containerHeight * paddingRatio;
-		const scaleX = availableWidth / pictureWidth;
-		const scaleY = availableHeight / pictureHeight;
-		return Math.min(scaleX, scaleY, 1);
-	}, [containerDimensions, pictureHeight, pictureWidth]);
-	const handleResetView = useCallback(() => {
-		resetPanOffset();
-		setZoomLevel(fitZoomLevel);
-	}, [fitZoomLevel, resetPanOffset, setZoomLevel]);
-	const handleZoomChange = useCallback(
-		(nextZoom: number) => {
-			if (!Number.isFinite(nextZoom)) return;
-			setZoomLevel(nextZoom);
-		},
-		[setZoomLevel],
-	);
 
 	return (
 		<div
@@ -685,12 +653,6 @@ const Preview = () => {
 					/>
 				</Layer>
 			</Stage>
-			<PreviewToolbar
-				effectiveZoomLevel={effectiveZoomLevel}
-				onZoomChange={handleZoomChange}
-				onResetView={handleResetView}
-				canvasRef={skiaCanvasRef}
-			/>
 		</div>
 	);
 };

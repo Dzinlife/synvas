@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ModelManager } from "@/dsl/model";
 import { useProjectStore } from "@/projects/projectStore";
 import EditorSidebars from "./components/EditorSidebars";
+import PreviewControlBar from "./components/PreviewControlBar";
 import PreviewProvider from "./contexts/PreviewProvider";
 import { TimelineProvider } from "./contexts/TimelineContext";
 import PreviewEditor from "./PreviewEditor";
@@ -73,6 +74,7 @@ const EditorContent: React.FC = () => {
 			<div className="relative flex-1 min-h-0 bg-neutral-900">
 				<PreviewEditor />
 				<EditorSidebars />
+				<PreviewControlBar />
 			</div>
 			<div
 				className="min-h-60 flex flex-col border-t border-neutral-700"
