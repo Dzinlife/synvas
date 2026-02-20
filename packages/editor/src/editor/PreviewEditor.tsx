@@ -22,8 +22,10 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Slider } from "@/components/ui/slider";
 import {
 	Tooltip,
 	TooltipContent,
@@ -31,6 +33,7 @@ import {
 } from "@/components/ui/tooltip";
 import { exportCanvasAsImage } from "@/dsl/export";
 import { transformMetaToRenderLayout } from "@/dsl/layout";
+import { framesToTimecode } from "@/utils/timecode";
 import { usePreview } from "./contexts/PreviewProvider";
 import {
 	usePlaybackControl,
@@ -47,6 +50,9 @@ const Preview = () => {
 	const renderElementsRef = useRef<TimelineElement[]>([]);
 	const { tracks } = useTracks();
 	const { isPlaying, togglePlay } = usePlaybackControl();
+	const currentTime = useTimelineStore((state) => state.currentTime);
+	const previewTime = useTimelineStore((state) => state.previewTime);
+	const fps = useTimelineStore((state) => state.fps);
 
 	const { getRenderTime, getElements } = useMemo(
 		() => useTimelineStore.getState(),
@@ -441,6 +447,37 @@ const Preview = () => {
 
 	const stageWidth = containerDimensions.width || canvasWidth;
 	const stageHeight = containerDimensions.height || canvasHeight;
+	const effectiveZoomLevel = pinchState.isPinching
+		? pinchState.currentZoom
+		: zoomLevel;
+	const fitZoomLevel = useMemo(() => {
+		const { width: containerWidth, height: containerHeight } =
+			containerDimensions;
+		if (
+			containerWidth <= 0 ||
+			containerHeight <= 0 ||
+			pictureWidth <= 0 ||
+			pictureHeight <= 0
+		) {
+			return 0.5;
+		}
+		const paddingRatio = 0.95;
+		const availableWidth = containerWidth * paddingRatio;
+		const availableHeight = containerHeight * paddingRatio;
+		const scaleX = availableWidth / pictureWidth;
+		const scaleY = availableHeight / pictureHeight;
+		return Math.min(scaleX, scaleY, 1);
+	}, [containerDimensions, pictureHeight, pictureWidth]);
+	const handleResetView = useCallback(() => {
+		resetPanOffset();
+		setZoomLevel(fitZoomLevel);
+	}, [fitZoomLevel, resetPanOffset, setZoomLevel]);
+	const displayTime = previewTime ?? currentTime;
+	const previewTimecode = useMemo(() => {
+		return framesToTimecode(displayTime, fps);
+	}, [displayTime, fps]);
+	const previewTimecodeMuted = previewTimecode.slice(0, 4);
+	const previewTimecodeStrong = previewTimecode.slice(4);
 
 	return (
 		<div
@@ -605,9 +642,6 @@ const Preview = () => {
 						);
 
 						// 将画布尺寸转换为 Stage 尺寸
-						const effectiveZoom = pinchState.isPinching
-							? pinchState.currentZoom
-							: zoomLevel;
 						const isSingleSelectionTransforming =
 							selectedIds.length === 1 &&
 							selectedIds[0] === id &&
@@ -617,8 +651,8 @@ const Preview = () => {
 							: undefined;
 						const canvasWidth = baseTransform?.canvasWidth ?? canvasWidth_el;
 						const canvasHeight = baseTransform?.canvasHeight ?? canvasHeight_el;
-						const stageWidth = canvasWidth * effectiveZoom;
-						const stageHeight = canvasHeight * effectiveZoom;
+						const stageWidth = canvasWidth * effectiveZoomLevel;
+						const stageHeight = canvasHeight * effectiveZoomLevel;
 
 						// 将弧度转换为度数（Konva 使用度数）
 						const rotationDegrees = (rotate * 180) / Math.PI;
@@ -705,24 +739,6 @@ const Preview = () => {
 				<Tooltip>
 					<TooltipTrigger
 						type="button"
-						onClick={resetPanOffset}
-						style={{
-							background: "transparent",
-							border: "none",
-							color: "white",
-							cursor: "pointer",
-							padding: "4px 8px",
-							borderRadius: 4,
-							fontSize: 12,
-						}}
-					>
-						⟲
-					</TooltipTrigger>
-					<TooltipContent>重置视图位置</TooltipContent>
-				</Tooltip>
-				<Tooltip>
-					<TooltipTrigger
-						type="button"
 						onClick={togglePlay}
 						style={{
 							background: "transparent",
@@ -738,23 +754,22 @@ const Preview = () => {
 					</TooltipTrigger>
 					<TooltipContent>播放 / 暂停</TooltipContent>
 				</Tooltip>
-				<input
-					type="range"
-					min={0.1}
-					max={2}
-					step={0.001}
-					value={pinchState.isPinching ? pinchState.currentZoom : zoomLevel}
-					onChange={(e) => {
-						setZoomLevel(Number(e.target.value));
+				<div
+					style={{
+						color: "white",
+						fontSize: 12,
+						fontFamily:
+							"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+						fontVariantNumeric: "tabular-nums",
+						letterSpacing: "0.02em",
+						minWidth: 90,
 					}}
-					style={{ width: 100 }}
-				/>
-				<span style={{ color: "white", fontSize: 12, minWidth: 40 }}>
-					{Math.round(
-						(pinchState.isPinching ? pinchState.currentZoom : zoomLevel) * 100,
-					)}
-					%
-				</span>
+				>
+					<span style={{ color: "rgba(255,255,255,0.55)" }}>
+						{previewTimecodeMuted}
+					</span>
+					<span>{previewTimecodeStrong}</span>
+				</div>
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						chevron={null}
@@ -765,8 +780,31 @@ const Preview = () => {
 					<DropdownMenuContent
 						align="center"
 						side="top"
-						className="min-w-[148px]"
+						className="min-w-[240px]"
 					>
+						<div className="px-4 py-2.5">
+							<div className="mb-2 flex items-center justify-between text-xs text-gray-600">
+								<span>缩放</span>
+								<span>{Math.round(effectiveZoomLevel * 100)}%</span>
+							</div>
+							<Slider
+								min={0.1}
+								max={2}
+								step={0.001}
+								value={[effectiveZoomLevel]}
+								onValueChange={(value) => {
+									const nextValue = Array.isArray(value) ? value[0] : value;
+									if (!Number.isFinite(nextValue)) return;
+									setZoomLevel(nextValue);
+								}}
+								className="w-full py-2"
+							/>
+						</div>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem onClick={handleResetView}>
+							重置视图位置（适应窗口）
+						</DropdownMenuItem>
+						<DropdownMenuSeparator />
 						<DropdownMenuItem
 							onClick={() => {
 								void handleExportFrame();
