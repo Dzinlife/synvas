@@ -288,7 +288,10 @@ const repairTokenTextsWithAnchors = (
 ): RepairedTokenRange[] => {
 	const textLength = segmentText.length;
 	const tokenCount = tokens.length;
-	const charRanges: Array<{ start: number; end: number } | null> = Array.from({
+	const charRanges: Array<{ start: number; end: number } | null> = Array.from<{
+		start: number;
+		end: number;
+	} | null>({
 		length: tokenCount,
 	}).fill(null);
 	let cursor = 0;
