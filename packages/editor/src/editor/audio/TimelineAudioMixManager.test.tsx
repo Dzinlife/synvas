@@ -1,4 +1,5 @@
 import type { TimelineElement, TimelineMeta } from "core/dsl/types";
+import { framesToSeconds } from "core/utils/timecode";
 import { describe, expect, it, vi } from "vitest";
 import { createTransformMeta } from "@/dsl/transform";
 import type { TimelineTrack } from "../timeline/types";
@@ -51,6 +52,32 @@ const createVideoElement = (
 	},
 	props: {
 		uri: `${id}.mp4`,
+	},
+});
+
+const createImageElement = (
+	id: string,
+	start: number,
+	end: number,
+): TimelineElement => ({
+	id,
+	type: "Image",
+	component: "image",
+	name: id,
+	transform: createTransformMeta({
+		width: 1920,
+		height: 1080,
+		positionX: 960,
+		positionY: 540,
+	}),
+	timeline: createTimeline(start, end),
+	render: {
+		zIndex: 0,
+		visible: true,
+		opacity: 1,
+	},
+	props: {
+		uri: `${id}.png`,
 	},
 });
 
@@ -188,6 +215,52 @@ describe("TimelineAudioMixManager.runTimelineAudioMixFrame", () => {
 		});
 		expect(fromInstruction.gain).toBeGreaterThan(0);
 		expect(toInstruction.gain).toBeGreaterThan(0);
+	});
+
+	it("VideoClip 与图片转场时会在图片区继续下发淡出指令", () => {
+		const applyFrom = vi.fn();
+		const from = createVideoElement("from", 0, 30, 0);
+		const image = createImageElement("image", 30, 60);
+		const transition = createTransitionElement(
+			"t1",
+			15,
+			45,
+			30,
+			"from",
+			"image",
+		);
+		const targets = new Map([
+			[
+				"from",
+				createTarget({
+					id: "from",
+					timeline: from.timeline,
+					applyAudioMix: applyFrom,
+				}),
+			],
+		]);
+
+		runTimelineAudioMixFrame({
+			isPlaying: true,
+			isExporting: false,
+			displayTime: 36,
+			fps: 30,
+			elements: [from, image, transition],
+			tracks: [createTrack()],
+			audioTrackStates: {},
+			targets,
+		});
+
+		const instruction = applyFrom.mock.calls.at(-1)?.[0];
+		expect(instruction).toMatchObject({
+			timelineTimeSeconds: expect.any(Number),
+			gain: expect.any(Number),
+		});
+		expect(instruction.gain).toBeGreaterThan(0);
+		expect(instruction.gain).toBeLessThan(1);
+		expect(instruction.timelineTimeSeconds).toBeGreaterThan(
+			framesToSeconds(30, 30),
+		);
 	});
 
 	it("导出态会强制停止所有目标", () => {

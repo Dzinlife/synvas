@@ -4,6 +4,7 @@ import {
 	buildTransitionAudioMixPlan,
 } from "core/editor/audio/transitionAudioMix";
 import type { ActiveTransitionFrameState } from "core/editor/preview/buildSkiaTree";
+import { framesToSeconds } from "core/utils/timecode";
 import { describe, expect, it } from "vitest";
 import type { TransitionAudioCurve } from "../../dsl/Transition/model";
 
@@ -130,6 +131,44 @@ describe("transitionAudioMix", () => {
 		expect(latePlan.instructions.from).toBeUndefined();
 	});
 
+	it("转场另一侧无音频片段时，from 侧会在非视频区继续淡出", () => {
+		const clips = [createClip("from", createTimeline(0, 30, 0), 2)];
+		const transition = createTransition("t1", 15, 45, 30, "from", "image");
+
+		const plan = buildPlan({
+			displayTimeFrames: 36,
+			clips,
+			activeTransitions: [transition],
+		});
+
+		const instruction = plan.instructions.from;
+		expect(instruction).toBeTruthy();
+		expect(instruction?.gain ?? 0).toBeGreaterThan(0);
+		expect(instruction?.gain ?? 0).toBeLessThan(1);
+		expect(instruction?.timelineTimeSeconds ?? 0).toBeGreaterThan(
+			framesToSeconds(30, FPS),
+		);
+	});
+
+	it("转场另一侧无音频片段时，to 侧会在非视频区提前淡入", () => {
+		const clips = [createClip("to", createTimeline(30, 60, 15), 2)];
+		const transition = createTransition("t1", 15, 45, 30, "image", "to");
+
+		const plan = buildPlan({
+			displayTimeFrames: 24,
+			clips,
+			activeTransitions: [transition],
+		});
+
+		const instruction = plan.instructions.to;
+		expect(instruction).toBeTruthy();
+		expect(instruction?.gain ?? 0).toBeGreaterThan(0);
+		expect(instruction?.gain ?? 0).toBeLessThan(1);
+		expect(instruction?.timelineTimeSeconds ?? Infinity).toBeLessThan(
+			framesToSeconds(30, FPS),
+		);
+	});
+
 	it("sourceTime 会被限制在有效 sourceRange 内", () => {
 		const clips = [
 			createClip("from", createTimeline(0, 30, 0), 2),
@@ -181,30 +220,28 @@ describe("transitionAudioMix", () => {
 		) {
 			throw new Error("reverse instruction should include source range");
 		}
-			expect(earlyInstruction.reversed).toBe(true);
-			expect(lateInstruction.reversed).toBe(true);
-			const earlySourceTime = earlyInstruction.sourceTime ?? 0;
-			const lateSourceTime = lateInstruction.sourceTime ?? 0;
-			expect(earlySourceTime).toBeGreaterThan(lateSourceTime);
-			expect(earlyInstruction.sourceRange.start).toBeLessThanOrEqual(
-				earlyInstruction.sourceRange.end,
-			);
+		expect(earlyInstruction.reversed).toBe(true);
+		expect(lateInstruction.reversed).toBe(true);
+		const earlySourceTime = earlyInstruction.sourceTime ?? 0;
+		const lateSourceTime = lateInstruction.sourceTime ?? 0;
+		expect(earlySourceTime).toBeGreaterThan(lateSourceTime);
+		expect(earlyInstruction.sourceRange.start).toBeLessThanOrEqual(
+			earlyInstruction.sourceRange.end,
+		);
 		expect(lateInstruction.sourceRange.start).toBeLessThanOrEqual(
 			lateInstruction.sourceRange.end,
 		);
-			expect(earlySourceTime).toBeGreaterThanOrEqual(
-				earlyInstruction.sourceRange.start,
-			);
-			expect(earlySourceTime).toBeLessThanOrEqual(
-				earlyInstruction.sourceRange.end,
-			);
-			expect(lateSourceTime).toBeGreaterThanOrEqual(
-				lateInstruction.sourceRange.start,
-			);
-			expect(lateSourceTime).toBeLessThanOrEqual(
-				lateInstruction.sourceRange.end,
-			);
-		});
+		expect(earlySourceTime).toBeGreaterThanOrEqual(
+			earlyInstruction.sourceRange.start,
+		);
+		expect(earlySourceTime).toBeLessThanOrEqual(
+			earlyInstruction.sourceRange.end,
+		);
+		expect(lateSourceTime).toBeGreaterThanOrEqual(
+			lateInstruction.sourceRange.start,
+		);
+		expect(lateSourceTime).toBeLessThanOrEqual(lateInstruction.sourceRange.end);
+	});
 
 	it("多转场叠加时增益合成保持稳定", () => {
 		const clips = [

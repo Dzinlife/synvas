@@ -105,11 +105,7 @@ const buildClipRuntime = (clip: AudioMixClip, fps: number): ClipRuntime => {
 	const clipDuration = Math.max(0, end - start);
 	const rawStart = offset;
 	const rawEnd = offset + clipDuration;
-	const trimmedStart = clamp(
-		Math.min(rawStart, rawEnd),
-		0,
-		clip.audioDuration,
-	);
+	const trimmedStart = clamp(Math.min(rawStart, rawEnd), 0, clip.audioDuration);
 	const trimmedEnd = clamp(
 		Math.max(rawStart, rawEnd),
 		trimmedStart,
@@ -237,6 +233,72 @@ const resolveTransitionMix = ({
 	};
 };
 
+const resolveSingleSidedTransitionMix = ({
+	currentTime,
+	transition,
+	clip,
+	curve,
+	fps,
+	side,
+}: {
+	currentTime: number;
+	transition: ActiveTransitionFrameState;
+	clip: ClipRuntime;
+	curve: TransitionAudioCurve;
+	fps: number;
+	side: "from" | "to";
+}): TransitionSideMix => {
+	const desiredStart = framesToSeconds(transition.start, fps);
+	const desiredEnd = framesToSeconds(transition.end, fps);
+	const boundary = framesToSeconds(transition.boundary, fps);
+
+	const playable =
+		side === "from"
+			? normalizeRange(clip.start, clip.end + clip.tailHandle)
+			: normalizeRange(clip.start - clip.headHandle, clip.end);
+
+	let activeStart = Math.max(desiredStart, playable.start);
+	let activeEnd = Math.min(desiredEnd, playable.end);
+	if (activeEnd < activeStart) {
+		activeEnd = activeStart;
+	}
+
+	let gain = 0;
+	if (activeEnd - activeStart > EPSILON) {
+		if (currentTime < activeStart) {
+			gain = side === "from" ? 1 : 0;
+		} else if (currentTime >= activeEnd) {
+			gain = side === "from" ? 0 : 1;
+		} else {
+			const progress = (currentTime - activeStart) / (activeEnd - activeStart);
+			const curveGains = resolveCurveGains(progress, curve);
+			gain = side === "from" ? curveGains.fromGain : curveGains.toGain;
+		}
+	} else {
+		const cutTime = clamp(boundary, desiredStart, desiredEnd);
+		gain =
+			side === "from"
+				? currentTime < cutTime
+					? 1
+					: 0
+				: currentTime >= cutTime
+					? 1
+					: 0;
+		activeStart = cutTime;
+		activeEnd = cutTime;
+	}
+
+	const activeWindow = normalizeRange(activeStart, activeEnd);
+	if (!isInRange(currentTime, activeWindow.start, activeWindow.end)) {
+		gain = 0;
+	}
+
+	return {
+		gain: clamp(gain, 0, 1),
+		activeWindow,
+	};
+};
+
 const mergeWindowAndSourceRange = (
 	acc: ClipAccumulator,
 	clip: ClipRuntime,
@@ -262,9 +324,11 @@ export const buildTransitionAudioMixPlan = (
 	const currentTime = framesToSeconds(input.displayTimeFrames, fps);
 	const clipRuntimeById = new Map<string, ClipRuntime>();
 	const accById = new Map<string, ClipAccumulator>();
+	const declaredClipIds = new Set<string>();
 	const instructions: Record<string, AudioMixInstruction> = {};
 
 	for (const clip of input.clips) {
+		declaredClipIds.add(clip.id);
 		if (!clip.enabled) continue;
 		if (!Number.isFinite(clip.audioDuration) || clip.audioDuration <= 0)
 			continue;
@@ -282,25 +346,60 @@ export const buildTransitionAudioMixPlan = (
 	for (const transition of input.activeTransitions) {
 		const from = clipRuntimeById.get(transition.fromId);
 		const to = clipRuntimeById.get(transition.toId);
-		if (!from || !to) continue;
-		const fromAcc = accById.get(from.id);
-		const toAcc = accById.get(to.id);
-		if (!fromAcc || !toAcc) continue;
+		const fromDeclared = declaredClipIds.has(transition.fromId);
+		const toDeclared = declaredClipIds.has(transition.toId);
+		if (!from && !to) continue;
 
 		const curve = input.transitionCurves?.[transition.id] ?? DEFAULT_CURVE;
-		const mix = resolveTransitionMix({
-			currentTime,
-			transition,
-			from,
-			to,
-			curve,
-			fps,
-		});
+		if (from && to) {
+			const fromAcc = accById.get(from.id);
+			const toAcc = accById.get(to.id);
+			if (!fromAcc || !toAcc) continue;
+			const mix = resolveTransitionMix({
+				currentTime,
+				transition,
+				from,
+				to,
+				curve,
+				fps,
+			});
+			fromAcc.gain *= mix.fromMix.gain;
+			toAcc.gain *= mix.toMix.gain;
+			mergeWindowAndSourceRange(fromAcc, from, mix.fromMix.activeWindow);
+			mergeWindowAndSourceRange(toAcc, to, mix.toMix.activeWindow);
+			continue;
+		}
 
-		fromAcc.gain *= mix.fromMix.gain;
-		toAcc.gain *= mix.toMix.gain;
-		mergeWindowAndSourceRange(fromAcc, from, mix.fromMix.activeWindow);
-		mergeWindowAndSourceRange(toAcc, to, mix.toMix.activeWindow);
+		if (from && !toDeclared) {
+			const fromAcc = accById.get(from.id);
+			if (!fromAcc) continue;
+			const mix = resolveSingleSidedTransitionMix({
+				currentTime,
+				transition,
+				clip: from,
+				curve,
+				fps,
+				side: "from",
+			});
+			fromAcc.gain *= mix.gain;
+			mergeWindowAndSourceRange(fromAcc, from, mix.activeWindow);
+			continue;
+		}
+
+		if (to && !fromDeclared) {
+			const toAcc = accById.get(to.id);
+			if (!toAcc) continue;
+			const mix = resolveSingleSidedTransitionMix({
+				currentTime,
+				transition,
+				clip: to,
+				curve,
+				fps,
+				side: "to",
+			});
+			toAcc.gain *= mix.gain;
+			mergeWindowAndSourceRange(toAcc, to, mix.activeWindow);
+		}
 	}
 
 	for (const [id, runtime] of clipRuntimeById.entries()) {
