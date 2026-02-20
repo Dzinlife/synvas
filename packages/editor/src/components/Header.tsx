@@ -1,4 +1,5 @@
 import { saveTimelineToObject } from "core/editor/timelineLoader";
+import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
 import { Check, FolderPlus, Save } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useMemo } from "react";
 import {
@@ -89,12 +90,10 @@ export default function Header() {
 		[],
 	);
 
-	const timelineEndFrame = useMemo(() => {
-		return elements.reduce(
-			(max, element) => Math.max(max, Math.round(element.timeline.end ?? 0)),
-			0,
-		);
-	}, [elements]);
+	const timelineEndFrame = useMemo(
+		() => resolveTimelineEndFrame(elements),
+		[elements],
+	);
 
 	const menuDisabled = status !== "ready";
 	const displayName =

@@ -13,6 +13,7 @@ import {
 	resolveTrackPlacementWithStoredAssignments,
 } from "core/editor/command/move";
 import { pruneAudioTrackStates } from "core/editor/command/postProcess";
+import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
 import {
 	createContext,
 	useCallback,
@@ -371,16 +372,6 @@ const pruneSelectionForTrackLock = (
 			? state.primarySelectedId
 			: (nextSelected[nextSelected.length - 1] ?? null);
 	return { selectedIds: nextSelected, primarySelectedId: nextPrimary };
-};
-
-const resolveTimelineEndFrame = (elements: TimelineElement[]): number => {
-	return Math.max(
-		0,
-		elements.reduce((maxFrame, element) => {
-			const endFrame = Math.round(element.timeline.end ?? 0);
-			return Math.max(maxFrame, endFrame);
-		}, 0),
-	);
 };
 
 const resolveStartPlaybackPatch = (

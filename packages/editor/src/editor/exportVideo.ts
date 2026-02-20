@@ -3,6 +3,7 @@ import {
 	type ExportElementAudioSource,
 	exportTimelineAsVideoCore,
 } from "core/editor/exportVideo";
+import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
 import { modelRegistry } from "@/dsl/model/registry";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import { getAudioPlaybackSessionKey } from "@/editor/playback/clipContinuityIndex";
@@ -62,12 +63,7 @@ export const exportTimelineAsVideo = async (options?: {
 		: Math.round(timelineState.fps || 30);
 
 	const startFrame = Math.max(0, Math.round(options?.startFrame ?? 0));
-	const timelineEnd =
-		options?.endFrame ??
-		elements.reduce(
-			(max, el) => Math.max(max, Math.round(el.timeline.end ?? 0)),
-			0,
-		);
+	const timelineEnd = options?.endFrame ?? resolveTimelineEndFrame(elements);
 	const endFrame = Math.max(startFrame, Math.round(timelineEnd));
 
 	const previousState = {

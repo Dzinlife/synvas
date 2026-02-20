@@ -8,9 +8,10 @@ const createElement = (
 	id: string,
 	start: number,
 	end: number,
+	type: TimelineElement["type"] = "VideoClip",
 ): TimelineElement => ({
 	id,
-	type: "VideoClip",
+	type,
 	component: "video-clip",
 	name: id,
 	timeline: {
@@ -93,5 +94,21 @@ describe("TimelineContext render time", () => {
 		});
 
 		expect(useTimelineStore.getState().getRenderTime()).toBe(120);
+	});
+
+	it("Filter 不参与末帧回退计算", () => {
+		useTimelineStore.setState({
+			elements: [
+				createElement("clip-1", 0, 120, "VideoClip"),
+				createElement("filter-1", 0, 300, "Filter"),
+			],
+			currentTime: 120,
+			previewTime: null,
+			isPlaying: false,
+			isExporting: false,
+			exportTime: null,
+		});
+
+		expect(useTimelineStore.getState().getRenderTime()).toBe(119);
 	});
 });

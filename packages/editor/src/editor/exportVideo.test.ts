@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let timelineState: {
-	elements: Array<{ timeline: { end: number } }>;
+	elements: Array<{ type?: string; timeline: { end: number } }>;
 	tracks: unknown[];
 	fps: number;
 	canvasSize: { width: number; height: number };
@@ -208,5 +208,22 @@ describe("editor.exportTimelineAsVideo", () => {
 		expect(timelineState.setCurrentTime).toHaveBeenCalledWith(16);
 		expect(timelineState.play).not.toHaveBeenCalled();
 		expect(timelineState.pause).toHaveBeenCalled();
+	});
+
+	it("未传 endFrame 时会忽略 Filter 计算末帧", async () => {
+		timelineState = createTimelineState({
+			elements: [
+				{ type: "VideoClip", timeline: { end: 120 } },
+				{ type: "Filter", timeline: { end: 300 } },
+			],
+		});
+		exportTimelineAsVideoCoreMock.mockResolvedValueOnce(undefined);
+
+		await exportTimelineAsVideo({
+			startFrame: 0,
+		});
+
+		const passed = exportTimelineAsVideoCoreMock.mock.calls[0]?.[0];
+		expect(passed?.endFrame).toBe(120);
 	});
 });

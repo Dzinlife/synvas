@@ -24,6 +24,7 @@ import type { buildSkiaFrameSnapshotCore } from "./preview/buildSkiaTree";
 import type { TransitionFrameState } from "./preview/transitionFrameState";
 import type { TimelineTrack } from "./timeline/types";
 import type { AudioTrackControlStateMap } from "./utils/audioTrackState";
+import { resolveTimelineEndFrame } from "./utils/timelineEndFrame";
 import { isTimelineTrackAudible } from "./utils/trackAudibility";
 import { isVideoSourceAudioMuted } from "./utils/videoSourceAudio";
 
@@ -529,11 +530,7 @@ export const exportTimelineAsVideoCore = async (
 
 	const startFrame = Math.max(0, Math.round(options.startFrame ?? 0));
 	const timelineEnd =
-		options.endFrame ??
-		options.elements.reduce(
-			(max, el) => Math.max(max, Math.round(el.timeline.end ?? 0)),
-			0,
-		);
+		options.endFrame ?? resolveTimelineEndFrame(options.elements);
 	const endFrame = Math.max(startFrame, Math.round(timelineEnd));
 	if (endFrame <= startFrame) {
 		throw new Error("导出失败：时间轴为空");

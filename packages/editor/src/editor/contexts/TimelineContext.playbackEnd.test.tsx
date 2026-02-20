@@ -11,9 +11,10 @@ const createElement = (
 	id: string,
 	start: number,
 	end: number,
+	type: TimelineElement["type"] = "VideoClip",
 ): TimelineElement => ({
 	id,
-	type: "VideoClip",
+	type,
 	component: "video-clip",
 	name: id,
 	timeline: {
@@ -181,5 +182,25 @@ describe("TimelineContext playback end guard", () => {
 		expect(stopped.isPlaying).toBe(false);
 		expect(stopped.currentTime).toBe(14);
 		expect(rafQueue.length).toBe(0);
+	});
+
+	it("Filter 不影响播放停止边界", () => {
+		useTimelineStore.setState({
+			elements: [
+				createElement("clip-1", 0, 120, "VideoClip"),
+				createElement("filter-1", 0, 300, "Filter"),
+			],
+			currentTime: 140,
+			previewTime: null,
+			isPlaying: false,
+		});
+
+		act(() => {
+			useTimelineStore.getState().play();
+		});
+
+		const state = useTimelineStore.getState();
+		expect(state.isPlaying).toBe(false);
+		expect(state.currentTime).toBe(120);
 	});
 });
