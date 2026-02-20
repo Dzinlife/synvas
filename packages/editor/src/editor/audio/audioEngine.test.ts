@@ -3,7 +3,9 @@ import {
 	__resetAudioEngineForTests,
 	createClipGain,
 	getAudioContext,
+	getPreviewLoudnessSnapshot,
 	setPreviewAudioDspSettings,
+	subscribePreviewLoudness,
 } from "./audioEngine";
 import { PREVIEW_DSP_WORKLET_PROCESSOR_NAME } from "./previewDspConstants";
 
@@ -207,7 +209,10 @@ describe("audioEngine preview dsp graph", () => {
 
 		expect(node.port.postMessage).toHaveBeenCalled();
 		const payload = node.port.postMessage.mock.calls.at(-1)?.[0] as
-			| { type: string; config?: { masterGainDb?: number; exportBlockSize?: number } }
+			| {
+					type: string;
+					config?: { masterGainDb?: number; exportBlockSize?: number };
+			  }
 			| undefined;
 		expect(payload?.type).toBe("config");
 		expect(payload?.config?.masterGainDb).toBe(-3);
@@ -225,5 +230,56 @@ describe("audioEngine preview dsp graph", () => {
 		expect(masterGain).toBeDefined();
 		expect(clipGainNode).toBeDefined();
 		expect(clipGainNode.connect).toHaveBeenCalledWith(masterGain);
+	});
+
+	it("收到 meter 消息后会更新响度快照并通知订阅者", async () => {
+		getAudioContext();
+		await sleepTick();
+
+		const node = fakeAudioWorkletNodeCtor.mock.results[0]
+			?.value as FakeAudioWorkletNodeInstance;
+		expect(node).toBeDefined();
+
+		const loudnessListener = vi.fn();
+		const unsubscribe = subscribePreviewLoudness(loudnessListener);
+
+		node.port.onmessage?.({
+			data: {
+				type: "meter",
+				leftRms: 0.23,
+				rightRms: 0.31,
+				leftPeak: 0.67,
+				rightPeak: 0.75,
+			},
+		} as MessageEvent);
+
+		const snapshot = getPreviewLoudnessSnapshot();
+		expect(snapshot.leftRms).toBeCloseTo(0.23);
+		expect(snapshot.rightRms).toBeCloseTo(0.31);
+		expect(snapshot.leftPeak).toBeCloseTo(0.67);
+		expect(snapshot.rightPeak).toBeCloseTo(0.75);
+		expect(snapshot.updatedAtMs).toBeGreaterThan(0);
+
+		expect(loudnessListener).toHaveBeenCalledTimes(1);
+		expect(loudnessListener).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				leftRms: 0.23,
+				rightRms: 0.31,
+				leftPeak: 0.67,
+				rightPeak: 0.75,
+			}),
+		);
+
+		unsubscribe();
+		node.port.onmessage?.({
+			data: {
+				type: "meter",
+				leftRms: 0.1,
+				rightRms: 0.1,
+				leftPeak: 0.2,
+				rightPeak: 0.2,
+			},
+		} as MessageEvent);
+		expect(loudnessListener).toHaveBeenCalledTimes(1);
 	});
 });

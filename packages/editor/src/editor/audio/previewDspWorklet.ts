@@ -34,9 +34,23 @@ type DspConfigMessage = {
 	config?: PartialExportAudioDspSettings;
 };
 
-const AUDIO_EPSILON = 1e-6;
+type DspMeterMessage = {
+	type: "meter";
+	leftRms: number;
+	rightRms: number;
+	leftPeak: number;
+	rightPeak: number;
+};
 
-const dbToAmp = (db: number): number => Math.pow(10, db / 20);
+const AUDIO_EPSILON = 1e-6;
+const METER_REPORT_RATE_HZ = 30;
+
+const dbToAmp = (db: number): number => 10 ** (db / 20);
+
+const clampUnit = (value: number): number => {
+	if (!Number.isFinite(value)) return 0;
+	return Math.min(1, Math.max(0, value));
+};
 
 const clampPcmInPlace = (data: Float32Array) => {
 	for (let i = 0; i < data.length; i += 1) {
@@ -55,6 +69,15 @@ class PreviewDspProcessor extends AudioWorkletProcessor {
 	private settings: ExportAudioDspSettings;
 	private compressorState: CompressorState;
 	private interleavedBuffer = new Float32Array(0);
+	private readonly meterReportIntervalFrames = Math.max(
+		1,
+		Math.round(sampleRate / METER_REPORT_RATE_HZ),
+	);
+	private meterAccumulatedFrames = 0;
+	private meterLeftSquareSum = 0;
+	private meterRightSquareSum = 0;
+	private meterLeftPeak = 0;
+	private meterRightPeak = 0;
 
 	constructor(options?: AudioWorkletNodeOptions) {
 		super(options);
@@ -118,6 +141,58 @@ class PreviewDspProcessor extends AudioWorkletProcessor {
 		}
 	}
 
+	private resetMeterAccumulator() {
+		this.meterAccumulatedFrames = 0;
+		this.meterLeftSquareSum = 0;
+		this.meterRightSquareSum = 0;
+		this.meterLeftPeak = 0;
+		this.meterRightPeak = 0;
+	}
+
+	private flushMeter() {
+		const totalFrames = this.meterAccumulatedFrames;
+		if (totalFrames <= 0) return;
+		const invFrames = 1 / totalFrames;
+		const message: DspMeterMessage = {
+			type: "meter",
+			leftRms: clampUnit(Math.sqrt(this.meterLeftSquareSum * invFrames)),
+			rightRms: clampUnit(Math.sqrt(this.meterRightSquareSum * invFrames)),
+			leftPeak: clampUnit(this.meterLeftPeak),
+			rightPeak: clampUnit(this.meterRightPeak),
+		};
+		this.port.postMessage(message);
+		this.resetMeterAccumulator();
+	}
+
+	private collectMeterFromOutput(output: Float32Array[]) {
+		const frames = output[0]?.length ?? 0;
+		if (frames <= 0) return;
+		const leftData = output[0];
+		const rightData = output[1] ?? output[0];
+		let leftSquareSum = 0;
+		let rightSquareSum = 0;
+		let leftPeak = 0;
+		let rightPeak = 0;
+		for (let frame = 0; frame < frames; frame += 1) {
+			const leftSample = leftData?.[frame] ?? 0;
+			const rightSample = rightData?.[frame] ?? 0;
+			const leftAbs = Math.abs(leftSample);
+			const rightAbs = Math.abs(rightSample);
+			leftSquareSum += leftSample * leftSample;
+			rightSquareSum += rightSample * rightSample;
+			if (leftAbs > leftPeak) leftPeak = leftAbs;
+			if (rightAbs > rightPeak) rightPeak = rightAbs;
+		}
+		this.meterAccumulatedFrames += frames;
+		this.meterLeftSquareSum += leftSquareSum;
+		this.meterRightSquareSum += rightSquareSum;
+		if (leftPeak > this.meterLeftPeak) this.meterLeftPeak = leftPeak;
+		if (rightPeak > this.meterRightPeak) this.meterRightPeak = rightPeak;
+		if (this.meterAccumulatedFrames >= this.meterReportIntervalFrames) {
+			this.flushMeter();
+		}
+	}
+
 	process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
 		const output = outputs[0];
 		if (!output || output.length === 0) return true;
@@ -139,6 +214,7 @@ class PreviewDspProcessor extends AudioWorkletProcessor {
 					targetData[frame] = sourceData?.[frame] ?? 0;
 				}
 			}
+			this.collectMeterFromOutput(output);
 			return true;
 		}
 
@@ -156,6 +232,7 @@ class PreviewDspProcessor extends AudioWorkletProcessor {
 		});
 		clampPcmInPlace(interleaved);
 		this.writeInterleavedToOutput(output, interleaved);
+		this.collectMeterFromOutput(output);
 		return true;
 	}
 }

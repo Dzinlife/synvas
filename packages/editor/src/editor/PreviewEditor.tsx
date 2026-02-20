@@ -2,7 +2,6 @@
 
 import type { TimelineElement } from "core/dsl/types";
 import type Konva from "konva";
-import { EllipsisIcon } from "lucide-react";
 import React, {
 	useCallback,
 	useEffect,
@@ -18,28 +17,10 @@ import {
 	Transformer,
 } from "react-konva";
 import type { CanvasRef } from "react-skia-lite";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Slider } from "@/components/ui/slider";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { exportCanvasAsImage } from "@/dsl/export";
 import { transformMetaToRenderLayout } from "@/dsl/layout";
-import { framesToTimecode } from "@/utils/timecode";
+import PreviewToolbar from "./components/PreviewToolbar";
 import { usePreview } from "./contexts/PreviewProvider";
-import {
-	usePlaybackControl,
-	useTimelineStore,
-	useTracks,
-} from "./contexts/TimelineContext";
+import { useTimelineStore, useTracks } from "./contexts/TimelineContext";
 import { buildKonvaTree } from "./preview/buildSkiaTree";
 import { LabelLayer } from "./preview/LabelLayer";
 import { SkiaPreviewCanvas } from "./preview/SkiaPreviewCanvas";
@@ -49,10 +30,6 @@ import { usePreviewInteractions } from "./preview/usePreviewInteractions";
 const Preview = () => {
 	const renderElementsRef = useRef<TimelineElement[]>([]);
 	const { tracks } = useTracks();
-	const { isPlaying, togglePlay } = usePlaybackControl();
-	const currentTime = useTimelineStore((state) => state.currentTime);
-	const previewTime = useTimelineStore((state) => state.previewTime);
-	const fps = useTimelineStore((state) => state.fps);
 
 	const { getRenderTime, getElements } = useMemo(
 		() => useTimelineStore.getState(),
@@ -177,20 +154,6 @@ const Preview = () => {
 		width: 0,
 		height: 0,
 	});
-	const [isExportingFrame, setIsExportingFrame] = useState(false);
-
-	const handleExportFrame = useCallback(async () => {
-		if (isExportingFrame) return;
-		setIsExportingFrame(true);
-		try {
-			await exportCanvasAsImage(skiaCanvasRef.current, {
-				format: "png",
-				waitForReady: true,
-			});
-		} finally {
-			setIsExportingFrame(false);
-		}
-	}, [isExportingFrame]);
 
 	// Sync canvas ref to context for export functionality
 	useEffect(() => {
@@ -472,12 +435,13 @@ const Preview = () => {
 		resetPanOffset();
 		setZoomLevel(fitZoomLevel);
 	}, [fitZoomLevel, resetPanOffset, setZoomLevel]);
-	const displayTime = previewTime ?? currentTime;
-	const previewTimecode = useMemo(() => {
-		return framesToTimecode(displayTime, fps);
-	}, [displayTime, fps]);
-	const previewTimecodeMuted = previewTimecode.slice(0, 4);
-	const previewTimecodeStrong = previewTimecode.slice(4);
+	const handleZoomChange = useCallback(
+		(nextZoom: number) => {
+			if (!Number.isFinite(nextZoom)) return;
+			setZoomLevel(nextZoom);
+		},
+		[setZoomLevel],
+	);
 
 	return (
 		<div
@@ -721,101 +685,12 @@ const Preview = () => {
 					/>
 				</Layer>
 			</Stage>
-			<div
-				style={{
-					position: "absolute",
-					bottom: 16,
-					left: "50%",
-					transform: "translateX(-50%)",
-					display: "flex",
-					alignItems: "center",
-					gap: 8,
-					background: "rgba(0,0,0,0.6)",
-					padding: "6px 12px",
-					borderRadius: 20,
-					backdropFilter: "blur(8px)",
-				}}
-			>
-				<Tooltip>
-					<TooltipTrigger
-						type="button"
-						onClick={togglePlay}
-						style={{
-							background: "transparent",
-							border: "none",
-							color: "white",
-							cursor: "pointer",
-							padding: "4px 8px",
-							borderRadius: 4,
-							fontSize: 12,
-						}}
-					>
-						{isPlaying ? "⏸" : "▶"}
-					</TooltipTrigger>
-					<TooltipContent>播放 / 暂停</TooltipContent>
-				</Tooltip>
-				<div
-					style={{
-						color: "white",
-						fontSize: 12,
-						fontFamily:
-							"ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-						fontVariantNumeric: "tabular-nums",
-						letterSpacing: "0.02em",
-						minWidth: 90,
-					}}
-				>
-					<span style={{ color: "rgba(255,255,255,0.55)" }}>
-						{previewTimecodeMuted}
-					</span>
-					<span>{previewTimecodeStrong}</span>
-				</div>
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						chevron={null}
-						className="size-8 border-none rounded-full bg-transparent px-2 text-xs text-white hover:bg-white/10 data-popup-open:bg-white/15"
-					>
-						<EllipsisIcon className="size-4" />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent
-						align="center"
-						side="top"
-						className="min-w-[240px]"
-					>
-						<div className="px-4 py-2.5">
-							<div className="mb-2 flex items-center justify-between text-xs text-gray-600">
-								<span>缩放</span>
-								<span>{Math.round(effectiveZoomLevel * 100)}%</span>
-							</div>
-							<Slider
-								min={0.1}
-								max={2}
-								step={0.001}
-								value={[effectiveZoomLevel]}
-								onValueChange={(value) => {
-									const nextValue = Array.isArray(value) ? value[0] : value;
-									if (!Number.isFinite(nextValue)) return;
-									setZoomLevel(nextValue);
-								}}
-								className="w-full py-2"
-							/>
-						</div>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem onClick={handleResetView}>
-							重置视图位置（适应窗口）
-						</DropdownMenuItem>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							onClick={() => {
-								void handleExportFrame();
-							}}
-							disabled={isExportingFrame}
-						>
-							{isExportingFrame ? "导出中..." : "导出静帧画面"}
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
-			</div>
+			<PreviewToolbar
+				effectiveZoomLevel={effectiveZoomLevel}
+				onZoomChange={handleZoomChange}
+				onResetView={handleResetView}
+				canvasRef={skiaCanvasRef}
+			/>
 		</div>
 	);
 };

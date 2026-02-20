@@ -16,12 +16,70 @@ let previewDspNode: AudioWorkletNode | null = null;
 let previewDspNodeInitPromise: Promise<void> | null = null;
 let directDestinationConnected = false;
 
+export type PreviewLoudnessSnapshot = {
+	leftRms: number;
+	rightRms: number;
+	leftPeak: number;
+	rightPeak: number;
+	updatedAtMs: number;
+};
+
+type PreviewMeterMessage = {
+	type: "meter";
+	leftRms: number;
+	rightRms: number;
+	leftPeak: number;
+	rightPeak: number;
+};
+
 const createDefaultAudioSettings = (): ExportAudioDspSettings => ({
 	...DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,
 	compressor: { ...DEFAULT_EXPORT_AUDIO_DSP_SETTINGS.compressor },
 });
 
 let previewAudioSettings: ExportAudioDspSettings = createDefaultAudioSettings();
+
+const createInitialPreviewLoudnessSnapshot = (): PreviewLoudnessSnapshot => ({
+	leftRms: 0,
+	rightRms: 0,
+	leftPeak: 0,
+	rightPeak: 0,
+	updatedAtMs: 0,
+});
+
+let previewLoudnessSnapshot = createInitialPreviewLoudnessSnapshot();
+const previewLoudnessListeners = new Set<
+	(snapshot: PreviewLoudnessSnapshot) => void
+>();
+
+const clampUnit = (value: unknown): number => {
+	if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+	return Math.min(1, Math.max(0, value));
+};
+
+const nowMilliseconds = (): number => {
+	if (
+		typeof performance !== "undefined" &&
+		Number.isFinite(performance.now())
+	) {
+		return performance.now();
+	}
+	return Date.now();
+};
+
+const applyPreviewMeterMessage = (message: PreviewMeterMessage) => {
+	const nextSnapshot: PreviewLoudnessSnapshot = {
+		leftRms: clampUnit(message.leftRms),
+		rightRms: clampUnit(message.rightRms),
+		leftPeak: clampUnit(message.leftPeak),
+		rightPeak: clampUnit(message.rightPeak),
+		updatedAtMs: nowMilliseconds(),
+	};
+	previewLoudnessSnapshot = nextSnapshot;
+	for (const listener of previewLoudnessListeners) {
+		listener(nextSnapshot);
+	}
+};
 
 const resolveAudioContext = (): AudioContext | null => {
 	if (typeof window === "undefined") return null;
@@ -83,7 +141,10 @@ const ensurePreviewDspNodeAsync = (context: AudioContext) => {
 
 	connectMasterDirectly(context);
 
-	if (!supportsAudioWorklet(context) || typeof AudioWorkletNode === "undefined") {
+	if (
+		!supportsAudioWorklet(context) ||
+		typeof AudioWorkletNode === "undefined"
+	) {
 		console.warn("[AudioEngine] AudioWorklet 不可用，预览音频将绕过 DSP。");
 		return;
 	}
@@ -108,6 +169,11 @@ const ensurePreviewDspNodeAsync = (context: AudioContext) => {
 				},
 			},
 		);
+		nextDspNode.port.onmessage = (event: MessageEvent<PreviewMeterMessage>) => {
+			const message = event.data;
+			if (!message || message.type !== "meter") return;
+			applyPreviewMeterMessage(message);
+		};
 		nextDspNode.connect(context.destination);
 		safeDisconnect(previewDspNode);
 		previewDspNode = nextDspNode;
@@ -147,6 +213,19 @@ export const setPreviewAudioDspSettings = (
 	const context = audioContext;
 	if (!context || !masterGain) return;
 	ensureMasterOutputGraph(context);
+};
+
+export const getPreviewLoudnessSnapshot = (): PreviewLoudnessSnapshot => {
+	return previewLoudnessSnapshot;
+};
+
+export const subscribePreviewLoudness = (
+	listener: (snapshot: PreviewLoudnessSnapshot) => void,
+): (() => void) => {
+	previewLoudnessListeners.add(listener);
+	return () => {
+		previewLoudnessListeners.delete(listener);
+	};
 };
 
 export const getAudioContext = (): AudioContext | null => {
@@ -198,4 +277,6 @@ export const __resetAudioEngineForTests = () => {
 	previewDspNodeInitPromise = null;
 	directDestinationConnected = false;
 	previewAudioSettings = createDefaultAudioSettings();
+	previewLoudnessListeners.clear();
+	previewLoudnessSnapshot = createInitialPreviewLoudnessSnapshot();
 };
