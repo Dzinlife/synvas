@@ -115,9 +115,11 @@ describe("PreviewControlBar", () => {
 	});
 
 	it("支持切换 Preview/Canvas 主视图", () => {
-		render(<PreviewControlBar />);
-		fireEvent.click(screen.getByRole("button", { name: "Canvas" }));
+		const { unmount } = render(<PreviewControlBar />);
+		fireEvent.click(screen.getByRole("button", { name: "Storyboard" }));
 		expect(studioState.activeMainView).toBe("canvas");
+		unmount();
+		render(<PreviewControlBar />);
 		fireEvent.click(screen.getByRole("button", { name: "Preview" }));
 		expect(studioState.activeMainView).toBe("preview");
 	});

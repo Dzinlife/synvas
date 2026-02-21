@@ -12,7 +12,7 @@ function DropdownMenuTrigger({
 	chevron,
 	...props
 }: MenuPrimitive.Trigger.Props & {
-	chevron?: React.ReactNode | null;
+	chevron?: React.ReactNode | boolean;
 }) {
 	return (
 		<MenuPrimitive.Trigger
@@ -23,7 +23,13 @@ function DropdownMenuTrigger({
 			{...props}
 		>
 			{children}
-			{chevron !== null && (chevron ?? <ChevronDownIcon className="-mr-1" />)}
+			{typeof chevron === "boolean" || chevron === undefined ? (
+				chevron ? (
+					<ChevronDownIcon className="-mr-1" />
+				) : null
+			) : (
+				chevron
+			)}
 		</MenuPrimitive.Trigger>
 	);
 }
