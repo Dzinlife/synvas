@@ -837,19 +837,22 @@ export function createVideoClipModel(
 			durationFrames,
 		);
 		const alignedVideoTime = framesToSeconds(alignedFrameIndex, fps);
-		// 导出时按帧顺序流式解码，只有回退或首次才重建迭代器
+		// 倒放预编译必须走 seek 路径，才能正确处理 GOP 回退并稳定产出目标帧。
+		if (props.reversed) {
+			await seekToTime(alignedVideoTime, { reason: "reverse-playback" });
+			lastPreparedFrameIndex = alignedFrameIndex;
+			return;
+		}
+		// 正放场景按帧顺序流式解码，只有回退或首次才重建迭代器。
 		if (
-			props.reversed ||
 			lastPreparedFrameIndex === null ||
 			alignedFrameIndex < lastPreparedFrameIndex
 		) {
 			await stepPlayback(alignedVideoTime);
 			lastPreparedFrameIndex = alignedFrameIndex;
-		} else {
-			if (alignedFrameIndex > lastPreparedFrameIndex) {
-				await stepPlayback(alignedVideoTime);
-				lastPreparedFrameIndex = alignedFrameIndex;
-			}
+		} else if (alignedFrameIndex > lastPreparedFrameIndex) {
+			await stepPlayback(alignedVideoTime);
+			lastPreparedFrameIndex = alignedFrameIndex;
 		}
 	};
 
