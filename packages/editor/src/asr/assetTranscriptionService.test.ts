@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
-import type { TimelineSource } from "core/dsl/types";
+import type { TimelineAsset } from "core/dsl/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import type { AsrClient } from "./AsrContext";
 import type { TranscriptSegment } from "./types";
-import { transcribeSourceById } from "./sourceTranscriptionService";
+import { transcribeAssetById } from "./assetTranscriptionService";
 
-vi.mock("./sourceMediaFile", () => ({
-	resolveSourceMediaFile: vi.fn(),
+vi.mock("./assetMediaFile", () => ({
+	resolveAssetMediaFile: vi.fn(),
 }));
 
 vi.mock("./opfsAudio", () => ({
@@ -20,9 +20,9 @@ vi.mock("@/editor/utils/externalVideo", () => ({
 
 import { readVideoMetadata } from "@/editor/utils/externalVideo";
 import { readAudioMetadata } from "./opfsAudio";
-import { resolveSourceMediaFile } from "./sourceMediaFile";
+import { resolveAssetMediaFile } from "./assetMediaFile";
 
-const mockedResolveSourceMediaFile = vi.mocked(resolveSourceMediaFile);
+const mockedResolveAssetMediaFile = vi.mocked(resolveAssetMediaFile);
 const mockedReadAudioMetadata = vi.mocked(readAudioMetadata);
 const mockedReadVideoMetadata = vi.mocked(readVideoMetadata);
 
@@ -30,7 +30,7 @@ const initialState = useTimelineStore.getState();
 
 afterEach(() => {
 	useTimelineStore.setState(initialState, true);
-	mockedResolveSourceMediaFile.mockReset();
+	mockedResolveAssetMediaFile.mockReset();
 	mockedReadAudioMetadata.mockReset();
 	mockedReadVideoMetadata.mockReset();
 });
@@ -42,7 +42,6 @@ const createSegment = (id: string, text: string): TranscriptSegment => ({
 	text,
 	words: [
 		{
-			id: `${id}-word`,
 			text,
 			start: 0,
 			end: 1,
@@ -52,19 +51,19 @@ const createSegment = (id: string, text: string): TranscriptSegment => ({
 
 const createSource = (options?: {
 	withAsr?: boolean;
-}): TimelineSource => ({
+}): TimelineAsset => ({
 	id: "source-1",
 	kind: "video",
 	uri: "file:///clip.mp4",
 	name: "clip.mp4",
 	...(options?.withAsr
 		? {
-				data: {
+				meta: {
 					asr: {
 						id: "old-asr",
 						source: {
-							type: "timeline-source" as const,
-							sourceId: "source-1",
+							type: "asset" as const,
+							assetId: "source-1",
 							kind: "video" as const,
 							uri: "file:///clip.mp4",
 							fileName: "clip.mp4",
@@ -81,12 +80,12 @@ const createSource = (options?: {
 		: {}),
 });
 
-describe("sourceTranscriptionService", () => {
-	it("普通转写应增量写入 source.data.asr", async () => {
+describe("assetTranscriptionService", () => {
+	it("普通转写应增量写入 asset.meta.asr", async () => {
 		const file = new File([new Uint8Array([1, 2, 3])], "clip.mp4", {
 			type: "video/mp4",
 		});
-		mockedResolveSourceMediaFile.mockResolvedValue({
+		mockedResolveAssetMediaFile.mockResolvedValue({
 			file,
 			fileName: "clip.mp4",
 		});
@@ -96,7 +95,7 @@ describe("sourceTranscriptionService", () => {
 			height: 1080,
 		});
 		useTimelineStore.setState({
-			sources: [createSource()],
+			assets: [createSource()],
 		});
 
 		const asrClient: AsrClient = {
@@ -110,15 +109,15 @@ describe("sourceTranscriptionService", () => {
 			}),
 		};
 		const controller = new AbortController();
-		const result = await transcribeSourceById({
-			sourceId: "source-1",
+		const result = await transcribeAssetById({
+			assetId: "source-1",
 			asrClient,
 			signal: controller.signal,
 			language: "zh",
 		});
 		expect(result.status).toBe("done");
 		expect(result.changed).toBe(true);
-		const asr = useTimelineStore.getState().getSourceById("source-1")?.data?.asr;
+		const asr = useTimelineStore.getState().getAssetById("source-1")?.meta?.asr;
 		expect(asr?.segments).toHaveLength(1);
 		expect(asr?.segments[0]?.text).toBe("你好");
 	});
@@ -127,7 +126,7 @@ describe("sourceTranscriptionService", () => {
 		const file = new File([new Uint8Array([1, 2, 3])], "clip.mp4", {
 			type: "video/mp4",
 		});
-		mockedResolveSourceMediaFile.mockResolvedValue({
+		mockedResolveAssetMediaFile.mockResolvedValue({
 			file,
 			fileName: "clip.mp4",
 		});
@@ -137,7 +136,7 @@ describe("sourceTranscriptionService", () => {
 			height: 1080,
 		});
 		useTimelineStore.setState({
-			sources: [createSource({ withAsr: true })],
+			assets: [createSource({ withAsr: true })],
 		});
 
 		const asrClient: AsrClient = {
@@ -152,8 +151,8 @@ describe("sourceTranscriptionService", () => {
 		};
 		const controller = new AbortController();
 		controller.abort();
-		const result = await transcribeSourceById({
-			sourceId: "source-1",
+		const result = await transcribeAssetById({
+			assetId: "source-1",
 			asrClient,
 			signal: controller.signal,
 			language: "zh",
@@ -161,7 +160,7 @@ describe("sourceTranscriptionService", () => {
 		});
 		expect(result.status).toBe("canceled");
 		expect(result.changed).toBe(false);
-		const asr = useTimelineStore.getState().getSourceById("source-1")?.data?.asr;
+		const asr = useTimelineStore.getState().getAssetById("source-1")?.meta?.asr;
 		expect(asr?.id).toBe("old-asr");
 		expect(asr?.segments[0]?.text).toBe("旧内容");
 	});
@@ -170,7 +169,7 @@ describe("sourceTranscriptionService", () => {
 		const file = new File([new Uint8Array([1, 2, 3])], "clip.mp4", {
 			type: "video/mp4",
 		});
-		mockedResolveSourceMediaFile.mockResolvedValue({
+		mockedResolveAssetMediaFile.mockResolvedValue({
 			file,
 			fileName: "clip.mp4",
 		});
@@ -180,7 +179,7 @@ describe("sourceTranscriptionService", () => {
 			height: 1080,
 		});
 		useTimelineStore.setState({
-			sources: [createSource({ withAsr: true })],
+			assets: [createSource({ withAsr: true })],
 		});
 
 		const asrClient: AsrClient = {
@@ -194,15 +193,15 @@ describe("sourceTranscriptionService", () => {
 			}),
 		};
 		const controller = new AbortController();
-		const result = await transcribeSourceById({
-			sourceId: "source-1",
+		const result = await transcribeAssetById({
+			assetId: "source-1",
 			asrClient,
 			signal: controller.signal,
 			language: "zh",
 			force: true,
 		});
 		expect(result.status).toBe("done");
-		const asr = useTimelineStore.getState().getSourceById("source-1")?.data?.asr;
+		const asr = useTimelineStore.getState().getAssetById("source-1")?.meta?.asr;
 		expect(asr?.id).not.toBe("old-asr");
 		expect(asr?.segments[0]?.text).toBe("新内容");
 	});

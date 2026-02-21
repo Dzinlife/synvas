@@ -8,7 +8,7 @@ export const AudioClipSetting = ({
 }: DSLComponentSettingProps<AudioClipProps>) => {
 	const reversed = Boolean(element.props.reversed);
 	const source = useTimelineStore((state) =>
-		state.getSourceById(element.sourceId ?? ""),
+		state.getAssetById(element.assetId ?? ""),
 	);
 
 	return (

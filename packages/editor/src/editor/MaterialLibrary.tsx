@@ -6,10 +6,10 @@
 import type {
 	ElementType,
 	TimelineElement,
-	TimelineSource,
+	TimelineAsset,
 	TrackRole,
 } from "core/dsl/types";
-import { isSourceBackedElementType } from "core/dsl/types";
+import { isAssetBackedElementType } from "core/dsl/types";
 import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type React from "react";
 import { useCallback } from "react";
@@ -24,7 +24,7 @@ import {
 	useAttachments,
 	useFps,
 	useRippleEditing,
-	useSources,
+	useAssets,
 	useTimelineStore,
 } from "./contexts/TimelineContext";
 import {
@@ -45,6 +45,7 @@ import {
 	getTransitionDurationParts,
 	isTransitionElement,
 } from "./utils/transitions";
+import { useCanvasStore } from "@/studio/canvas/canvasStore";
 
 // ============================================================================
 // 类型定义
@@ -82,6 +83,7 @@ interface MaterialCardProps {
 		positionX: number,
 		positionY: number,
 	) => void;
+	onCanvasDrop?: (item: MaterialItem) => void;
 	dndContext: MaterialDndContext;
 }
 
@@ -93,6 +95,7 @@ const MaterialCard: React.FC<MaterialCardProps> = ({
 	item,
 	onTimelineDrop,
 	onPreviewDrop,
+	onCanvasDrop,
 	dndContext,
 }) => {
 	const { fps } = useFps();
@@ -101,6 +104,7 @@ const MaterialCard: React.FC<MaterialCardProps> = ({
 		context: dndContext,
 		onTimelineDrop,
 		onPreviewDrop,
+		onCanvasDrop,
 		getRole: (target) => getMaterialRole(target),
 	});
 
@@ -337,7 +341,7 @@ const getMaterialRole = (item: MaterialItem): TrackRole => {
 
 const resolveSourceKindByElementType = (
 	type: ElementType,
-): TimelineSource["kind"] | null => {
+): TimelineAsset["kind"] | null => {
 	switch (type) {
 		case "VideoClip":
 		case "FreezeFrame":
@@ -403,10 +407,11 @@ const MaterialLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
 	const currentTime = useTimelineStore((state) => state.currentTime);
-	const { ensureSourceByUri } = useSources();
+	const { ensureAssetByUri } = useAssets();
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
+	const addCanvasAssetRef = useCanvasStore((state) => state.addAssetRef);
 
 	const materials = buildMaterialItems();
 
@@ -488,17 +493,17 @@ const MaterialLibrary: React.FC = () => {
 				const sourceUri =
 					typeof nextProps.uri === "string" ? nextProps.uri : null;
 				const sourceKind = resolveSourceKindByElementType(item.elementType);
-				const sourceId =
-					isSourceBackedElementType(item.elementType) &&
+				const assetId =
+					isAssetBackedElementType(item.elementType) &&
 					sourceUri &&
 					sourceKind
-						? ensureSourceByUri({
+						? ensureAssetByUri({
 								uri: sourceUri,
 								kind: sourceKind,
 								name: item.name,
 							})
 						: undefined;
-				if (sourceId) {
+				if (assetId) {
 					delete nextProps.uri;
 				}
 				const newElement: TimelineElement = {
@@ -506,7 +511,7 @@ const MaterialLibrary: React.FC = () => {
 					type: item.elementType,
 					component: item.component,
 					name: item.name,
-					...(sourceId ? { sourceId } : {}),
+					...(assetId ? { assetId } : {}),
 					props: nextProps,
 					transform: createTransformMeta({
 						width: item.width ?? 1920,
@@ -583,7 +588,7 @@ const MaterialLibrary: React.FC = () => {
 		},
 		[
 			setElements,
-			ensureSourceByUri,
+			ensureAssetByUri,
 			rippleEditingEnabled,
 			attachments,
 			autoAttach,
@@ -622,17 +627,17 @@ const MaterialLibrary: React.FC = () => {
 				const sourceUri =
 					typeof nextProps.uri === "string" ? nextProps.uri : null;
 				const sourceKind = resolveSourceKindByElementType(item.elementType);
-				const sourceId =
-					isSourceBackedElementType(item.elementType) &&
+				const assetId =
+					isAssetBackedElementType(item.elementType) &&
 					sourceUri &&
 					sourceKind
-						? ensureSourceByUri({
+						? ensureAssetByUri({
 								uri: sourceUri,
 								kind: sourceKind,
 								name: item.name,
 							})
 						: undefined;
-				if (sourceId) {
+				if (assetId) {
 					delete nextProps.uri;
 				}
 				const newElement: TimelineElement = {
@@ -640,7 +645,7 @@ const MaterialLibrary: React.FC = () => {
 					type: item.elementType,
 					component: item.component,
 					name: item.name,
-					...(sourceId ? { sourceId } : {}),
+					...(assetId ? { assetId } : {}),
 					props: nextProps,
 					transform: createTransformMeta({
 						width: elementWidth,
@@ -667,7 +672,21 @@ const MaterialLibrary: React.FC = () => {
 				return [...prev, newElement];
 			});
 		},
-		[setElements, currentTime, ensureSourceByUri, fps],
+		[setElements, currentTime, ensureAssetByUri, fps],
+	);
+
+	const handleCanvasDrop = useCallback(
+		(item: MaterialItem) => {
+			const sourceKind = resolveSourceKindByElementType(item.elementType);
+			if (!sourceKind || !item.uri) return;
+			const assetId = ensureAssetByUri({
+				uri: item.uri,
+				kind: sourceKind,
+				name: item.name,
+			});
+			addCanvasAssetRef(assetId);
+		},
+		[addCanvasAssetRef, ensureAssetByUri],
 	);
 
 	return (
@@ -678,6 +697,7 @@ const MaterialLibrary: React.FC = () => {
 					item={item}
 					onTimelineDrop={handleTimelineDrop}
 					onPreviewDrop={handlePreviewDrop}
+					onCanvasDrop={handleCanvasDrop}
 					dndContext={dndContext}
 				/>
 			))}

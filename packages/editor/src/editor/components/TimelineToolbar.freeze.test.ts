@@ -25,7 +25,7 @@ const createVideoClip = ({
 	type: "VideoClip",
 	component: "video-clip",
 	name: id,
-	sourceId: `${id}-source`,
+	assetId: `${id}-source`,
 	timeline: {
 		start,
 		end,

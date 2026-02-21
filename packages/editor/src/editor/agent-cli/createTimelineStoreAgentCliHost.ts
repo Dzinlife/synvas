@@ -1,6 +1,6 @@
 import type { AgentCliHost, ParsedCommand } from "@ai-nle/agent-cli";
 import type { AsrClient } from "@/asr";
-import { isSupportedSourceMediaUri, transcribeSourceById } from "@/asr";
+import { isSupportedAssetMediaUri, transcribeAssetById } from "@/asr";
 import { useTimelineStore } from "../contexts/TimelineContext";
 import {
 	analyzeVideoChangeForElement,
@@ -137,50 +137,50 @@ const executeTranscribeCommand = async (
 		};
 	}
 
-	const sourceId = target.sourceId;
-	if (!sourceId) {
+	const assetId = target.assetId;
+	if (!assetId) {
 		return {
 			ok: false,
 			changed: false,
-			error: `目标片段缺少 sourceId: ${id}`,
+			error: `目标片段缺少 assetId: ${id}`,
 		};
 	}
-	const source = snapshot.sources.find((item) => item.id === sourceId);
-	if (!source) {
+	const asset = snapshot.assets.find((item) => item.id === assetId);
+	if (!asset) {
 		return {
 			ok: false,
 			changed: false,
-			error: `未找到目标 source: ${sourceId}`,
+			error: `未找到目标 asset: ${assetId}`,
 		};
 	}
-	if (source.kind !== "video" && source.kind !== "audio") {
+	if (asset.kind !== "video" && asset.kind !== "audio") {
 		return {
 			ok: false,
 			changed: false,
-			error: `目标 source 类型不支持转写: ${source.kind}`,
+			error: `目标 asset 类型不支持转写: ${asset.kind}`,
 		};
 	}
-	if (!isSupportedSourceMediaUri(source.uri)) {
+	if (!isSupportedAssetMediaUri(asset.uri)) {
 		return {
 			ok: false,
 			changed: false,
-			error: `目标 source URI 不支持转写: ${source.uri}`,
+			error: `目标 asset URI 不支持转写: ${asset.uri}`,
 		};
 	}
 
 	const language = toStringValue(command.args.language) ?? "auto";
 	const force = toBooleanValue(command.args.force) ?? false;
-	if (!force && source.data?.asr) {
+	if (!force && asset.meta?.asr) {
 		return {
 			ok: true,
 			changed: false,
-			summaryText: "当前 source 已有转写，已跳过。",
+			summaryText: "当前 asset 已有转写，已跳过。",
 		};
 	}
 
 	const controller = new AbortController();
-	const result = await transcribeSourceById({
-		sourceId,
+	const result = await transcribeAssetById({
+		assetId,
 		asrClient,
 		language,
 		force,

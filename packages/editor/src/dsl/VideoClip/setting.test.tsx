@@ -8,9 +8,9 @@ import type { VideoClipProps } from "./model";
 import { VideoClipSetting } from "./setting";
 
 vi.mock("@/editor/contexts/TimelineContext", () => ({
-	useTimelineStore: (selector: (state: { getSourceById: (id: string) => { id: string; uri: string } | null }) => unknown) =>
+	useTimelineStore: (selector: (state: { getAssetById: (id: string) => { id: string; uri: string } | null }) => unknown) =>
 		selector({
-			getSourceById: (id: string) =>
+			getAssetById: (id: string) =>
 				id === "source-video-1"
 					? { id: "source-video-1", uri: "/origin.mp4" }
 					: null,
@@ -25,7 +25,7 @@ const createVideoClipElement = (
 		type: "VideoClip",
 		component: "video-clip",
 		name: "Video Clip",
-		sourceId: "source-video-1",
+		assetId: "source-video-1",
 		transform: createTransformMeta({
 			width: 320,
 			height: 180,

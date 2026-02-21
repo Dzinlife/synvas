@@ -27,7 +27,7 @@ export const hasSnapshotStateChange = (
 	return (
 		prev.currentTime !== next.currentTime ||
 		prev.elements !== next.elements ||
-		prev.sources !== next.sources ||
+		prev.assets !== next.assets ||
 		prev.tracks !== next.tracks ||
 		prev.audioTrackStates !== next.audioTrackStates ||
 		prev.autoAttach !== next.autoAttach ||

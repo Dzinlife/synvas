@@ -1,4 +1,5 @@
 export {
+	type AssetRefDragData,
 	type AutoScrollConfig,
 	calculateAutoScrollSpeed,
 	DEFAULT_AUTO_SCROLL_CONFIG,
@@ -6,6 +7,7 @@ export {
 	type DragGhostInfo,
 	type DragSourceType,
 	type DropTargetInfo,
+	isAssetRefDragData,
 	isMaterialDragData,
 	isTimelineDragData,
 	type MaterialDragData,
@@ -24,6 +26,7 @@ export {
 } from "./materialDnd";
 export {
 	findTimelineDropTargetFromScreenPosition,
+	getCanvasDropTargetFromScreenPosition,
 	getPreviewDropTargetFromScreenPosition,
 	getTimelineDropTimeFromScreenX,
 	parseTrackHeights,

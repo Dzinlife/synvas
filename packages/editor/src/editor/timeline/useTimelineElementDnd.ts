@@ -9,11 +9,15 @@ import {
 	insertElementsIntoMainTrackGroup,
 } from "core/editor/utils/mainTrackMagnet";
 import { useCallback, useMemo, useRef } from "react";
+import { useCanvasStore } from "@/studio/canvas/canvasStore";
 import {
 	type DragGhostState,
 	useTimelineStore,
 } from "../contexts/TimelineContext";
-import { findTimelineDropTargetFromScreenPosition } from "../drag/timelineDropTargets";
+import {
+	findTimelineDropTargetFromScreenPosition,
+	getCanvasDropTargetFromScreenPosition,
+} from "../drag/timelineDropTargets";
 import { getAudioTrackControlState } from "../utils/audioTrackState";
 import { cloneValue, createCopySeed } from "../utils/copyUtils";
 import {
@@ -523,7 +527,7 @@ export const useTimelineElementDnd = ({
 		);
 	};
 
-	const getCopyId = (sourceId: string) => copyIdMapRef.current.get(sourceId);
+	const getCopyId = (assetId: string) => copyIdMapRef.current.get(assetId);
 	const createCopyElement = (source: TimelineElement, copyId: string) => {
 		const baseProps = cloneValue(source.props) as Record<string, unknown>;
 		const nextProps = baseProps;
@@ -1115,8 +1119,8 @@ export const useTimelineElementDnd = ({
 				if (isCopyDragStart) {
 					const seed = createCopySeed();
 					const nextMap = new Map<string, string>();
-					dragSelectedIds.forEach((sourceId, index) => {
-						nextMap.set(sourceId, `element-${seed}-${index}`);
+					dragSelectedIds.forEach((assetId, index) => {
+						nextMap.set(assetId, `element-${seed}-${index}`);
 					});
 					copyIdMapRef.current = nextMap;
 				} else {
@@ -1613,6 +1617,28 @@ export const useTimelineElementDnd = ({
 				}
 
 				if (last) {
+					const canvasDropTarget = getCanvasDropTargetFromScreenPosition(
+						xy[0],
+						xy[1],
+					);
+					if (canvasDropTarget?.canDrop) {
+						const dragAssetIds = dragSelectedIdsRef.current
+							.map((id) => baseElementMap.get(id)?.assetId)
+							.filter((assetId): assetId is string => Boolean(assetId));
+						if (dragAssetIds.length > 0) {
+							useCanvasStore.getState().addAssetRefs(dragAssetIds, {
+								dedupe: true,
+							});
+							setIsDragging(false);
+							setActiveSnapPoint(null);
+							setActiveDropTarget(null);
+							setDragGhosts([]);
+							setLocalTrackY(null);
+							stopAutoScroll();
+							return;
+						}
+					}
+
 					if (isCopyDrag) {
 						const hasMovement = Math.abs(mx) > 0 || Math.abs(my) > 0;
 						const dragSelectedIds = dragSelectedIdsRef.current;
@@ -1624,9 +1650,9 @@ export const useTimelineElementDnd = ({
 						if (hasMovement && copyIds.length > 0) {
 							if (shouldUseRippleEditingMulti) {
 								const copies = dragSelectedIds
-									.map((sourceId) => {
-										const source = elements.find((el) => el.id === sourceId);
-										const copyId = getCopyId(sourceId);
+									.map((assetId) => {
+										const source = elements.find((el) => el.id === assetId);
+										const copyId = getCopyId(assetId);
 										if (!source || !copyId) return null;
 										return createCopyElement(source, copyId);
 									})
@@ -1653,10 +1679,10 @@ export const useTimelineElementDnd = ({
 								}
 							} else if (forceMainTrackPlacement) {
 								const copies = dragSelectedIds
-									.map((sourceId) => {
-										const initial = initialMap.get(sourceId);
-										const source = elements.find((el) => el.id === sourceId);
-										const copyId = getCopyId(sourceId);
+									.map((assetId) => {
+										const initial = initialMap.get(assetId);
+										const source = elements.find((el) => el.id === assetId);
+										const copyId = getCopyId(assetId);
 										if (!initial || !source || !copyId) return null;
 										const copy = createCopyElement(source, copyId);
 										const timed = updateElementTime(
@@ -1701,10 +1727,10 @@ export const useTimelineElementDnd = ({
 								};
 
 								const copies = dragSelectedIds
-									.map((sourceId) => {
-										const initial = initialMap.get(sourceId);
-										const source = elements.find((el) => el.id === sourceId);
-										const copyId = getCopyId(sourceId);
+									.map((assetId) => {
+										const initial = initialMap.get(assetId);
+										const source = elements.find((el) => el.id === assetId);
+										const copyId = getCopyId(assetId);
 										if (!initial || !source || !copyId) return null;
 										const role = getElementRole(source);
 										const nextStart = initial.start + deltaFrames;
@@ -2165,6 +2191,24 @@ export const useTimelineElementDnd = ({
 					: null;
 
 			if (last) {
+				const canvasDropTarget = getCanvasDropTargetFromScreenPosition(
+					xy[0],
+					xy[1],
+				);
+				if (canvasDropTarget?.canDrop && element.assetId) {
+					useCanvasStore.getState().addAssetRef(element.assetId, {
+						sourceElementId: element.id,
+						dedupe: true,
+					});
+					setIsDragging(false);
+					setActiveSnapPoint(null);
+					setActiveDropTarget(null);
+					setDragGhosts([]);
+					setLocalTrackY(null);
+					stopAutoScroll();
+					return;
+				}
+
 				setIsDragging(false);
 				setActiveSnapPoint(null);
 				setActiveDropTarget(null);

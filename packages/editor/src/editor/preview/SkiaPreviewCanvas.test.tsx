@@ -292,7 +292,7 @@ describe("SkiaPreviewCanvas", () => {
 	});
 
 	it("非播放态连续拖拽时不应被慢帧阻塞", async () => {
-		let resolveSlowFrame: (() => void) | null = null;
+			let resolveSlowFrame: (() => void) | undefined;
 		buildSkiaFrameSnapshotMock.mockImplementation(({ displayTime }) => {
 			if (displayTime === 0) {
 				return new Promise((resolve) => {
@@ -328,14 +328,14 @@ describe("SkiaPreviewCanvas", () => {
 			expect(hasFrame8Commit).toBe(true);
 		});
 
-		resolveSlowFrame?.();
+			resolveSlowFrame?.();
 		await waitFor(() => {
 			expect(buildSkiaFrameSnapshotMock).toHaveBeenCalled();
 		});
 	});
 
 	it("播放中 seek 跳帧时应优先显示目标帧", async () => {
-		let resolveSlowFrame: (() => void) | null = null;
+			let resolveSlowFrame: (() => void) | undefined;
 		timelineStore.setState({ isPlaying: true });
 		buildSkiaFrameSnapshotMock.mockImplementation(({ displayTime }) => {
 			if (displayTime === 0) {
@@ -372,6 +372,6 @@ describe("SkiaPreviewCanvas", () => {
 			expect(hasTargetFrameCommit).toBe(true);
 		});
 
-		resolveSlowFrame?.();
+			resolveSlowFrame?.();
+		});
 	});
-});

@@ -16,8 +16,8 @@ export type TranscriptSegment = {
 };
 
 export type TranscriptSource = {
-	type: "timeline-source";
-	sourceId: string;
+	type: "asset";
+	assetId: string;
 	kind: "video" | "audio";
 	uri: string;
 	fileName: string;

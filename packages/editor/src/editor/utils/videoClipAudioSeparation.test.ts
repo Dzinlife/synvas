@@ -16,7 +16,7 @@ const createVideoElement = (
 		type: "VideoClip",
 		component: "video-clip",
 		name: "video",
-		sourceId: "source-video-1",
+		assetId: "source-video-1",
 		props: {
 			reversed: Boolean(options?.reversed),
 		},
@@ -55,7 +55,7 @@ describe("videoClipAudioSeparation", () => {
 		const detached = next.find((element) => element.type === "AudioClip");
 		expect(detached).toBeTruthy();
 		expect(detached?.clip?.sourceVideoClipId).toBe("video-1");
-		expect(detached?.sourceId).toBe("source-video-1");
+		expect(detached?.assetId).toBe("source-video-1");
 		expect(detached?.timeline.start).toBe(10);
 		expect(detached?.timeline.end).toBe(100);
 		expect(detached?.timeline.offset).toBe(7);

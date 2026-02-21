@@ -1,5 +1,4 @@
 import { DialSlider } from "@/components/ui/dial-slider";
-import { getTransformSize } from "@/dsl/transform";
 import type { DSLComponentSettingProps } from "../model/componentRegistry";
 import {
 	HALATION_FILTER_DEFAULT_PROPS,
@@ -92,14 +91,6 @@ export const HalationFilterLayerSetting: React.FC<
 		HALATION_FILTER_DEFAULT_PROPS.chromaticShift,
 		0,
 		8,
-	);
-
-	const transformSize = element.transform
-		? getTransformSize(element.transform)
-		: { width: 0, height: 0 };
-	const cornerRadiusMax = Math.max(
-		0,
-		Math.min(transformSize.width, transformSize.height) / 2,
 	);
 
 	const setNumberProp = (

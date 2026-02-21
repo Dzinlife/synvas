@@ -120,7 +120,7 @@ export const isQuickSplitCandidateElement = (
 	element: TimelineElement | null | undefined,
 ): element is QuickSplitCandidate => {
 	if (!element || element.type !== "VideoClip") return false;
-	return typeof element.sourceId === "string" && element.sourceId.length > 0;
+	return typeof element.assetId === "string" && element.assetId.length > 0;
 };
 
 export const resolveQuickSplitCandidate = (options: {
@@ -642,7 +642,7 @@ export const analyzeVideoChangeForElement = async (options: {
 		throw new Error("无法创建帧分析上下文");
 	}
 
-	const source = useTimelineStore.getState().getSourceById(element.sourceId ?? "");
+	const source = useTimelineStore.getState().getAssetById(element.assetId ?? "");
 	if (!source?.uri) {
 		throw new Error("视频源不存在或无效");
 	}

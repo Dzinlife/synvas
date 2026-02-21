@@ -1,16 +1,16 @@
 import { z } from "zod";
 import type {
 	RenderMeta,
+	TimelineAsset,
 	TimelineElement,
 	TimelineMeta,
-	TimelineSource,
 	TrackRole,
 	TransformMeta,
 	TransitionMeta,
 } from "../dsl/types";
 import {
 	ELEMENT_TYPE_VALUES,
-	isSourceBackedElementType,
+	isAssetBackedElementType,
 	SOURCE_KIND_VALUES,
 } from "../dsl/types";
 import { framesToTimecode, timecodeToFrames } from "../utils/timecode";
@@ -25,7 +25,6 @@ import type { TimelineTrack } from "./timeline/types";
  * 时间线 JSON 格式定义
  */
 export interface TimelineJSON {
-	version: string;
 	fps: number;
 	canvas: {
 		width: number;
@@ -33,7 +32,7 @@ export interface TimelineJSON {
 	};
 	settings: TimelineSettings;
 	tracks?: TimelineTrackJSON[];
-	sources: TimelineSource[];
+	assets: TimelineAsset[];
 	elements: TimelineElement[];
 }
 
@@ -65,7 +64,7 @@ export interface TimelineData {
 	fps: number;
 	canvas: { width: number; height: number };
 	tracks: TimelineTrack[];
-	sources: TimelineSource[];
+	assets: TimelineAsset[];
 	elements: TimelineElement[];
 	settings: TimelineSettings;
 }
@@ -123,7 +122,6 @@ const timelineTrackSchema = z.object({
 });
 
 const transcriptWordSchema = z.object({
-	id: nonEmptyStringSchema,
 	text: z.string(),
 	start: finiteNumberSchema,
 	end: finiteNumberSchema,
@@ -139,8 +137,8 @@ const transcriptSegmentSchema = z.object({
 });
 
 const transcriptSourceSchema = z.object({
-	type: z.literal("timeline-source"),
-	sourceId: nonEmptyStringSchema,
+	type: z.literal("asset"),
+	assetId: nonEmptyStringSchema,
 	kind: z.enum(["video", "audio"]),
 	uri: nonEmptyStringSchema,
 	fileName: z.string(),
@@ -159,16 +157,16 @@ const transcriptRecordSchema = z.object({
 	segments: z.array(transcriptSegmentSchema),
 });
 
-const sourceDataSchema = z.object({
+const assetMetaSchema = z.object({
 	asr: transcriptRecordSchema.optional(),
 });
 
-const timelineSourceSchema = z.object({
+const timelineAssetSchema = z.object({
 	id: nonEmptyStringSchema,
 	uri: nonEmptyStringSchema,
 	kind: z.enum(SOURCE_KIND_VALUES),
 	name: z.string().optional(),
-	data: sourceDataSchema.optional(),
+	meta: assetMetaSchema.optional(),
 });
 
 const transformMetaSchema: z.ZodType<TransformMeta> = z.object({
@@ -244,7 +242,7 @@ const timelineElementBaseSchema = z.object({
 	type: elementTypeSchema,
 	component: nonEmptyStringSchema,
 	name: nonEmptyStringSchema,
-	sourceId: nonEmptyStringSchema.optional(),
+	assetId: nonEmptyStringSchema.optional(),
 	transform: transformMetaSchema.optional(),
 	timeline: z.unknown(),
 	render: z.unknown().optional(),
@@ -254,7 +252,6 @@ const timelineElementBaseSchema = z.object({
 });
 
 const timelineSchema = z.object({
-	version: z.literal("1.0"),
 	fps: z.number().int().positive(),
 	canvas: z.object({
 		width: z.number(),
@@ -262,7 +259,7 @@ const timelineSchema = z.object({
 	}),
 	settings: timelineSettingsSchema,
 	tracks: z.array(z.unknown()).optional(),
-	sources: z.array(z.unknown()),
+	assets: z.array(z.unknown()),
 	elements: z.array(z.unknown()),
 });
 
@@ -338,7 +335,7 @@ export function saveTimelineToJSON(
 	canvasSize: { width: number; height: number } = { width: 1920, height: 1080 },
 	tracks?: TimelineTrack[],
 	settings?: TimelineSettings,
-	sources?: TimelineSource[],
+	assets?: TimelineAsset[],
 ): string {
 	return JSON.stringify(
 		saveTimelineToObject(
@@ -347,7 +344,7 @@ export function saveTimelineToJSON(
 			canvasSize,
 			tracks,
 			settings,
-			sources,
+			assets,
 		),
 		null,
 		2,
@@ -363,7 +360,7 @@ export function saveTimelineToObject(
 	canvasSize: { width: number; height: number } = { width: 1920, height: 1080 },
 	tracks?: TimelineTrack[],
 	settings?: TimelineSettings,
-	sources?: TimelineSource[],
+	assets?: TimelineAsset[],
 ): TimelineJSON {
 	const serializedTracks = serializeTracks(tracks);
 	const resolvedSettings: TimelineSettings = {
@@ -378,11 +375,10 @@ export function saveTimelineToObject(
 		audio: resolveExportAudioDspSettings(settings?.audio),
 	};
 	return {
-		version: "1.0",
 		fps,
 		canvas: canvasSize,
 		settings: resolvedSettings,
-		sources: sources ?? [],
+		assets: assets ?? [],
 		...(serializedTracks ? { tracks: serializedTracks } : {}),
 		elements: elements.map((element) =>
 			removeLegacyUriFromProps(ensureTimecodes(element, fps)),
@@ -396,10 +392,10 @@ export function saveTimelineToObject(
 function validateTimeline(data: unknown): TimelineData {
 	const timeline = parseWithSchema(timelineSchema, data, "timeline");
 	const fps = timeline.fps;
-	const sources = validateSources(timeline.sources, "sources");
-	const sourceIdSet = new Set(sources.map((source) => source.id));
+	const assets = validateAssets(timeline.assets, "assets");
+	const assetIdSet = new Set(assets.map((asset) => asset.id));
 	const elements = timeline.elements.map((element, index) =>
-		validateElement(element, index, fps, sourceIdSet),
+		validateElement(element, index, fps, assetIdSet),
 	);
 
 	return {
@@ -409,7 +405,7 @@ function validateTimeline(data: unknown): TimelineData {
 			height: timeline.canvas.height,
 		},
 		tracks: validateTracks(timeline.tracks, "tracks"),
-		sources,
+		assets,
 		settings: validateSettings(timeline.settings, "settings"),
 		elements,
 	};
@@ -422,7 +418,7 @@ function validateElement(
 	el: unknown,
 	index: number,
 	fps: number,
-	sourceIdSet: ReadonlySet<string>,
+	assetIdSet: ReadonlySet<string>,
 ): TimelineElement {
 	const path = `elements[${index}]`;
 	const element = parseWithSchema(timelineElementBaseSchema, el, path);
@@ -451,16 +447,16 @@ function validateElement(
 	// props 可以是任意对象
 	const props = (element.props ?? {}) as TimelineElement["props"];
 	const mediaProps = props as { uri?: unknown };
-	if (isSourceBackedElementType(type) && mediaProps.uri !== undefined) {
-		throw new Error(`${path}.props.uri: must use sourceId instead`);
+	if (isAssetBackedElementType(type) && mediaProps.uri !== undefined) {
+		throw new Error(`${path}.props.uri: must use assetId instead`);
 	}
 
-	if (isSourceBackedElementType(type)) {
-		if (!element.sourceId) {
-			throw new Error(`${path}.sourceId: required for ${type}`);
+	if (isAssetBackedElementType(type)) {
+		if (!element.assetId) {
+			throw new Error(`${path}.assetId: required for ${type}`);
 		}
-		if (!sourceIdSet.has(element.sourceId)) {
-			throw new Error(`${path}.sourceId: source "${element.sourceId}" not found`);
+		if (!assetIdSet.has(element.assetId)) {
+			throw new Error(`${path}.assetId: asset "${element.assetId}" not found`);
 		}
 	}
 
@@ -477,7 +473,7 @@ function validateElement(
 		type,
 		component: element.component,
 		name: element.name,
-		sourceId: element.sourceId,
+		assetId: element.assetId,
 		transform,
 		timeline,
 		render,
@@ -506,15 +502,15 @@ function validateTracks(tracks: unknown, path: string): TimelineTrack[] {
 	}));
 }
 
-function validateSources(sources: unknown, path: string): TimelineSource[] {
-	const parsed = parseWithSchema(z.array(timelineSourceSchema), sources, path);
+function validateAssets(assets: unknown, path: string): TimelineAsset[] {
+	const parsed = parseWithSchema(z.array(timelineAssetSchema), assets, path);
 	const idSet = new Set<string>();
 	for (let index = 0; index < parsed.length; index += 1) {
-		const source = parsed[index];
-		if (idSet.has(source.id)) {
-			throw new Error(`${path}[${index}].id: duplicated source id "${source.id}"`);
+		const asset = parsed[index];
+		if (idSet.has(asset.id)) {
+			throw new Error(`${path}[${index}].id: duplicated asset id "${asset.id}"`);
 		}
-		idSet.add(source.id);
+		idSet.add(asset.id);
 	}
 	return parsed;
 }
@@ -549,7 +545,7 @@ function serializeTracks(
 const removeLegacyUriFromProps = (
 	element: TimelineElement,
 ): TimelineElement => {
-	if (!isSourceBackedElementType(element.type)) {
+	if (!isAssetBackedElementType(element.type)) {
 		return element;
 	}
 	const currentProps = (element.props ?? {}) as Record<string, unknown>;

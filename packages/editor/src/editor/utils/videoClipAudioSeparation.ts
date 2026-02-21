@@ -15,9 +15,9 @@ const createElementId = () => {
 
 const getVideoSourceId = (element: TimelineElement): string | null => {
 	if (element.type !== "VideoClip") return null;
-	const sourceId = element.sourceId;
-	if (typeof sourceId !== "string" || sourceId.length === 0) return null;
-	return sourceId;
+	const assetId = element.assetId;
+	if (typeof assetId !== "string" || assetId.length === 0) return null;
+	return assetId;
 };
 
 const buildAudioTimelineMeta = (
@@ -186,8 +186,8 @@ export const detachVideoClipAudio = ({
 	if (videoIndex < 0) return elements;
 	const videoElement = elements[videoIndex];
 	if (videoElement.type !== "VideoClip") return elements;
-	const sourceId = getVideoSourceId(videoElement);
-	if (!sourceId) return elements;
+	const assetId = getVideoSourceId(videoElement);
+	if (!assetId) return elements;
 	if (hasSourceAudioTrack === false) return elements;
 	const sourceReversed = Boolean(
 		(videoElement.props as { reversed?: unknown } | undefined)?.reversed,
@@ -209,7 +209,7 @@ export const detachVideoClipAudio = ({
 		type: "AudioClip",
 		component: "audio-clip",
 		name: videoElement.name ? `${videoElement.name} 音频` : "分离音频",
-		sourceId,
+		assetId,
 		props: {
 			...(sourceReversed ? { reversed: true } : {}),
 		},

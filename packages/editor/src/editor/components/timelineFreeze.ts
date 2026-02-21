@@ -20,7 +20,7 @@ const isFreezeCandidateElement = (
 	currentTime: number,
 ): element is FreezeCandidate => {
 	if (!element || element.type !== "VideoClip") return false;
-	if (!element.sourceId) return false;
+	if (!element.assetId) return false;
 	if (currentTime <= element.timeline.start) return false;
 	if (currentTime >= element.timeline.end) return false;
 	return true;
@@ -124,7 +124,7 @@ export const applyFreezeFrame = (options: {
 		type: "FreezeFrame",
 		component: "freeze-frame",
 		name: "定格",
-		sourceId: target.sourceId,
+		assetId: target.assetId,
 		props: {
 			sourceElementId: target.id,
 			sourceFrame,

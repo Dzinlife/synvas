@@ -1,9 +1,9 @@
-import type { TimelineSource } from "core/dsl/types";
+import type { TimelineAsset } from "core/dsl/types";
 import { readVideoMetadata } from "@/editor/utils/externalVideo";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import type { AsrClient } from "./AsrContext";
+import { resolveAssetMediaFile } from "./assetMediaFile";
 import { readAudioMetadata } from "./opfsAudio";
-import { resolveSourceMediaFile } from "./sourceMediaFile";
 import type {
 	AsrJobStatus,
 	AsrModelSize,
@@ -25,13 +25,13 @@ const resolveDefaultModel = (): AsrModelSize => {
 	return isElectron ? "large-v3-turbo" : "tiny";
 };
 
-const resolveSourceKind = (
-	source: TimelineSource,
+const resolveAssetKind = (
+	asset: TimelineAsset,
 ): "video" | "audio" => {
-	if (source.kind === "video" || source.kind === "audio") {
-		return source.kind;
+	if (asset.kind === "video" || asset.kind === "audio") {
+		return asset.kind;
 	}
-	throw new Error(`当前 source kind 不支持转写: ${source.kind}`);
+	throw new Error(`当前 asset kind 不支持转写: ${asset.kind}`);
 };
 
 const upsertSegment = (
@@ -48,11 +48,11 @@ const upsertSegment = (
 };
 
 const resolveDuration = async (options: {
-	sourceKind: "video" | "audio";
+	assetKind: "video" | "audio";
 	file: File;
 }): Promise<number> => {
-	const { sourceKind, file } = options;
-	if (sourceKind === "audio") {
+	const { assetKind, file } = options;
+	if (assetKind === "audio") {
 		const metadata = await readAudioMetadata(file);
 		return metadata.duration;
 	}
@@ -60,8 +60,8 @@ const resolveDuration = async (options: {
 	return metadata.duration;
 };
 
-export interface TranscribeSourceByIdOptions {
-	sourceId: string;
+export interface TranscribeAssetByIdOptions {
+	assetId: string;
 	asrClient: AsrClient;
 	language?: string;
 	force?: boolean;
@@ -72,7 +72,7 @@ export interface TranscribeSourceByIdOptions {
 	onChunk?: (segment: TranscriptSegment) => void;
 }
 
-export interface TranscribeSourceByIdResult {
+export interface TranscribeAssetByIdResult {
 	status: "done" | "canceled" | "skipped";
 	changed: boolean;
 	summaryText: string;
@@ -81,11 +81,11 @@ export interface TranscribeSourceByIdResult {
 	durationMs?: number;
 }
 
-export const transcribeSourceById = async (
-	options: TranscribeSourceByIdOptions,
-): Promise<TranscribeSourceByIdResult> => {
+export const transcribeAssetById = async (
+	options: TranscribeAssetByIdOptions,
+): Promise<TranscribeAssetByIdResult> => {
 	const {
-		sourceId,
+		assetId,
 		asrClient,
 		signal,
 		onStatus,
@@ -96,32 +96,32 @@ export const transcribeSourceById = async (
 	const force = options.force === true;
 	const model = options.model ?? resolveDefaultModel();
 
-	const source = useTimelineStore.getState().getSourceById(sourceId);
-	if (!source) {
-		throw new Error(`未找到 source: ${sourceId}`);
+	const asset = useTimelineStore.getState().getAssetById(assetId);
+	if (!asset) {
+		throw new Error(`未找到 asset: ${assetId}`);
 	}
-	const sourceKind = resolveSourceKind(source);
-	const existedRecord = source.data?.asr ?? null;
+	const assetKind = resolveAssetKind(asset);
+	const existedRecord = asset.meta?.asr ?? null;
 	if (existedRecord && !force) {
 		return {
 			status: "skipped",
 			changed: false,
-			summaryText: "当前 source 已有转写，已跳过。",
+			summaryText: "当前 asset 已有转写，已跳过。",
 			record: existedRecord,
 		};
 	}
 
-	const { file, fileName } = await resolveSourceMediaFile(source);
-	const duration = await resolveDuration({ sourceKind, file });
+	const { file, fileName } = await resolveAssetMediaFile(asset);
+	const duration = await resolveDuration({ assetKind, file });
 	const now = Date.now();
 	const transcriptId = createId("transcript");
 	const baseRecord: TranscriptRecord = {
 		id: transcriptId,
 		source: {
-			type: "timeline-source",
-			sourceId: source.id,
-			kind: sourceKind,
-			uri: source.uri,
+			type: "asset",
+			assetId: asset.id,
+			kind: assetKind,
+			uri: asset.uri,
 			fileName,
 			duration,
 		},
@@ -139,8 +139,8 @@ export const transcribeSourceById = async (
 	const writeRecord = (segments: TranscriptSegment[]) => {
 		latestSegments = segments;
 		const updatedAt = Date.now();
-		useTimelineStore.getState().updateSourceData(
-			sourceId,
+		useTimelineStore.getState().updateAssetMeta(
+			assetId,
 			(prevData) => ({
 				...(prevData ?? {}),
 				asr: {
@@ -190,7 +190,8 @@ export const transcribeSourceById = async (
 		}
 
 		onStatus?.("done");
-		const currentRecord = useTimelineStore.getState().getSourceById(sourceId)?.data?.asr ?? null;
+		const currentRecord =
+			useTimelineStore.getState().getAssetById(assetId)?.meta?.asr ?? null;
 		return {
 			status: "done",
 			changed,
@@ -207,7 +208,7 @@ export const transcribeSourceById = async (
 			onStatus?.("canceled");
 			const currentRecord = useTimelineStore
 				.getState()
-				.getSourceById(sourceId)?.data?.asr ?? null;
+				.getAssetById(assetId)?.meta?.asr ?? null;
 			return {
 				status: "canceled",
 				changed,

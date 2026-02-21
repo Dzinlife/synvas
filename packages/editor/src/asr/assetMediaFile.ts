@@ -1,10 +1,10 @@
-import type { TimelineSource } from "core/dsl/types";
+import type { TimelineAsset } from "core/dsl/types";
 import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
 
 const OPFS_PREFIX = "opfs://";
 const FILE_PREFIX = "file://";
 
-export const isSupportedSourceMediaUri = (uri: string): boolean => {
+export const isSupportedAssetMediaUri = (uri: string): boolean => {
 	return (
 		uri.startsWith(OPFS_PREFIX) ||
 		uri.startsWith(FILE_PREFIX) ||
@@ -58,7 +58,7 @@ const getElectronFileBridge = (): {
 	return bridge;
 };
 
-const inferMimeType = (kind: TimelineSource["kind"]): string => {
+const inferMimeType = (kind: TimelineAsset["kind"]): string => {
 	if (kind === "audio") return "audio/*";
 	if (kind === "video") return "video/*";
 	return "application/octet-stream";
@@ -79,44 +79,44 @@ const extractFileNameFromUri = (uri: string): string | null => {
 	}
 };
 
-const resolveFileName = (source: TimelineSource): string => {
-	const preferred = source.name?.trim();
+const resolveFileName = (asset: TimelineAsset): string => {
+	const preferred = asset.name?.trim();
 	if (preferred) return preferred;
-	const fromUri = extractFileNameFromUri(source.uri);
+	const fromUri = extractFileNameFromUri(asset.uri);
 	if (fromUri) return fromUri;
-	if (source.kind === "audio") return "audio-source";
-	if (source.kind === "video") return "video-source";
-	return "source";
+	if (asset.kind === "audio") return "audio-asset";
+	if (asset.kind === "video") return "video-asset";
+	return "asset";
 };
 
-export interface ResolvedSourceMediaFile {
+export interface ResolvedAssetMediaFile {
 	file: File;
 	fileName: string;
 }
 
-export const resolveSourceMediaFile = async (
-	source: TimelineSource,
-): Promise<ResolvedSourceMediaFile> => {
-	if (source.kind !== "audio" && source.kind !== "video") {
-		throw new Error(`当前 source kind 不支持转写: ${source.kind}`);
+export const resolveAssetMediaFile = async (
+	asset: TimelineAsset,
+): Promise<ResolvedAssetMediaFile> => {
+	if (asset.kind !== "audio" && asset.kind !== "video") {
+		throw new Error(`当前 asset kind 不支持转写: ${asset.kind}`);
 	}
 
-	const fileName = resolveFileName(source);
-	if (source.uri.startsWith(OPFS_PREFIX)) {
-		const file = await resolveProjectOpfsFile(source.uri);
+	const fileName = resolveFileName(asset);
+	if (asset.uri.startsWith(OPFS_PREFIX)) {
+		const file = await resolveProjectOpfsFile(asset.uri);
 		if (file.name === fileName) {
 			return { file, fileName };
 		}
 		return {
 			file: new File([file], fileName, {
-				type: file.type || inferMimeType(source.kind),
+				type: file.type || inferMimeType(asset.kind),
 			}),
 			fileName,
 		};
 	}
 
-	if (source.uri.startsWith(FILE_PREFIX)) {
-		const filePath = resolveFilePathFromUri(source.uri);
+	if (asset.uri.startsWith(FILE_PREFIX)) {
+		const filePath = resolveFilePathFromUri(asset.uri);
 		const bridge = getElectronFileBridge();
 		if (!filePath || !bridge) {
 			throw new Error("当前环境无法读取 file:// 资源");
@@ -129,29 +129,29 @@ export const resolveSourceMediaFile = async (
 		copied.set(bytes);
 		return {
 			file: new File([copied.buffer], fileName, {
-				type: inferMimeType(source.kind),
+				type: inferMimeType(asset.kind),
 			}),
 			fileName,
 		};
 	}
 
 	const isWebFetchUri =
-		source.uri.startsWith("http://") ||
-		source.uri.startsWith("https://") ||
-		source.uri.startsWith("blob:");
+		asset.uri.startsWith("http://") ||
+		asset.uri.startsWith("https://") ||
+		asset.uri.startsWith("blob:");
 	if (isWebFetchUri) {
-		const response = await fetch(source.uri);
+		const response = await fetch(asset.uri);
 		if (!response.ok) {
-			throw new Error(`下载 source 失败: ${response.status}`);
+			throw new Error(`下载 asset 失败: ${response.status}`);
 		}
 		const blob = await response.blob();
 		return {
 			file: new File([blob], fileName, {
-				type: blob.type || inferMimeType(source.kind),
+				type: blob.type || inferMimeType(asset.kind),
 			}),
 			fileName,
 		};
 	}
 
-	throw new Error(`当前 source URI 不支持转写: ${source.uri}`);
+	throw new Error(`当前 asset URI 不支持转写: ${asset.uri}`);
 };

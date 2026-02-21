@@ -551,7 +551,7 @@ export const usePreviewInteractions = ({
 		const state = useTimelineStore.getState();
 		return {
 			elements: state.elements,
-			sources: state.sources,
+			assets: state.assets,
 			tracks: state.tracks,
 			audioTrackStates: state.audioTrackStates,
 			rippleEditingEnabled: state.rippleEditingEnabled,
@@ -950,8 +950,8 @@ export const usePreviewInteractions = ({
 		const snapshots = copySourceSnapshotsRef.current;
 		if (snapshots.size === 0) return;
 
-		snapshots.forEach((source, sourceId) => {
-			const node = stage.findOne(`.element-${sourceId}`) as Konva.Node | null;
+		snapshots.forEach((source, assetId) => {
+			const node = stage.findOne(`.element-${assetId}`) as Konva.Node | null;
 			if (!node) return;
 			if (!source.transform) return;
 			const { canvasX, canvasY } = modelPositionToCanvasCenter(
@@ -1017,21 +1017,21 @@ export const usePreviewInteractions = ({
 			if (isCopyDragStart) {
 				copySourceIdsRef.current = nextSelectedIds;
 				const sourceSnapshots = new Map<string, TimelineElement>();
-				nextSelectedIds.forEach((sourceId) => {
-					const source = currentElements.find((el) => el.id === sourceId);
-					if (source) sourceSnapshots.set(sourceId, source);
+				nextSelectedIds.forEach((assetId) => {
+					const source = currentElements.find((el) => el.id === assetId);
+					if (source) sourceSnapshots.set(assetId, source);
 				});
 				copySourceSnapshotsRef.current = sourceSnapshots;
 
 				const seed = createCopySeed();
 				const nextMap = new Map<string, string>();
-				nextSelectedIds.forEach((sourceId, index) => {
-					nextMap.set(sourceId, `element-${seed}-${index}`);
+				nextSelectedIds.forEach((assetId, index) => {
+					nextMap.set(assetId, `element-${seed}-${index}`);
 				});
 				copyIdMapRef.current = nextMap;
 
 				const copyIds = nextSelectedIds
-					.map((sourceId) => nextMap.get(sourceId))
+					.map((assetId) => nextMap.get(assetId))
 					.filter((copyId): copyId is string => Boolean(copyId));
 
 				const copies = currentElements
@@ -1051,9 +1051,9 @@ export const usePreviewInteractions = ({
 				// 拖拽结束后再切换选择到副本
 				// dragSelectedIds 存储副本 ID，用于在 handleDrag 中更新副本元素
 				dragSelectedIds = [...copyIds];
-				nextSelectedIds.forEach((sourceId) => {
-					const copyId = nextMap.get(sourceId);
-					const center = centers[sourceId];
+				nextSelectedIds.forEach((assetId) => {
+					const copyId = nextMap.get(assetId);
+					const center = centers[assetId];
 					if (!copyId || !center) return;
 					dragCenters[copyId] = center;
 				});
@@ -1238,12 +1238,12 @@ export const usePreviewInteractions = ({
 				if (copyModeRef.current) {
 					const sourceIds = copySourceIdsRef.current;
 					const sourceCenters = dragSourceCentersRef.current;
-					sourceIds.forEach((sourceId) => {
-						const initial = sourceCenters[sourceId];
+					sourceIds.forEach((assetId) => {
+						const initial = sourceCenters[assetId];
 						if (!initial) return;
 
 						const otherNode = stage?.findOne(
-							`.element-${sourceId}`,
+							`.element-${assetId}`,
 						) as Konva.Node | null;
 						if (!otherNode) return;
 
@@ -1333,10 +1333,10 @@ export const usePreviewInteractions = ({
 						setElementsWithoutHistory(nextElements);
 					}
 
-					const sources = copySourceIdsRef.current;
-					if (sources.length > 0) {
-						const primaryId = sources.includes(id) ? id : (sources[0] ?? null);
-						setSelection(sources, primaryId);
+					const assets = copySourceIdsRef.current;
+					if (assets.length > 0) {
+						const primaryId = assets.includes(id) ? id : (assets[0] ?? null);
+						setSelection(assets, primaryId);
 					}
 				} else {
 					// 复制成功，切换选择到副本元素

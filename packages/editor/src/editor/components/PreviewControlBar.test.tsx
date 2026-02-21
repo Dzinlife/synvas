@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { framesToTimecode } from "@/utils/timecode";
 import PreviewControlBar from "./PreviewControlBar";
 
-const { timelineState, playbackState, previewState, togglePlayMock } =
+const { timelineState, playbackState, previewState, togglePlayMock, studioState } =
 	vi.hoisted(() => ({
 		timelineState: {
 			currentTime: 120,
@@ -28,6 +28,9 @@ const { timelineState, playbackState, previewState, togglePlayMock } =
 			},
 		},
 		togglePlayMock: vi.fn(),
+		studioState: {
+			activeMainView: "preview" as "preview" | "canvas",
+		},
 	}));
 
 vi.mock("@/editor/contexts/TimelineContext", () => {
@@ -60,6 +63,21 @@ vi.mock("@/dsl/export", () => ({
 	exportCanvasAsImage: vi.fn(async () => {}),
 }));
 
+vi.mock("@/studio/studioStore", () => ({
+	useStudioStore: (
+		selector: (state: {
+			activeMainView: "preview" | "canvas";
+			setActiveMainView: (view: "preview" | "canvas") => void;
+		}) => unknown,
+	) =>
+		selector({
+			activeMainView: studioState.activeMainView,
+			setActiveMainView: (view) => {
+				studioState.activeMainView = view;
+			},
+		}),
+}));
+
 afterEach(() => {
 	cleanup();
 });
@@ -76,6 +94,7 @@ beforeEach(() => {
 	previewState.setZoomLevel.mockReset();
 	previewState.resetPanOffset.mockReset();
 	togglePlayMock.mockReset();
+	studioState.activeMainView = "preview";
 });
 
 describe("PreviewControlBar", () => {
@@ -93,5 +112,13 @@ describe("PreviewControlBar", () => {
 		expect(screen.getByTestId("preview-control-bar-timecode").textContent).toBe(
 			timecode,
 		);
+	});
+
+	it("支持切换 Preview/Canvas 主视图", () => {
+		render(<PreviewControlBar />);
+		fireEvent.click(screen.getByRole("button", { name: "Canvas" }));
+		expect(studioState.activeMainView).toBe("canvas");
+		fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+		expect(studioState.activeMainView).toBe("preview");
 	});
 });

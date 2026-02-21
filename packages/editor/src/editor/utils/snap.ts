@@ -25,12 +25,12 @@ export function collectSnapPoints(
 			points.push({
 				time: el.timeline.start,
 				type: "element-start",
-				sourceId: el.id,
+				assetId: el.id,
 			});
 			points.push({
 				time: el.timeline.end,
 				type: "element-end",
-				sourceId: el.id,
+				assetId: el.id,
 			});
 		}
 	});

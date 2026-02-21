@@ -24,7 +24,7 @@ const createVideoClip = ({
 	start,
 	end,
 	offset = 0,
-	sourceId = "source-video-a",
+	assetId = "source-video-a",
 	reversed = false,
 	trackIndex = 0,
 	muteSourceAudio = false,
@@ -33,7 +33,7 @@ const createVideoClip = ({
 	start: number;
 	end: number;
 	offset?: number;
-	sourceId?: string;
+	assetId?: string;
 	reversed?: boolean;
 	trackIndex?: number;
 	muteSourceAudio?: boolean;
@@ -42,7 +42,7 @@ const createVideoClip = ({
 	type: "VideoClip",
 	component: "video-clip",
 	name: id,
-	sourceId,
+	assetId,
 	timeline: createTimeline(start, end, offset, trackIndex),
 	props: { reversed },
 	...(muteSourceAudio
@@ -59,7 +59,7 @@ const createAudioClip = ({
 	start,
 	end,
 	offset = 0,
-	sourceId = "source-audio-a",
+	assetId = "source-audio-a",
 	reversed = false,
 	trackIndex = -1,
 }: {
@@ -67,7 +67,7 @@ const createAudioClip = ({
 	start: number;
 	end: number;
 	offset?: number;
-	sourceId?: string;
+	assetId?: string;
 	reversed?: boolean;
 	trackIndex?: number;
 }): TimelineElement => ({
@@ -75,7 +75,7 @@ const createAudioClip = ({
 	type: "AudioClip",
 	component: "audio-clip",
 	name: id,
-	sourceId,
+	assetId,
 	timeline: createTimeline(start, end, offset, trackIndex),
 	props: { reversed },
 });
@@ -241,7 +241,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 100,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				trackIndex: -1,
 			}),
 			createVideoClip({
@@ -249,7 +249,7 @@ describe("clipContinuityIndex", () => {
 				start: 30,
 				end: 60,
 				offset: 130,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				trackIndex: 1,
 			}),
 		];
@@ -266,7 +266,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 100,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				trackIndex: -1,
 			}),
 			createVideoClip({
@@ -274,7 +274,7 @@ describe("clipContinuityIndex", () => {
 				start: 31,
 				end: 60,
 				offset: 131,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				trackIndex: 2,
 			}),
 		];
@@ -290,7 +290,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 40,
 				offset: 100,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				trackIndex: -2,
 			}),
 			createVideoClip({
@@ -298,7 +298,7 @@ describe("clipContinuityIndex", () => {
 				start: 30,
 				end: 60,
 				offset: 130,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				trackIndex: 0,
 			}),
 		];
@@ -314,7 +314,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 0,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				muteSourceAudio: true,
 			}),
 			createAudioClip({
@@ -322,7 +322,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 0,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				trackIndex: -1,
 			}),
 			createVideoClip({
@@ -330,7 +330,7 @@ describe("clipContinuityIndex", () => {
 				start: 30,
 				end: 60,
 				offset: 30,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 			}),
 		];
 		expect(getAudioPlaybackSessionKey(elements, "v1")).toBe("clip:v1");
@@ -346,7 +346,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 0,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				muteSourceAudio: true,
 			}),
 			createAudioClip({
@@ -354,7 +354,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 0,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 				trackIndex: -1,
 			}),
 			createVideoClip({
@@ -362,7 +362,7 @@ describe("clipContinuityIndex", () => {
 				start: 30,
 				end: 60,
 				offset: 30,
-				sourceId: "shared.mp4",
+				assetId: "shared.mp4",
 			}),
 			createTransition({
 				id: "t1",
@@ -385,7 +385,7 @@ describe("clipContinuityIndex", () => {
 				start: 0,
 				end: 30,
 				offset: 10,
-				sourceId: "",
+				assetId: "",
 			}),
 		];
 		expect(getVideoPlaybackSessionKey(elements, "v1")).toBe("clip:v1");

@@ -28,6 +28,7 @@ const createSnapshot = (): TimelineCommandSnapshot => ({
 	fps: 30,
 	currentTime: 0,
 	elements: [createElement("clip-1", 0, 30)],
+	assets: [],
 	tracks: [
 		{
 			id: "main-track",

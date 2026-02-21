@@ -33,6 +33,19 @@ export interface MaterialDragData {
 	duration?: number;
 }
 
+/** 拖拽数据：资产引用 */
+export interface AssetRefDragData {
+	payloadType: "asset-ref";
+	assetId: string;
+	assetKind: "video" | "audio" | "image" | "lottie" | "unknown";
+	type: MaterialType;
+	name: string;
+	thumbnailUrl?: string;
+	width?: number;
+	height?: number;
+	duration?: number;
+}
+
 /** 拖拽数据：来自时间线 */
 export interface TimelineDragData {
 	elementId: string;
@@ -42,7 +55,7 @@ export interface TimelineDragData {
 }
 
 /** 拖拽数据联合类型 */
-export type DragData = MaterialDragData | TimelineDragData;
+export type DragData = MaterialDragData | AssetRefDragData | TimelineDragData;
 
 /** Ghost 渲染信息 */
 export interface DragGhostInfo {
@@ -65,7 +78,7 @@ export interface DragGhostInfo {
 /** 拖拽目标信息 */
 export interface DropTargetInfo {
 	/** 目标区域类型 */
-	zone: "timeline" | "preview" | "none";
+	zone: "timeline" | "preview" | "canvas" | "none";
 	/** 时间线目标类型（轨道或间隙） */
 	type?: "track" | "gap";
 	/** 轨道索引（时间线目标） */
@@ -207,6 +220,11 @@ export const useDragStore = create<DragStore>()(
 /** 判断拖拽数据是否来自素材库 */
 export function isMaterialDragData(data: DragData): data is MaterialDragData {
 	return "uri" in data && "type" in data;
+}
+
+/** 判断拖拽数据是否为资产引用 */
+export function isAssetRefDragData(data: DragData): data is AssetRefDragData {
+	return "payloadType" in data && data.payloadType === "asset-ref";
 }
 
 /** 判断拖拽数据是否来自时间线 */

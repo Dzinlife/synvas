@@ -34,7 +34,7 @@ import {
 	usePreviewAxis,
 	useRippleEditing,
 	useSnap,
-	useSources,
+	useAssets,
 	useTimelineScale,
 	useTimelineStore,
 	useTrackAssignments,
@@ -162,7 +162,7 @@ const TimelineEditor = () => {
 	const { isPlaying, pause } = usePlaybackControl();
 	const { currentTime, setCurrentTime: seekTo } = useCurrentTime();
 	const { fps } = useFps();
-	const { sources } = useSources();
+	const { assets } = useAssets();
 	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId, deselectAll, setSelection } =
@@ -1331,7 +1331,7 @@ const TimelineEditor = () => {
 			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
 			const hasSourceAudioTrack =
 				getVideoClipHasSourceAudioTrack(targetElement);
-			const videoUri = resolveElementSourceUri(targetElement, sources);
+			const videoUri = resolveElementSourceUri(targetElement, assets);
 			if (isSingleVideo && hasSourceAudioTrack) {
 				const isActionDisabled = !videoUri;
 				actions.splice(2, 0, {
@@ -1388,7 +1388,7 @@ const TimelineEditor = () => {
 		pasteFromClipboard,
 		postProcessOptions,
 		setElements,
-		sources,
+		assets,
 		trackLockedMap,
 	]);
 

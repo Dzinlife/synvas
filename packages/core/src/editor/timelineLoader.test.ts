@@ -1,9 +1,8 @@
-import type { TimelineElement, TimelineSource } from "../dsl/types";
+import type { TimelineAsset, TimelineElement } from "../dsl/types";
 import { describe, expect, it } from "vitest";
 import { loadTimelineFromObject, saveTimelineToObject } from "./timelineLoader";
 
 const createBaseTimeline = () => ({
-	version: "1.0" as const,
 	fps: 30,
 	canvas: {
 		width: 1920,
@@ -15,9 +14,9 @@ const createBaseTimeline = () => ({
 		rippleEditingEnabled: true,
 		previewAxisEnabled: true,
 	},
-	sources: [
+	assets: [
 		{
-			id: "source-video-1",
+			id: "asset-video-1",
 			kind: "video" as const,
 			uri: "file:///clip.mp4",
 		},
@@ -28,7 +27,7 @@ const createBaseTimeline = () => ({
 			type: "VideoClip" as const,
 			component: "video-clip",
 			name: "clip-1",
-			sourceId: "source-video-1",
+			assetId: "asset-video-1",
 			timeline: {
 				start: 0,
 				end: 30,
@@ -43,27 +42,27 @@ const createBaseTimeline = () => ({
 	],
 });
 
-describe("timelineLoader source schema", () => {
-	it("支持 version=1.0 的 sources + sourceId 结构", () => {
+describe("timelineLoader asset schema", () => {
+	it("支持 assets + assetId 结构", () => {
 		const loaded = loadTimelineFromObject(createBaseTimeline());
-		expect(loaded.sources).toHaveLength(1);
-		expect(loaded.sources[0]?.id).toBe("source-video-1");
-		expect(loaded.elements[0]?.sourceId).toBe("source-video-1");
+		expect(loaded.assets).toHaveLength(1);
+		expect(loaded.assets[0]?.id).toBe("asset-video-1");
+		expect(loaded.elements[0]?.assetId).toBe("asset-video-1");
 	});
 
-	it("媒体元素缺少 sourceId 会校验失败", () => {
+	it("媒体元素缺少 assetId 会校验失败", () => {
 		const invalid = createBaseTimeline();
-		delete (invalid.elements[0] as { sourceId?: string }).sourceId;
+		delete (invalid.elements[0] as { assetId?: string }).assetId;
 		expect(() => loadTimelineFromObject(invalid)).toThrow(
-			"elements[0].sourceId: required",
+			"elements[0].assetId: required",
 		);
 	});
 
-	it("sourceId 指向不存在的 source 会校验失败", () => {
+	it("assetId 指向不存在的 asset 会校验失败", () => {
 		const invalid = createBaseTimeline();
-		(invalid.elements[0] as { sourceId?: string }).sourceId = "missing-source";
+		(invalid.elements[0] as { assetId?: string }).assetId = "missing-asset";
 		expect(() => loadTimelineFromObject(invalid)).toThrow(
-			'source "missing-source" not found',
+			'asset "missing-asset" not found',
 		);
 	});
 
@@ -73,13 +72,13 @@ describe("timelineLoader source schema", () => {
 			uri: "file:///legacy.mp4",
 		};
 		expect(() => loadTimelineFromObject(invalid)).toThrow(
-			"elements[0].props.uri: must use sourceId instead",
+			"elements[0].props.uri: must use assetId instead",
 		);
 	});
 
-	it("saveTimelineToObject 会保留 sourceId 并移除媒体 props.uri", () => {
-		const source: TimelineSource = {
-			id: "source-video-1",
+	it("saveTimelineToObject 会保留 assetId 并移除媒体 props.uri", () => {
+		const asset: TimelineAsset = {
+			id: "asset-video-1",
 			kind: "video",
 			uri: "file:///clip.mp4",
 		};
@@ -88,7 +87,7 @@ describe("timelineLoader source schema", () => {
 			type: "VideoClip",
 			component: "video-clip",
 			name: "clip-1",
-			sourceId: "source-video-1",
+			assetId: "asset-video-1",
 			timeline: {
 				start: 0,
 				end: 30,
@@ -107,22 +106,21 @@ describe("timelineLoader source schema", () => {
 			{ width: 1920, height: 1080 },
 			[],
 			undefined,
-			[source],
+			[asset],
 		);
-		expect(saved.version).toBe("1.0");
-		expect(saved.sources?.[0]?.id).toBe("source-video-1");
-		expect(saved.elements[0]?.sourceId).toBe("source-video-1");
+		expect(saved.assets?.[0]?.id).toBe("asset-video-1");
+		expect(saved.elements[0]?.assetId).toBe("asset-video-1");
 		expect((saved.elements[0]?.props as { uri?: string }).uri).toBeUndefined();
 	});
 
-	it("支持在 source.data.asr 中保存转写数据", () => {
+	it("支持在 asset.meta.asr 中保存转写数据", () => {
 		const timeline = createBaseTimeline();
-		(timeline.sources[0] as TimelineSource).data = {
+		(timeline.assets[0] as TimelineAsset).meta = {
 			asr: {
 				id: "transcript-1",
 				source: {
-					type: "timeline-source",
-					sourceId: "source-video-1",
+					type: "asset",
+					assetId: "asset-video-1",
 					kind: "video",
 					uri: "file:///clip.mp4",
 					fileName: "clip.mp4",
@@ -140,7 +138,6 @@ describe("timelineLoader source schema", () => {
 						text: "你好",
 						words: [
 							{
-								id: "word-1",
 								text: "你好",
 								start: 0,
 								end: 1,
@@ -151,12 +148,12 @@ describe("timelineLoader source schema", () => {
 			},
 		};
 		const loaded = loadTimelineFromObject(timeline);
-		expect(loaded.sources[0]?.data?.asr?.id).toBe("transcript-1");
+		expect(loaded.assets[0]?.meta?.asr?.id).toBe("transcript-1");
 	});
 
 	it("不兼容旧版 opfs-audio 转写结构", () => {
 		const timeline = createBaseTimeline();
-		(timeline.sources[0] as TimelineSource).data = {
+		(timeline.assets[0] as TimelineAsset).meta = {
 			asr: {
 				id: "transcript-1",
 				source: {
@@ -171,9 +168,9 @@ describe("timelineLoader source schema", () => {
 				updatedAt: 2,
 				segments: [],
 			},
-		} as unknown as TimelineSource["data"];
+		} as unknown as TimelineAsset["meta"];
 		expect(() => loadTimelineFromObject(timeline)).toThrow(
-			"sources[0].data.asr.source.type",
+			"assets[0].meta.asr.source.type",
 		);
 	});
 });

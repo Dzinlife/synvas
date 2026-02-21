@@ -1,25 +1,25 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { TimelineSource } from "core/dsl/types";
+import type { TimelineAsset } from "core/dsl/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AsrProvider } from "@/asr";
 import type { AsrClient } from "@/asr/AsrContext";
 import { useTimelineStore } from "../contexts/TimelineContext";
 import SmartSpeechCutDialog from "./SmartSpeechCutDialog";
 
-vi.mock("@/asr/sourceTranscriptionService", () => ({
-	transcribeSourceById: vi.fn(),
+vi.mock("@/asr/assetTranscriptionService", () => ({
+	transcribeAssetById: vi.fn(),
 }));
 
-import { transcribeSourceById } from "@/asr/sourceTranscriptionService";
+import { transcribeAssetById } from "@/asr/assetTranscriptionService";
 
-const mockedTranscribeSourceById = vi.mocked(transcribeSourceById);
+const mockedTranscribeAssetById = vi.mocked(transcribeAssetById);
 
 const initialState = useTimelineStore.getState();
 
 afterEach(() => {
 	useTimelineStore.setState(initialState, true);
-	mockedTranscribeSourceById.mockReset();
+	mockedTranscribeAssetById.mockReset();
 	vi.restoreAllMocks();
 });
 
@@ -29,19 +29,19 @@ const asrClient: AsrClient = {
 	})),
 };
 
-const createSource = (withAsr: boolean): TimelineSource => ({
+const createSource = (withAsr: boolean): TimelineAsset => ({
 	id: "source-1",
 	kind: "video",
 	uri: "file:///clip.mp4",
 	name: "clip.mp4",
 	...(withAsr
 		? {
-				data: {
+				meta: {
 					asr: {
 						id: "asr-1",
 						source: {
-							type: "timeline-source" as const,
-							sourceId: "source-1",
+							type: "asset" as const,
+							assetId: "source-1",
 							kind: "video" as const,
 							uri: "file:///clip.mp4",
 							fileName: "clip.mp4",
@@ -59,7 +59,6 @@ const createSource = (withAsr: boolean): TimelineSource => ({
 								text: "你好",
 								words: [
 									{
-										id: "word-1",
 										text: "你好",
 										start: 0,
 										end: 1,
@@ -80,7 +79,7 @@ const renderDialog = () => {
 				open
 				onOpenChange={() => {}}
 				elementId="clip-1"
-				sourceId="source-1"
+				assetId="source-1"
 			/>
 		</AsrProvider>,
 	);
@@ -89,7 +88,7 @@ const renderDialog = () => {
 describe("SmartSpeechCutDialog", () => {
 	it("应根据 asr 数据在转写模式和文本模式间切换", async () => {
 		useTimelineStore.setState({
-			sources: [createSource(false)],
+			assets: [createSource(false)],
 		});
 		const { rerender } = render(
 			<AsrProvider value={asrClient}>
@@ -97,7 +96,7 @@ describe("SmartSpeechCutDialog", () => {
 					open
 					onOpenChange={() => {}}
 					elementId="clip-1"
-					sourceId="source-1"
+					assetId="source-1"
 				/>
 			</AsrProvider>,
 		);
@@ -105,7 +104,7 @@ describe("SmartSpeechCutDialog", () => {
 		expect(screen.getByRole("button", { name: "开始转写" })).toBeTruthy();
 
 		useTimelineStore.setState({
-			sources: [createSource(true)],
+			assets: [createSource(true)],
 		});
 		rerender(
 			<AsrProvider value={asrClient}>
@@ -113,7 +112,7 @@ describe("SmartSpeechCutDialog", () => {
 					open
 					onOpenChange={() => {}}
 					elementId="clip-1"
-					sourceId="source-1"
+					assetId="source-1"
 				/>
 			</AsrProvider>,
 		);
@@ -124,23 +123,23 @@ describe("SmartSpeechCutDialog", () => {
 	});
 
 	it("点击强制重新转写应以 force=true 调用服务", async () => {
-		mockedTranscribeSourceById.mockResolvedValue({
+		mockedTranscribeAssetById.mockResolvedValue({
 			status: "done",
 			changed: true,
 			summaryText: "转写完成",
 			record: null,
 		});
 		useTimelineStore.setState({
-			sources: [createSource(true)],
+			assets: [createSource(true)],
 		});
 		renderDialog();
 
 		fireEvent.click(screen.getByRole("button", { name: "强制重新转写" }));
 
 		await waitFor(() => {
-			expect(mockedTranscribeSourceById).toHaveBeenCalledWith(
+			expect(mockedTranscribeAssetById).toHaveBeenCalledWith(
 				expect.objectContaining({
-					sourceId: "source-1",
+					assetId: "source-1",
 					force: true,
 				}),
 			);
@@ -149,7 +148,7 @@ describe("SmartSpeechCutDialog", () => {
 
 	it("点击调试按钮应输出当前 asr 数据", () => {
 		useTimelineStore.setState({
-			sources: [createSource(true)],
+			assets: [createSource(true)],
 		});
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		renderDialog();
@@ -160,7 +159,7 @@ describe("SmartSpeechCutDialog", () => {
 			"[SmartSpeechCutDialog][asr]",
 			expect.objectContaining({
 				elementId: "clip-1",
-				sourceId: "source-1",
+				assetId: "source-1",
 				sourceUri: "file:///clip.mp4",
 			}),
 		);

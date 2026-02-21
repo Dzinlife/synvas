@@ -1,8 +1,8 @@
-import type { TimelineSource } from "core/dsl/types";
+import type { TimelineAsset } from "core/dsl/types";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAsrClient } from "@/asr";
-import { transcribeSourceById } from "@/asr/sourceTranscriptionService";
+import { transcribeAssetById } from "@/asr/assetTranscriptionService";
 import type { AsrJobStatus, TranscriptRecord } from "@/asr/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,13 +19,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { useSources } from "../contexts/TimelineContext";
+import { useAssets } from "../contexts/TimelineContext";
 
 interface SmartSpeechCutDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	elementId: string | null;
-	sourceId: string | null;
+	assetId: string | null;
 }
 
 const LANGUAGE_OPTIONS = [
@@ -112,26 +112,26 @@ const TranscriptContent: React.FC<{ record: TranscriptRecord | null }> = ({
 };
 
 const resolveSourceById = (
-	sources: TimelineSource[],
-	sourceId: string | null,
-): TimelineSource | null => {
-	if (!sourceId) return null;
-	return sources.find((source) => source.id === sourceId) ?? null;
+	assets: TimelineAsset[],
+	assetId: string | null,
+): TimelineAsset | null => {
+	if (!assetId) return null;
+	return assets.find((source) => source.id === assetId) ?? null;
 };
 
 const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 	open,
 	onOpenChange,
 	elementId,
-	sourceId,
+	assetId,
 }) => {
 	const asrClient = useAsrClient();
-	const { sources } = useSources();
+	const { assets } = useAssets();
 	const source = useMemo(
-		() => resolveSourceById(sources, sourceId),
-		[sources, sourceId],
+		() => resolveSourceById(assets, assetId),
+		[assets, assetId],
 	);
-	const asrRecord = source?.data?.asr ?? null;
+	const asrRecord = source?.meta?.asr ?? null;
 	const [language, setLanguage] = useState("auto");
 	const [status, setStatus] = useState<AsrJobStatus>("idle");
 	const [progress, setProgress] = useState(0);
@@ -155,15 +155,15 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 
 	const handleTranscribe = useCallback(
 		async (force: boolean) => {
-			if (!sourceId || isRunning) return;
+			if (!assetId || isRunning) return;
 			setError(null);
 			setMessage(null);
 			setProgress(0);
 			const controller = new AbortController();
 			setAbortController(controller);
 			try {
-				const result = await transcribeSourceById({
-					sourceId,
+				const result = await transcribeAssetById({
+					assetId,
 					asrClient,
 					language,
 					force,
@@ -194,19 +194,19 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 				setAbortController(null);
 			}
 		},
-		[asrClient, isRunning, language, sourceId],
+		[asrClient, isRunning, language, assetId],
 	);
 
 	const handleDebugLog = useCallback(() => {
 		console.log("[SmartSpeechCutDialog][asr]", {
 			elementId,
-			sourceId,
+			assetId,
 			sourceUri: source?.uri ?? null,
-			asr: source?.data?.asr ?? null,
+			asr: source?.meta?.asr ?? null,
 		});
-	}, [elementId, source, sourceId]);
+	}, [elementId, source, assetId]);
 
-	const canRun = Boolean(sourceId && source);
+	const canRun = Boolean(assetId && source);
 	const hasAsr = Boolean(asrRecord);
 
 	return (

@@ -57,8 +57,8 @@ vi.mock("../contexts/TimelineContext", () => {
 			rippleEditingEnabled: false,
 			setRippleEditingEnabled: noop,
 		}),
-		useSources: () => ({
-			sources: [],
+		useAssets: () => ({
+			assets: [],
 		}),
 		useSnap: () => ({
 			snapEnabled: true,

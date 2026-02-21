@@ -28,7 +28,7 @@ const cloneSnapshot = (
 	return {
 		...snapshot,
 		elements: [...snapshot.elements],
-		sources: [...snapshot.sources],
+		assets: [...snapshot.assets],
 		tracks: [...snapshot.tracks],
 		audioTrackStates: { ...snapshot.audioTrackStates },
 	};

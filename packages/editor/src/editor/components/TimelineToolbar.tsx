@@ -2,7 +2,7 @@ import type { TimelineElement } from "core/dsl/types";
 import { buildSplitElements } from "core/editor/command/split";
 import { Film, Mic, Sparkles, Split, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isSupportedSourceMediaUri } from "@/asr";
+import { isSupportedAssetMediaUri } from "@/asr";
 import {
 	AutoAttachIcon,
 	RippleEditingIcon,
@@ -45,7 +45,7 @@ import {
 	usePreviewAxis,
 	useRippleEditing,
 	useSnap,
-	useSources,
+	useAssets,
 	useTimelineHistory,
 	useTimelineScale,
 	useTimelineStore,
@@ -119,7 +119,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const { undo, redo } = useTimelineHistory();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId } = useMultiSelect();
-	const { sources } = useSources();
+	const { assets } = useAssets();
 	const { fps } = useFps();
 	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
@@ -268,16 +268,16 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		if (!target) return null;
 		if (selectedIds.length !== 1 || selectedIds[0] !== target.id) return null;
 		if (target.type !== "VideoClip" && target.type !== "AudioClip") return null;
-		if (!target.sourceId) return null;
-		const source = sources.find((item) => item.id === target.sourceId);
-		if (!source) return null;
-		if (source.kind !== "video" && source.kind !== "audio") return null;
-		if (!isSupportedSourceMediaUri(source.uri)) return null;
+		if (!target.assetId) return null;
+		const asset = assets.find((item) => item.id === target.assetId);
+		if (!asset) return null;
+		if (asset.kind !== "video" && asset.kind !== "audio") return null;
+		if (!isSupportedAssetMediaUri(asset.uri)) return null;
 		return {
 			elementId: target.id,
-			sourceId: source.id,
+			assetId: asset.id,
 		};
-	}, [primarySelectedElement, selectedIds, sources]);
+	}, [primarySelectedElement, selectedIds, assets]);
 
 	useEffect(() => {
 		if (speechCutCandidate) return;
@@ -777,7 +777,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 				open={speechCutOpen}
 				onOpenChange={setSpeechCutOpen}
 				elementId={speechCutCandidate?.elementId ?? null}
-				sourceId={speechCutCandidate?.sourceId ?? null}
+				assetId={speechCutCandidate?.assetId ?? null}
 			/>
 		</>
 	);

@@ -12,7 +12,7 @@ import {
 import { collectLinkedTransitions, isTransitionElement } from "./transitions";
 
 interface TimelineClipboardAnchor {
-	sourceId: string | null;
+	assetId: string | null;
 	start: number;
 	trackIndex: number;
 }
@@ -108,7 +108,7 @@ export const buildTimelineClipboardPayload = (
 		elements: copiedElements.map((element) => cloneTimelineElement(element)),
 		primaryId: resolvedPrimary,
 		anchor: {
-			sourceId: anchorElement.id,
+			assetId: anchorElement.id,
 			start: anchorElement.timeline.start,
 			trackIndex: getTrackIndex(anchorElement),
 		},

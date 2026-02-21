@@ -1,23 +1,23 @@
-import type { TimelineElement, TimelineSource } from "core/dsl/types";
-import { isSourceBackedElementType } from "core/dsl/types";
+import type { TimelineElement, TimelineAsset } from "core/dsl/types";
+import { isAssetBackedElementType } from "core/dsl/types";
 import { useEffect, useMemo, useRef } from "react";
 import { TimelineAudioMixManager } from "@/editor/audio/TimelineAudioMixManager";
-import { useElements, useSources } from "@/editor/contexts/TimelineContext";
+import { useElements, useAssets } from "@/editor/contexts/TimelineContext";
 import { componentRegistry } from "./componentRegistry";
 import { modelRegistry } from "./registry";
 
-const buildSourceById = (sources: TimelineSource[]): Map<string, TimelineSource> => {
-	return new Map(sources.map((source) => [source.id, source]));
+const buildSourceById = (assets: TimelineAsset[]): Map<string, TimelineAsset> => {
+	return new Map(assets.map((source) => [source.id, source]));
 };
 
 const resolveModelProps = (
 	element: TimelineElement,
-	sourceById: ReadonlyMap<string, TimelineSource>,
+	sourceById: ReadonlyMap<string, TimelineAsset>,
 ): Record<string, unknown> => {
 	const props = (element.props ?? {}) as Record<string, unknown>;
-	if (!isSourceBackedElementType(element.type)) return props;
-	if (!element.sourceId) return props;
-	const source = sourceById.get(element.sourceId);
+	if (!isAssetBackedElementType(element.type)) return props;
+	if (!element.assetId) return props;
+	const source = sourceById.get(element.assetId);
 	if (!source) return props;
 	return {
 		...props,
@@ -51,10 +51,10 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 	children,
 }) => {
 	const { elements } = useElements();
-	const { sources } = useSources();
+	const { assets } = useAssets();
 	const prevElementsRef = useRef<TimelineElement[]>([]);
 	const initializedRef = useRef(false);
-	const sourceById = useMemo(() => buildSourceById(sources), [sources]);
+	const sourceById = useMemo(() => buildSourceById(assets), [assets]);
 
 	// 首次渲染时直接初始化所有 model
 	if (!initializedRef.current && elements.length > 0) {

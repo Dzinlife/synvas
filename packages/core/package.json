@@ -8,6 +8,7 @@
     "./asr/*": "./src/asr/*",
     "./dsl/*": "./src/dsl/*",
     "./dsl/*/*": "./src/dsl/*/*",
+    "./studio/*": "./src/studio/*",
     "./editor/command": "./src/editor/command/index.ts",
     "./editor/command/*": "./src/editor/command/*",
     "./editor/*": "./src/editor/*",

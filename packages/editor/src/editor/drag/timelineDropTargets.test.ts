@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it } from "vitest";
-import { getPreviewDropTargetFromScreenPosition } from "./timelineDropTargets";
+import {
+	getCanvasDropTargetFromScreenPosition,
+	getPreviewDropTargetFromScreenPosition,
+} from "./timelineDropTargets";
 
 const createPreviewZone = () => {
 	const previewZone = document.createElement("div");
@@ -25,6 +28,29 @@ const createPreviewZone = () => {
 		}) as DOMRect;
 	document.body.appendChild(previewZone);
 	return previewZone;
+};
+
+const createCanvasZone = (options?: { active?: boolean }) => {
+	const root = document.createElement("div");
+	root.setAttribute("data-main-view-canvas", "true");
+	root.dataset.active = options?.active === false ? "false" : "true";
+	const canvasZone = document.createElement("div");
+	canvasZone.setAttribute("data-canvas-drop-zone", "true");
+	canvasZone.getBoundingClientRect = () =>
+		({
+			left: 300,
+			top: 100,
+			right: 1300,
+			bottom: 900,
+			width: 1000,
+			height: 800,
+			x: 300,
+			y: 100,
+			toJSON: () => "",
+		}) as DOMRect;
+	root.appendChild(canvasZone);
+	document.body.appendChild(root);
+	return canvasZone;
 };
 
 describe("getPreviewDropTargetFromScreenPosition", () => {
@@ -59,6 +85,33 @@ describe("getPreviewDropTargetFromScreenPosition", () => {
 	it("预览区域外返回 null", () => {
 		createPreviewZone();
 		const target = getPreviewDropTargetFromScreenPosition(90, 200);
+		expect(target).toBeNull();
+	});
+});
+
+describe("getCanvasDropTargetFromScreenPosition", () => {
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("canvas 视图激活时命中返回 canDrop=true", () => {
+		createCanvasZone();
+		const target = getCanvasDropTargetFromScreenPosition(600, 300);
+		expect(target).toEqual({
+			zone: "canvas",
+			canDrop: true,
+		});
+	});
+
+	it("canvas 视图未激活时返回 null", () => {
+		createCanvasZone({ active: false });
+		const target = getCanvasDropTargetFromScreenPosition(600, 300);
+		expect(target).toBeNull();
+	});
+
+	it("canvas 区域外返回 null", () => {
+		createCanvasZone();
+		const target = getCanvasDropTargetFromScreenPosition(200, 90);
 		expect(target).toBeNull();
 	});
 });

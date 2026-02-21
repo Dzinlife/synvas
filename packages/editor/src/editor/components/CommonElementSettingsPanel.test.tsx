@@ -6,6 +6,26 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTransformMeta } from "@/dsl/transform";
 import CommonElementSettingsPanel from "./CommonElementSettingsPanel";
 
+vi.mock("@/components/ui/dial-slider", () => ({
+	DialSlider: ({
+		label,
+		value,
+		onChange,
+	}: {
+		label: string;
+		value: number;
+		onChange: (value: number) => void;
+	}) => (
+		<input
+			aria-label={label}
+			value={String(value)}
+			onChange={(event) => {
+				onChange(Number(event.target.value));
+			}}
+		/>
+	),
+}));
+
 const createElement = (
 	partial: Partial<TimelineElement> = {},
 ): TimelineElement => ({

@@ -60,7 +60,7 @@ export default function Header() {
 					compressor: { ...state.audioSettings.compressor },
 				},
 			},
-			state.sources,
+			state.assets,
 		);
 	});
 

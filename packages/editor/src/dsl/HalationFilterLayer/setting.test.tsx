@@ -10,6 +10,26 @@ import {
 } from "./model";
 import { HalationFilterLayerSetting } from "./setting";
 
+vi.mock("@/components/ui/dial-slider", () => ({
+	DialSlider: ({
+		label,
+		value,
+		onChange,
+	}: {
+		label: string;
+		value: number;
+		onChange: (value: number) => void;
+	}) => (
+		<input
+			aria-label={label}
+			value={String(value)}
+			onChange={(event) => {
+				onChange(Number(event.target.value));
+			}}
+		/>
+	),
+}));
+
 const createHalationElement = (
 	props: HalationFilterLayerProps = {},
 ): TimelineElement<HalationFilterLayerProps> => {
@@ -55,14 +75,10 @@ describe("HalationFilterLayerSetting", () => {
 			/>,
 		);
 
-		const intensityInput = screen.getByLabelText(
-			"Intensity input",
-		) as HTMLInputElement;
-		const thresholdInput = screen.getByLabelText(
-			"Threshold input",
-		) as HTMLInputElement;
+		const intensityInput = screen.getByLabelText("Intensity") as HTMLInputElement;
+		const thresholdInput = screen.getByLabelText("Threshold") as HTMLInputElement;
 		const chromaticShiftInput = screen.getByLabelText(
-			"Chromatic Shift input",
+			"Chromatic Shift",
 		) as HTMLInputElement;
 
 		expect(Number(intensityInput.value)).toBeCloseTo(
@@ -74,10 +90,9 @@ describe("HalationFilterLayerSetting", () => {
 		expect(Number(chromaticShiftInput.value)).toBeCloseTo(
 			HALATION_FILTER_DEFAULT_PROPS.chromaticShift,
 		);
-		expect(screen.queryByLabelText("Corner Radius input")).not.toBeNull();
 	});
 
-	it("clamps number input values before update", () => {
+	it("clamps number values before update", () => {
 		const updateProps = vi.fn();
 		render(
 			<HalationFilterLayerSetting
@@ -86,10 +101,10 @@ describe("HalationFilterLayerSetting", () => {
 			/>,
 		);
 
-		fireEvent.change(screen.getByLabelText("Intensity input"), {
+		fireEvent.change(screen.getByLabelText("Intensity"), {
 			target: { value: "10" },
 		});
-		fireEvent.change(screen.getByLabelText("Threshold input"), {
+		fireEvent.change(screen.getByLabelText("Threshold"), {
 			target: { value: "-1" },
 		});
 
@@ -97,26 +112,18 @@ describe("HalationFilterLayerSetting", () => {
 		expect(updateProps).toHaveBeenNthCalledWith(2, { threshold: 0 });
 	});
 
-	it("hides corner radius control when shape is circle", () => {
+	it("updates radius by user input", () => {
 		const updateProps = vi.fn();
-		const { rerender } = render(
+		render(
 			<HalationFilterLayerSetting
-				element={createHalationElement({ shape: "rect" })}
+				element={createHalationElement()}
 				updateProps={updateProps}
 			/>,
 		);
 
-		expect(screen.queryByLabelText("Corner Radius input")).not.toBeNull();
-		fireEvent.click(screen.getByRole("button", { name: "Circle" }));
-		expect(updateProps).toHaveBeenCalledWith({ shape: "circle" });
-
-		rerender(
-			<HalationFilterLayerSetting
-				element={createHalationElement({ shape: "circle" })}
-				updateProps={updateProps}
-			/>,
-		);
-
-		expect(screen.queryByLabelText("Corner Radius input")).toBeNull();
+		fireEvent.change(screen.getByLabelText("Radius"), {
+			target: { value: "12.5" },
+		});
+		expect(updateProps).toHaveBeenCalledWith({ radius: 12.5 });
 	});
 });

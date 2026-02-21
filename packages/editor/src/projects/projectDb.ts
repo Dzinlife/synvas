@@ -2,12 +2,13 @@ import {
 	DEFAULT_TIMELINE_SETTINGS,
 	type TimelineJSON,
 } from "core/editor/timelineLoader";
+import type { StudioProject } from "core/studio/types";
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
 
 export interface ProjectRecord {
 	id: string;
 	name: string;
-	data: TimelineJSON;
+	data: StudioProject;
 	createdAt: number;
 	updatedAt: number;
 }
@@ -34,8 +35,7 @@ const PROJECT_STORE = "projects";
 const META_STORE = "meta";
 const CURRENT_PROJECT_KEY = "currentProjectId";
 
-export const buildEmptyTimeline = (): TimelineJSON => ({
-	version: "1.0",
+const buildEmptyTimeline = (): TimelineJSON => ({
 	fps: 30,
 	canvas: {
 		width: 1920,
@@ -52,9 +52,26 @@ export const buildEmptyTimeline = (): TimelineJSON => ({
 		},
 	},
 	tracks: [],
-	sources: [],
+	assets: [],
 	elements: [],
 });
+
+export const buildEmptyProject = (projectId: string): StudioProject => {
+	const now = Date.now();
+	return {
+		id: projectId,
+		revision: 0,
+		timeline: buildEmptyTimeline(),
+		compositions: {},
+		assets: {},
+		ui: {
+			activeMainView: "preview",
+			activeScope: { type: "main" },
+		},
+		createdAt: now,
+		updatedAt: now,
+	};
+};
 
 export const buildAutoProjectName = (now: Date = new Date()): string => {
 	const pad = (value: number) => value.toString().padStart(2, "0");

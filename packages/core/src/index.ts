@@ -20,3 +20,7 @@ export * from "./editor/utils/audioTrackState";
 export * from "./editor/utils/trackAudibility";
 export * from "./editor/utils/videoSourceAudio";
 export * from "./editor/command";
+export * from "./studio/types";
+export * from "./studio/selectors";
+export * from "./studio/schema";
+export * from "./studio/composition";

@@ -151,20 +151,20 @@ export const SOURCE_KIND_VALUES = [
 
 export type SourceKind = (typeof SOURCE_KIND_VALUES)[number];
 
-export interface SourceDataSet {
+export interface AssetMetaSet {
 	asr?: TranscriptRecord;
 	[key: string]: unknown;
 }
 
-export interface TimelineSource {
+export interface TimelineAsset {
 	id: string;
 	uri: string;
 	kind: SourceKind;
 	name?: string;
-	data?: SourceDataSet;
+	meta?: AssetMetaSet;
 }
 
-export const SOURCE_BACKED_ELEMENT_TYPE_VALUES = [
+export const ASSET_BACKED_ELEMENT_TYPE_VALUES = [
 	"VideoClip",
 	"AudioClip",
 	"Image",
@@ -172,16 +172,16 @@ export const SOURCE_BACKED_ELEMENT_TYPE_VALUES = [
 	"FreezeFrame",
 ] as const;
 
-export type SourceBackedElementType =
-	(typeof SOURCE_BACKED_ELEMENT_TYPE_VALUES)[number];
+export type AssetBackedElementType =
+	(typeof ASSET_BACKED_ELEMENT_TYPE_VALUES)[number];
 
-const sourceBackedElementTypeSet = new Set<ElementType>(
-	SOURCE_BACKED_ELEMENT_TYPE_VALUES,
+const assetBackedElementTypeSet = new Set<ElementType>(
+	ASSET_BACKED_ELEMENT_TYPE_VALUES,
 );
 
-export const isSourceBackedElementType = (
+export const isAssetBackedElementType = (
 	type: ElementType,
-): type is SourceBackedElementType => sourceBackedElementTypeSet.has(type);
+): type is AssetBackedElementType => assetBackedElementTypeSet.has(type);
 
 /**
  * 转场元信息（仅用于模型层元数据）
@@ -202,7 +202,7 @@ export interface TimelineElement<Props = Record<string, any>> {
 	type: ElementType; // 组件类型 ("Image" | "VideoClip" | "Lottie" | ...)
 	component: string; // 组件实现标识（区分具体实现）
 	name: string; // 显示名称
-	sourceId?: string; // 媒体源标识（共享素材/ASR 等扩展数据）
+	assetId?: string; // 资产标识（共享素材/ASR 等扩展数据）
 
 	transform?: TransformMeta; // 空间属性
 	timeline: TimelineMeta; // 时间属性

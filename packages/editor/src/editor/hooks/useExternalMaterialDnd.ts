@@ -21,7 +21,7 @@ import {
 	useElements,
 	useFps,
 	useRippleEditing,
-	useSources,
+	useAssets,
 } from "../contexts/TimelineContext";
 import {
 	resolveMaterialDropTarget,
@@ -184,7 +184,7 @@ export function useExternalMaterialDnd({
 	const { fps } = useFps();
 	const { currentTime } = useCurrentTime();
 	const { setElements } = useElements();
-	const { ensureSourceByUri } = useSources();
+	const { ensureAssetByUri } = useAssets();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
 	const materialDndContext = useMaterialDndContext();
@@ -685,7 +685,7 @@ export function useExternalMaterialDnd({
 							newId,
 							trackCount,
 						);
-						const sourceId = ensureSourceByUri({
+						const assetId = ensureAssetByUri({
 							uri: item.uri,
 							kind: "audio",
 							name: item.file.name,
@@ -695,7 +695,7 @@ export function useExternalMaterialDnd({
 							type: "AudioClip",
 							component: "audio-clip",
 							name: item.file.name,
-							sourceId,
+							assetId,
 							props: {
 								reversed: false,
 							},
@@ -810,7 +810,7 @@ export function useExternalMaterialDnd({
 								newId,
 								nextTrackCount,
 							);
-							const sourceId = ensureSourceByUri({
+							const assetId = ensureAssetByUri({
 								uri: item.uri,
 								kind: "image",
 								name: item.file.name,
@@ -820,7 +820,7 @@ export function useExternalMaterialDnd({
 								type: "Image",
 								component: "image",
 								name: item.file.name,
-								sourceId,
+								assetId,
 								props: {},
 								transform: createTransformMeta({
 									width: item.width,
@@ -882,7 +882,7 @@ export function useExternalMaterialDnd({
 							targetType === "gap"
 								? Math.max(1, targetTrackIndex)
 								: targetTrackIndex;
-						const sourceId = ensureSourceByUri({
+						const assetId = ensureAssetByUri({
 							uri: item.uri,
 							kind: "image",
 							name: item.file.name,
@@ -893,7 +893,7 @@ export function useExternalMaterialDnd({
 							type: "Image",
 							component: "image",
 							name: item.file.name,
-							sourceId,
+							assetId,
 							props: {},
 							transform: createTransformMeta({
 								width: item.width,
@@ -1036,7 +1036,7 @@ export function useExternalMaterialDnd({
 							newId,
 							nextTrackCount,
 						);
-						const sourceId = ensureSourceByUri({
+						const assetId = ensureAssetByUri({
 							uri: item.uri,
 							kind: "video",
 							name: item.file.name,
@@ -1046,7 +1046,7 @@ export function useExternalMaterialDnd({
 							type: "VideoClip",
 							component: "video-clip",
 							name: item.file.name,
-							sourceId,
+							assetId,
 							props: {},
 							transform: createTransformMeta({
 								width: item.metadata.width,
@@ -1108,7 +1108,7 @@ export function useExternalMaterialDnd({
 						targetType === "gap"
 							? Math.max(1, targetTrackIndex)
 							: targetTrackIndex;
-					const sourceId = ensureSourceByUri({
+					const assetId = ensureAssetByUri({
 						uri: item.uri,
 						kind: "video",
 						name: item.file.name,
@@ -1119,7 +1119,7 @@ export function useExternalMaterialDnd({
 						type: "VideoClip",
 						component: "video-clip",
 						name: item.file.name,
-						sourceId,
+						assetId,
 						props: {},
 						transform: createTransformMeta({
 							width: item.metadata.width,
@@ -1201,7 +1201,7 @@ export function useExternalMaterialDnd({
 			attachments,
 			autoAttach,
 			trackLockedMap,
-			ensureSourceByUri,
+			ensureAssetByUri,
 			resolveExternalAudioUri,
 			resolveExternalImageUri,
 			currentProjectId,

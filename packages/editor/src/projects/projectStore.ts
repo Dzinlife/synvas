@@ -3,10 +3,12 @@ import {
 	type TimelineData,
 	type TimelineJSON,
 } from "core/editor/timelineLoader";
+import { selectTimelineForScope } from "core/studio/selectors";
+import type { StudioProject } from "core/studio/types";
 import { create } from "zustand";
 import {
 	buildAutoProjectName,
-	buildEmptyTimeline,
+	buildEmptyProject,
 	getAllProjects,
 	getCurrentProjectId,
 	getProject,
@@ -28,6 +30,7 @@ interface ProjectStoreState {
 	status: ProjectStatus;
 	projects: ProjectSummary[];
 	currentProjectId: string | null;
+	currentProject: StudioProject | null;
 	currentProjectData: TimelineData | null;
 	error: string | null;
 	initialize: () => Promise<void>;
@@ -70,19 +73,16 @@ const createProjectId = (): string => {
 		.slice(2, 8)}`;
 };
 
-const resolveTimelineData = (data: TimelineJSON): TimelineData => {
-	if (data.version !== "1.0") {
-		console.warn(
-			`Unsupported timeline version "${data.version}", reset to empty timeline.`,
-		);
-		return loadTimelineFromObject(buildEmptyTimeline());
+const resolveTimelineData = (project: StudioProject): TimelineData => {
+	const selectedTimeline = selectTimelineForScope(project, project.ui.activeScope);
+	if (!selectedTimeline) {
+		return loadTimelineFromObject(buildEmptyProject(project.id).timeline);
 	}
-
 	try {
-		return loadTimelineFromObject(data);
+		return loadTimelineFromObject(selectedTimeline);
 	} catch (error) {
 		console.error("Failed to load timeline data:", error);
-		return loadTimelineFromObject(buildEmptyTimeline());
+		return loadTimelineFromObject(buildEmptyProject(project.id).timeline);
 	}
 };
 
@@ -97,29 +97,32 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	status: "idle",
 	projects: [],
 	currentProjectId: null,
+	currentProject: null,
 	currentProjectData: null,
 	error: null,
 	initialize: async () => {
 		const { status } = get();
 		if (status === "loading" || status === "ready") return;
 		set({ status: "loading", error: null });
-		try {
-			const records = await getAllProjects();
-			if (records.length === 0) {
-				const now = Date.now();
-				const record: ProjectRecord = {
-					id: createProjectId(),
-					name: buildAutoProjectName(),
-					data: buildEmptyTimeline(),
-					createdAt: now,
-					updatedAt: now,
-				};
-				await putProject(record);
-				await setCurrentProjectId(record.id);
+			try {
+				const records = await getAllProjects();
+				if (records.length === 0) {
+					const now = Date.now();
+					const id = createProjectId();
+					const record: ProjectRecord = {
+						id,
+						name: buildAutoProjectName(),
+						data: buildEmptyProject(id),
+						createdAt: now,
+						updatedAt: now,
+					};
+					await putProject(record);
+					await setCurrentProjectId(record.id);
 				set({
 					status: "ready",
 					projects: [toSummary(record)],
 					currentProjectId: record.id,
+					currentProject: record.data,
 					currentProjectData: resolveTimelineData(record.data),
 					error: null,
 				});
@@ -141,6 +144,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				status: "ready",
 				projects: sortedRecords.map(toSummary),
 				currentProjectId: currentId,
+				currentProject: currentRecord.data,
 				currentProjectData: resolveTimelineData(currentRecord.data),
 				error: null,
 			});
@@ -152,21 +156,23 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 		}
 	},
-	createProject: async () => {
-		try {
-			const now = Date.now();
-			const record: ProjectRecord = {
-				id: createProjectId(),
-				name: buildAutoProjectName(),
-				data: buildEmptyTimeline(),
-				createdAt: now,
-				updatedAt: now,
-			};
-			await putProject(record);
+		createProject: async () => {
+			try {
+				const now = Date.now();
+				const id = createProjectId();
+				const record: ProjectRecord = {
+					id,
+					name: buildAutoProjectName(),
+					data: buildEmptyProject(id),
+					createdAt: now,
+					updatedAt: now,
+				};
+				await putProject(record);
 			await setCurrentProjectId(record.id);
 			set({
 				projects: sortProjectSummaries([...get().projects, toSummary(record)]),
 				currentProjectId: record.id,
+				currentProject: record.data,
 				currentProjectData: resolveTimelineData(record.data),
 				error: null,
 			});
@@ -178,12 +184,22 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	saveCurrentProject: async (data: TimelineJSON) => {
 		try {
 			const now = Date.now();
-			const { currentProjectId, projects } = get();
+			const { currentProjectId, projects, currentProject } = get();
+			const nextProjectId = currentProjectId ?? createProjectId();
+			const baseProject =
+				currentProject ?? buildEmptyProject(nextProjectId);
+			const nextProject: StudioProject = {
+				...baseProject,
+				id: nextProjectId,
+				revision: (baseProject.revision ?? 0) + 1,
+				timeline: data,
+				updatedAt: now,
+			};
 			if (!currentProjectId) {
 				const record: ProjectRecord = {
-					id: createProjectId(),
+					id: nextProjectId,
 					name: buildAutoProjectName(),
-					data,
+					data: nextProject,
 					createdAt: now,
 					updatedAt: now,
 				};
@@ -192,6 +208,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				set({
 					projects: sortProjectSummaries([...projects, toSummary(record)]),
 					currentProjectId: record.id,
+					currentProject: record.data,
 					currentProjectData: resolveTimelineData(record.data),
 					error: null,
 				});
@@ -203,7 +220,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const record: ProjectRecord = {
 				id: currentProjectId,
 				name: currentSummary?.name ?? buildAutoProjectName(),
-				data,
+				data: nextProject,
 				createdAt: currentSummary?.createdAt ?? now,
 				updatedAt: now,
 			};
@@ -223,6 +240,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			);
 			set({
 				projects: nextProjects,
+				currentProject: nextProject,
+				currentProjectData: resolveTimelineData(nextProject),
 				error: null,
 			});
 		} catch (error) {
@@ -241,6 +260,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			await setCurrentProjectId(id);
 			set({
 				currentProjectId: id,
+				currentProject: record.data,
 				currentProjectData: resolveTimelineData(record.data),
 				error: null,
 			});

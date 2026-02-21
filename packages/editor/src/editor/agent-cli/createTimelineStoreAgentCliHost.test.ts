@@ -1,7 +1,7 @@
-import type { TimelineElement, TimelineSource } from "core/dsl/types";
+import type { TimelineElement, TimelineAsset } from "core/dsl/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AsrClient } from "@/asr";
-import { transcribeSourceById } from "@/asr";
+import { transcribeAssetById } from "@/asr";
 import { useTimelineStore } from "../contexts/TimelineContext";
 import { createTimelineStoreAgentCliHost } from "./createTimelineStoreAgentCliHost";
 
@@ -9,17 +9,17 @@ vi.mock("@/asr", async () => {
 	const actual = await vi.importActual<typeof import("@/asr")>("@/asr");
 	return {
 		...actual,
-		transcribeSourceById: vi.fn(),
+		transcribeAssetById: vi.fn(),
 	};
 });
 
-const mockedTranscribeSourceById = vi.mocked(transcribeSourceById);
+const mockedTranscribeAssetById = vi.mocked(transcribeAssetById);
 
 const initialState = useTimelineStore.getState();
 
 afterEach(() => {
 	useTimelineStore.setState(initialState, true);
-	mockedTranscribeSourceById.mockReset();
+	mockedTranscribeAssetById.mockReset();
 });
 
 const createClip = (type: "VideoClip" | "AudioClip" | "Image"): TimelineElement => ({
@@ -27,7 +27,7 @@ const createClip = (type: "VideoClip" | "AudioClip" | "Image"): TimelineElement 
 	type,
 	component: type === "Image" ? "image" : type === "AudioClip" ? "audio-clip" : "video-clip",
 	name: "clip-1",
-	sourceId: "source-1",
+	assetId: "source-1",
 	timeline: {
 		start: 0,
 		end: 30,
@@ -39,19 +39,19 @@ const createClip = (type: "VideoClip" | "AudioClip" | "Image"): TimelineElement 
 	props: {},
 });
 
-const createSource = (withAsr: boolean): TimelineSource => ({
+const createSource = (withAsr: boolean): TimelineAsset => ({
 	id: "source-1",
 	kind: "video",
 	uri: "file:///clip.mp4",
 	name: "clip.mp4",
 	...(withAsr
 		? {
-				data: {
+				meta: {
 					asr: {
 						id: "asr-1",
 						source: {
-							type: "timeline-source" as const,
-							sourceId: "source-1",
+							type: "asset" as const,
+							assetId: "source-1",
 							kind: "video" as const,
 							uri: "file:///clip.mp4",
 							fileName: "clip.mp4",
@@ -68,7 +68,7 @@ const createSource = (withAsr: boolean): TimelineSource => ({
 		: {}),
 });
 
-const createSourceWithUri = (uri: string): TimelineSource => ({
+const createSourceWithUri = (uri: string): TimelineAsset => ({
 	id: "source-1",
 	kind: "video",
 	uri,
@@ -79,7 +79,7 @@ describe("createTimelineStoreAgentCliHost.transcribe", () => {
 	it("force=false 且已有 asr 时应跳过", async () => {
 		useTimelineStore.setState({
 			elements: [createClip("VideoClip")],
-			sources: [createSource(true)],
+			assets: [createSource(true)],
 		});
 		const host = createTimelineStoreAgentCliHost({
 			asrClient: {} as AsrClient,
@@ -92,11 +92,11 @@ describe("createTimelineStoreAgentCliHost.transcribe", () => {
 		expect(result?.ok).toBe(true);
 		expect(result?.changed).toBe(false);
 		expect(result?.summaryText).toContain("已跳过");
-		expect(mockedTranscribeSourceById).not.toHaveBeenCalled();
+		expect(mockedTranscribeAssetById).not.toHaveBeenCalled();
 	});
 
 	it("force=true 时应执行转写服务", async () => {
-		mockedTranscribeSourceById.mockResolvedValue({
+		mockedTranscribeAssetById.mockResolvedValue({
 			status: "done",
 			changed: true,
 			summaryText: "转写完成",
@@ -104,7 +104,7 @@ describe("createTimelineStoreAgentCliHost.transcribe", () => {
 		});
 		useTimelineStore.setState({
 			elements: [createClip("VideoClip")],
-			sources: [createSource(true)],
+			assets: [createSource(true)],
 		});
 		const host = createTimelineStoreAgentCliHost({
 			asrClient: {} as AsrClient,
@@ -114,9 +114,9 @@ describe("createTimelineStoreAgentCliHost.transcribe", () => {
 			args: { id: "clip-1", force: true, language: "zh" },
 			raw: "timeline.element.transcribe --id clip-1 --force true --language zh",
 		});
-		expect(mockedTranscribeSourceById).toHaveBeenCalledWith(
+		expect(mockedTranscribeAssetById).toHaveBeenCalledWith(
 			expect.objectContaining({
-				sourceId: "source-1",
+				assetId: "source-1",
 				language: "zh",
 				force: true,
 			}),
@@ -128,7 +128,7 @@ describe("createTimelineStoreAgentCliHost.transcribe", () => {
 	it("非法目标元素类型应报错", async () => {
 		useTimelineStore.setState({
 			elements: [createClip("Image")],
-			sources: [createSource(false)],
+			assets: [createSource(false)],
 		});
 		const host = createTimelineStoreAgentCliHost({
 			asrClient: {} as AsrClient,
@@ -142,10 +142,10 @@ describe("createTimelineStoreAgentCliHost.transcribe", () => {
 		expect(result?.error).toContain("不是可转写片段");
 	});
 
-	it("不支持的 source URI 应报错", async () => {
+	it("不支持的 asset URI 应报错", async () => {
 		useTimelineStore.setState({
 			elements: [createClip("VideoClip")],
-			sources: [createSourceWithUri("data:text/plain,hello")],
+			assets: [createSourceWithUri("data:text/plain,hello")],
 		});
 		const host = createTimelineStoreAgentCliHost({
 			asrClient: {} as AsrClient,

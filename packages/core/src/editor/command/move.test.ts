@@ -46,7 +46,7 @@ const createSnapshot = (
 	fps: 30,
 	currentTime: 0,
 	elements: [createElement("clip-1", 0, 30, 0, "main-track")],
-	sources: [],
+	assets: [],
 	tracks: [createTrack("main-track", "clip")],
 	audioTrackStates: {},
 	autoAttach: false,

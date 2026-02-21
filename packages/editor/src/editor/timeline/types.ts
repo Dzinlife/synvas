@@ -5,7 +5,7 @@ export type SnapPointType = "element-start" | "element-end" | "playhead";
 export interface SnapPoint {
 	time: number;
 	type: SnapPointType;
-	sourceId?: string;
+	assetId?: string;
 }
 
 export interface SnapResult {

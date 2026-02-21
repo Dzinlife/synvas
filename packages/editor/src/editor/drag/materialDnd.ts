@@ -23,6 +23,7 @@ import {
 import { isTransitionElement } from "../utils/transitions";
 import {
 	calculateAutoScrollSpeed,
+	type AssetRefDragData,
 	type DragGhostInfo,
 	type DropTargetInfo,
 	type MaterialDragData,
@@ -30,6 +31,7 @@ import {
 } from "./dragStore";
 import {
 	findTimelineDropTargetFromScreenPosition,
+	getCanvasDropTargetFromScreenPosition,
 	getPreviewDropTargetFromScreenPosition,
 	getTimelineDropTimeFromScreenX,
 } from "./timelineDropTargets";
@@ -159,6 +161,14 @@ export function resolveMaterialDropTarget(
 			return { ...previewTarget, canDrop: false };
 		}
 		return previewTarget;
+	}
+
+	const canvasTarget = getCanvasDropTargetFromScreenPosition(screenX, screenY);
+	if (canvasTarget) {
+		if (state.isTransitionMaterial || state.materialRole === "audio") {
+			return { ...canvasTarget, canDrop: false };
+		}
+		return canvasTarget;
 	}
 
 	const otherTrackCountFallback = Math.max(context.trackCount - 1, 0);
@@ -416,9 +426,10 @@ export interface UseMaterialDndOptions<T extends MaterialDndItem> {
 		dropTargetType?: "track" | "gap",
 	) => void;
 	onPreviewDrop?: (item: T, positionX: number, positionY: number) => void;
+	onCanvasDrop?: (item: T) => void;
 	getRole?: (item: T) => TrackRole;
 	getDurationFrames?: (item: T, defaultDurationFrames: number) => number;
-	getDragData?: (item: T) => MaterialDragData;
+	getDragData?: (item: T) => MaterialDragData | AssetRefDragData;
 	getGhostInfo?: (
 		item: T,
 		position: { screenX: number; screenY: number },
@@ -432,6 +443,7 @@ export function useMaterialDnd<T extends MaterialDndItem>({
 	context,
 	onTimelineDrop,
 	onPreviewDrop,
+	onCanvasDrop,
 	getRole = defaultMaterialRole,
 	getDurationFrames = defaultMaterialDurationFrames,
 	getDragData = (target) => ({
@@ -524,6 +536,8 @@ export function useMaterialDnd<T extends MaterialDndItem>({
 							currentDropTarget.positionX,
 							currentDropTarget.positionY,
 						);
+					} else if (currentDropTarget.zone === "canvas") {
+						onCanvasDrop?.(item);
 					}
 				}
 				endDrag();

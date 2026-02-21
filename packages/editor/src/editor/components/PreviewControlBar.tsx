@@ -20,6 +20,7 @@ import {
 	usePlaybackControl,
 	useTimelineStore,
 } from "@/editor/contexts/TimelineContext";
+import { useStudioStore } from "@/studio/studioStore";
 import { framesToTimecode } from "@/utils/timecode";
 import PreviewLoudnessMeterCanvas from "./PreviewLoudnessMeterCanvas";
 
@@ -37,6 +38,8 @@ const PreviewControlBarComponent: React.FC = () => {
 		fitZoomLevel,
 	} = usePreview();
 	const [isExportingFrame, setIsExportingFrame] = useState(false);
+	const activeMainView = useStudioStore((state) => state.activeMainView);
+	const setActiveMainView = useStudioStore((state) => state.setActiveMainView);
 	const effectiveZoomLevel = pinchState.isPinching
 		? pinchState.currentZoom
 		: zoomLevel;
@@ -54,6 +57,7 @@ const PreviewControlBarComponent: React.FC = () => {
 	}, [fitZoomLevel, resetPanOffset, setZoomLevel]);
 
 	const handleExportFrame = useCallback(async () => {
+		if (activeMainView !== "preview") return;
 		if (isExportingFrame) return;
 		setIsExportingFrame(true);
 		try {
@@ -64,7 +68,7 @@ const PreviewControlBarComponent: React.FC = () => {
 		} finally {
 			setIsExportingFrame(false);
 		}
-	}, [canvasRef, isExportingFrame]);
+	}, [activeMainView, canvasRef, isExportingFrame]);
 
 	const displayTime = previewTime ?? currentTime;
 	const previewTimecode = useMemo(() => {
@@ -99,6 +103,38 @@ const PreviewControlBarComponent: React.FC = () => {
 					<span>{previewTimecodeStrong}</span>
 				</div>
 				<PreviewLoudnessMeterCanvas />
+				<div
+					className="flex items-center rounded-full border border-white/10 bg-black/40 p-0.5"
+					role="group"
+					aria-label="主视图切换"
+				>
+					<button
+						type="button"
+						className={`rounded-full px-2 py-1 text-[11px] transition-colors ${
+							activeMainView === "preview"
+								? "bg-white/20 text-white"
+								: "text-neutral-300 hover:text-white"
+						}`}
+						onClick={() => {
+							setActiveMainView("preview");
+						}}
+					>
+						Preview
+					</button>
+					<button
+						type="button"
+						className={`rounded-full px-2 py-1 text-[11px] transition-colors ${
+							activeMainView === "canvas"
+								? "bg-white/20 text-white"
+								: "text-neutral-300 hover:text-white"
+						}`}
+						onClick={() => {
+							setActiveMainView("canvas");
+						}}
+					>
+						Canvas
+					</button>
+				</div>
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						chevron={null}
@@ -138,9 +174,13 @@ const PreviewControlBarComponent: React.FC = () => {
 							onClick={() => {
 								void handleExportFrame();
 							}}
-							disabled={isExportingFrame}
+							disabled={isExportingFrame || activeMainView !== "preview"}
 						>
-							{isExportingFrame ? "导出中..." : "导出静帧画面"}
+							{isExportingFrame
+								? "导出中..."
+								: activeMainView === "preview"
+									? "导出静帧画面"
+									: "Canvas 模式不可导出"}
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>

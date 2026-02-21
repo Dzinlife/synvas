@@ -5,12 +5,9 @@ import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ModelManager } from "@/dsl/model";
 import { useProjectStore } from "@/projects/projectStore";
-import EditorSidebars from "./components/EditorSidebars";
-import PreviewControlBar from "./components/PreviewControlBar";
 import PreviewProvider from "./contexts/PreviewProvider";
 import { TimelineProvider } from "./contexts/TimelineContext";
-import PreviewEditor from "./PreviewEditor";
-import TimelineEditor from "./TimelineEditor";
+import ViewportHost from "./ViewportHost";
 
 // 导入所有组件以触发注册
 import "@/dsl/AudioClip";
@@ -70,26 +67,10 @@ const EditorContent: React.FC = () => {
 	);
 
 	return (
-		<div className="relative flex flex-col flex-1 min-h-0">
-			<div className="relative flex-1 min-h-0 bg-neutral-900">
-				<PreviewEditor />
-				<EditorSidebars />
-				<PreviewControlBar />
-			</div>
-			<div
-				className="min-h-60 flex flex-col border-t border-neutral-700"
-				style={{ height: timelineMaxHeight }}
-			>
-				{/* 拖拽手柄 */}
-				<button
-					type="button"
-					aria-label="调整时间线高度"
-					className="h-1.5 cursor-ns-resize bg-neutral-700 hover:bg-neutral-600 active:bg-blue-500 transition-colors shrink-0"
-					onMouseDown={handleResizeMouseDown}
-				/>
-				<TimelineEditor />
-			</div>
-		</div>
+		<ViewportHost
+			timelineMaxHeight={timelineMaxHeight}
+			onResizeMouseDown={handleResizeMouseDown}
+		/>
 	);
 };
 
@@ -116,7 +97,7 @@ const Editor = () => {
 				<Toaster />
 				<TimelineProvider
 					elements={currentProjectData.elements}
-					sources={currentProjectData.sources}
+					assets={currentProjectData.assets}
 					tracks={currentProjectData.tracks}
 					canvasSize={currentProjectData.canvas}
 					fps={currentProjectData.fps}

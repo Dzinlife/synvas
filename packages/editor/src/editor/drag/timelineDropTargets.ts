@@ -267,6 +267,14 @@ export function getPreviewDropTargetFromScreenPosition(
 		"[data-preview-drop-zone]",
 	);
 	if (!previewZone) return null;
+	const previewRoot = previewZone.closest<HTMLElement>("[data-main-view-preview]");
+	if (previewRoot?.dataset.active === "false") {
+		return null;
+	}
+	const previewStyle = getComputedStyle(previewZone);
+	if (previewStyle.pointerEvents === "none" || previewStyle.opacity === "0") {
+		return null;
+	}
 	const rect = previewZone.getBoundingClientRect();
 	if (
 		mouseY < rect.top ||
@@ -308,5 +316,39 @@ export function getPreviewDropTargetFromScreenPosition(
 		positionX,
 		positionY,
 		canDrop: isInBounds,
+	};
+}
+
+export interface CanvasDropTargetInfo {
+	zone: "canvas";
+	canDrop: boolean;
+}
+
+export function getCanvasDropTargetFromScreenPosition(
+	mouseX: number,
+	mouseY: number,
+): CanvasDropTargetInfo | null {
+	const canvasZone = document.querySelector<HTMLElement>("[data-canvas-drop-zone]");
+	if (!canvasZone) return null;
+	const canvasRoot = canvasZone.closest<HTMLElement>("[data-main-view-canvas]");
+	if (canvasRoot?.dataset.active === "false") {
+		return null;
+	}
+	const style = getComputedStyle(canvasZone);
+	if (style.pointerEvents === "none" || style.opacity === "0") {
+		return null;
+	}
+	const rect = canvasZone.getBoundingClientRect();
+	if (
+		mouseY < rect.top ||
+		mouseY > rect.bottom ||
+		mouseX < rect.left ||
+		mouseX > rect.right
+	) {
+		return null;
+	}
+	return {
+		zone: "canvas",
+		canDrop: true,
 	};
 }

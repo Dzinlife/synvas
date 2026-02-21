@@ -27,13 +27,13 @@ const createElement = (
 	id: string,
 	start: number,
 	end: number,
-	options?: { sourceId?: string },
+	options?: { assetId?: string },
 ): TimelineElement => ({
 	id,
 	type: "VideoClip",
 	component: "video-clip",
 	name: id,
-	...(options?.sourceId ? { sourceId: options.sourceId } : {}),
+	...(options?.assetId ? { assetId: options.assetId } : {}),
 	timeline: {
 		start,
 		end,
@@ -131,9 +131,9 @@ describe("TimelineContext batch history", () => {
 		});
 		useTimelineStore.setState({
 			elements: [
-				createElement("clip-1", 0, 30, { sourceId: "source-video-1" }),
+				createElement("clip-1", 0, 30, { assetId: "source-video-1" }),
 			],
-			sources: [
+			assets: [
 				{
 					id: "source-video-1",
 					kind: "video",

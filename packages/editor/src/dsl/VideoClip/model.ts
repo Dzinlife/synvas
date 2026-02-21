@@ -447,10 +447,10 @@ export function createVideoClipModel(
 	const shouldUseDedicatedSink = (
 		elements: TimelineElement[],
 		clipId: string,
-		sourceId?: string,
+		assetId?: string,
 		currentTime?: number,
 	): boolean => {
-		if (!sourceId) return false;
+		if (!assetId) return false;
 		const current = elements.find((el) => el.id === clipId);
 		if (!current) return false;
 		const isCoveredAtTime = (clip: TimelineElement, time?: number): boolean => {
@@ -478,7 +478,7 @@ export function createVideoClipModel(
 
 		const candidates = elements.filter((element) => {
 			if (element.type !== "VideoClip") return false;
-			if (element.sourceId !== sourceId) return false;
+			if (element.assetId !== assetId) return false;
 			return isCoveredAtTime(element, currentTime);
 		});
 
@@ -526,7 +526,7 @@ export function createVideoClipModel(
 		const shouldDedicated = shouldUseDedicatedSink(
 			elements,
 			id,
-			currentElement?.sourceId,
+			currentElement?.assetId,
 			currentTime,
 		);
 		if (!shouldDedicated && activeDedicatedSink && currentTime !== undefined) {
