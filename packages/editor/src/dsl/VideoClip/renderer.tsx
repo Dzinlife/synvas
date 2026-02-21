@@ -141,7 +141,7 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 			stopPlayback();
 		}
 
-		// 非播放状态：直接 seek，保证逐帧拖动时每一帧都刷新
+		// 非播放状态：直接 seek，保证逐帧拖动时每一帧都刷新。
 		seekToTime(videoTime);
 	}, [
 		props.uri,

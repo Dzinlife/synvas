@@ -53,6 +53,14 @@ export interface VideoSeekOptions {
 	reason?: VideoSeekReason;
 }
 
+const resolveSeekReason = (
+	reason: VideoSeekReason | undefined,
+	reversed: boolean,
+): VideoSeekReason => {
+	if (reason) return reason;
+	return reversed ? "reverse-playback" : "default";
+};
+
 // VideoClip 内部状态
 export interface VideoClipInternal {
 	videoSink: CanvasSink | null;
@@ -652,11 +660,13 @@ export function createVideoClipModel(
 
 		const alignedTime = alignTime(seconds);
 		const normalizedOptions: VideoSeekOptions = {
-			reason: options.reason ?? "default",
+			reason: resolveSeekReason(options.reason, Boolean(props.reversed)),
 		};
-		const reverseLookaheadContext =
+		const shouldReverseLookahead =
 			normalizedOptions.reason === "reverse-playback" &&
-			props.reversed &&
+			Boolean(props.reversed);
+		const reverseLookaheadContext =
+			shouldReverseLookahead &&
 			typeof props.uri === "string" &&
 			props.uri.length > 0 &&
 			input &&
@@ -680,9 +690,15 @@ export function createVideoClipModel(
 		// 防止并发 seek
 		if (isSeekingFlag) {
 			pendingSeekRequest = { time: alignedTime, options: normalizedOptions };
+			// seek 忙碌时也触发倒放预热，避免预编译阶段丢失 lookahead 机会。
+			triggerReverseLookaheadPrewarm();
 			return;
 		}
-		if (lastSeekTime === alignedTime) return;
+		if (lastSeekTime === alignedTime) {
+			// 命中同帧时仍允许倒放预热继续推进。
+			triggerReverseLookaheadPrewarm();
+			return;
+		}
 
 		// 检查缓存
 		const cachedFrame = assetHandle?.asset.getCachedFrame(alignedTime);
@@ -751,13 +767,7 @@ export function createVideoClipModel(
 
 		try {
 			let resolvedByWarmup = false;
-			if (
-				normalizedOptions.reason === "reverse-playback" &&
-				props.reversed &&
-				props.uri &&
-				input &&
-				assetHandle?.asset
-			) {
+			if (shouldReverseLookahead && props.uri && input && assetHandle?.asset) {
 				const warmupResult = await warmFramesFromKeyframeToTarget<SkImage>({
 					videoSink,
 					targetTime: alignedTime,
@@ -839,7 +849,7 @@ export function createVideoClipModel(
 		const alignedVideoTime = framesToSeconds(alignedFrameIndex, fps);
 		// 倒放预编译必须走 seek 路径，才能正确处理 GOP 回退并稳定产出目标帧。
 		if (props.reversed) {
-			await seekToTime(alignedVideoTime, { reason: "reverse-playback" });
+			await seekToTime(alignedVideoTime);
 			lastPreparedFrameIndex = alignedFrameIndex;
 			return;
 		}
