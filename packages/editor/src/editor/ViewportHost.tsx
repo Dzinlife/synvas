@@ -45,16 +45,20 @@ const ViewportHost: React.FC<ViewportHostProps> = ({
 				<EditorSidebars />
 				<PreviewControlBar />
 			</div>
+			<div className="h-0 relative z-100">
+				<button
+					type="button"
+					aria-label="调整时间线高度"
+					className="absolute -bottom-2 z-50 h-4 w-full cursor-ns-resize shrink-0 group"
+					onMouseDown={onResizeMouseDown}
+				>
+					<div className="absolute bottom-2 w-full h-1 bg-transparent group-hover:bg-white/30 group-active:bg-white/70 transition-colors"></div>
+				</button>
+			</div>
 			<div
 				className="min-h-60 flex flex-col border-t border-neutral-700"
 				style={{ height: timelineMaxHeight }}
 			>
-				<button
-					type="button"
-					aria-label="调整时间线高度"
-					className="h-1.5 cursor-ns-resize bg-neutral-700 hover:bg-neutral-600 active:bg-blue-500 transition-colors shrink-0"
-					onMouseDown={onResizeMouseDown}
-				/>
 				<TimelineEditor />
 			</div>
 		</div>
