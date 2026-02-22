@@ -1,5 +1,6 @@
 import { saveTimelineToObject, type TimelineJSON } from "core/editor/timelineLoader";
 import { useEffect, useRef } from "react";
+import { modelRegistry } from "@/dsl/model/registry";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import { useProjectStore } from "@/projects/projectStore";
 import {
@@ -46,6 +47,57 @@ const isTimelineEqual = (a: TimelineJSON, b: TimelineJSON): boolean => {
 	return JSON.stringify(a) === JSON.stringify(b);
 };
 
+type ModelReadyState = {
+	props?: {
+		uri?: unknown;
+	};
+	constraints?: {
+		hasError?: boolean;
+	};
+	internal?: {
+		isReady?: boolean;
+	};
+	waitForReady?: () => Promise<void>;
+};
+
+const sleep = (ms: number): Promise<void> => {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+};
+
+const waitForSceneModelsReady = async (
+	timeline: TimelineJSON,
+	timeoutMs = 5000,
+): Promise<void> => {
+	const ids = Array.from(new Set(timeline.elements.map((element) => element.id)));
+	if (ids.length === 0) return;
+	const deadline = Date.now() + timeoutMs;
+
+	await Promise.all(
+		ids.map(async (id) => {
+			let store: { getState: () => ModelReadyState } | undefined;
+			const storeDeadline = Math.min(deadline, Date.now() + 250);
+			while (Date.now() < storeDeadline) {
+				store = modelRegistry.get(id) as { getState: () => ModelReadyState } | undefined;
+				if (store) break;
+				await sleep(16);
+			}
+			if (!store) return;
+			const state = store.getState();
+			if (!state.waitForReady) return;
+			if (state.props && "uri" in state.props && !state.props.uri) return;
+			if (state.internal?.isReady || state.constraints?.hasError) return;
+			const rest = deadline - Date.now();
+			if (rest <= 0) return;
+			await Promise.race([
+				state.waitForReady().catch(() => undefined),
+				sleep(rest),
+			]);
+		}),
+	);
+};
+
 export const useSceneSessionBridge = (): void => {
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const focusedSceneId = useProjectStore(
@@ -61,6 +113,7 @@ export const useSceneSessionBridge = (): void => {
 	);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 	const previousFocusedSceneIdRef = useRef<string | null>(null);
+	const preloadEpochRef = useRef(0);
 
 	useEffect(() => {
 		previousFocusedSceneIdRef.current = null;
@@ -85,6 +138,20 @@ export const useSceneSessionBridge = (): void => {
 			}
 			setActiveScene(focusedSceneId);
 			applyTimelineJsonToStore(focusedTimeline);
+			const preloadEpoch = preloadEpochRef.current + 1;
+			preloadEpochRef.current = preloadEpoch;
+			void waitForSceneModelsReady(focusedTimeline).then(() => {
+				if (preloadEpochRef.current !== preloadEpoch) return;
+				const latestFocusedSceneId =
+					useProjectStore.getState().currentProject?.ui.focusedSceneId ?? null;
+				if (latestFocusedSceneId !== focusedSceneId) return;
+				useTimelineStore.setState((state) => ({
+					// 模型异步就绪后强制触发一次渲染，修复跨 scene 首次 focus 白屏。
+					elements: [...state.elements],
+				}));
+			});
+		} else {
+			preloadEpochRef.current += 1;
 		}
 		previousFocusedSceneIdRef.current = focusedSceneId;
 	}, [

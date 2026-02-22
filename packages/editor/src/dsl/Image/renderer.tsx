@@ -29,20 +29,12 @@ const ImageRenderer: React.FC<ImageRendererProps> = ({ id }) => {
 
 	// Loading 状态
 	if (isLoading) {
-		return (
-			<Group>
-				<Rect x={0} y={0} width={width} height={height} color="#e5e7eb" />
-			</Group>
-		);
+		return null;
 	}
 
 	// Error 状态
 	if (hasError) {
-		return (
-			<Group>
-				<Rect x={0} y={0} width={width} height={height} color="#fee2e2" />
-			</Group>
-		);
+		return null;
 	}
 
 	// 正常渲染

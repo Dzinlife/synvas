@@ -30,19 +30,11 @@ const FreezeFrameRenderer: React.FC<FreezeFrameRendererProps> = ({ id }) => {
 	const image = useFreezeFrameSelector(id, (state) => state.internal.image);
 
 	if (isLoading) {
-		return (
-			<Group>
-				<Rect x={0} y={0} width={width} height={height} color="#e5e7eb" />
-			</Group>
-		);
+		return null;
 	}
 
 	if (hasError) {
-		return (
-			<Group>
-				<Rect x={0} y={0} width={width} height={height} color="#fee2e2" />
-			</Group>
-		);
+		return null;
 	}
 
 	return (
