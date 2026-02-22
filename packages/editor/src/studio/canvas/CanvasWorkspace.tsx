@@ -1,10 +1,13 @@
 import type { SceneNode } from "core/studio/types";
 import type Konva from "konva";
 import { Plus, Search, SearchX } from "lucide-react";
+import { animate } from "motion";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layer, Line, Rect, Stage, Text, Transformer } from "react-konva";
-import SceneTimelineDrawer from "@/editor/components/SceneTimelineDrawer";
+import SceneTimelineDrawer, {
+	SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
+} from "@/editor/components/SceneTimelineDrawer";
 import MaterialLibrary from "@/editor/MaterialLibrary";
 import { useProjectStore } from "@/projects/projectStore";
 import {
@@ -20,6 +23,15 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2;
 const GRID_SIZE = 100;
 const GRID_RANGE = 16000;
+const CAMERA_ANIMATION_DURATION = 0.35;
+const CAMERA_ANIMATION_EASING = "easeInOut";
+const CAMERA_ZOOM_EPSILON = 1e-6;
+
+interface CameraState {
+	x: number;
+	y: number;
+	zoom: number;
+}
 
 const pickLayout = (node: SceneNode): SceneNodeLayoutSnapshot => ({
 	x: node.x,
@@ -78,16 +90,24 @@ const CanvasWorkspace = () => {
 	const camera = currentProject?.ui.camera ?? { x: 0, y: 0, zoom: 1 };
 	const isCanvasInteractionLocked = Boolean(focusedSceneId);
 	const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+	const [focusTimelineDrawerHeight, setFocusTimelineDrawerHeight] = useState(
+		SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
+	);
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const stageRef = useRef<Konva.Stage | null>(null);
 	const transformerRef = useRef<Konva.Transformer | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	const cameraAnimationRef = useRef<{ stop: () => void } | null>(null);
+	const cameraAnimationRunIdRef = useRef(0);
+	const preFocusCameraRef = useRef<CameraState | null>(null);
+	const prevFocusedSceneIdRef = useRef<string | null>(focusedSceneId);
 	const dragBeforeRef = useRef<Map<string, SceneNodeLayoutSnapshot>>(new Map());
 	const transformBeforeRef = useRef<Map<string, SceneNodeLayoutSnapshot>>(
 		new Map(),
 	);
 	const dragMovedRef = useRef(false);
 	const focusCameraAlignKeyRef = useRef<string | null>(null);
+	const [isCameraAnimating, setIsCameraAnimating] = useState(false);
 
 	const sortedNodes = useMemo(() => {
 		if (!currentProject) return [];
@@ -168,7 +188,121 @@ const CanvasWorkspace = () => {
 	useEffect(() => {
 		if (focusedSceneId) return;
 		focusCameraAlignKeyRef.current = null;
+		setFocusTimelineDrawerHeight(SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT);
 	}, [focusedSceneId]);
+
+	const stopCameraAnimation = useCallback((unlock: boolean) => {
+		const animation = cameraAnimationRef.current;
+		if (animation) {
+			cameraAnimationRef.current = null;
+			animation.stop();
+		}
+		cameraAnimationRunIdRef.current += 1;
+		if (unlock) {
+			setIsCameraAnimating(false);
+		}
+	}, []);
+
+	const startCameraAnimation = useCallback(
+		(targetCamera: CameraState) => {
+			stopCameraAnimation(false);
+			const snapshotCamera =
+				useProjectStore.getState().currentProject?.ui.camera ?? camera;
+			if (isCameraAlmostEqual(snapshotCamera, targetCamera)) {
+				setCanvasCamera(targetCamera);
+				setIsCameraAnimating(false);
+				return;
+			}
+
+			const runId = cameraAnimationRunIdRef.current + 1;
+			cameraAnimationRunIdRef.current = runId;
+			setIsCameraAnimating(true);
+			const safeSnapshotZoom = Math.max(
+				snapshotCamera.zoom,
+				CAMERA_ZOOM_EPSILON,
+			);
+			const safeTargetZoom = Math.max(targetCamera.zoom, CAMERA_ZOOM_EPSILON);
+			const snapshotTranslateX = snapshotCamera.x * safeSnapshotZoom;
+			const snapshotTranslateY = snapshotCamera.y * safeSnapshotZoom;
+			const targetTranslateX = targetCamera.x * safeTargetZoom;
+			const targetTranslateY = targetCamera.y * safeTargetZoom;
+			cameraAnimationRef.current = animate(0, 1, {
+				duration: CAMERA_ANIMATION_DURATION,
+				ease: CAMERA_ANIMATION_EASING,
+				onUpdate: (progress) => {
+					if (cameraAnimationRunIdRef.current !== runId) return;
+					const interpolatedZoom =
+						snapshotCamera.zoom +
+						(targetCamera.zoom - snapshotCamera.zoom) * progress;
+					const safeInterpolatedZoom = Math.max(
+						interpolatedZoom,
+						CAMERA_ZOOM_EPSILON,
+					);
+					const interpolatedTranslateX =
+						snapshotTranslateX +
+						(targetTranslateX - snapshotTranslateX) * progress;
+					const interpolatedTranslateY =
+						snapshotTranslateY +
+						(targetTranslateY - snapshotTranslateY) * progress;
+					setCanvasCamera({
+						x: interpolatedTranslateX / safeInterpolatedZoom,
+						y: interpolatedTranslateY / safeInterpolatedZoom,
+						zoom: interpolatedZoom,
+					});
+				},
+				onComplete: () => {
+					if (cameraAnimationRunIdRef.current !== runId) return;
+					cameraAnimationRef.current = null;
+					setCanvasCamera(targetCamera);
+					setIsCameraAnimating(false);
+				},
+			});
+		},
+		[camera, setCanvasCamera, stopCameraAnimation],
+	);
+
+	useEffect(() => {
+		const prevFocusedSceneId = prevFocusedSceneIdRef.current;
+		if (!prevFocusedSceneId && focusedSceneId) {
+			preFocusCameraRef.current = camera;
+		} else if (prevFocusedSceneId && !focusedSceneId) {
+			const restoreCamera = preFocusCameraRef.current;
+			preFocusCameraRef.current = null;
+			if (!restoreCamera) {
+				stopCameraAnimation(true);
+			} else {
+				const safeCurrentZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+				const safeRestoreZoom = Math.max(
+					restoreCamera.zoom,
+					CAMERA_ZOOM_EPSILON,
+				);
+				const anchorX = stageSize.width > 0 ? stageSize.width / 2 : 0;
+				const anchorY = stageSize.height > 0 ? stageSize.height / 2 : 0;
+				const anchorWorldX = anchorX / safeCurrentZoom - camera.x;
+				const anchorWorldY = anchorY / safeCurrentZoom - camera.y;
+				const zoomRestoreCamera = {
+					x: anchorX / safeRestoreZoom - anchorWorldX,
+					y: anchorY / safeRestoreZoom - anchorWorldY,
+					zoom: restoreCamera.zoom,
+				};
+				if (isCameraAlmostEqual(camera, zoomRestoreCamera)) {
+					stopCameraAnimation(true);
+					setCanvasCamera(zoomRestoreCamera);
+				} else {
+					startCameraAnimation(zoomRestoreCamera);
+				}
+			}
+		}
+		prevFocusedSceneIdRef.current = focusedSceneId;
+	}, [
+		camera,
+		focusedSceneId,
+		setCanvasCamera,
+		startCameraAnimation,
+		stageSize.height,
+		stageSize.width,
+		stopCameraAnimation,
+	]);
 
 	useEffect(() => {
 		if (!focusedSceneId) return;
@@ -182,20 +316,28 @@ const CanvasWorkspace = () => {
 
 		// focus 仅改变摄像机，不切换 timeline 实例。
 		const viewPadding = 80;
-		const zoomX = (stageSize.width - viewPadding * 2) / focusedNode.width;
-		const zoomY = (stageSize.height - viewPadding * 2) / focusedNode.height;
+		const visibleCanvasHeight = Math.max(
+			1,
+			stageSize.height - focusTimelineDrawerHeight,
+		);
+		const availableWidth = Math.max(1, stageSize.width - viewPadding * 2);
+		const availableHeight = Math.max(1, visibleCanvasHeight - viewPadding * 2);
+		const zoomX = availableWidth / focusedNode.width;
+		const zoomY = availableHeight / focusedNode.height;
 		const nextZoom = clampZoom(Math.min(zoomX, zoomY));
 		const worldCenterX = focusedNode.x + focusedNode.width / 2;
 		const worldCenterY = focusedNode.y + focusedNode.height / 2;
+		const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
 		const nextCamera = {
-			x: stageSize.width / 2 - worldCenterX * nextZoom,
-			y: stageSize.height / 2 - worldCenterY * nextZoom,
+			x: stageSize.width / 2 / safeNextZoom - worldCenterX,
+			y: visibleCanvasHeight / 2 / safeNextZoom - worldCenterY,
 			zoom: nextZoom,
 		};
 		const alignKey = [
 			focusedSceneId,
 			stageSize.width,
 			stageSize.height,
+			focusTimelineDrawerHeight,
 			focusedNode.x,
 			focusedNode.y,
 			focusedNode.width,
@@ -204,8 +346,21 @@ const CanvasWorkspace = () => {
 		if (focusCameraAlignKeyRef.current === alignKey) return;
 		focusCameraAlignKeyRef.current = alignKey;
 		if (isCameraAlmostEqual(camera, nextCamera)) return;
-		setCanvasCamera(nextCamera);
-	}, [camera, currentProject, focusedSceneId, setCanvasCamera, stageSize]);
+		startCameraAnimation(nextCamera);
+	}, [
+		camera,
+		currentProject,
+		focusTimelineDrawerHeight,
+		focusedSceneId,
+		stageSize,
+		startCameraAnimation,
+	]);
+
+	useEffect(() => {
+		return () => {
+			stopCameraAnimation(false);
+		};
+	}, [stopCameraAnimation]);
 
 	const handleCreateScene = useCallback(() => {
 		const sceneId = createSceneNode();
@@ -229,12 +384,19 @@ const CanvasWorkspace = () => {
 		(multiplier: number) => {
 			const nextZoom = clampZoom(camera.zoom * multiplier);
 			if (nextZoom === camera.zoom) return;
+			const safeCurrentZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
+			const anchorX = stageSize.width > 0 ? stageSize.width / 2 : 0;
+			const anchorY = stageSize.height > 0 ? stageSize.height / 2 : 0;
+			const anchorWorldX = anchorX / safeCurrentZoom - camera.x;
+			const anchorWorldY = anchorY / safeCurrentZoom - camera.y;
 			setCanvasCamera({
-				...camera,
+				x: anchorX / safeNextZoom - anchorWorldX,
+				y: anchorY / safeNextZoom - anchorWorldY,
 				zoom: nextZoom,
 			});
 		},
-		[camera, setCanvasCamera],
+		[camera, setCanvasCamera, stageSize.height, stageSize.width],
 	);
 
 	const handleResetView = useCallback(() => {
@@ -248,6 +410,7 @@ const CanvasWorkspace = () => {
 	const handleStageWheel = useCallback(
 		(event: Konva.KonvaEventObject<WheelEvent>) => {
 			event.evt.preventDefault();
+			if (isCameraAnimating) return;
 			const nativeEvent = event.evt;
 
 			if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
@@ -255,16 +418,17 @@ const CanvasWorkspace = () => {
 				if (!stage) return;
 				const pointer = stage.getPointerPosition();
 				if (!pointer) return;
-				const oldZoom = camera.zoom;
+				const oldZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
 				const zoomDelta = nativeEvent.deltaY > 0 ? 0.92 : 1.08;
 				const nextZoom = clampZoom(oldZoom * zoomDelta);
+				const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
 				const worldPoint = {
-					x: (pointer.x - camera.x) / oldZoom,
-					y: (pointer.y - camera.y) / oldZoom,
+					x: pointer.x / oldZoom - camera.x,
+					y: pointer.y / oldZoom - camera.y,
 				};
 				setCanvasCamera({
-					x: pointer.x - worldPoint.x * nextZoom,
-					y: pointer.y - worldPoint.y * nextZoom,
+					x: pointer.x / safeNextZoom - worldPoint.x,
+					y: pointer.y / safeNextZoom - worldPoint.y,
 					zoom: nextZoom,
 				});
 				return;
@@ -274,13 +438,14 @@ const CanvasWorkspace = () => {
 				? nativeEvent.deltaY
 				: nativeEvent.deltaX;
 			const deltaY = nativeEvent.shiftKey ? 0 : nativeEvent.deltaY;
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
 			setCanvasCamera({
-				x: camera.x - deltaX,
-				y: camera.y - deltaY,
+				x: camera.x - deltaX / safeZoom,
+				y: camera.y - deltaY / safeZoom,
 				zoom: camera.zoom,
 			});
 		},
-		[camera, setCanvasCamera],
+		[camera, isCameraAnimating, setCanvasCamera],
 	);
 
 	const handleStageMouseDown = useCallback(
@@ -462,8 +627,8 @@ const CanvasWorkspace = () => {
 				onMouseDown={handleStageMouseDown}
 			>
 				<Layer
-					x={camera.x}
-					y={camera.y}
+					x={camera.x * camera.zoom}
+					y={camera.y * camera.zoom}
 					scaleX={camera.zoom}
 					scaleY={camera.zoom}
 				>
@@ -589,7 +754,10 @@ const CanvasWorkspace = () => {
 						<div className="mb-2 text-xs font-medium text-white/80">素材库</div>
 						<MaterialLibrary />
 					</div>
-					<SceneTimelineDrawer onExitFocus={handleExitFocus} />
+					<SceneTimelineDrawer
+						onExitFocus={handleExitFocus}
+						onHeightChange={setFocusTimelineDrawerHeight}
+					/>
 				</>
 			)}
 		</div>

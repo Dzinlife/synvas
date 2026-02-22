@@ -112,8 +112,8 @@ const FocusSceneKonvaLayerInner: React.FC<FocusSceneKonvaLayerInnerProps> = ({
 	const stageToCanvasCoords = useCallback(
 		(stageX: number, stageY: number) => {
 			const safeCameraZoom = Math.max(camera.zoom, SCALE_EPSILON);
-			const worldX = (stageX - camera.x) / safeCameraZoom;
-			const worldY = (stageY - camera.y) / safeCameraZoom;
+			const worldX = stageX / safeCameraZoom - camera.x;
+			const worldY = stageY / safeCameraZoom - camera.y;
 			const canvasX = (worldX - focusedNode.x) / safeSceneScaleX;
 			const canvasY = (worldY - focusedNode.y) / safeSceneScaleY;
 			return {
@@ -128,8 +128,8 @@ const FocusSceneKonvaLayerInner: React.FC<FocusSceneKonvaLayerInnerProps> = ({
 		(canvasX: number, canvasY: number) => {
 			const worldX = focusedNode.x + canvasX * safeSceneScaleX;
 			const worldY = focusedNode.y + canvasY * safeSceneScaleY;
-			const stageX = worldX * camera.zoom + camera.x;
-			const stageY = worldY * camera.zoom + camera.y;
+			const stageX = (worldX + camera.x) * camera.zoom;
+			const stageY = (worldY + camera.y) * camera.zoom;
 			return {
 				stageX,
 				stageY,

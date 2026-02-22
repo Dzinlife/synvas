@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+	act,
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+} from "@testing-library/react";
 import type { StudioProject } from "core/studio/types";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +15,33 @@ import CanvasWorkspace from "./CanvasWorkspace";
 const stageMockState = vi.hoisted(() => ({
 	props: null as Record<string, unknown> | null,
 	togglePlaybackMock: vi.fn(),
+}));
+
+const motionMockState = vi.hoisted(() => ({
+	animations: [] as Array<{
+		onUpdate?: (latest: number) => void;
+		onComplete?: () => void;
+		stop: ReturnType<typeof vi.fn>;
+	}>,
+}));
+
+vi.mock("motion", () => ({
+	animate: (
+		_from: number,
+		_to: number,
+		options?: {
+			onUpdate?: (latest: number) => void;
+			onComplete?: () => void;
+		},
+	) => {
+		const stop = vi.fn();
+		motionMockState.animations.push({
+			onUpdate: options?.onUpdate,
+			onComplete: options?.onComplete,
+			stop,
+		});
+		return { stop };
+	},
 }));
 
 vi.mock("react-konva", () => ({
@@ -42,6 +75,7 @@ vi.mock("./FocusSceneKonvaLayer", () => ({
 }));
 
 vi.mock("@/editor/components/SceneTimelineDrawer", () => ({
+	SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT: 320,
 	default: ({ onExitFocus }: { onExitFocus: () => void }) => (
 		<button
 			type="button"
@@ -69,6 +103,22 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 		isOwnerPlaying: () => false,
 	}),
 }));
+
+const mockDOMRect = {
+	x: 0,
+	y: 0,
+	width: 1200,
+	height: 800,
+	top: 0,
+	right: 1200,
+	bottom: 800,
+	left: 0,
+	toJSON: () => ({}),
+} as DOMRect;
+
+vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+	() => mockDOMRect,
+);
 
 const createProject = (): StudioProject => ({
 	id: "project-1",
@@ -188,6 +238,7 @@ const createProject = (): StudioProject => ({
 
 beforeEach(() => {
 	stageMockState.togglePlaybackMock.mockReset();
+	motionMockState.animations.length = 0;
 	useProjectStore.setState({
 		status: "ready",
 		projects: [],
@@ -204,6 +255,24 @@ afterEach(() => {
 });
 
 describe("CanvasWorkspace", () => {
+	const getLatestCameraAnimation = () => {
+		const latest =
+			motionMockState.animations[motionMockState.animations.length - 1];
+		expect(latest).toBeTruthy();
+		if (!latest) {
+			throw new Error("Expected latest camera animation");
+		}
+		return latest;
+	};
+
+	const finishLatestCameraAnimation = () => {
+		const animation = getLatestCameraAnimation();
+		act(() => {
+			animation.onUpdate?.(1);
+			animation.onComplete?.();
+		});
+	};
+
 	const triggerStageWheel = (
 		wheelEvent: WheelEvent,
 		pointer = { x: 0, y: 0 },
@@ -246,6 +315,7 @@ describe("CanvasWorkspace", () => {
 		expect(screen.getByTestId("focus-material-library")).toBeTruthy();
 		expect(screen.getByTestId("material-library-content")).toBeTruthy();
 		expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
+		expect(motionMockState.animations.length).toBeGreaterThan(0);
 	});
 
 	it("非 focus 状态下可触发节点快速预览", () => {
@@ -285,6 +355,95 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("camera 动画期间滚轮不应平移或缩放", () => {
+		render(<CanvasWorkspace />);
+		const firstNode = screen.getAllByTestId("scene-node-node-1")[0];
+		expect(firstNode).toBeTruthy();
+		if (!firstNode) return;
+		fireEvent.click(firstNode);
+		expect(motionMockState.animations.length).toBeGreaterThan(0);
+
+		triggerStageWheel(new WheelEvent("wheel", { deltaX: 20, deltaY: 30 }));
+		const camera = useProjectStore.getState().currentProject?.ui.camera;
+		expect(camera).toMatchObject({ x: 0, y: 0, zoom: 1 });
+	});
+
+	it("退出 focus 时应仅恢复 zoom 且不回到进入前 x/y", () => {
+		const restoreCamera = { x: 120, y: -60, zoom: 0.72 };
+		const currentState = useProjectStore.getState();
+		const currentProject = currentState.currentProject;
+		expect(currentProject).toBeTruthy();
+		if (!currentProject) return;
+		useProjectStore.setState({
+			currentProject: {
+				...currentProject,
+				ui: {
+					...currentProject.ui,
+					camera: restoreCamera,
+				},
+			},
+		});
+
+		render(<CanvasWorkspace />);
+		const firstNode = screen.getAllByTestId("scene-node-node-1")[0];
+		expect(firstNode).toBeTruthy();
+		if (!firstNode) return;
+		fireEvent.click(firstNode);
+		expect(motionMockState.animations.length).toBe(1);
+		finishLatestCameraAnimation();
+		const cameraBeforeExit =
+			useProjectStore.getState().currentProject?.ui.camera;
+		expect(cameraBeforeExit).toBeTruthy();
+		if (!cameraBeforeExit) return;
+		const viewportCenter = { x: 600, y: 400 };
+		const centerWorldBeforeExit = {
+			x: viewportCenter.x / cameraBeforeExit.zoom - cameraBeforeExit.x,
+			y: viewportCenter.y / cameraBeforeExit.zoom - cameraBeforeExit.y,
+		};
+
+		fireEvent.click(screen.getByTestId("scene-timeline-drawer"));
+		expect(motionMockState.animations.length).toBe(2);
+		finishLatestCameraAnimation();
+
+		const camera = useProjectStore.getState().currentProject?.ui.camera;
+		expect(camera?.zoom).toBeCloseTo(restoreCamera.zoom, 4);
+		expect(camera?.x).not.toBeCloseTo(restoreCamera.x, 4);
+		expect(camera?.y).not.toBeCloseTo(restoreCamera.y, 4);
+		if (!camera) return;
+		const centerWorldAfterExit = {
+			x: viewportCenter.x / camera.zoom - camera.x,
+			y: viewportCenter.y / camera.zoom - camera.y,
+		};
+		expect(centerWorldAfterExit.x).toBeCloseTo(centerWorldBeforeExit.x, 4);
+		expect(centerWorldAfterExit.y).toBeCloseTo(centerWorldBeforeExit.y, 4);
+	});
+
+	it("camera 动画完成后滚轮恢复可用", () => {
+		render(<CanvasWorkspace />);
+		const firstNode = screen.getAllByTestId("scene-node-node-1")[0];
+		expect(firstNode).toBeTruthy();
+		if (!firstNode) return;
+		fireEvent.click(firstNode);
+		finishLatestCameraAnimation();
+
+		const beforeWheelCamera =
+			useProjectStore.getState().currentProject?.ui.camera;
+		expect(beforeWheelCamera).toBeTruthy();
+		if (!beforeWheelCamera) return;
+
+		triggerStageWheel(new WheelEvent("wheel", { deltaX: 20, deltaY: 30 }));
+		const camera = useProjectStore.getState().currentProject?.ui.camera;
+		expect(camera?.x).toBeCloseTo(
+			beforeWheelCamera.x - 20 / beforeWheelCamera.zoom,
+			4,
+		);
+		expect(camera?.y).toBeCloseTo(
+			beforeWheelCamera.y - 30 / beforeWheelCamera.zoom,
+			4,
+		);
+		expect(camera?.zoom).toBeCloseTo(beforeWheelCamera.zoom, 4);
+	});
+
 	it("普通滚轮应平移画布", () => {
 		render(<CanvasWorkspace />);
 		triggerStageWheel(new WheelEvent("wheel", { deltaX: 20, deltaY: 30 }));
@@ -303,8 +462,8 @@ describe("CanvasWorkspace", () => {
 		);
 		const camera = useProjectStore.getState().currentProject?.ui.camera;
 		expect(camera?.zoom).toBeCloseTo(1.08, 4);
-		expect(camera?.x).toBeCloseTo(-8, 4);
-		expect(camera?.y).toBeCloseTo(-9.6, 4);
+		expect(camera?.x).toBeCloseTo(-7.4074, 4);
+		expect(camera?.y).toBeCloseTo(-8.8889, 4);
 	});
 
 	it("Cmd + 滚轮应缩放画布", () => {
@@ -318,8 +477,8 @@ describe("CanvasWorkspace", () => {
 		);
 		const camera = useProjectStore.getState().currentProject?.ui.camera;
 		expect(camera?.zoom).toBeCloseTo(1.08, 4);
-		expect(camera?.x).toBeCloseTo(-8, 4);
-		expect(camera?.y).toBeCloseTo(-9.6, 4);
+		expect(camera?.x).toBeCloseTo(-7.4074, 4);
+		expect(camera?.y).toBeCloseTo(-8.8889, 4);
 	});
 
 	it("按下空白区域不会触发拖拽平移", () => {

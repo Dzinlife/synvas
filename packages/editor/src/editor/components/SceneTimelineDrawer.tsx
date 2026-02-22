@@ -4,16 +4,20 @@ import TimelineEditor from "@/editor/TimelineEditor";
 import ScenePlaybackControlBar from "./ScenePlaybackControlBar";
 
 const MIN_HEIGHT = 240;
-const DEFAULT_HEIGHT = 320;
+export const SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT = 320;
 
 interface SceneTimelineDrawerProps {
 	onExitFocus: () => void;
+	onHeightChange?: (height: number) => void;
 }
 
 const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
 	onExitFocus,
+	onHeightChange,
 }) => {
-	const [drawerHeight, setDrawerHeight] = useState(DEFAULT_HEIGHT);
+	const [drawerHeight, setDrawerHeight] = useState(
+		SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
+	);
 	const draggingRef = useRef(false);
 	const startYRef = useRef(0);
 	const startHeightRef = useRef(0);
@@ -44,6 +48,10 @@ const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
 			document.removeEventListener("mouseup", stopResize);
 		};
 	}, [handleMouseMove, stopResize]);
+
+	useEffect(() => {
+		onHeightChange?.(drawerHeight);
+	}, [drawerHeight, onHeightChange]);
 
 	const handleResizeMouseDown = useCallback(
 		(event: React.MouseEvent) => {

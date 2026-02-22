@@ -10,8 +10,10 @@ import {
 	type SkPicture,
 } from "react-skia-lite";
 import { buildSkiaFrameSnapshot } from "@/editor/preview/buildSkiaTree";
-import { EditorRuntimeProvider } from "@/editor/runtime/EditorRuntimeProvider";
-import { useStudioRuntimeManager } from "@/editor/runtime/EditorRuntimeProvider";
+import {
+	EditorRuntimeProvider,
+	useStudioRuntimeManager,
+} from "@/editor/runtime/EditorRuntimeProvider";
 import type { EditorRuntime, TimelineRuntime } from "@/editor/runtime/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 
@@ -176,7 +178,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					setVersion((value) => value + 1);
 				} catch (error) {
 					// 画布销毁阶段或模型切换阶段可能抛出短暂错误，保持容错并等待下一次帧更新。
-					console.warn(`[InfiniteSkiaCanvas] Failed to render scene ${sceneId}:`, error);
+					console.warn(
+						`[InfiniteSkiaCanvas] Failed to render scene ${sceneId}:`,
+						error,
+					);
 				}
 			});
 		};
@@ -184,7 +189,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		for (const sceneId of sceneIds) {
 			const scene = scenes[sceneId];
 			if (!scene) continue;
-			const runtime = runtimeManager.ensureTimelineRuntime(toSceneTimelineRef(sceneId));
+			const runtime = runtimeManager.ensureTimelineRuntime(
+				toSceneTimelineRef(sceneId),
+			);
 			const selector = () => buildRenderSignature(runtime);
 			subscriptions.push(
 				runtime.timelineStore.subscribe(
@@ -223,8 +230,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				<Fill color="#111" />
 				<Group
 					transform={[
-						{ translateX: camera.x },
-						{ translateY: camera.y },
+						{ translateX: camera.x * camera.zoom },
+						{ translateY: camera.y * camera.zoom },
 						{ scale: camera.zoom },
 					]}
 				>
@@ -277,4 +284,3 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 };
 
 export default InfiniteSkiaCanvas;
-
