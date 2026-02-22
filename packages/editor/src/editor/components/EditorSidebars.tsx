@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useSelectedElement } from "../contexts/TimelineContext";
 import MaterialLibrary from "../MaterialLibrary";
-import AgentCliPanel from "./AgentCliPanel";
 import ElementSettingsPanel from "./ElementSettingsPanel";
 
 interface SidebarPanelProps {
@@ -54,7 +53,6 @@ const EditorSidebars: React.FC = () => {
 	const [panelOpenState, setPanelOpenState] = useState({
 		material: true,
 		element: false,
-		agentCli: false,
 	});
 
 	// 选中元素时自动收起素材库，并展开设置面板
@@ -71,7 +69,7 @@ const EditorSidebars: React.FC = () => {
 	}, [selectedElement?.id]);
 
 	const togglePanel = useCallback(
-		(panelId: "material" | "element" | "agentCli") => {
+		(panelId: "material" | "element") => {
 			if (panelId === "element" && !selectedElement) {
 				return;
 			}
@@ -129,16 +127,6 @@ const EditorSidebars: React.FC = () => {
 						<ElementSettingsPanel />
 					</SidebarPanel>
 				)}
-			</div>
-			<div className="absolute right-4 top-4 bottom-4 flex flex-col gap-2 pointer-events-none overflow-y-auto min-h-0">
-				<SidebarPanel
-					title="协作命令"
-					isOpen={panelOpenState.agentCli}
-					onToggle={() => togglePanel("agentCli")}
-					widthClassName="w-80"
-				>
-					<AgentCliPanel />
-				</SidebarPanel>
 			</div>
 		</div>
 	);
