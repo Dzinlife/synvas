@@ -1,32 +1,26 @@
 import { z } from "zod";
-import { SOURCE_KIND_VALUES } from "../dsl/types";
 import type { StudioProject } from "./types";
 
 const nonEmptyStringSchema = z.string().min(1);
 
-const scopeSchema = z.discriminatedUnion("type", [
-	z.object({ type: z.literal("main") }),
-	z.object({
-		type: z.literal("composition"),
-		compositionId: nonEmptyStringSchema,
-	}),
-]);
-
-const assetSchema = z.object({
+const sceneNodeSchema = z.object({
 	id: nonEmptyStringSchema,
-	kind: z.enum(SOURCE_KIND_VALUES),
-	uri: nonEmptyStringSchema,
-	name: z.string().optional(),
-	meta: z.record(z.string(), z.unknown()).optional(),
-});
-
-const compositionSchema = z.object({
-	id: nonEmptyStringSchema,
+	type: z.literal("scene"),
+	sceneId: nonEmptyStringSchema,
 	name: nonEmptyStringSchema,
-	elements: z.array(z.unknown()),
-	durationFrames: z.number().int().nonnegative(),
+	x: z.number().finite(),
+	y: z.number().finite(),
+	width: z.number().positive(),
+	height: z.number().positive(),
+	zIndex: z.number().int(),
+	locked: z.boolean(),
+	hidden: z.boolean(),
 	createdAt: z.number(),
 	updatedAt: z.number(),
+});
+
+const canvasDocumentSchema = z.object({
+	nodes: z.array(sceneNodeSchema),
 });
 
 const timelineSchema = z.object({
@@ -37,18 +31,32 @@ const timelineSchema = z.object({
 	}),
 	settings: z.unknown(),
 	tracks: z.array(z.unknown()),
+	assets: z.array(z.unknown()),
 	elements: z.array(z.unknown()),
+});
+
+const sceneDocumentSchema = z.object({
+	id: nonEmptyStringSchema,
+	name: nonEmptyStringSchema,
+	timeline: timelineSchema,
+	posterFrame: z.number().int().nonnegative(),
+	createdAt: z.number(),
+	updatedAt: z.number(),
 });
 
 const studioProjectSchema = z.object({
 	id: nonEmptyStringSchema,
 	revision: z.number().int().nonnegative(),
-	timeline: timelineSchema,
-	compositions: z.record(nonEmptyStringSchema, compositionSchema),
-	assets: z.record(nonEmptyStringSchema, assetSchema),
+	canvas: canvasDocumentSchema,
+	scenes: z.record(nonEmptyStringSchema, sceneDocumentSchema),
 	ui: z.object({
-		activeMainView: z.union([z.literal("preview"), z.literal("canvas")]),
-		activeScope: scopeSchema,
+		activeSceneId: nonEmptyStringSchema.nullable(),
+		focusedSceneId: nonEmptyStringSchema.nullable(),
+		camera: z.object({
+			x: z.number().finite(),
+			y: z.number().finite(),
+			zoom: z.number().positive(),
+		}),
 	}),
 	createdAt: z.number(),
 	updatedAt: z.number(),

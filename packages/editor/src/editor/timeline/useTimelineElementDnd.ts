@@ -9,14 +9,12 @@ import {
 	insertElementsIntoMainTrackGroup,
 } from "core/editor/utils/mainTrackMagnet";
 import { useCallback, useMemo, useRef } from "react";
-import { useCanvasStore } from "@/studio/canvas/canvasStore";
 import {
 	type DragGhostState,
 	useTimelineStore,
 } from "../contexts/TimelineContext";
 import {
 	findTimelineDropTargetFromScreenPosition,
-	getCanvasDropTargetFromScreenPosition,
 } from "../drag/timelineDropTargets";
 import { getAudioTrackControlState } from "../utils/audioTrackState";
 import { cloneValue, createCopySeed } from "../utils/copyUtils";
@@ -1617,28 +1615,6 @@ export const useTimelineElementDnd = ({
 				}
 
 				if (last) {
-					const canvasDropTarget = getCanvasDropTargetFromScreenPosition(
-						xy[0],
-						xy[1],
-					);
-					if (canvasDropTarget?.canDrop) {
-						const dragAssetIds = dragSelectedIdsRef.current
-							.map((id) => baseElementMap.get(id)?.assetId)
-							.filter((assetId): assetId is string => Boolean(assetId));
-						if (dragAssetIds.length > 0) {
-							useCanvasStore.getState().addAssetRefs(dragAssetIds, {
-								dedupe: true,
-							});
-							setIsDragging(false);
-							setActiveSnapPoint(null);
-							setActiveDropTarget(null);
-							setDragGhosts([]);
-							setLocalTrackY(null);
-							stopAutoScroll();
-							return;
-						}
-					}
-
 					if (isCopyDrag) {
 						const hasMovement = Math.abs(mx) > 0 || Math.abs(my) > 0;
 						const dragSelectedIds = dragSelectedIdsRef.current;
@@ -2191,24 +2167,6 @@ export const useTimelineElementDnd = ({
 					: null;
 
 			if (last) {
-				const canvasDropTarget = getCanvasDropTargetFromScreenPosition(
-					xy[0],
-					xy[1],
-				);
-				if (canvasDropTarget?.canDrop && element.assetId) {
-					useCanvasStore.getState().addAssetRef(element.assetId, {
-						sourceElementId: element.id,
-						dedupe: true,
-					});
-					setIsDragging(false);
-					setActiveSnapPoint(null);
-					setActiveDropTarget(null);
-					setDragGhosts([]);
-					setLocalTrackY(null);
-					stopAutoScroll();
-					return;
-				}
-
 				setIsDragging(false);
 				setActiveSnapPoint(null);
 				setActiveDropTarget(null);

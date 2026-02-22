@@ -2,10 +2,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { framesToTimecode } from "@/utils/timecode";
-import PreviewControlBar from "./PreviewControlBar";
+import ScenePlaybackControlBar from "./ScenePlaybackControlBar";
 
-const { timelineState, playbackState, previewState, togglePlayMock, studioState } =
-	vi.hoisted(() => ({
+const { timelineState, playbackState, previewState, togglePlayMock } = vi.hoisted(
+	() => ({
 		timelineState: {
 			currentTime: 120,
 			previewTime: null as number | null,
@@ -28,10 +28,8 @@ const { timelineState, playbackState, previewState, togglePlayMock, studioState 
 			},
 		},
 		togglePlayMock: vi.fn(),
-		studioState: {
-			activeMainView: "preview" as "preview" | "canvas",
-		},
-	}));
+	}),
+);
 
 vi.mock("@/editor/contexts/TimelineContext", () => {
 	const useTimelineStore = ((
@@ -63,21 +61,6 @@ vi.mock("@/dsl/export", () => ({
 	exportCanvasAsImage: vi.fn(async () => {}),
 }));
 
-vi.mock("@/studio/studioStore", () => ({
-	useStudioStore: (
-		selector: (state: {
-			activeMainView: "preview" | "canvas";
-			setActiveMainView: (view: "preview" | "canvas") => void;
-		}) => unknown,
-	) =>
-		selector({
-			activeMainView: studioState.activeMainView,
-			setActiveMainView: (view) => {
-				studioState.activeMainView = view;
-			},
-		}),
-}));
-
 afterEach(() => {
 	cleanup();
 });
@@ -94,33 +77,25 @@ beforeEach(() => {
 	previewState.setZoomLevel.mockReset();
 	previewState.resetPanOffset.mockReset();
 	togglePlayMock.mockReset();
-	studioState.activeMainView = "preview";
 });
 
-describe("PreviewControlBar", () => {
-	it("播放按钮可触发切换且时间码与原逻辑一致", () => {
+describe("ScenePlaybackControlBar", () => {
+	it("播放按钮可触发切换且时间码正确", () => {
 		timelineState.currentTime = 150;
 		timelineState.previewTime = 90;
 		timelineState.fps = 30;
 
-		render(<PreviewControlBar />);
+		render(<ScenePlaybackControlBar onExitFocus={vi.fn()} />);
 
-		fireEvent.click(screen.getByTestId("preview-control-play-toggle"));
+		fireEvent.click(screen.getByRole("button", { name: "播放 / 暂停" }));
 		expect(togglePlayMock).toHaveBeenCalledTimes(1);
-
-		const timecode = framesToTimecode(90, 30);
-		expect(screen.getByTestId("preview-control-bar-timecode").textContent).toBe(
-			timecode,
-		);
+		expect(screen.getByText(framesToTimecode(90, 30))).toBeTruthy();
 	});
 
-	it("支持切换 Preview/Canvas 主视图", () => {
-		const { unmount } = render(<PreviewControlBar />);
-		fireEvent.click(screen.getByRole("button", { name: "Storyboard" }));
-		expect(studioState.activeMainView).toBe("canvas");
-		unmount();
-		render(<PreviewControlBar />);
-		fireEvent.click(screen.getByRole("button", { name: "Preview" }));
-		expect(studioState.activeMainView).toBe("preview");
+	it("退出按钮可触发回调", () => {
+		const onExitFocus = vi.fn();
+		render(<ScenePlaybackControlBar onExitFocus={onExitFocus} />);
+		fireEvent.click(screen.getByRole("button", { name: "退出 Scene" }));
+		expect(onExitFocus).toHaveBeenCalledTimes(1);
 	});
 });

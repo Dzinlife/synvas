@@ -41,12 +41,10 @@ import {
 	useElements,
 	useFps,
 	useMultiSelect,
-	usePlaybackControl,
 	usePreviewAxis,
 	useRippleEditing,
 	useSnap,
 	useAssets,
-	useTimelineHistory,
 	useTimelineScale,
 	useTimelineStore,
 	useTracks,
@@ -110,13 +108,11 @@ const remapTransitionsAfterSplit = (
 };
 
 const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
-	const { togglePlay } = usePlaybackControl();
 	const { snapEnabled, setSnapEnabled } = useSnap();
 	const { attachments, autoAttach, setAutoAttach } = useAttachments();
 	const { rippleEditingEnabled, setRippleEditingEnabled } = useRippleEditing();
 	const { previewAxisEnabled, setPreviewAxisEnabled } = usePreviewAxis();
 	const { timelineScale, setTimelineScale } = useTimelineScale();
-	const { undo, redo } = useTimelineHistory();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId } = useMultiSelect();
 	const { assets } = useAssets();
@@ -165,48 +161,6 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			quickSplitAbortRef.current?.abort();
 		};
 	}, []);
-
-	// 全局空格键播放/暂停
-	useEffect(() => {
-		const handleKeyDown = (e: KeyboardEvent) => {
-			// 避免在输入框中触发
-			if (
-				e.target instanceof HTMLInputElement ||
-				e.target instanceof HTMLTextAreaElement ||
-				(e.target as HTMLElement | null)?.isContentEditable
-			) {
-				return;
-			}
-
-			if (e.code === "Space" && !e.repeat) {
-				e.preventDefault();
-				togglePlay();
-				return;
-			}
-
-			const isModifier = e.metaKey || e.ctrlKey;
-			if (!isModifier) return;
-
-			const key = e.key.toLowerCase();
-			if (key === "z") {
-				e.preventDefault();
-				if (e.shiftKey) {
-					redo();
-				} else {
-					undo();
-				}
-				return;
-			}
-
-			if (key === "y") {
-				e.preventDefault();
-				redo();
-			}
-		};
-
-		window.addEventListener("keydown", handleKeyDown);
-		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [togglePlay, undo, redo]);
 
 	const handleScaleChange = useCallback(
 		(value: number | readonly number[]) => {

@@ -540,6 +540,22 @@ export function useExternalMaterialDnd({
 		(event: React.DragEvent<HTMLDivElement>) => {
 			if (!hasExternalFileDrag(event.dataTransfer)) return;
 			event.preventDefault();
+			const nextTarget = event.relatedTarget;
+			if (
+				nextTarget instanceof Node &&
+				event.currentTarget.contains(nextTarget)
+			) {
+				return;
+			}
+			const rect = event.currentTarget.getBoundingClientRect();
+			if (
+				event.clientX >= rect.left &&
+				event.clientX <= rect.right &&
+				event.clientY >= rect.top &&
+				event.clientY <= rect.bottom
+			) {
+				return;
+			}
 			stopAutoScroll();
 			externalDragActiveRef.current = false;
 			externalDragTypeRef.current = null;

@@ -1,28 +1,35 @@
 import type { TimelineElement } from "../dsl/types";
-import type { MainTimelineDocument, StudioProject, StudioScope } from "./types";
+import type { SceneDocument, StudioProject } from "./types";
 
-export const selectStudioScope = (project: StudioProject): StudioScope =>
-	project.ui.activeScope;
+export const selectActiveSceneId = (project: StudioProject): string | null =>
+	project.ui.activeSceneId;
 
-export const selectTimelineForScope = (
+export const selectFocusedSceneId = (project: StudioProject): string | null =>
+	project.ui.focusedSceneId;
+
+export const selectSceneById = (
 	project: StudioProject,
-	scope: StudioScope = project.ui.activeScope,
-): MainTimelineDocument | null => {
-	if (scope.type === "main") {
-		return project.timeline;
-	}
-	const composition = project.compositions[scope.compositionId];
-	if (!composition) return null;
-	return {
-		...project.timeline,
-		elements: composition.elements,
-	};
+	sceneId: string | null | undefined,
+): SceneDocument | null => {
+	if (!sceneId) return null;
+	return project.scenes[sceneId] ?? null;
 };
 
-export const selectElementsForScope = (
+export const selectActiveScene = (project: StudioProject): SceneDocument | null =>
+	selectSceneById(project, project.ui.activeSceneId);
+
+export const selectFocusedScene = (project: StudioProject): SceneDocument | null =>
+	selectSceneById(project, project.ui.focusedSceneId);
+
+export const selectTimelineForActiveScene = (
 	project: StudioProject,
-	scope: StudioScope = project.ui.activeScope,
+): SceneDocument["timeline"] | null => {
+	return selectActiveScene(project)?.timeline ?? null;
+};
+
+export const selectElementsForActiveScene = (
+	project: StudioProject,
 ): TimelineElement[] => {
-	const timeline = selectTimelineForScope(project, scope);
+	const timeline = selectTimelineForActiveScene(project);
 	return timeline?.elements ?? [];
 };

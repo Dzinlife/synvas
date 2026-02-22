@@ -1,35 +1,49 @@
-import type { TimelineAsset, TimelineElement } from "../dsl/types";
 import type { TimelineJSON } from "../editor/timelineLoader";
 
-export interface CompositionDocument {
+export type CanvasNodeType = "scene";
+
+export interface SceneNode {
 	id: string;
+	type: CanvasNodeType;
+	sceneId: string;
 	name: string;
-	elements: TimelineElement[];
-	durationFrames: number;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	zIndex: number;
+	locked: boolean;
+	hidden: boolean;
 	createdAt: number;
 	updatedAt: number;
 }
 
-export type MainTimelineDocument = TimelineJSON;
+export interface CanvasDocument {
+	nodes: SceneNode[];
+}
 
-export type StudioScope =
-	| {
-			type: "main";
-	  }
-	| {
-			type: "composition";
-			compositionId: string;
-	  };
+export interface SceneDocument {
+	id: string;
+	name: string;
+	timeline: TimelineJSON;
+	posterFrame: number;
+	createdAt: number;
+	updatedAt: number;
+}
 
 export interface StudioProject {
 	id: string;
 	revision: number;
-	timeline: MainTimelineDocument;
-	compositions: Record<string, CompositionDocument>;
-	assets: Record<string, TimelineAsset>;
+	canvas: CanvasDocument;
+	scenes: Record<string, SceneDocument>;
 	ui: {
-		activeMainView: "preview" | "canvas";
-		activeScope: StudioScope;
+		activeSceneId: string | null;
+		focusedSceneId: string | null;
+		camera: {
+			x: number;
+			y: number;
+			zoom: number;
+		};
 	};
 	createdAt: number;
 	updatedAt: number;

@@ -23,4 +23,3 @@ export * from "./editor/command";
 export * from "./studio/types";
 export * from "./studio/selectors";
 export * from "./studio/schema";
-export * from "./studio/composition";

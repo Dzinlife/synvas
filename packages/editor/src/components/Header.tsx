@@ -1,7 +1,6 @@
-import { saveTimelineToObject } from "core/editor/timelineLoader";
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
 import { Check, FolderPlus, Save } from "lucide-react";
-import { useCallback, useEffect, useEffectEvent, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -12,12 +11,10 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ExportVideoDialog from "@/editor/components/ExportVideoDialog";
-import {
-	useTimelineHistory,
-	useTimelineStore,
-} from "@/editor/contexts/TimelineContext";
+import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import { useProjectStore } from "@/projects/projectStore";
+import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 
 export default function Header() {
 	const status = useProjectStore((state) => state.status);
@@ -28,8 +25,14 @@ export default function Header() {
 	const saveCurrentProject = useProjectStore(
 		(state) => state.saveCurrentProject,
 	);
+	const flushFocusedSceneDraft = useProjectStore(
+		(state) => state.flushFocusedSceneDraft,
+	);
 	const switchProject = useProjectStore((state) => state.switchProject);
-	const { canUndo, canRedo, undo, redo } = useTimelineHistory();
+	const canUndo = useStudioHistoryStore((state) => state.canUndo);
+	const canRedo = useStudioHistoryStore((state) => state.canRedo);
+	const undo = useStudioHistoryStore((state) => state.undo);
+	const redo = useStudioHistoryStore((state) => state.redo);
 	const fps = useTimelineStore((state) => state.fps);
 	const elements = useTimelineStore((state) => state.elements);
 	const canvasSize = useTimelineStore((state) => state.canvasSize);
@@ -43,29 +46,9 @@ export default function Header() {
 		[projects, currentProjectId],
 	);
 
-	const getTimelineSnapshot = useEffectEvent(() => {
-		const state = useTimelineStore.getState();
-		return saveTimelineToObject(
-			state.elements,
-			state.fps,
-			state.canvasSize,
-			state.tracks,
-			{
-				snapEnabled: state.snapEnabled,
-				autoAttach: state.autoAttach,
-				rippleEditingEnabled: state.rippleEditingEnabled,
-				previewAxisEnabled: state.previewAxisEnabled,
-				audio: {
-					...state.audioSettings,
-					compressor: { ...state.audioSettings.compressor },
-				},
-			},
-			state.assets,
-		);
-	});
-
 	const handleSave = async () => {
-		await saveCurrentProject(getTimelineSnapshot());
+		flushFocusedSceneDraft();
+		await saveCurrentProject();
 	};
 
 	const handleCreate = async () => {

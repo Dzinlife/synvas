@@ -45,7 +45,6 @@ import {
 	getTransitionDurationParts,
 	isTransitionElement,
 } from "./utils/transitions";
-import { useCanvasStore } from "@/studio/canvas/canvasStore";
 
 // ============================================================================
 // 类型定义
@@ -83,7 +82,6 @@ interface MaterialCardProps {
 		positionX: number,
 		positionY: number,
 	) => void;
-	onCanvasDrop?: (item: MaterialItem) => void;
 	dndContext: MaterialDndContext;
 }
 
@@ -95,7 +93,6 @@ const MaterialCard: React.FC<MaterialCardProps> = ({
 	item,
 	onTimelineDrop,
 	onPreviewDrop,
-	onCanvasDrop,
 	dndContext,
 }) => {
 	const { fps } = useFps();
@@ -104,7 +101,6 @@ const MaterialCard: React.FC<MaterialCardProps> = ({
 		context: dndContext,
 		onTimelineDrop,
 		onPreviewDrop,
-		onCanvasDrop,
 		getRole: (target) => getMaterialRole(target),
 	});
 
@@ -411,7 +407,6 @@ const MaterialLibrary: React.FC = () => {
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
-	const addCanvasAssetRef = useCanvasStore((state) => state.addAssetRef);
 
 	const materials = buildMaterialItems();
 
@@ -675,20 +670,6 @@ const MaterialLibrary: React.FC = () => {
 		[setElements, currentTime, ensureAssetByUri, fps],
 	);
 
-	const handleCanvasDrop = useCallback(
-		(item: MaterialItem) => {
-			const sourceKind = resolveSourceKindByElementType(item.elementType);
-			if (!sourceKind || !item.uri) return;
-			const assetId = ensureAssetByUri({
-				uri: item.uri,
-				kind: sourceKind,
-				name: item.name,
-			});
-			addCanvasAssetRef(assetId);
-		},
-		[addCanvasAssetRef, ensureAssetByUri],
-	);
-
 	return (
 		<div className="space-y-2">
 			{materials.map((item) => (
@@ -697,7 +678,6 @@ const MaterialLibrary: React.FC = () => {
 					item={item}
 					onTimelineDrop={handleTimelineDrop}
 					onPreviewDrop={handlePreviewDrop}
-					onCanvasDrop={handleCanvasDrop}
 					dndContext={dndContext}
 				/>
 			))}

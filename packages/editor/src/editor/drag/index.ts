@@ -26,7 +26,6 @@ export {
 } from "./materialDnd";
 export {
 	findTimelineDropTargetFromScreenPosition,
-	getCanvasDropTargetFromScreenPosition,
 	getPreviewDropTargetFromScreenPosition,
 	getTimelineDropTimeFromScreenX,
 	parseTrackHeights,

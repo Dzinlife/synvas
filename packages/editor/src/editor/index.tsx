@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ModelManager } from "@/dsl/model";
 import { useProjectStore } from "@/projects/projectStore";
+import { useSceneSessionBridge } from "@/studio/scene/useSceneSessionBridge";
+import { useStudioHotkeys } from "@/studio/useStudioHotkeys";
 import PreviewProvider from "./contexts/PreviewProvider";
 import { TimelineProvider } from "./contexts/TimelineContext";
 import ViewportHost from "./ViewportHost";
@@ -31,47 +33,9 @@ console.log(
 
 // 内部编辑器内容组件（可以使用 hooks）
 const EditorContent: React.FC = () => {
-	// Timeline 高度状态和拖拽逻辑
-	const [timelineMaxHeight, setTimelineMaxHeight] = useState(300);
-	const isDraggingRef = useRef(false);
-	const startYRef = useRef(0);
-	const startHeightRef = useRef(0);
-
-	const handleResizeMouseDown = useCallback(
-		(e: React.MouseEvent) => {
-			e.preventDefault();
-			isDraggingRef.current = true;
-			startYRef.current = e.clientY;
-			startHeightRef.current = timelineMaxHeight;
-
-			const handleMouseMove = (e: MouseEvent) => {
-				if (!isDraggingRef.current) return;
-				const delta = startYRef.current - e.clientY;
-				const newHeight = Math.max(
-					100,
-					Math.min(600, startHeightRef.current + delta),
-				);
-				setTimelineMaxHeight(newHeight);
-			};
-
-			const handleMouseUp = () => {
-				isDraggingRef.current = false;
-				document.removeEventListener("mousemove", handleMouseMove);
-				document.removeEventListener("mouseup", handleMouseUp);
-			};
-
-			document.addEventListener("mousemove", handleMouseMove);
-			document.addEventListener("mouseup", handleMouseUp);
-		},
-		[timelineMaxHeight],
-	);
-
-	return (
-		<ViewportHost
-			timelineMaxHeight={timelineMaxHeight}
-			onResizeMouseDown={handleResizeMouseDown}
-		/>
-	);
+	useSceneSessionBridge();
+	useStudioHotkeys();
+	return <ViewportHost />;
 };
 
 const Editor = () => {
@@ -95,14 +59,7 @@ const Editor = () => {
 		<QueryClientProvider client={queryClient}>
 			<TooltipProvider>
 				<Toaster />
-				<TimelineProvider
-					elements={currentProjectData.elements}
-					assets={currentProjectData.assets}
-					tracks={currentProjectData.tracks}
-					canvasSize={currentProjectData.canvas}
-					fps={currentProjectData.fps}
-					settings={currentProjectData.settings}
-				>
+				<TimelineProvider>
 					<ModelManager>
 						<PreviewProvider>
 							<EditorContent />

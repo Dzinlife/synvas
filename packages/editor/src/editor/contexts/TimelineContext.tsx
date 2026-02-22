@@ -2290,8 +2290,6 @@ export const TimelineProvider = ({
 				tracks,
 				audioTrackStates: {},
 				scrollLeft: 0,
-				timelineMaxScrollLeft: 0,
-				timelineViewportWidth: 0,
 				canvasSize: initialCanvasSize ?? { width: 1920, height: 1080 },
 				fps: normalizeFps(initialFps ?? DEFAULT_FPS),
 				...(settingsState ?? {}),
@@ -2305,8 +2303,6 @@ export const TimelineProvider = ({
 				...(initialSources ? { assets: initialSources } : {}),
 				audioTrackStates: {},
 				scrollLeft: 0,
-				timelineMaxScrollLeft: 0,
-				timelineViewportWidth: 0,
 				...(settingsState ?? {}),
 			});
 			useTimelineStore.getState().resetHistory();
@@ -2316,8 +2312,6 @@ export const TimelineProvider = ({
 			useTimelineStore.setState({
 				...(initialSources ? { assets: initialSources } : {}),
 				scrollLeft: 0,
-				timelineMaxScrollLeft: 0,
-				timelineViewportWidth: 0,
 				...settingsState,
 			});
 		}
@@ -2334,8 +2328,6 @@ export const TimelineProvider = ({
 				tracks,
 				audioTrackStates: {},
 				scrollLeft: 0,
-				timelineMaxScrollLeft: 0,
-				timelineViewportWidth: 0,
 			});
 			useTimelineStore.getState().resetHistory();
 		}
@@ -2348,8 +2340,6 @@ export const TimelineProvider = ({
 				...(initialSources ? { assets: initialSources } : {}),
 				audioTrackStates: {},
 				scrollLeft: 0,
-				timelineMaxScrollLeft: 0,
-				timelineViewportWidth: 0,
 			});
 			useTimelineStore.getState().resetHistory();
 		}

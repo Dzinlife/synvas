@@ -78,7 +78,7 @@ export interface DragGhostInfo {
 /** 拖拽目标信息 */
 export interface DropTargetInfo {
 	/** 目标区域类型 */
-	zone: "timeline" | "preview" | "canvas" | "none";
+	zone: "timeline" | "preview" | "none";
 	/** 时间线目标类型（轨道或间隙） */
 	type?: "track" | "gap";
 	/** 轨道索引（时间线目标） */

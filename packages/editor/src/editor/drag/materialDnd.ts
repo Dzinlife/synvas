@@ -31,7 +31,6 @@ import {
 } from "./dragStore";
 import {
 	findTimelineDropTargetFromScreenPosition,
-	getCanvasDropTargetFromScreenPosition,
 	getPreviewDropTargetFromScreenPosition,
 	getTimelineDropTimeFromScreenX,
 } from "./timelineDropTargets";
@@ -152,25 +151,6 @@ export function resolveMaterialDropTarget(
 	screenX: number,
 	screenY: number,
 ): DropTargetInfo | null {
-	const previewTarget = getPreviewDropTargetFromScreenPosition(
-		screenX,
-		screenY,
-	);
-	if (previewTarget) {
-		if (state.isTransitionMaterial || state.materialRole === "audio") {
-			return { ...previewTarget, canDrop: false };
-		}
-		return previewTarget;
-	}
-
-	const canvasTarget = getCanvasDropTargetFromScreenPosition(screenX, screenY);
-	if (canvasTarget) {
-		if (state.isTransitionMaterial || state.materialRole === "audio") {
-			return { ...canvasTarget, canDrop: false };
-		}
-		return canvasTarget;
-	}
-
 	const otherTrackCountFallback = Math.max(context.trackCount - 1, 0);
 	const baseDropTarget = findTimelineDropTargetFromScreenPosition(
 		screenX,
@@ -179,7 +159,17 @@ export function resolveMaterialDropTarget(
 		DEFAULT_TRACK_HEIGHT,
 		false,
 	);
-	if (!baseDropTarget) return null;
+	if (!baseDropTarget) {
+		const previewTarget = getPreviewDropTargetFromScreenPosition(
+			screenX,
+			screenY,
+		);
+		if (!previewTarget) return null;
+		if (state.isTransitionMaterial || state.materialRole === "audio") {
+			return { ...previewTarget, canDrop: false };
+		}
+		return previewTarget;
+	}
 
 	const scrollLeft = useDragStore.getState().timelineScrollLeft;
 	const rawTime = getTimelineDropTimeFromScreenX(
@@ -188,7 +178,17 @@ export function resolveMaterialDropTarget(
 		context.ratio,
 		scrollLeft,
 	);
-	if (rawTime === null) return null;
+	if (rawTime === null) {
+		const previewTarget = getPreviewDropTargetFromScreenPosition(
+			screenX,
+			screenY,
+		);
+		if (!previewTarget) return null;
+		if (state.isTransitionMaterial || state.materialRole === "audio") {
+			return { ...previewTarget, canDrop: false };
+		}
+		return previewTarget;
+	}
 
 	const time = clampFrame(rawTime);
 	const dropEnd = time + state.materialDurationFrames;
@@ -426,7 +426,6 @@ export interface UseMaterialDndOptions<T extends MaterialDndItem> {
 		dropTargetType?: "track" | "gap",
 	) => void;
 	onPreviewDrop?: (item: T, positionX: number, positionY: number) => void;
-	onCanvasDrop?: (item: T) => void;
 	getRole?: (item: T) => TrackRole;
 	getDurationFrames?: (item: T, defaultDurationFrames: number) => number;
 	getDragData?: (item: T) => MaterialDragData | AssetRefDragData;
@@ -443,7 +442,6 @@ export function useMaterialDnd<T extends MaterialDndItem>({
 	context,
 	onTimelineDrop,
 	onPreviewDrop,
-	onCanvasDrop,
 	getRole = defaultMaterialRole,
 	getDurationFrames = defaultMaterialDurationFrames,
 	getDragData = (target) => ({
@@ -536,8 +534,6 @@ export function useMaterialDnd<T extends MaterialDndItem>({
 							currentDropTarget.positionX,
 							currentDropTarget.positionY,
 						);
-					} else if (currentDropTarget.zone === "canvas") {
-						onCanvasDrop?.(item);
 					}
 				}
 				endDrag();

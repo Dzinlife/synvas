@@ -34,6 +34,17 @@ const DB_VERSION = 1;
 const PROJECT_STORE = "projects";
 const META_STORE = "meta";
 const CURRENT_PROJECT_KEY = "currentProjectId";
+const DEFAULT_SCENE_NODE_WIDTH = 960;
+const DEFAULT_SCENE_NODE_HEIGHT = 540;
+
+const createEntityId = (prefix: string): string => {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return `${prefix}-${crypto.randomUUID()}`;
+	}
+	return `${prefix}-${Date.now().toString(36)}-${Math.random()
+		.toString(36)
+		.slice(2, 8)}`;
+};
 
 const buildEmptyTimeline = (): TimelineJSON => ({
 	fps: 30,
@@ -58,15 +69,48 @@ const buildEmptyTimeline = (): TimelineJSON => ({
 
 export const buildEmptyProject = (projectId: string): StudioProject => {
 	const now = Date.now();
+	const sceneId = createEntityId("scene");
+	const nodeId = createEntityId("node");
 	return {
 		id: projectId,
 		revision: 0,
-		timeline: buildEmptyTimeline(),
-		compositions: {},
-		assets: {},
+		canvas: {
+			nodes: [
+				{
+					id: nodeId,
+					type: "scene",
+					sceneId,
+					name: "Scene 1",
+					x: -DEFAULT_SCENE_NODE_WIDTH / 2,
+					y: -DEFAULT_SCENE_NODE_HEIGHT / 2,
+					width: DEFAULT_SCENE_NODE_WIDTH,
+					height: DEFAULT_SCENE_NODE_HEIGHT,
+					zIndex: 0,
+					locked: false,
+					hidden: false,
+					createdAt: now,
+					updatedAt: now,
+				},
+			],
+		},
+		scenes: {
+			[sceneId]: {
+				id: sceneId,
+				name: "Scene 1",
+				timeline: buildEmptyTimeline(),
+				posterFrame: 0,
+				createdAt: now,
+				updatedAt: now,
+			},
+		},
 		ui: {
-			activeMainView: "preview",
-			activeScope: { type: "main" },
+			activeSceneId: sceneId,
+			focusedSceneId: null,
+			camera: {
+				x: 0,
+				y: 0,
+				zoom: 1,
+			},
 		},
 		createdAt: now,
 		updatedAt: now,
