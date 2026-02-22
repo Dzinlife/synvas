@@ -2,22 +2,15 @@ import type { SceneNode } from "core/studio/types";
 import type Konva from "konva";
 import { Plus, Search, SearchX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-	Layer,
-	Line,
-	Rect,
-	Stage,
-	Text,
-	Transformer,
-} from "react-konva";
+import { Layer, Line, Rect, Stage, Text, Transformer } from "react-konva";
+import SceneTimelineDrawer from "@/editor/components/SceneTimelineDrawer";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 import MaterialLibrary from "@/editor/MaterialLibrary";
 import PreviewEditor from "@/editor/PreviewEditor";
-import SceneTimelineDrawer from "@/editor/components/SceneTimelineDrawer";
 import { useProjectStore } from "@/projects/projectStore";
 import {
-	useStudioHistoryStore,
 	type SceneNodeLayoutSnapshot,
+	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
 import { setScenePoster } from "./scenePosterCache";
 
@@ -64,7 +57,9 @@ const CanvasWorkspace = () => {
 	const setFocusedScene = useProjectStore((state) => state.setFocusedScene);
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
 	const setCanvasCamera = useProjectStore((state) => state.setCanvasCamera);
-	const updateSceneTimeline = useProjectStore((state) => state.updateSceneTimeline);
+	const updateSceneTimeline = useProjectStore(
+		(state) => state.updateSceneTimeline,
+	);
 	const updateScenePosterFrame = useProjectStore(
 		(state) => state.updateScenePosterFrame,
 	);
@@ -78,10 +73,10 @@ const CanvasWorkspace = () => {
 	const stageRef = useRef<Konva.Stage | null>(null);
 	const transformerRef = useRef<Konva.Transformer | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
-	const panningRef = useRef(false);
-	const panStartRef = useRef({ x: 0, y: 0, cameraX: 0, cameraY: 0 });
 	const dragBeforeRef = useRef<Map<string, SceneNodeLayoutSnapshot>>(new Map());
-	const transformBeforeRef = useRef<Map<string, SceneNodeLayoutSnapshot>>(new Map());
+	const transformBeforeRef = useRef<Map<string, SceneNodeLayoutSnapshot>>(
+		new Map(),
+	);
 	const dragMovedRef = useRef(false);
 
 	const sortedNodes = useMemo(() => {
@@ -129,7 +124,17 @@ const CanvasWorkspace = () => {
 			transformer.getLayer()?.batchDraw();
 			return;
 		}
-		const node = stage.findOne(`.scene-node-${selectedNodeId}`) as Konva.Rect | null;
+		const hasSelectedNode = sortedNodes.some(
+			(node) => node.id === selectedNodeId,
+		);
+		if (!hasSelectedNode) {
+			transformer.nodes([]);
+			transformer.getLayer()?.batchDraw();
+			return;
+		}
+		const node = stage.findOne(
+			`.scene-node-${selectedNodeId}`,
+		) as Konva.Rect | null;
 		if (!node) {
 			transformer.nodes([]);
 			transformer.getLayer()?.batchDraw();
@@ -155,7 +160,9 @@ const CanvasWorkspace = () => {
 		const latestProject = useProjectStore.getState().currentProject;
 		if (!latestProject) return;
 		const scene = latestProject.scenes[sceneId];
-		const node = latestProject.canvas.nodes.find((item) => item.sceneId === sceneId);
+		const node = latestProject.canvas.nodes.find(
+			(item) => item.sceneId === sceneId,
+		);
 		if (!scene || !node) return;
 		pushHistory({
 			kind: "canvas.scene-create",
@@ -210,21 +217,36 @@ const CanvasWorkspace = () => {
 	const handleStageWheel = useCallback(
 		(event: Konva.KonvaEventObject<WheelEvent>) => {
 			event.evt.preventDefault();
-			const stage = event.target.getStage();
-			if (!stage) return;
-			const pointer = stage.getPointerPosition();
-			if (!pointer) return;
-			const oldZoom = camera.zoom;
-			const zoomDelta = event.evt.deltaY > 0 ? 0.92 : 1.08;
-			const nextZoom = clampZoom(oldZoom * zoomDelta);
-			const worldPoint = {
-				x: (pointer.x - camera.x) / oldZoom,
-				y: (pointer.y - camera.y) / oldZoom,
-			};
+			const nativeEvent = event.evt;
+
+			if (nativeEvent.ctrlKey) {
+				const stage = event.target.getStage();
+				if (!stage) return;
+				const pointer = stage.getPointerPosition();
+				if (!pointer) return;
+				const oldZoom = camera.zoom;
+				const zoomDelta = nativeEvent.deltaY > 0 ? 0.92 : 1.08;
+				const nextZoom = clampZoom(oldZoom * zoomDelta);
+				const worldPoint = {
+					x: (pointer.x - camera.x) / oldZoom,
+					y: (pointer.y - camera.y) / oldZoom,
+				};
+				setCanvasCamera({
+					x: pointer.x - worldPoint.x * nextZoom,
+					y: pointer.y - worldPoint.y * nextZoom,
+					zoom: nextZoom,
+				});
+				return;
+			}
+
+			const deltaX = nativeEvent.shiftKey
+				? nativeEvent.deltaY
+				: nativeEvent.deltaX;
+			const deltaY = nativeEvent.shiftKey ? 0 : nativeEvent.deltaY;
 			setCanvasCamera({
-				x: pointer.x - worldPoint.x * nextZoom,
-				y: pointer.y - worldPoint.y * nextZoom,
-				zoom: nextZoom,
+				x: camera.x - deltaX,
+				y: camera.y - deltaY,
+				zoom: camera.zoom,
 			});
 		},
 		[camera, setCanvasCamera],
@@ -233,43 +255,10 @@ const CanvasWorkspace = () => {
 	const handleStageMouseDown = useCallback(
 		(event: Konva.KonvaEventObject<MouseEvent>) => {
 			if (event.target !== event.target.getStage()) return;
-			const stage = event.target.getStage();
-			if (!stage) return;
-			const pointer = stage.getPointerPosition();
-			if (!pointer) return;
-			panningRef.current = true;
-			panStartRef.current = {
-				x: pointer.x,
-				y: pointer.y,
-				cameraX: camera.x,
-				cameraY: camera.y,
-			};
 			setSelectedNodeId(null);
 		},
-		[camera.x, camera.y],
+		[],
 	);
-
-	const handleStageMouseMove = useCallback(
-		(event: Konva.KonvaEventObject<MouseEvent>) => {
-			if (!panningRef.current) return;
-			const stage = event.target.getStage();
-			if (!stage) return;
-			const pointer = stage.getPointerPosition();
-			if (!pointer) return;
-			const deltaX = pointer.x - panStartRef.current.x;
-			const deltaY = pointer.y - panStartRef.current.y;
-			setCanvasCamera({
-				x: panStartRef.current.cameraX + deltaX,
-				y: panStartRef.current.cameraY + deltaY,
-				zoom: camera.zoom,
-			});
-		},
-		[camera.zoom, setCanvasCamera],
-	);
-
-	const stopPanning = useCallback(() => {
-		panningRef.current = false;
-	}, []);
 
 	const handleNodeDragStart = useCallback((node: SceneNode) => {
 		dragMovedRef.current = false;
@@ -370,7 +359,11 @@ const CanvasWorkspace = () => {
 	}, []);
 
 	if (!currentProject) {
-		return <div className="flex h-full w-full items-center justify-center">Loading...</div>;
+		return (
+			<div className="flex h-full w-full items-center justify-center">
+				Loading...
+			</div>
+		);
 	}
 
 	return (
@@ -421,7 +414,9 @@ const CanvasWorkspace = () => {
 						>
 							重置视图
 						</button>
-						<span className="text-white/70">{Math.round(camera.zoom * 100)}%</span>
+						<span className="text-white/70">
+							{Math.round(camera.zoom * 100)}%
+						</span>
 					</div>
 					<Stage
 						ref={stageRef}
@@ -429,9 +424,6 @@ const CanvasWorkspace = () => {
 						height={stageSize.height}
 						onWheel={handleStageWheel}
 						onMouseDown={handleStageMouseDown}
-						onMouseMove={handleStageMouseMove}
-						onMouseUp={stopPanning}
-						onMouseLeave={stopPanning}
 					>
 						<Layer>
 							<Rect
@@ -443,7 +435,12 @@ const CanvasWorkspace = () => {
 								listening={false}
 							/>
 						</Layer>
-						<Layer x={camera.x} y={camera.y} scaleX={camera.zoom} scaleY={camera.zoom}>
+						<Layer
+							x={camera.x}
+							y={camera.y}
+							scaleX={camera.zoom}
+							scaleY={camera.zoom}
+						>
 							{gridLines}
 							{sortedNodes.map((node) => {
 								const isActive = node.sceneId === activeSceneId;
