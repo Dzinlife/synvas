@@ -13,6 +13,7 @@ import {
 import { transformMetaToRenderLayout } from "@/dsl/layout";
 import { useTimelineStore, useTracks } from "@/editor/contexts/TimelineContext";
 import { buildKonvaTree } from "@/editor/preview/buildSkiaTree";
+import { LabelLayer } from "@/editor/preview/LabelLayer";
 import { usePreviewInteractions } from "@/editor/preview/usePreviewInteractions";
 import {
 	EditorRuntimeProvider,
@@ -180,6 +181,11 @@ const FocusSceneKonvaLayerInner: React.FC<FocusSceneKonvaLayerInnerProps> = ({
 		canvasToStageCoords,
 	});
 
+	const effectiveZoom = getEffectiveZoom();
+	const stageOrigin = useMemo(() => {
+		return canvasToStageCoords(0, 0);
+	}, [canvasToStageCoords]);
+
 	const sortByTrackIndex = useCallback(
 		(items: TimelineElement[]) => {
 			return items
@@ -265,6 +271,24 @@ const FocusSceneKonvaLayerInner: React.FC<FocusSceneKonvaLayerInnerProps> = ({
 			className="absolute inset-0 z-20"
 			data-testid="focus-scene-konva-layer"
 		>
+			<LabelLayer
+				elements={renderElements}
+				selectedIds={selectedIds}
+				stageRef={stageRef}
+				groupProxyRef={groupProxyRef}
+				canvasConvertOptions={canvasConvertOptions}
+				offsetX={stageOrigin.stageX}
+				offsetY={stageOrigin.stageY}
+				zoomLevel={effectiveZoom}
+				pinchState={{
+					isPinching: false,
+					centerX: 0,
+					centerY: 0,
+					initialZoom: effectiveZoom,
+					currentZoom: effectiveZoom,
+				}}
+				groupProxyBox={groupProxyBox}
+			/>
 			<Stage
 				ref={stageRef}
 				width={width}
