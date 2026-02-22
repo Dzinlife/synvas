@@ -39,7 +39,8 @@ type TransformBase = {
 	canvasHeight: number;
 	localWidth: number;
 	localHeight: number;
-	effectiveZoom: number;
+	effectiveScaleX: number;
+	effectiveScaleY: number;
 	elementScaleX: number;
 	elementScaleY: number;
 	activeAnchor: string | null;
@@ -377,6 +378,10 @@ export interface UsePreviewInteractionsOptions {
 	canvasWidth: number;
 	canvasHeight: number;
 	getEffectiveZoom: () => number;
+	getEffectiveScale?: () => {
+		x: number;
+		y: number;
+	};
 	stageToCanvasCoords: (
 		stageX: number,
 		stageY: number,
@@ -477,6 +482,7 @@ export const usePreviewInteractions = ({
 	canvasWidth,
 	canvasHeight,
 	getEffectiveZoom,
+	getEffectiveScale,
 	stageToCanvasCoords,
 	canvasToStageCoords,
 }: UsePreviewInteractionsOptions) => {
@@ -511,9 +517,9 @@ export const usePreviewInteractions = ({
 	const initialSelectedIdsRef = useRef<string[]>([]);
 	const selectionRectRef = useRef(selectionRect);
 	const dragSelectedIdsRef = useRef<string[]>([]);
-	const dragInitialCentersRef = useRef<Record<string, { x: number; y: number }>>(
-		{},
-	);
+	const dragInitialCentersRef = useRef<
+		Record<string, { x: number; y: number }>
+	>({});
 	const dragSourceCentersRef = useRef<Record<string, { x: number; y: number }>>(
 		{},
 	);
@@ -587,6 +593,33 @@ export const usePreviewInteractions = ({
 		},
 		[],
 	);
+
+	const resolveEffectiveScale = useCallback(() => {
+		if (getEffectiveScale) {
+			const scale = getEffectiveScale();
+			const scaleX =
+				Number.isFinite(scale.x) && Math.abs(scale.x) > SCALE_EPSILON
+					? scale.x
+					: 1;
+			const scaleY =
+				Number.isFinite(scale.y) && Math.abs(scale.y) > SCALE_EPSILON
+					? scale.y
+					: 1;
+			return { x: scaleX, y: scaleY };
+		}
+		const zoom = getEffectiveZoom();
+		const safeZoom =
+			Number.isFinite(zoom) && Math.abs(zoom) > SCALE_EPSILON ? zoom : 1;
+		return { x: safeZoom, y: safeZoom };
+	}, [getEffectiveScale, getEffectiveZoom]);
+
+	const resolveSnapScale = useCallback(() => {
+		const scale = resolveEffectiveScale();
+		return Math.max(
+			Math.min(Math.abs(scale.x), Math.abs(scale.y)),
+			SCALE_EPSILON,
+		);
+	}, [resolveEffectiveScale]);
 
 	const modelPositionToCanvasCenter = useCallback(
 		(position: { x: number; y: number }) => {
@@ -731,7 +764,7 @@ export const usePreviewInteractions = ({
 	const resolveElementStageFrame = useCallback(
 		(
 			element: TransformableTimelineElement,
-			effectiveZoom = getEffectiveZoom(),
+			effectiveScale = resolveEffectiveScale(),
 		): RectMatrixFrame => {
 			const canvasFrame = resolveElementCanvasFrame(element);
 			const center = canvasFrame.matrix.point({
@@ -741,12 +774,12 @@ export const usePreviewInteractions = ({
 			const { stageX, stageY } = canvasToStageCoords(center.x, center.y);
 			return createCenterRectMatrix(
 				{ x: stageX, y: stageY },
-				canvasFrame.width * effectiveZoom,
-				canvasFrame.height * effectiveZoom,
+				canvasFrame.width * effectiveScale.x,
+				canvasFrame.height * effectiveScale.y,
 				canvasFrame.matrix.decompose().rotation,
 			);
 		},
-		[resolveElementCanvasFrame, canvasToStageCoords, getEffectiveZoom],
+		[resolveElementCanvasFrame, canvasToStageCoords, resolveEffectiveScale],
 	);
 
 	const getElementCanvasBox = useCallback(
@@ -806,10 +839,10 @@ export const usePreviewInteractions = ({
 			return null;
 		}
 
-		const effectiveZoom = getEffectiveZoom();
+		const effectiveScale = resolveEffectiveScale();
 		const stageCorners: Point[] = [];
 		selectedElements.forEach((element) => {
-			const stageFrame = resolveElementStageFrame(element, effectiveZoom);
+			const stageFrame = resolveElementStageFrame(element, effectiveScale);
 			stageCorners.push(
 				...getRectCornersFromMatrix(
 					stageFrame.matrix,
@@ -823,14 +856,15 @@ export const usePreviewInteractions = ({
 		}
 
 		const axisBounds = getBoundingBoxFromPoints(stageCorners);
-		const groupCenter =
-			groupCenterRef.current ?? {
-				x: axisBounds.x + axisBounds.width / 2,
-				y: axisBounds.y + axisBounds.height / 2,
-			};
+		const groupCenter = groupCenterRef.current ?? {
+			x: axisBounds.x + axisBounds.width / 2,
+			y: axisBounds.y + axisBounds.height / 2,
+		};
 		const rotationDeg = groupRotationRef.current;
 		const worldToLocal = createWorldToLocalMatrix(groupCenter, rotationDeg);
-		const localCorners = stageCorners.map((corner) => worldToLocal.point(corner));
+		const localCorners = stageCorners.map((corner) =>
+			worldToLocal.point(corner),
+		);
 		const localBounds = getBoundingBoxFromPoints(localCorners);
 		const localCenter = {
 			x: localBounds.x + localBounds.width / 2,
@@ -850,7 +884,7 @@ export const usePreviewInteractions = ({
 	}, [
 		renderElements,
 		selectedIds,
-		getEffectiveZoom,
+		resolveEffectiveScale,
 		resolveElementStageFrame,
 	]);
 
@@ -957,10 +991,7 @@ export const usePreviewInteractions = ({
 			const { canvasX, canvasY } = modelPositionToCanvasCenter(
 				source.transform.position,
 			);
-			const { stageX, stageY } = canvasToStageCoords(
-				canvasX,
-				canvasY,
-			);
+			const { stageX, stageY } = canvasToStageCoords(canvasX, canvasY);
 			node.position({ x: stageX, y: stageY });
 		});
 
@@ -1170,7 +1201,7 @@ export const usePreviewInteractions = ({
 			const node = e.target as Konva.Node;
 			const stageX = node.x();
 			const stageY = node.y();
-			const effectiveZoom = getEffectiveZoom();
+			const snapScale = resolveSnapScale();
 			const { canvasX: rawCanvasX, canvasY: rawCanvasY } = stageToCanvasCoords(
 				stageX,
 				stageY,
@@ -1195,8 +1226,7 @@ export const usePreviewInteractions = ({
 					};
 					// In copy mode, keep source elements as snap guides.
 					const snapExcludeIds = dragSelectedIds;
-					const snapThreshold =
-						SNAP_GUIDE_THRESHOLD / Math.max(effectiveZoom, 1e-6);
+					const snapThreshold = SNAP_GUIDE_THRESHOLD / snapScale;
 					const snapResult = computeSnapResult(
 						movingBox,
 						snapExcludeIds,
@@ -1278,7 +1308,7 @@ export const usePreviewInteractions = ({
 		[
 			stageToCanvasCoords,
 			snapEnabled,
-			getEffectiveZoom,
+			resolveSnapScale,
 			canvasToStageCoords,
 			computeSnapResult,
 			clearSnapGuides,
@@ -1476,7 +1506,15 @@ export const usePreviewInteractions = ({
 			const currentGroupMatrix = node.getAbsoluteTransform().copy();
 			const inverseBase = snapshot.groupMatrix.copy().invert();
 			const deltaTransform = currentGroupMatrix.copy().multiply(inverseBase);
-			const effectiveZoom = Math.max(getEffectiveZoom(), SCALE_EPSILON);
+			const effectiveScale = resolveEffectiveScale();
+			const effectiveScaleX = Math.max(
+				Math.abs(effectiveScale.x),
+				SCALE_EPSILON,
+			);
+			const effectiveScaleY = Math.max(
+				Math.abs(effectiveScale.y),
+				SCALE_EPSILON,
+			);
 
 			const currentElements = timelineStore.getState().elements;
 			let didChange = false;
@@ -1492,16 +1530,14 @@ export const usePreviewInteractions = ({
 					base.localWidth,
 					base.localHeight,
 				);
-				const { canvasX: nextCenterX, canvasY: nextCenterY } = stageToCanvasCoords(
-					nextMetrics.center.x,
-					nextMetrics.center.y,
-				);
+				const { canvasX: nextCenterX, canvasY: nextCenterY } =
+					stageToCanvasCoords(nextMetrics.center.x, nextMetrics.center.y);
 				const { positionX, positionY } = canvasCenterToModelPosition(
 					nextCenterX,
 					nextCenterY,
 				);
-				const nextWidth = nextMetrics.width / effectiveZoom;
-				const nextHeight = nextMetrics.height / effectiveZoom;
+				const nextWidth = nextMetrics.width / effectiveScaleX;
+				const nextHeight = nextMetrics.height / effectiveScaleY;
 				const nextScaleX = resolveScaleFromSize(
 					nextWidth,
 					transform.baseSize.width,
@@ -1556,7 +1592,7 @@ export const usePreviewInteractions = ({
 		[
 			captureHistorySnapshot,
 			snapshotGroupTransform,
-			getEffectiveZoom,
+			resolveEffectiveScale,
 			stageToCanvasCoords,
 			canvasCenterToModelPosition,
 			setElementsWithoutHistory,
@@ -1599,12 +1635,12 @@ export const usePreviewInteractions = ({
 	// 处理 transform 事件（实时更新）
 	const handleTransformStart = useCallback(
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
-				const node = e.target as Konva.Rect;
-				transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
-				transformHasChangedRef.current[id] = false;
-				const element = timelineStore
-					.getState()
-					.elements.find((el) => el.id === id);
+			const node = e.target as Konva.Rect;
+			transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
+			transformHasChangedRef.current[id] = false;
+			const element = timelineStore
+				.getState()
+				.elements.find((el) => el.id === id);
 			delete transformCanvasBoxRef.current[id];
 			if ("altKey" in e.evt) {
 				const eventAltPressed = Boolean((e.evt as MouseEvent).altKey);
@@ -1620,7 +1656,15 @@ export const usePreviewInteractions = ({
 					updateTransformerRotationSnaps(eventShiftPressed);
 				}
 			}
-			const effectiveZoom = getEffectiveZoom();
+			const effectiveScale = resolveEffectiveScale();
+			const effectiveScaleX = Math.max(
+				Math.abs(effectiveScale.x),
+				SCALE_EPSILON,
+			);
+			const effectiveScaleY = Math.max(
+				Math.abs(effectiveScale.y),
+				SCALE_EPSILON,
+			);
 			const baseMetrics = getMatrixMetrics(
 				node.getAbsoluteTransform().copy(),
 				node.width(),
@@ -1628,11 +1672,12 @@ export const usePreviewInteractions = ({
 			);
 
 			transformBaseRef.current[id] = {
-				canvasWidth: baseMetrics.width / effectiveZoom,
-				canvasHeight: baseMetrics.height / effectiveZoom,
+				canvasWidth: baseMetrics.width / effectiveScaleX,
+				canvasHeight: baseMetrics.height / effectiveScaleY,
 				localWidth: node.width(),
 				localHeight: node.height(),
-				effectiveZoom,
+				effectiveScaleX,
+				effectiveScaleY,
 				elementScaleX: element?.transform?.scale.x ?? 1,
 				elementScaleY: element?.transform?.scale.y ?? 1,
 				activeAnchor: transformerRef.current?.getActiveAnchor?.() ?? null,
@@ -1640,7 +1685,7 @@ export const usePreviewInteractions = ({
 		},
 		[
 			captureHistorySnapshot,
-			getEffectiveZoom,
+			resolveEffectiveScale,
 			updateTransformerCenteredScaling,
 			updateTransformerRotationSnaps,
 		],
@@ -1653,12 +1698,20 @@ export const usePreviewInteractions = ({
 				transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
 				transformHasChangedRef.current[id] = false;
 			}
-				let base = transformBaseRef.current[id];
-				if (!base) {
-					const effectiveZoom = getEffectiveZoom();
-					const element = timelineStore
-						.getState()
-						.elements.find((el) => el.id === id);
+			let base = transformBaseRef.current[id];
+			if (!base) {
+				const effectiveScale = resolveEffectiveScale();
+				const effectiveScaleX = Math.max(
+					Math.abs(effectiveScale.x),
+					SCALE_EPSILON,
+				);
+				const effectiveScaleY = Math.max(
+					Math.abs(effectiveScale.y),
+					SCALE_EPSILON,
+				);
+				const element = timelineStore
+					.getState()
+					.elements.find((el) => el.id === id);
 				const baseMetrics = getMatrixMetrics(
 					node.getAbsoluteTransform().copy(),
 					node.width(),
@@ -1666,11 +1719,12 @@ export const usePreviewInteractions = ({
 				);
 
 				base = {
-					canvasWidth: baseMetrics.width / effectiveZoom,
-					canvasHeight: baseMetrics.height / effectiveZoom,
+					canvasWidth: baseMetrics.width / effectiveScaleX,
+					canvasHeight: baseMetrics.height / effectiveScaleY,
 					localWidth: node.width(),
 					localHeight: node.height(),
-					effectiveZoom,
+					effectiveScaleX,
+					effectiveScaleY,
 					elementScaleX: element?.transform?.scale.x ?? 1,
 					elementScaleY: element?.transform?.scale.y ?? 1,
 					activeAnchor: transformerRef.current?.getActiveAnchor?.() ?? null,
@@ -1683,8 +1737,10 @@ export const usePreviewInteractions = ({
 				node.width(),
 				node.height(),
 			);
-			const pictureWidthScaled = currentMetrics.width / base.effectiveZoom;
-			const pictureHeightScaled = currentMetrics.height / base.effectiveZoom;
+			const pictureWidthScaled =
+				currentMetrics.width / Math.max(base.effectiveScaleX, SCALE_EPSILON);
+			const pictureHeightScaled =
+				currentMetrics.height / Math.max(base.effectiveScaleY, SCALE_EPSILON);
 			const { canvasX: canvasCenterX, canvasY: canvasCenterY } =
 				stageToCanvasCoords(currentMetrics.center.x, currentMetrics.center.y);
 			const { positionX, positionY } = canvasCenterToModelPosition(
@@ -1780,7 +1836,7 @@ export const usePreviewInteractions = ({
 		},
 		[
 			stageToCanvasCoords,
-			getEffectiveZoom,
+			resolveEffectiveScale,
 			captureHistorySnapshot,
 			canvasCenterToModelPosition,
 			setElementsWithoutHistory,
@@ -1806,9 +1862,18 @@ export const usePreviewInteractions = ({
 			node.width(stageWidthScaled);
 			node.height(stageHeightScaled);
 
-			const effectiveZoom = base?.effectiveZoom ?? getEffectiveZoom();
-			const pictureWidthScaled = metricsBeforeReset.width / effectiveZoom;
-			const pictureHeightScaled = metricsBeforeReset.height / effectiveZoom;
+			const effectiveScale = base
+				? {
+						x: base.effectiveScaleX,
+						y: base.effectiveScaleY,
+					}
+				: resolveEffectiveScale();
+			const pictureWidthScaled =
+				metricsBeforeReset.width /
+				Math.max(Math.abs(effectiveScale.x), SCALE_EPSILON);
+			const pictureHeightScaled =
+				metricsBeforeReset.height /
+				Math.max(Math.abs(effectiveScale.y), SCALE_EPSILON);
 			const { canvasX: canvasCenterX, canvasY: canvasCenterY } =
 				stageToCanvasCoords(
 					metricsBeforeReset.center.x,
@@ -1915,7 +1980,7 @@ export const usePreviewInteractions = ({
 		},
 		[
 			stageToCanvasCoords,
-			getEffectiveZoom,
+			resolveEffectiveScale,
 			canvasCenterToModelPosition,
 			clearSnapGuides,
 			setElementsWithoutHistory,
@@ -2104,9 +2169,21 @@ export const usePreviewInteractions = ({
 				return newBox;
 			}
 
-			const effectiveZoom = Math.max(getEffectiveZoom(), SCALE_EPSILON);
-			const minSizeCanvas = MIN_TRANSFORM_SIZE_STAGE / effectiveZoom;
-			const snapThreshold = SNAP_GUIDE_THRESHOLD / effectiveZoom;
+			const effectiveScale = resolveEffectiveScale();
+			const effectiveScaleX = Math.max(
+				Math.abs(effectiveScale.x),
+				SCALE_EPSILON,
+			);
+			const effectiveScaleY = Math.max(
+				Math.abs(effectiveScale.y),
+				SCALE_EPSILON,
+			);
+			const referenceScale = Math.max(
+				Math.min(effectiveScaleX, effectiveScaleY),
+				SCALE_EPSILON,
+			);
+			const minSizeCanvas = MIN_TRANSFORM_SIZE_STAGE / referenceScale;
+			const snapThreshold = SNAP_GUIDE_THRESHOLD / referenceScale;
 			const rotationMagnitude = resolveRotationMagnitude(
 				Number.isFinite(newBox.rotation) ? newBox.rotation : oldBox.rotation,
 			);
@@ -2129,8 +2206,8 @@ export const usePreviewInteractions = ({
 				return {
 					x: canvasX,
 					y: canvasY,
-					width: box.width / effectiveZoom,
-					height: box.height / effectiveZoom,
+					width: box.width / effectiveScaleX,
+					height: box.height / effectiveScaleY,
 				};
 			};
 
@@ -2140,8 +2217,8 @@ export const usePreviewInteractions = ({
 					...newBox,
 					x: stageX,
 					y: stageY,
-					width: box.width * effectiveZoom,
-					height: box.height * effectiveZoom,
+					width: box.width * effectiveScaleX,
+					height: box.height * effectiveScaleY,
 				};
 			};
 
@@ -2459,7 +2536,7 @@ export const usePreviewInteractions = ({
 			snapEnabled,
 			selectedIds,
 			getSnapGuideValues,
-			getEffectiveZoom,
+			resolveEffectiveScale,
 			stageToCanvasCoords,
 			canvasToStageCoords,
 			projectGuidesToStage,

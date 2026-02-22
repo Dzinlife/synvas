@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ModelManager } from "@/dsl/model";
 import { useProjectStore } from "@/projects/projectStore";
 import { useSceneSessionBridge } from "@/studio/scene/useSceneSessionBridge";
+import { useTimelineRuntimeRegistryBridge } from "@/studio/scene/useTimelineRuntimeRegistryBridge";
 import { useStudioHotkeys } from "@/studio/useStudioHotkeys";
 import PreviewProvider from "./contexts/PreviewProvider";
 import { TimelineProvider } from "./contexts/TimelineContext";
@@ -33,6 +34,7 @@ console.log(
 
 // 内部编辑器内容组件（可以使用 hooks）
 const EditorContent: React.FC = () => {
+	useTimelineRuntimeRegistryBridge();
 	useSceneSessionBridge();
 	useStudioHotkeys();
 	return <ViewportHost />;

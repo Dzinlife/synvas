@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
 import type { TimelineJSON } from "core/editor/timelineLoader";
-import { framesToTimecode } from "core/utils/timecode";
 import type { StudioProject } from "core/studio/types";
+import { framesToTimecode } from "core/utils/timecode";
+import { beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
+import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { useStudioHistoryStore } from "./studioHistoryStore";
 
 const createTimeline = (elementsCount: number): TimelineJSON => ({
@@ -127,6 +128,7 @@ describe("studioHistoryStore", () => {
 		const after = createTimeline(2);
 		useStudioHistoryStore.getState().push({
 			kind: "scene.timeline",
+			timelineRef: toSceneTimelineRef("scene-2"),
 			sceneId: "scene-2",
 			before,
 			after,
@@ -134,7 +136,9 @@ describe("studioHistoryStore", () => {
 		});
 
 		useStudioHistoryStore.getState().undo();
-		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe("scene-2");
+		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
+			"scene-2",
+		);
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-2"].timeline
 				.elements.length,
@@ -179,12 +183,18 @@ describe("studioHistoryStore", () => {
 		});
 
 		useProjectStore.getState().restoreSceneGraphForHistory(scene, node);
-		expect(useProjectStore.getState().currentProject?.scenes["scene-3"]).toBeTruthy();
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-3"],
+		).toBeTruthy();
 
 		useStudioHistoryStore.getState().undo();
-		expect(useProjectStore.getState().currentProject?.scenes["scene-3"]).toBeUndefined();
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-3"],
+		).toBeUndefined();
 
 		useStudioHistoryStore.getState().redo();
-		expect(useProjectStore.getState().currentProject?.scenes["scene-3"]).toBeTruthy();
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-3"],
+		).toBeTruthy();
 	});
 });

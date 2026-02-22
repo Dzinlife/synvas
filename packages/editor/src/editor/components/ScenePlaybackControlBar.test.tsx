@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { framesToTimecode } from "@/utils/timecode";
 import ScenePlaybackControlBar from "./ScenePlaybackControlBar";
 
-const { timelineState, playbackState, previewState, togglePlayMock } = vi.hoisted(
-	() => ({
+const { timelineState, playbackState, previewState, togglePlaybackMock } =
+	vi.hoisted(() => ({
 		timelineState: {
 			currentTime: 120,
 			previewTime: null as number | null,
@@ -29,9 +29,8 @@ const { timelineState, playbackState, previewState, togglePlayMock } = vi.hoiste
 				current: null,
 			},
 		},
-		togglePlayMock: vi.fn(),
-	}),
-);
+		togglePlaybackMock: vi.fn(),
+	}));
 
 vi.mock("@/editor/contexts/TimelineContext", () => {
 	const useTimelineStore = ((
@@ -41,12 +40,6 @@ vi.mock("@/editor/contexts/TimelineContext", () => {
 			timelineState,
 		)) as unknown as typeof import("@/editor/contexts/TimelineContext").useTimelineStore;
 	return {
-		usePlaybackControl: () => ({
-			isPlaying: playbackState.isPlaying,
-			togglePlay: togglePlayMock,
-			play: vi.fn(),
-			pause: vi.fn(),
-		}),
 		useTimelineStore,
 	};
 });
@@ -72,6 +65,21 @@ vi.mock("@/editor/runtime/EditorRuntimeProvider", () => ({
 		({
 			id: "test-runtime",
 		}) as unknown,
+	useActiveTimelineRuntime: () =>
+		({
+			id: "scene:scene-1",
+			ref: {
+				kind: "scene",
+				sceneId: "scene-1",
+			},
+		}) as unknown,
+}));
+
+vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
+	usePlaybackOwnerController: () => ({
+		togglePlayback: togglePlaybackMock,
+		isOwnerPlaying: () => playbackState.isPlaying,
+	}),
 }));
 
 afterEach(() => {
@@ -91,7 +99,7 @@ beforeEach(() => {
 	previewState.fitZoomLevel = 1;
 	previewState.setZoomLevel.mockReset();
 	previewState.resetPanOffset.mockReset();
-	togglePlayMock.mockReset();
+	togglePlaybackMock.mockReset();
 });
 
 describe("ScenePlaybackControlBar", () => {
@@ -103,7 +111,7 @@ describe("ScenePlaybackControlBar", () => {
 		render(<ScenePlaybackControlBar onExitFocus={vi.fn()} />);
 
 		fireEvent.click(screen.getByRole("button", { name: "播放 / 暂停" }));
-		expect(togglePlayMock).toHaveBeenCalledTimes(1);
+		expect(togglePlaybackMock).toHaveBeenCalledTimes(1);
 		expect(screen.getByText(framesToTimecode(90, 30))).toBeTruthy();
 	});
 

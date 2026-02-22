@@ -8,6 +8,7 @@ import CanvasWorkspace from "./CanvasWorkspace";
 
 const stageMockState = vi.hoisted(() => ({
 	props: null as Record<string, unknown> | null,
+	togglePlaybackMock: vi.fn(),
 }));
 
 vi.mock("react-konva", () => ({
@@ -32,8 +33,12 @@ vi.mock("react-konva", () => ({
 	Transformer: () => <span data-testid="transformer" />,
 }));
 
-vi.mock("@/editor/PreviewEditor", () => ({
-	default: () => <div data-testid="preview-editor" />,
+vi.mock("./InfiniteSkiaCanvas", () => ({
+	default: () => <div data-testid="infinite-skia-canvas" />,
+}));
+
+vi.mock("./FocusSceneKonvaLayer", () => ({
+	default: () => <div data-testid="focus-scene-konva-layer" />,
 }));
 
 vi.mock("@/editor/components/SceneTimelineDrawer", () => ({
@@ -55,13 +60,14 @@ vi.mock("@/editor/MaterialLibrary", () => ({
 }));
 
 vi.mock("@/editor/runtime/EditorRuntimeProvider", () => ({
-	useTimelineStoreApi: () =>
-		({
-			getState: () => ({
-				currentTime: 0,
-				previewTime: null,
-			}),
-		}) as unknown,
+	useTimelineStoreApi: () => null,
+}));
+
+vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
+	usePlaybackOwnerController: () => ({
+		togglePlayback: stageMockState.togglePlaybackMock,
+		isOwnerPlaying: () => false,
+	}),
 }));
 
 const createProject = (): StudioProject => ({
@@ -181,6 +187,7 @@ const createProject = (): StudioProject => ({
 });
 
 beforeEach(() => {
+	stageMockState.togglePlaybackMock.mockReset();
 	useProjectStore.setState({
 		status: "ready",
 		projects: [],
@@ -224,6 +231,7 @@ describe("CanvasWorkspace", () => {
 
 	it("canvas 模式渲染 scene 节点", () => {
 		render(<CanvasWorkspace />);
+		expect(screen.getByTestId("infinite-skia-canvas")).toBeTruthy();
 		expect(screen.getByText(/Scene 1/)).toBeTruthy();
 		expect(screen.getByText(/Scene 2/)).toBeTruthy();
 	});
@@ -234,10 +242,47 @@ describe("CanvasWorkspace", () => {
 		expect(firstNode).toBeTruthy();
 		if (!firstNode) return;
 		fireEvent.click(firstNode);
-		expect(screen.getByTestId("preview-editor")).toBeTruthy();
 		expect(screen.getByTestId("scene-timeline-drawer")).toBeTruthy();
 		expect(screen.getByTestId("focus-material-library")).toBeTruthy();
 		expect(screen.getByTestId("material-library-content")).toBeTruthy();
+		expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
+	});
+
+	it("非 focus 状态下可触发节点快速预览", () => {
+		render(<CanvasWorkspace />);
+		const previewToggle = screen.getAllByTestId(
+			"scene-preview-toggle-node-1",
+		)[0];
+		expect(previewToggle).toBeTruthy();
+		if (!previewToggle) return;
+		fireEvent.click(previewToggle);
+		expect(stageMockState.togglePlaybackMock).toHaveBeenCalledTimes(1);
+		expect(stageMockState.togglePlaybackMock).toHaveBeenCalledWith({
+			kind: "scene",
+			sceneId: "scene-1",
+		});
+	});
+
+	it("focus 状态禁用其他节点交互", () => {
+		render(<CanvasWorkspace />);
+		const node1 = screen.getAllByTestId("scene-node-node-1")[0];
+		expect(node1).toBeTruthy();
+		if (!node1) return;
+		fireEvent.click(node1);
+		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
+			"scene-1",
+		);
+
+		const node2 = screen.getAllByTestId("scene-node-node-2")[0];
+		expect(node2).toBeTruthy();
+		if (!node2) return;
+		fireEvent.click(node2);
+		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
+			"scene-1",
+		);
+		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
+			"scene-1",
+		);
 	});
 
 	it("普通滚轮应平移画布", () => {
@@ -253,6 +298,21 @@ describe("CanvasWorkspace", () => {
 			new WheelEvent("wheel", {
 				deltaY: -10,
 				ctrlKey: true,
+			}),
+			{ x: 100, y: 120 },
+		);
+		const camera = useProjectStore.getState().currentProject?.ui.camera;
+		expect(camera?.zoom).toBeCloseTo(1.08, 4);
+		expect(camera?.x).toBeCloseTo(-8, 4);
+		expect(camera?.y).toBeCloseTo(-9.6, 4);
+	});
+
+	it("Cmd + 滚轮应缩放画布", () => {
+		render(<CanvasWorkspace />);
+		triggerStageWheel(
+			new WheelEvent("wheel", {
+				deltaY: -10,
+				metaKey: true,
 			}),
 			{ x: 100, y: 120 },
 		);

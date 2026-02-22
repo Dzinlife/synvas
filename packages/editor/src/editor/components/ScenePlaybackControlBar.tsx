@@ -16,13 +16,14 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { exportCanvasAsImage } from "@/dsl/export";
-import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import { usePreview } from "@/editor/contexts/PreviewProvider";
+import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import {
-	usePlaybackControl,
-	useTimelineStore,
-} from "@/editor/contexts/TimelineContext";
-import { useEditorRuntime } from "@/editor/runtime/EditorRuntimeProvider";
+	useActiveTimelineRuntime,
+	useEditorRuntime,
+} from "@/editor/runtime/EditorRuntimeProvider";
+import { usePlaybackOwnerController } from "@/studio/scene/usePlaybackOwnerController";
 import { framesToTimecode } from "@/utils/timecode";
 import ExportVideoDialog from "./ExportVideoDialog";
 import PreviewLoudnessMeterCanvas from "./PreviewLoudnessMeterCanvas";
@@ -35,12 +36,16 @@ const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 	onExitFocus,
 }) => {
 	const runtime = useEditorRuntime();
-	const { isPlaying, togglePlay } = usePlaybackControl();
+	const activeTimelineRuntime = useActiveTimelineRuntime();
+	const { togglePlayback, isOwnerPlaying } = usePlaybackOwnerController();
 	const currentTime = useTimelineStore((state) => state.currentTime);
 	const previewTime = useTimelineStore((state) => state.previewTime);
 	const fps = useTimelineStore((state) => state.fps);
 	const elements = useTimelineStore((state) => state.elements);
 	const canvasSize = useTimelineStore((state) => state.canvasSize);
+	const isPlaying = activeTimelineRuntime
+		? isOwnerPlaying(activeTimelineRuntime.ref)
+		: false;
 	const {
 		canvasRef,
 		pinchState,
@@ -124,7 +129,10 @@ const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 					<TooltipTrigger
 						type="button"
 						aria-label="播放 / 暂停"
-						onClick={togglePlay}
+						onClick={() => {
+							if (!activeTimelineRuntime) return;
+							togglePlayback(activeTimelineRuntime.ref);
+						}}
 						className="size-8 rounded-full bg-transparent p-0 text-md text-white hover:bg-white/10"
 					>
 						{isPlaying ? "⏸" : "▶"}
@@ -151,7 +159,11 @@ const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 					>
 						<EllipsisIcon className="size-4" />
 					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" side="bottom" className="min-w-[240px]">
+					<DropdownMenuContent
+						align="end"
+						side="bottom"
+						className="min-w-[240px]"
+					>
 						<div className="px-4 py-2.5">
 							<div className="mb-2 flex items-center justify-between text-xs text-gray-600">
 								<span>缩放</span>

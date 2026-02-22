@@ -1,10 +1,16 @@
 import { useEffect } from "react";
-import { usePlaybackControl } from "@/editor/contexts/TimelineContext";
-import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
+import {
+	useActiveTimelineRuntime,
+	useStudioRuntimeManager,
+	useTimelineStoreApi,
+} from "@/editor/runtime/EditorRuntimeProvider";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
+import { usePlaybackOwnerController } from "@/studio/scene/usePlaybackOwnerController";
 
 export const useStudioHotkeys = (): void => {
-	const { togglePlay } = usePlaybackControl();
+	const activeTimelineRuntime = useActiveTimelineRuntime();
+	const runtimeManager = useStudioRuntimeManager();
+	const { togglePlayback } = usePlaybackOwnerController();
 	const timelineStore = useTimelineStoreApi();
 	const undo = useStudioHistoryStore((state) => state.undo);
 	const redo = useStudioHistoryStore((state) => state.redo);
@@ -20,7 +26,9 @@ export const useStudioHotkeys = (): void => {
 			}
 			if (e.code === "Space" && !e.repeat) {
 				e.preventDefault();
-				togglePlay();
+				if (activeTimelineRuntime) {
+					togglePlayback(activeTimelineRuntime.ref);
+				}
 				return;
 			}
 			const isModifier = e.metaKey || e.ctrlKey;
@@ -29,20 +37,27 @@ export const useStudioHotkeys = (): void => {
 			if (key === "z") {
 				e.preventDefault();
 				if (e.shiftKey) {
-					redo({ timelineStore });
+					redo({ timelineStore, runtimeManager });
 					return;
 				}
-				undo({ timelineStore });
+				undo({ timelineStore, runtimeManager });
 				return;
 			}
 			if (key === "y") {
 				e.preventDefault();
-				redo({ timelineStore });
+				redo({ timelineStore, runtimeManager });
 			}
 		};
 		window.addEventListener("keydown", handleKeyDown);
 		return () => {
 			window.removeEventListener("keydown", handleKeyDown);
 		};
-	}, [redo, timelineStore, togglePlay, undo]);
+	}, [
+		activeTimelineRuntime,
+		redo,
+		runtimeManager,
+		timelineStore,
+		togglePlayback,
+		undo,
+	]);
 };

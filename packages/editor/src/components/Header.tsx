@@ -9,12 +9,16 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
+import {
+	useStudioRuntimeManager,
+	useTimelineStoreApi,
+} from "@/editor/runtime/EditorRuntimeProvider";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 
 export default function Header() {
 	const timelineStore = useTimelineStoreApi();
+	const runtimeManager = useStudioRuntimeManager();
 	const status = useProjectStore((state) => state.status);
 	const projects = useProjectStore((state) => state.projects);
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
@@ -55,11 +59,11 @@ export default function Header() {
 	};
 
 	const handleUndo = useCallback(() => {
-		undo({ timelineStore });
-	}, [timelineStore, undo]);
+		undo({ timelineStore, runtimeManager });
+	}, [runtimeManager, timelineStore, undo]);
 	const handleRedo = useCallback(() => {
-		redo({ timelineStore });
-	}, [redo, timelineStore]);
+		redo({ timelineStore, runtimeManager });
+	}, [redo, runtimeManager, timelineStore]);
 
 	const menuDisabled = status !== "ready";
 	const displayName =

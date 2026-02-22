@@ -2,8 +2,13 @@ import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { SceneDocument, SceneNode } from "core/studio/types";
 import { create } from "zustand";
 import type { TimelineStoreApi } from "@/editor/contexts/TimelineContext";
-import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
+import type { StudioRuntimeManager, TimelineRef } from "@/editor/runtime/types";
 import { useProjectStore } from "@/projects/projectStore";
+import {
+	toSceneTimelineRef,
+	writeTimelineByRef,
+} from "@/studio/scene/timelineRefAdapter";
+import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 
 export type SceneNodeLayoutSnapshot = Pick<
 	SceneNode,
@@ -13,7 +18,11 @@ export type SceneNodeLayoutSnapshot = Pick<
 export type StudioHistoryEntry =
 	| {
 			kind: "scene.timeline";
-			sceneId: string;
+			timelineRef?: TimelineRef;
+			/**
+			 * 兼容旧历史数据：历史栈中可能只有 sceneId。
+			 */
+			sceneId?: string;
 			before: TimelineJSON;
 			after: TimelineJSON;
 			focusSceneId: string | null;
@@ -39,28 +48,56 @@ interface StudioHistoryState {
 	canUndo: boolean;
 	canRedo: boolean;
 	push: (entry: StudioHistoryEntry) => void;
-	undo: (options?: { timelineStore?: TimelineStoreApi }) => void;
-	redo: (options?: { timelineStore?: TimelineStoreApi }) => void;
+	undo: (options?: HistoryApplyOptions) => void;
+	redo: (options?: HistoryApplyOptions) => void;
 	clear: () => void;
 }
 
 const HISTORY_LIMIT = 200;
 
+interface HistoryApplyOptions {
+	timelineStore?: TimelineStoreApi;
+	runtimeManager?: StudioRuntimeManager;
+}
+
+const resolveTimelineRef = (
+	entry: Extract<StudioHistoryEntry, { kind: "scene.timeline" }>,
+): TimelineRef | null => {
+	if (entry.timelineRef) return entry.timelineRef;
+	if (entry.sceneId) return toSceneTimelineRef(entry.sceneId);
+	return null;
+};
+
 const applyEntry = (
 	entry: StudioHistoryEntry,
 	mode: "undo" | "redo",
-	options?: { timelineStore?: TimelineStoreApi },
+	options?: HistoryApplyOptions,
 ): void => {
 	const projectStore = useProjectStore.getState();
 	const nextFocusSceneId = entry.focusSceneId;
 	projectStore.setFocusedScene(nextFocusSceneId);
 	if (entry.kind === "scene.timeline") {
+		const timelineRef = resolveTimelineRef(entry);
+		if (!timelineRef) return;
 		const timeline = mode === "undo" ? entry.before : entry.after;
-		projectStore.updateSceneTimeline(entry.sceneId, timeline, {
+
+		writeTimelineByRef(projectStore, timelineRef, timeline, {
 			recordHistory: false,
 		});
-		const focusedSceneId = useProjectStore.getState().currentProject?.ui.focusedSceneId;
-		if (focusedSceneId === entry.sceneId && options?.timelineStore) {
+
+		if (options?.runtimeManager) {
+			const runtime = options.runtimeManager.ensureTimelineRuntime(timelineRef);
+			applyTimelineJsonToStore(timeline, runtime.timelineStore);
+			return;
+		}
+
+		const focusedSceneId =
+			useProjectStore.getState().currentProject?.ui.focusedSceneId;
+		if (
+			timelineRef.kind === "scene" &&
+			focusedSceneId === timelineRef.sceneId &&
+			options?.timelineStore
+		) {
 			applyTimelineJsonToStore(timeline, options.timelineStore);
 		}
 		return;

@@ -1,7 +1,12 @@
 import { createContext, useContext } from "react";
 import type { ModelRegistryClass } from "@/dsl/model/registry";
 import type { TimelineStoreApi } from "@/editor/contexts/TimelineContext";
-import type { EditorRuntime } from "./types";
+import type {
+	EditorRuntime,
+	StudioRuntimeManager,
+	TimelineRef,
+	TimelineRuntime,
+} from "./types";
 
 export const EditorRuntimeContext = createContext<EditorRuntime | null>(null);
 
@@ -31,6 +36,25 @@ export const EditorRuntimeProvider = ({
 
 export const useEditorRuntime = (): EditorRuntime => {
 	return resolveRuntime();
+};
+
+export const useStudioRuntimeManager = (): StudioRuntimeManager => {
+	const runtime = resolveRuntime();
+	const manager = runtime as Partial<StudioRuntimeManager>;
+	if (!manager.ensureTimelineRuntime) {
+		throw new Error("Current runtime does not implement StudioRuntimeManager.");
+	}
+	return manager as StudioRuntimeManager;
+};
+
+export const useTimelineRuntime = (
+	ref: TimelineRef,
+): TimelineRuntime | null => {
+	return useStudioRuntimeManager().getTimelineRuntime(ref);
+};
+
+export const useActiveTimelineRuntime = (): TimelineRuntime | null => {
+	return useStudioRuntimeManager().getActiveEditTimelineRuntime();
 };
 
 export const useTimelineStoreApi = (): TimelineStoreApi => {
