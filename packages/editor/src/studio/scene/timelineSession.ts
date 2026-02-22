@@ -3,21 +3,25 @@ import {
 	saveTimelineToObject,
 	type TimelineJSON,
 } from "core/editor/timelineLoader";
+import type {
+	TimelineStore,
+	TimelineStoreApi,
+} from "@/editor/contexts/TimelineContext";
 import { reconcileTracks } from "@/editor/utils/trackState";
 import { clampFrame } from "@/utils/timecode";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 
-const cloneAudioSettings = (
-	audio: ReturnType<typeof useTimelineStore.getState>["audioSettings"],
-) => ({
+const cloneAudioSettings = (audio: TimelineStore["audioSettings"]) => ({
 	...audio,
 	compressor: { ...audio.compressor },
 });
 
-export const applyTimelineJsonToStore = (timeline: TimelineJSON): void => {
+export const applyTimelineJsonToStore = (
+	timeline: TimelineJSON,
+	timelineStore: TimelineStoreApi,
+): void => {
 	const data = loadTimelineFromObject(timeline);
 	const { tracks, elements } = reconcileTracks(data.elements, data.tracks);
-	useTimelineStore.setState((state) => ({
+	timelineStore.setState((state) => ({
 		currentTime: clampFrame(state.currentTime),
 		elements,
 		assets: data.assets,
@@ -32,11 +36,13 @@ export const applyTimelineJsonToStore = (timeline: TimelineJSON): void => {
 		previewAxisEnabled: data.settings.previewAxisEnabled,
 		audioSettings: cloneAudioSettings(data.settings.audio),
 	}));
-	useTimelineStore.getState().resetHistory();
+	timelineStore.getState().resetHistory();
 };
 
-export const snapshotTimelineFromStore = (): TimelineJSON => {
-	const state = useTimelineStore.getState();
+export const snapshotTimelineFromStore = (
+	timelineStore: TimelineStoreApi,
+): TimelineJSON => {
+	const state = timelineStore.getState();
 	return saveTimelineToObject(
 		state.elements,
 		state.fps,

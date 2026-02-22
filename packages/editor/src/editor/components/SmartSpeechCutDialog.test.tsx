@@ -4,7 +4,10 @@ import type { TimelineAsset } from "core/dsl/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AsrProvider } from "@/asr";
 import type { AsrClient } from "@/asr/AsrContext";
-import { useTimelineStore } from "../contexts/TimelineContext";
+import {
+	createEditorRuntimeWrapper,
+	createTestEditorRuntime,
+} from "../runtime/testUtils";
 import SmartSpeechCutDialog from "./SmartSpeechCutDialog";
 
 vi.mock("@/asr/assetTranscriptionService", () => ({
@@ -15,10 +18,13 @@ import { transcribeAssetById } from "@/asr/assetTranscriptionService";
 
 const mockedTranscribeAssetById = vi.mocked(transcribeAssetById);
 
-const initialState = useTimelineStore.getState();
+const runtime = createTestEditorRuntime("smart-speech-cut-dialog-test");
+const timelineStore = runtime.timelineStore;
+const wrapper = createEditorRuntimeWrapper(runtime);
+const initialState = timelineStore.getState();
 
 afterEach(() => {
-	useTimelineStore.setState(initialState, true);
+	timelineStore.setState(initialState, true);
 	mockedTranscribeAssetById.mockReset();
 	vi.restoreAllMocks();
 });
@@ -82,12 +88,13 @@ const renderDialog = () => {
 				assetId="source-1"
 			/>
 		</AsrProvider>,
+		{ wrapper },
 	);
 };
 
 describe("SmartSpeechCutDialog", () => {
 	it("应根据 asr 数据在转写模式和文本模式间切换", async () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			assets: [createSource(false)],
 		});
 		const { rerender } = render(
@@ -99,11 +106,12 @@ describe("SmartSpeechCutDialog", () => {
 					assetId="source-1"
 				/>
 			</AsrProvider>,
+			{ wrapper },
 		);
 		expect(screen.getByText("当前素材尚未转写，可选择语言并开始转写。")).toBeTruthy();
 		expect(screen.getByRole("button", { name: "开始转写" })).toBeTruthy();
 
-		useTimelineStore.setState({
+		timelineStore.setState({
 			assets: [createSource(true)],
 		});
 		rerender(
@@ -129,7 +137,7 @@ describe("SmartSpeechCutDialog", () => {
 			summaryText: "转写完成",
 			record: null,
 		});
-		useTimelineStore.setState({
+		timelineStore.setState({
 			assets: [createSource(true)],
 		});
 		renderDialog();
@@ -147,7 +155,7 @@ describe("SmartSpeechCutDialog", () => {
 	});
 
 	it("点击调试按钮应输出当前 asr 数据", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			assets: [createSource(true)],
 		});
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});

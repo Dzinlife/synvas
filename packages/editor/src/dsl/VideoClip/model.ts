@@ -18,7 +18,7 @@ import {
 	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
 } from "@/editor/audio/audioPlayback";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import {
 	getAudioPlaybackSessionKey,
 	getVideoPlaybackSessionKey,
@@ -155,7 +155,9 @@ const computeAvailableDurationFrames = (
 export function createVideoClipModel(
 	id: string,
 	initialProps: VideoClipProps,
+	runtime: EditorRuntime,
 ): ComponentModelStore<VideoClipProps, VideoClipInternal> {
+	const timelineStore = runtime.timelineStore;
 	const SEEK_PREFETCH_FRAMES = 24;
 	const REVERSE_PREWARM_LOOKAHEAD_KEYFRAMES = 2;
 	const REVERSE_PREWARM_COMPLETED_LIMIT = 512;
@@ -185,13 +187,13 @@ export function createVideoClipModel(
 	const reversePrewarmCompletedOrder: string[] = [];
 
 	const getTimelineFps = () => {
-		const fps = useTimelineStore.getState().fps;
+		const fps = timelineStore.getState().fps;
 		if (!Number.isFinite(fps) || fps <= 0) return DEFAULT_FPS;
 		return Math.round(fps);
 	};
 
 	const getTimeline = () => {
-		return useTimelineStore.getState().getElementById(id)?.timeline;
+		return timelineStore.getState().getElementById(id)?.timeline;
 	};
 
 	const getTimelineOffsetFrames = (): number => {
@@ -208,8 +210,8 @@ export function createVideoClipModel(
 	};
 
 	const resolveVideoPlaybackSessionKey = (): string => {
-		const timelineState = useTimelineStore.getState();
-		return getVideoPlaybackSessionKey(timelineState.elements, id);
+		const timelineState = timelineStore.getState();
+		return `${runtime.id}:${getVideoPlaybackSessionKey(timelineState.elements, id)}`;
 	};
 
 	const retainPlaybackSession = (): string => {
@@ -511,7 +513,7 @@ export function createVideoClipModel(
 	const updateVideoSink = () => {
 		const handle = assetHandle;
 		if (!handle) return;
-		const timelineState = useTimelineStore.getState();
+		const timelineState = timelineStore.getState();
 		const elements = timelineState.elements;
 		const currentTime = timelineState.getDisplayTime();
 		const currentElement = elements.find((el) => el.id === id);
@@ -592,6 +594,7 @@ export function createVideoClipModel(
 			sink: videoSink,
 			targetTime,
 			backJumpThresholdSeconds,
+			isExporting: () => timelineStore.getState().isExporting,
 		});
 		if (!frameToShow) {
 			return;
@@ -1021,8 +1024,8 @@ export function createVideoClipModel(
 					resetReversePrewarmState();
 
 					const { asset } = localHandle;
-					const elements = useTimelineStore.getState().elements;
-					const currentTime = useTimelineStore.getState().getDisplayTime();
+					const elements = timelineStore.getState().elements;
+					const currentTime = timelineStore.getState().getDisplayTime();
 					const fps = getTimelineFps();
 					const durationFrames = secondsToFrames(asset.duration, fps);
 					const offsetFrames = getTimelineOffsetFrames();
@@ -1073,7 +1076,7 @@ export function createVideoClipModel(
 					if (currentInitEpoch !== initEpoch) return;
 
 					if (!unsubscribeTimelineOffset) {
-						unsubscribeTimelineOffset = useTimelineStore.subscribe(
+						unsubscribeTimelineOffset = timelineStore.subscribe(
 							(state) => state.getElementById(id)?.timeline?.offset ?? 0,
 							() => {
 								updateMaxDurationByOffset();
@@ -1082,7 +1085,7 @@ export function createVideoClipModel(
 					}
 
 					if (!unsubscribeElements) {
-						unsubscribeElements = useTimelineStore.subscribe(
+						unsubscribeElements = timelineStore.subscribe(
 							(state) => state.elements,
 							() => {
 								updateVideoSink();
@@ -1093,11 +1096,11 @@ export function createVideoClipModel(
 						const onTimeChange = () => {
 							updateVideoSink();
 						};
-						const unsub1 = useTimelineStore.subscribe(
+						const unsub1 = timelineStore.subscribe(
 							(state) => state.currentTime,
 							onTimeChange,
 						);
-						const unsub2 = useTimelineStore.subscribe(
+						const unsub2 = timelineStore.subscribe(
 							(state) => state.previewTime,
 							onTimeChange,
 						);
@@ -1231,13 +1234,13 @@ export function createVideoClipModel(
 		getTimeline,
 		getFps: getTimelineFps,
 		getState: getAudioPlaybackState,
-		getSeekEpoch: () => useTimelineStore.getState().seekEpoch,
+		getSeekEpoch: () => timelineStore.getState().seekEpoch,
 		getRuntimeKey: () => {
-			const timelineState = useTimelineStore.getState();
-			return getAudioPlaybackSessionKey(timelineState.elements, id);
+			const timelineState = timelineStore.getState();
+			return `${runtime.id}:${getAudioPlaybackSessionKey(timelineState.elements, id)}`;
 		},
 		isPlaybackEnabled: () => {
-			const timelineState = useTimelineStore.getState();
+			const timelineState = timelineStore.getState();
 			return isTimelineTrackAudible(
 				timelineState.getElementById(id)?.timeline,
 				timelineState.tracks,

@@ -1,6 +1,7 @@
 import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { SceneDocument, SceneNode } from "core/studio/types";
 import { create } from "zustand";
+import type { TimelineStoreApi } from "@/editor/contexts/TimelineContext";
 import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 import { useProjectStore } from "@/projects/projectStore";
 
@@ -38,14 +39,18 @@ interface StudioHistoryState {
 	canUndo: boolean;
 	canRedo: boolean;
 	push: (entry: StudioHistoryEntry) => void;
-	undo: () => void;
-	redo: () => void;
+	undo: (options?: { timelineStore?: TimelineStoreApi }) => void;
+	redo: (options?: { timelineStore?: TimelineStoreApi }) => void;
 	clear: () => void;
 }
 
 const HISTORY_LIMIT = 200;
 
-const applyEntry = (entry: StudioHistoryEntry, mode: "undo" | "redo"): void => {
+const applyEntry = (
+	entry: StudioHistoryEntry,
+	mode: "undo" | "redo",
+	options?: { timelineStore?: TimelineStoreApi },
+): void => {
 	const projectStore = useProjectStore.getState();
 	const nextFocusSceneId = entry.focusSceneId;
 	projectStore.setFocusedScene(nextFocusSceneId);
@@ -55,8 +60,8 @@ const applyEntry = (entry: StudioHistoryEntry, mode: "undo" | "redo"): void => {
 			recordHistory: false,
 		});
 		const focusedSceneId = useProjectStore.getState().currentProject?.ui.focusedSceneId;
-		if (focusedSceneId === entry.sceneId) {
-			applyTimelineJsonToStore(timeline);
+		if (focusedSceneId === entry.sceneId && options?.timelineStore) {
+			applyTimelineJsonToStore(timeline, options.timelineStore);
 		}
 		return;
 	}
@@ -95,13 +100,13 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 			};
 		});
 	},
-	undo: () => {
+	undo: (options) => {
 		const { past, future } = get();
 		if (past.length === 0) return;
 		const entry = past[past.length - 1];
 		set({ isApplying: true });
 		try {
-			applyEntry(entry, "undo");
+			applyEntry(entry, "undo", options);
 			const nextPast = past.slice(0, -1);
 			const nextFuture = [entry, ...future];
 			set({
@@ -114,13 +119,13 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 			set({ isApplying: false });
 		}
 	},
-	redo: () => {
+	redo: (options) => {
 		const { past, future } = get();
 		if (future.length === 0) return;
 		const entry = future[0];
 		set({ isApplying: true });
 		try {
-			applyEntry(entry, "redo");
+			applyEntry(entry, "redo", options);
 			const nextFuture = future.slice(1);
 			const nextPast = [...past, entry];
 			set({

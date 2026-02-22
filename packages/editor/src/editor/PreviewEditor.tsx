@@ -18,8 +18,9 @@ import {
 } from "react-konva";
 import type { CanvasRef } from "react-skia-lite";
 import { transformMetaToRenderLayout } from "@/dsl/layout";
+import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import { usePreview } from "./contexts/PreviewProvider";
-import { useTimelineStore, useTracks } from "./contexts/TimelineContext";
+import { useTracks } from "./contexts/TimelineContext";
 import { buildKonvaTree } from "./preview/buildSkiaTree";
 import { LabelLayer } from "./preview/LabelLayer";
 import { SkiaPreviewCanvas } from "./preview/SkiaPreviewCanvas";
@@ -27,12 +28,13 @@ import { usePreviewCoordinates } from "./preview/usePreviewCoordinates";
 import { usePreviewInteractions } from "./preview/usePreviewInteractions";
 
 const Preview = () => {
+	const timelineStore = useTimelineStoreApi();
 	const renderElementsRef = useRef<TimelineElement[]>([]);
 	const { tracks } = useTracks();
 
 	const { getRenderTime, getElements } = useMemo(
-		() => useTimelineStore.getState(),
-		[],
+		() => timelineStore.getState(),
+		[timelineStore],
 	);
 
 	// For Konva layer, we need state to trigger re-renders for interaction updates
@@ -369,11 +371,11 @@ const Preview = () => {
 			}
 		};
 
-		const unsub1 = useTimelineStore.subscribe(
+		const unsub1 = timelineStore.subscribe(
 			(state) => state.currentTime,
 			updateKonvaElements,
 		);
-		const unsub2 = useTimelineStore.subscribe(
+		const unsub2 = timelineStore.subscribe(
 			(state) => state.previewTime,
 			updateKonvaElements,
 		);
@@ -381,10 +383,10 @@ const Preview = () => {
 			unsub1();
 			unsub2();
 		};
-	}, [getElements, getRenderTime, sortByTrackIndex, tracks]);
+	}, [getElements, getRenderTime, sortByTrackIndex, timelineStore, tracks]);
 
 	useEffect(() => {
-		return useTimelineStore.subscribe(
+		return timelineStore.subscribe(
 			(state) => state.elements,
 			(newElements) => {
 				const time = getRenderTime();
@@ -403,7 +405,7 @@ const Preview = () => {
 				fireImmediately: true,
 			},
 		);
-	}, [getRenderTime, sortByTrackIndex, tracks]);
+	}, [getRenderTime, sortByTrackIndex, timelineStore, tracks]);
 
 	const stageWidth = containerDimensions.width || canvasWidth;
 	const stageHeight = containerDimensions.height || canvasHeight;

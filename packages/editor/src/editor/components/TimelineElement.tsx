@@ -13,7 +13,8 @@ import React, {
 	useState,
 } from "react";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
-import { modelRegistry, useModelExists } from "@/dsl/model/registry";
+import { useModelExists } from "@/dsl/model/registry";
+import { useModelRegistry } from "@/editor/runtime/EditorRuntimeProvider";
 import { cn } from "@/lib/utils";
 import { framesToTimecode } from "@/utils/timecode";
 import {
@@ -147,6 +148,7 @@ const ElementContent: React.FC<ElementContentProps> = ({
 // ============================================================================
 
 function useMaxDurationConstraint(elementId: string) {
+	const modelRegistry = useModelRegistry();
 	const hasModel = useModelExists(elementId);
 	const [maxDuration, setMaxDuration] = useState<number | undefined>(undefined);
 
@@ -169,7 +171,7 @@ function useMaxDurationConstraint(elementId: string) {
 		});
 
 		return unsubscribe;
-	}, [hasModel, elementId]);
+	}, [elementId, hasModel, modelRegistry]);
 
 	return maxDuration;
 }

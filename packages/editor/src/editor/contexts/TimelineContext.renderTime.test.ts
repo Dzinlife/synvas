@@ -1,8 +1,10 @@
 import type { TimelineElement } from "core/dsl/types";
 import { afterEach, describe, expect, it } from "vitest";
-import { useTimelineStore } from "./TimelineContext";
+import { createTestEditorRuntime } from "../runtime/testUtils";
 
-const initialState = useTimelineStore.getState();
+const runtime = createTestEditorRuntime("timeline-render-time-test");
+const timelineStore = runtime.timelineStore;
+const initialState = timelineStore.getState();
 
 const createElement = (
 	id: string,
@@ -27,12 +29,12 @@ const createElement = (
 });
 
 afterEach(() => {
-	useTimelineStore.setState(initialState, true);
+	timelineStore.setState(initialState, true);
 });
 
 describe("TimelineContext render time", () => {
 	it("非导出时 currentTime 等于末尾会回退一帧", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [createElement("clip-1", 0, 120)],
 			currentTime: 120,
 			previewTime: null,
@@ -41,11 +43,11 @@ describe("TimelineContext render time", () => {
 			exportTime: null,
 		});
 
-		expect(useTimelineStore.getState().getRenderTime()).toBe(119);
+		expect(timelineStore.getState().getRenderTime()).toBe(119);
 	});
 
 	it("非导出时 currentTime 超过末尾不回退", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [createElement("clip-1", 0, 120)],
 			currentTime: 121,
 			previewTime: null,
@@ -54,11 +56,11 @@ describe("TimelineContext render time", () => {
 			exportTime: null,
 		});
 
-		expect(useTimelineStore.getState().getRenderTime()).toBe(121);
+		expect(timelineStore.getState().getRenderTime()).toBe(121);
 	});
 
 	it("非导出暂停态 previewTime 等于末尾会回退一帧", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [createElement("clip-1", 0, 120)],
 			currentTime: 0,
 			previewTime: 120,
@@ -67,11 +69,11 @@ describe("TimelineContext render time", () => {
 			exportTime: null,
 		});
 
-		expect(useTimelineStore.getState().getRenderTime()).toBe(119);
+		expect(timelineStore.getState().getRenderTime()).toBe(119);
 	});
 
 	it("空时间线不会回退到负数", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [],
 			currentTime: 0,
 			previewTime: null,
@@ -80,11 +82,11 @@ describe("TimelineContext render time", () => {
 			exportTime: null,
 		});
 
-		expect(useTimelineStore.getState().getRenderTime()).toBe(0);
+		expect(timelineStore.getState().getRenderTime()).toBe(0);
 	});
 
 	it("导出态不做末尾回退", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [createElement("clip-1", 0, 120)],
 			currentTime: 120,
 			previewTime: null,
@@ -93,11 +95,11 @@ describe("TimelineContext render time", () => {
 			exportTime: 120,
 		});
 
-		expect(useTimelineStore.getState().getRenderTime()).toBe(120);
+		expect(timelineStore.getState().getRenderTime()).toBe(120);
 	});
 
 	it("Filter 不参与末帧回退计算", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [
 				createElement("clip-1", 0, 120, "VideoClip"),
 				createElement("filter-1", 0, 300, "Filter"),
@@ -109,6 +111,6 @@ describe("TimelineContext render time", () => {
 			exportTime: null,
 		});
 
-		expect(useTimelineStore.getState().getRenderTime()).toBe(119);
+		expect(timelineStore.getState().getRenderTime()).toBe(119);
 	});
 });

@@ -1,5 +1,6 @@
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import type {
 	ComponentModel,
 	ComponentModelStore,
@@ -26,6 +27,7 @@ export type TransitionModelStore = ComponentModelStore<TransitionProps>;
 export function createTransitionModel(
 	id: string,
 	initialProps: TransitionProps = {},
+	_runtime: EditorRuntime,
 ): TransitionModelStore {
 	return createStore<ComponentModel<TransitionProps>>()(
 		subscribeWithSelector((set, get) => ({

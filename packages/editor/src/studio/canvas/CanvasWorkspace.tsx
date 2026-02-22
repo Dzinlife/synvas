@@ -4,7 +4,7 @@ import { Plus, Search, SearchX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layer, Line, Rect, Stage, Text, Transformer } from "react-konva";
 import SceneTimelineDrawer from "@/editor/components/SceneTimelineDrawer";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import MaterialLibrary from "@/editor/MaterialLibrary";
 import PreviewEditor from "@/editor/PreviewEditor";
 import { useProjectStore } from "@/projects/projectStore";
@@ -49,6 +49,7 @@ const clampZoom = (zoom: number): number => {
 };
 
 const CanvasWorkspace = () => {
+	const timelineStore = useTimelineStoreApi();
 	const currentProject = useProjectStore((state) => state.currentProject);
 	const createSceneNode = useProjectStore((state) => state.createSceneNode);
 	const updateSceneNodeLayout = useProjectStore(
@@ -194,7 +195,7 @@ const CanvasWorkspace = () => {
 			setFocusedScene(null);
 			return;
 		}
-		const timelineState = useTimelineStore.getState();
+		const timelineState = timelineStore.getState();
 		const posterFrame = timelineState.previewTime ?? timelineState.currentTime;
 		setScenePoster(focusedSceneId, posterFrame, null);
 		updateSceneTimeline(
@@ -209,6 +210,7 @@ const CanvasWorkspace = () => {
 	}, [
 		focusedScene,
 		focusedSceneId,
+		timelineStore,
 		setFocusedScene,
 		updateScenePosterFrame,
 		updateSceneTimeline,

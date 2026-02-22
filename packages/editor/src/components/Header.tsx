@@ -1,4 +1,3 @@
-import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
 import { Check, FolderPlus, Save } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
 import {
@@ -10,13 +9,12 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import ExportVideoDialog from "@/editor/components/ExportVideoDialog";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
-import { exportTimelineAsVideo } from "@/editor/exportVideo";
+import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 
 export default function Header() {
+	const timelineStore = useTimelineStoreApi();
 	const status = useProjectStore((state) => state.status);
 	const projects = useProjectStore((state) => state.projects);
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
@@ -33,9 +31,6 @@ export default function Header() {
 	const canRedo = useStudioHistoryStore((state) => state.canRedo);
 	const undo = useStudioHistoryStore((state) => state.undo);
 	const redo = useStudioHistoryStore((state) => state.redo);
-	const fps = useTimelineStore((state) => state.fps);
-	const elements = useTimelineStore((state) => state.elements);
-	const canvasSize = useTimelineStore((state) => state.canvasSize);
 
 	useEffect(() => {
 		initialize();
@@ -59,24 +54,12 @@ export default function Header() {
 		await switchProject(id);
 	};
 
-	const handleExportVideo = useCallback(
-		async (options: {
-			filename: string;
-			fps: number;
-			startFrame: number;
-			endFrame: number;
-			signal: AbortSignal;
-			onFrame?: (frame: number) => void;
-		}) => {
-			await exportTimelineAsVideo(options);
-		},
-		[],
-	);
-
-	const timelineEndFrame = useMemo(
-		() => resolveTimelineEndFrame(elements),
-		[elements],
-	);
+	const handleUndo = useCallback(() => {
+		undo({ timelineStore });
+	}, [timelineStore, undo]);
+	const handleRedo = useCallback(() => {
+		redo({ timelineStore });
+	}, [redo, timelineStore]);
 
 	const menuDisabled = status !== "ready";
 	const displayName =
@@ -90,7 +73,7 @@ export default function Header() {
 					<>
 						<button
 							type="button"
-							onClick={undo}
+							onClick={handleUndo}
 							disabled={!canUndo}
 							className={`px-2 py-1 text-xs rounded transition-colors ${
 								canUndo
@@ -103,7 +86,7 @@ export default function Header() {
 						</button>
 						<button
 							type="button"
-							onClick={redo}
+							onClick={handleRedo}
 							disabled={!canRedo}
 							className={`px-2 py-1 text-xs rounded transition-colors ${
 								canRedo
@@ -114,13 +97,6 @@ export default function Header() {
 						>
 							重做
 						</button>
-						<ExportVideoDialog
-							disabled={menuDisabled}
-							defaultFps={fps}
-							timelineEndFrame={timelineEndFrame}
-							canvasSize={canvasSize}
-							onExport={handleExportVideo}
-						/>
 					</>
 				)}
 				<DropdownMenu>

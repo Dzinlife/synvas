@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { act, render } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { StudioProject } from "core/studio/types";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import {
+	createEditorRuntimeWrapper,
+	createTestEditorRuntime,
+} from "@/editor/runtime/testUtils";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import { useSceneSessionBridge } from "./useSceneSessionBridge";
@@ -11,6 +14,10 @@ const BridgeMount = () => {
 	useSceneSessionBridge();
 	return null;
 };
+
+const runtime = createTestEditorRuntime("scene-session-bridge-test");
+const timelineStore = runtime.timelineStore;
+const wrapper = createEditorRuntimeWrapper(runtime);
 
 const createProject = (): StudioProject => ({
 	id: "project-1",
@@ -78,7 +85,7 @@ const createProject = (): StudioProject => ({
 	},
 	ui: {
 		activeSceneId: "scene-1",
-		focusedSceneId: "scene-1",
+		focusedSceneId: null,
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,
@@ -96,7 +103,7 @@ beforeEach(() => {
 		error: null,
 	});
 	useStudioHistoryStore.getState().clear();
-	useTimelineStore.setState({
+	timelineStore.setState({
 		elements: [],
 		assets: [],
 		tracks: [],
@@ -107,18 +114,33 @@ beforeEach(() => {
 	});
 });
 
+afterEach(() => {
+	cleanup();
+});
+
 describe("useSceneSessionBridge", () => {
-	it("focus scene 时加载 timeline 到 timelineStore", () => {
-		render(<BridgeMount />);
-		expect(useTimelineStore.getState().elements.length).toBe(1);
-		expect(useTimelineStore.getState().timelineViewportWidth).toBe(1280);
-		expect(useTimelineStore.getState().timelineMaxScrollLeft).toBe(4096);
+	it("focus scene 时加载 timeline 到 timelineStore", async () => {
+		render(<BridgeMount />, { wrapper });
+		act(() => {
+			useProjectStore.getState().setFocusedScene("scene-1");
+		});
+		await waitFor(() => {
+			expect(timelineStore.getState().elements.length).toBe(1);
+		});
+		expect(timelineStore.getState().timelineViewportWidth).toBe(1280);
+		expect(timelineStore.getState().timelineMaxScrollLeft).toBe(4096);
 	});
 
-	it("timeline 变更会回写 scene 并进入全局历史", () => {
-		render(<BridgeMount />);
+	it("timeline 变更会回写 scene 并进入全局历史", async () => {
+		render(<BridgeMount />, { wrapper });
 		act(() => {
-			useTimelineStore.getState().setElements((prev) => [
+			useProjectStore.getState().setFocusedScene("scene-1");
+		});
+		await waitFor(() => {
+			expect(timelineStore.getState().elements.length).toBe(1);
+		});
+		act(() => {
+			timelineStore.getState().setElements((prev) => [
 				...prev,
 				{
 					id: "element-2",

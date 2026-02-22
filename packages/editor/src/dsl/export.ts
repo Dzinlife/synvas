@@ -1,11 +1,14 @@
 import { exportCanvasAsImage as exportCanvasAsImageCore } from "core/dsl/export";
 import type { CanvasRef } from "react-skia-lite";
-import { modelRegistry } from "./model/registry";
+import type { EditorRuntime } from "@/editor/runtime/types";
 
 /**
  * 等待所有已注册的 model 资源准备就绪
  */
-export async function waitForAllModelsReady(): Promise<void> {
+export async function waitForAllModelsReady(
+	runtime: EditorRuntime,
+): Promise<void> {
+	const { modelRegistry } = runtime;
 	const ids = modelRegistry.getIds();
 	const promises: Promise<void>[] = [];
 
@@ -27,16 +30,19 @@ export async function waitForAllModelsReady(): Promise<void> {
  */
 export async function exportCanvasAsImage(
 	canvasRef: CanvasRef | null,
-	options?: {
+	options: {
+		runtime: EditorRuntime;
 		format?: "jpeg" | "png";
 		quality?: number;
 		filename?: string;
 		waitForReady?: boolean;
 	},
 ): Promise<void> {
-	const { waitForReady = true, ...rest } = options ?? {};
+	const { runtime, waitForReady = true, ...rest } = options;
 	return exportCanvasAsImageCore(canvasRef, {
 		...rest,
-		waitForReady: waitForReady ? waitForAllModelsReady : undefined,
+		waitForReady: waitForReady
+			? () => waitForAllModelsReady(runtime)
+			: undefined,
 	});
 }

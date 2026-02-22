@@ -2,7 +2,10 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { TimelineElement } from "core/dsl/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useTimelineStore } from "./contexts/TimelineContext";
+import {
+	createEditorRuntimeWrapper,
+	createTestEditorRuntime,
+} from "./runtime/testUtils";
 import TimelineEditor from "./TimelineEditor";
 
 vi.mock("@use-gesture/react", () => ({
@@ -11,12 +14,6 @@ vi.mock("@use-gesture/react", () => ({
 
 vi.mock("@/components/ui/progressive-blur", () => ({
 	ProgressiveBlur: () => null,
-}));
-
-vi.mock("@/dsl/model/registry", () => ({
-	modelRegistry: {
-		get: () => null,
-	},
 }));
 
 vi.mock("@/editor/components/TimeIndicatorCanvas", () => ({
@@ -71,7 +68,10 @@ vi.mock("./hooks/useExternalMaterialDnd", () => ({
 	}),
 }));
 
-const initialState = useTimelineStore.getState();
+const runtime = createTestEditorRuntime("timeline-editor-minimap-test");
+const timelineStore = runtime.timelineStore;
+const wrapper = createEditorRuntimeWrapper(runtime);
+const initialState = timelineStore.getState();
 let resizeObserverCallback: ResizeObserverCallback | null = null;
 
 class ResizeObserverMock {
@@ -117,7 +117,7 @@ describe("TimelineEditor minimap sync", () => {
 	beforeEach(() => {
 		vi.stubGlobal("ResizeObserver", ResizeObserverMock);
 		vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
-		useTimelineStore.setState(
+		timelineStore.setState(
 			{
 				...initialState,
 				elements: [],
@@ -135,14 +135,14 @@ describe("TimelineEditor minimap sync", () => {
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
 		resizeObserverCallback = null;
-		useTimelineStore.setState(initialState, true);
+		timelineStore.setState(initialState, true);
 	});
 
 	it("rulerWidth 变化会同步到 timelineViewportWidth", async () => {
-		render(<TimelineEditor />);
+		render(<TimelineEditor />, { wrapper });
 
 		await waitFor(() => {
-			expect(useTimelineStore.getState().timelineViewportWidth).toBe(800);
+			expect(timelineStore.getState().timelineViewportWidth).toBe(800);
 		});
 
 		act(() => {
@@ -160,12 +160,12 @@ describe("TimelineEditor minimap sync", () => {
 		});
 
 		await waitFor(() => {
-			expect(useTimelineStore.getState().timelineViewportWidth).toBe(640);
+			expect(timelineStore.getState().timelineViewportWidth).toBe(640);
 		});
 	});
 
 	it("根据时间线内容计算并限制最大滚动", async () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [
 				createElement({
 					id: "clip-1",
@@ -179,18 +179,18 @@ describe("TimelineEditor minimap sync", () => {
 			fps: 30,
 			timelineMaxScrollLeft: 0,
 		});
-		render(<TimelineEditor />);
+		render(<TimelineEditor />, { wrapper });
 
 		await waitFor(() => {
-			expect(useTimelineStore.getState().timelineMaxScrollLeft).toBeCloseTo(
+			expect(timelineStore.getState().timelineMaxScrollLeft).toBeCloseTo(
 				4448,
 			);
 		});
-		expect(useTimelineStore.getState().scrollLeft).toBeCloseTo(4448);
+		expect(timelineStore.getState().scrollLeft).toBeCloseTo(4448);
 	});
 
 	it("scrollLeft 为 0 且锚点在内容内时，缩放会按锚点产生滚动", async () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [
 				createElement({
 					id: "clip-zoom-inner",
@@ -203,7 +203,7 @@ describe("TimelineEditor minimap sync", () => {
 			timelineScale: 1,
 			fps: 30,
 		});
-		render(<TimelineEditor />);
+		render(<TimelineEditor />, { wrapper });
 
 		const scrollArea = document.querySelector("[data-timeline-scroll-area]");
 		expect(scrollArea).not.toBeNull();
@@ -220,12 +220,12 @@ describe("TimelineEditor minimap sync", () => {
 		});
 
 		await waitFor(() => {
-			expect(useTimelineStore.getState().scrollLeft).toBeGreaterThan(0);
+			expect(timelineStore.getState().scrollLeft).toBeGreaterThan(0);
 		});
 	});
 
 	it("scrollLeft 为 0 且锚点在最后元素之后时，缩放保持 0 点", async () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [
 				createElement({
 					id: "clip-zoom-tail",
@@ -238,7 +238,7 @@ describe("TimelineEditor minimap sync", () => {
 			timelineScale: 1,
 			fps: 30,
 		});
-		render(<TimelineEditor />);
+		render(<TimelineEditor />, { wrapper });
 
 		const scrollArea = document.querySelector("[data-timeline-scroll-area]");
 		expect(scrollArea).not.toBeNull();
@@ -255,8 +255,8 @@ describe("TimelineEditor minimap sync", () => {
 		});
 
 		await waitFor(() => {
-			expect(useTimelineStore.getState().timelineScale).toBeGreaterThan(1);
+			expect(timelineStore.getState().timelineScale).toBeGreaterThan(1);
 		});
-		expect(useTimelineStore.getState().scrollLeft).toBe(0);
+		expect(timelineStore.getState().scrollLeft).toBe(0);
 	});
 });

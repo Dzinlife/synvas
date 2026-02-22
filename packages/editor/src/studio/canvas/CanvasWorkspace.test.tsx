@@ -54,6 +54,16 @@ vi.mock("@/editor/MaterialLibrary", () => ({
 	),
 }));
 
+vi.mock("@/editor/runtime/EditorRuntimeProvider", () => ({
+	useTimelineStoreApi: () =>
+		({
+			getState: () => ({
+				currentTime: 0,
+				previewTime: null,
+			}),
+		}) as unknown,
+}));
+
 const createProject = (): StudioProject => ({
 	id: "project-1",
 	revision: 0,

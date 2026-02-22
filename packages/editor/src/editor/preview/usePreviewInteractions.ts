@@ -6,10 +6,11 @@ import type { TimelineElement, TransformMeta } from "core/dsl/types";
 import Konva from "konva";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { transformMetaToRenderLayout } from "@/dsl/layout";
+import type { TimelineStore } from "@/editor/contexts/TimelineContext";
+import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import {
 	useMultiSelect,
 	useSnap,
-	useTimelineStore,
 	useTrackAssignments,
 } from "../contexts/TimelineContext";
 import { cloneValue, createCopySeed } from "../utils/copyUtils";
@@ -467,9 +468,7 @@ const createCopyElement = (source: TimelineElement, copyId: string) => ({
 	...(source.clip ? { clip: cloneValue(source.clip) } : {}),
 });
 
-type TimelineHistorySnapshot = ReturnType<
-	typeof useTimelineStore.getState
->["historyPast"][number];
+type TimelineHistorySnapshot = TimelineStore["historyPast"][number];
 
 export const usePreviewInteractions = ({
 	renderElements,
@@ -481,6 +480,7 @@ export const usePreviewInteractions = ({
 	stageToCanvasCoords,
 	canvasToStageCoords,
 }: UsePreviewInteractionsOptions) => {
+	const timelineStore = useTimelineStoreApi();
 	const [hoveredId, setHoveredId] = useState<string | null>(null);
 	const [draggingId, setDraggingId] = useState<string | null>(null);
 	const { selectedIds, select, toggleSelect, deselectAll, setSelection } =
@@ -548,7 +548,7 @@ export const usePreviewInteractions = ({
 	const groupTransformHasChangedRef = useRef(false);
 
 	const captureHistorySnapshot = useCallback((): TimelineHistorySnapshot => {
-		const state = useTimelineStore.getState();
+		const state = timelineStore.getState();
 		return {
 			elements: state.elements,
 			assets: state.assets,
@@ -561,7 +561,7 @@ export const usePreviewInteractions = ({
 	const pushHistorySnapshot = useCallback(
 		(snapshot: TimelineHistorySnapshot | null) => {
 			if (!snapshot) return;
-			useTimelineStore.setState((state) => {
+			timelineStore.setState((state) => {
 				if (state.elements === snapshot.elements) return state;
 				const nextPast = [...state.historyPast, snapshot];
 				const trimmedPast =
@@ -583,7 +583,7 @@ export const usePreviewInteractions = ({
 				| TimelineElement[]
 				| ((prev: TimelineElement[]) => TimelineElement[]),
 		) => {
-			useTimelineStore.getState().setElements(elements, { history: false });
+			timelineStore.getState().setElements(elements, { history: false });
 		},
 		[],
 	);
@@ -989,7 +989,7 @@ export const usePreviewInteractions = ({
 				setSelection([id], id);
 			}
 
-			const currentElements = useTimelineStore.getState().elements;
+			const currentElements = timelineStore.getState().elements;
 			const centers: Record<string, { x: number; y: number }> = {};
 			for (const el of currentElements) {
 				if (!nextSelectedIds.includes(el.id)) continue;
@@ -1124,7 +1124,7 @@ export const usePreviewInteractions = ({
 			const deltaX = canvasCenterX - anchorInitialCenter.x;
 			const deltaY = canvasCenterY - anchorInitialCenter.y;
 
-			const currentElements = useTimelineStore.getState().elements;
+			const currentElements = timelineStore.getState().elements;
 			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				const isDragged = dragSelectedIds.includes(el.id);
@@ -1313,7 +1313,7 @@ export const usePreviewInteractions = ({
 				// Always restore original elements to their pre-copy snapshot.
 				const snapshots = copySourceSnapshotsRef.current;
 				if (snapshots.size > 0) {
-					const currentElements = useTimelineStore.getState().elements;
+					const currentElements = timelineStore.getState().elements;
 					const restored = currentElements.map(
 						(el) => snapshots.get(el.id) ?? el,
 					);
@@ -1326,7 +1326,7 @@ export const usePreviewInteractions = ({
 				if (!dragHasMovedRef.current) {
 					const copyIds = new Set(copyIdMapRef.current.values());
 					if (copyIds.size > 0) {
-						const currentElements = useTimelineStore.getState().elements;
+						const currentElements = timelineStore.getState().elements;
 						const nextElements = currentElements.filter(
 							(el) => !copyIds.has(el.id),
 						);
@@ -1346,7 +1346,7 @@ export const usePreviewInteractions = ({
 						setSelection(copyIds, primaryCopyId ?? null);
 					}
 
-					const currentElements = useTimelineStore.getState().elements;
+					const currentElements = timelineStore.getState().elements;
 					setElementsWithoutHistory(applyTrackAssignments(currentElements));
 				}
 			}
@@ -1416,7 +1416,7 @@ export const usePreviewInteractions = ({
 			const groupMatrix = node.getAbsoluteTransform().copy();
 			const elements: Record<string, GroupElementSnapshot> = {};
 			const stage = node.getStage();
-			const currentElements = useTimelineStore.getState().elements;
+			const currentElements = timelineStore.getState().elements;
 
 			selectedIds.forEach((id) => {
 				const element = currentElements.find((el) => el.id === id);
@@ -1478,7 +1478,7 @@ export const usePreviewInteractions = ({
 			const deltaTransform = currentGroupMatrix.copy().multiply(inverseBase);
 			const effectiveZoom = Math.max(getEffectiveZoom(), SCALE_EPSILON);
 
-			const currentElements = useTimelineStore.getState().elements;
+			const currentElements = timelineStore.getState().elements;
 			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				const base = snapshot.elements[el.id];
@@ -1599,12 +1599,12 @@ export const usePreviewInteractions = ({
 	// 处理 transform 事件（实时更新）
 	const handleTransformStart = useCallback(
 		(id: string, e: Konva.KonvaEventObject<Event>) => {
-			const node = e.target as Konva.Rect;
-			transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
-			transformHasChangedRef.current[id] = false;
-			const element = useTimelineStore
-				.getState()
-				.elements.find((el) => el.id === id);
+				const node = e.target as Konva.Rect;
+				transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
+				transformHasChangedRef.current[id] = false;
+				const element = timelineStore
+					.getState()
+					.elements.find((el) => el.id === id);
 			delete transformCanvasBoxRef.current[id];
 			if ("altKey" in e.evt) {
 				const eventAltPressed = Boolean((e.evt as MouseEvent).altKey);
@@ -1653,12 +1653,12 @@ export const usePreviewInteractions = ({
 				transformHistorySnapshotsRef.current[id] = captureHistorySnapshot();
 				transformHasChangedRef.current[id] = false;
 			}
-			let base = transformBaseRef.current[id];
-			if (!base) {
-				const effectiveZoom = getEffectiveZoom();
-				const element = useTimelineStore
-					.getState()
-					.elements.find((el) => el.id === id);
+				let base = transformBaseRef.current[id];
+				if (!base) {
+					const effectiveZoom = getEffectiveZoom();
+					const element = timelineStore
+						.getState()
+						.elements.find((el) => el.id === id);
 				const baseMetrics = getMatrixMetrics(
 					node.getAbsoluteTransform().copy(),
 					node.width(),
@@ -1697,7 +1697,7 @@ export const usePreviewInteractions = ({
 				transformerRef.current?.getActiveAnchor?.() ??
 				null;
 
-			const currentElements = useTimelineStore.getState().elements;
+			const currentElements = timelineStore.getState().elements;
 			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				if (el.id !== id) return el;
@@ -1824,7 +1824,7 @@ export const usePreviewInteractions = ({
 				transformerRef.current?.getActiveAnchor?.() ??
 				null;
 
-			const currentElements = useTimelineStore.getState().elements;
+			const currentElements = timelineStore.getState().elements;
 			let didChange = false;
 			const newElements = currentElements.map((el) => {
 				if (el.id !== id) return el;

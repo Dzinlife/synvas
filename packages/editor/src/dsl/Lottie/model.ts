@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { type SkData, Skia, type SkSkottieAnimation } from "react-skia-lite";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import type { ComponentModel, ComponentModelStore } from "../model/types";
 
 export interface LottieProps {
@@ -170,6 +171,7 @@ async function loadLottieAnimation(
 export function createLottieModel(
 	id: string,
 	initialProps: LottieProps,
+	_runtime: EditorRuntime,
 ): LottieModelStore {
 	const store = createStore<ComponentModel<LottieProps, LottieInternal>>()(
 		subscribeWithSelector((set, get) => ({

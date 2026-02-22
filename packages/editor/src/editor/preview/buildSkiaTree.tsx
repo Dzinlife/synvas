@@ -5,33 +5,48 @@ import {
 	buildSkiaRenderStateCore,
 	buildSkiaTreeCore,
 } from "core/editor/preview/buildSkiaTree";
+import type { ReactNode } from "react";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { renderNodeToPicture } from "@/dsl/Transition/picture";
 import { isTransitionElement } from "@/editor/utils/transitions";
 
-const deps: BuildSkiaDeps = {
+type BuildSkiaOverrides = {
+	renderNodeToPicture?: BuildSkiaDeps["renderNodeToPicture"];
+	wrapRenderNode?: (node: ReactNode) => ReactNode;
+};
+
+const createBuildSkiaDeps = (overrides?: BuildSkiaOverrides): BuildSkiaDeps => ({
 	resolveComponent: (componentId) => componentRegistry.get(componentId),
 	listComponentIds: () => componentRegistry.getComponentIds(),
-	renderNodeToPicture,
+	renderNodeToPicture: (node, size) => {
+		const wrappedNode = overrides?.wrapRenderNode
+			? overrides.wrapRenderNode(node)
+			: node;
+		const render = overrides?.renderNodeToPicture ?? renderNodeToPicture;
+		return render(wrappedNode, size);
+	},
 	isTransitionElement,
-};
+});
 
 export const buildSkiaRenderState = async (
 	args: Parameters<typeof buildSkiaRenderStateCore>[0],
+	overrides?: BuildSkiaOverrides,
 ) => {
-	return buildSkiaRenderStateCore(args, deps);
+	return buildSkiaRenderStateCore(args, createBuildSkiaDeps(overrides));
 };
 
 export const buildSkiaFrameSnapshot = async (
 	args: Parameters<typeof buildSkiaFrameSnapshotCore>[0],
+	overrides?: BuildSkiaOverrides,
 ) => {
-	return buildSkiaFrameSnapshotCore(args, deps);
+	return buildSkiaFrameSnapshotCore(args, createBuildSkiaDeps(overrides));
 };
 
 export const buildSkiaTree = async (
 	args: Parameters<typeof buildSkiaTreeCore>[0],
+	overrides?: BuildSkiaOverrides,
 ) => {
-	return buildSkiaTreeCore(args, deps);
+	return buildSkiaTreeCore(args, createBuildSkiaDeps(overrides));
 };
 
 export const buildKonvaTree = (

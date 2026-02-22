@@ -2,6 +2,7 @@ import type { SkImage } from "react-skia-lite";
 import { Skia } from "react-skia-lite";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
 import type { ComponentModel, ComponentModelStore } from "../model/types";
 
@@ -70,6 +71,7 @@ export interface ImageInternal {
 export function createImageModel(
 	id: string,
 	initialProps: ImageProps,
+	_runtime: EditorRuntime,
 ): ComponentModelStore<ImageProps, ImageInternal> {
 	const loadImage = async (uri: string): Promise<void> => {
 		try {

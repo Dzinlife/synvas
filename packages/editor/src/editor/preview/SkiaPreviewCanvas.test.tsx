@@ -6,8 +6,8 @@ import type React from "react";
 import type { TimelineTrack } from "@/editor/timeline/types";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { rootRenderSpy, buildSkiaFrameSnapshotMock, timelineStore } = vi.hoisted(
-	() => {
+const { rootRenderSpy, buildSkiaFrameSnapshotMock, timelineStore, modelRegistry } =
+	vi.hoisted(() => {
 		type StoreState = {
 			fps: number;
 			isPlaying: boolean;
@@ -78,18 +78,32 @@ const { rootRenderSpy, buildSkiaFrameSnapshotMock, timelineStore } = vi.hoisted(
 			subscribers.length = 0;
 		};
 
+		const subscribe = (
+			useStore as unknown as {
+				subscribe: (
+					selector: (storeState: StoreState) => unknown,
+					listener: (selected: unknown) => void,
+					options?: { fireImmediately?: boolean },
+				) => () => void;
+			}
+		).subscribe;
+
 		return {
 			rootRenderSpy: vi.fn(),
 			buildSkiaFrameSnapshotMock: vi.fn(),
+			modelRegistry: {
+				get: vi.fn(() => undefined),
+				subscribe: vi.fn(() => () => {}),
+			},
 			timelineStore: {
 				useStore,
 				setState,
 				reset,
 				getState: () => state,
+				subscribe,
 			},
 		};
-	},
-);
+	});
 
 vi.mock("react-skia-lite", async () => {
 	const ReactModule = await import("react");
@@ -120,6 +134,9 @@ vi.mock("react-skia-lite", async () => {
 		Canvas,
 		Fill,
 		Picture,
+		useContextBridge: () => {
+			return ({ children }: { children: React.ReactNode }) => children;
+		},
 	};
 });
 
@@ -127,11 +144,17 @@ vi.mock("@/editor/contexts/TimelineContext", () => ({
 	useTimelineStore: timelineStore.useStore,
 }));
 
-vi.mock("@/dsl/model/registry", () => ({
-	modelRegistry: {
-		get: vi.fn(() => undefined),
-	},
-}));
+vi.mock("@/editor/runtime/EditorRuntimeProvider", async () => {
+	const ReactModule = await import("react");
+	return {
+		EditorRuntimeContext: ReactModule.createContext(null),
+		useTimelineStoreApi: () => ({
+			getState: timelineStore.getState,
+			subscribe: timelineStore.subscribe,
+		}),
+		useModelRegistry: () => modelRegistry,
+	};
+});
 
 vi.mock("./buildSkiaTree", () => ({
 	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,

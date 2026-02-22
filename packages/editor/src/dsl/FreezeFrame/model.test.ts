@@ -2,7 +2,7 @@
 
 import type { WrappedCanvas } from "mediabunny";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { createTestEditorRuntime } from "@/editor/runtime/testUtils";
 import {
 	alignSourceTime,
 	createFreezeFrameModel,
@@ -62,9 +62,12 @@ const createMockVideoHandle = (options: {
 };
 
 describe("FreezeFrame model", () => {
+	const runtime = createTestEditorRuntime("freeze-frame-model-test");
+	const timelineStore = runtime.timelineStore;
+
 	beforeEach(() => {
 		vi.clearAllMocks();
-		useTimelineStore.setState({ fps: 30 });
+		timelineStore.setState({ fps: 30 });
 	});
 
 	afterEach(() => {
@@ -81,7 +84,7 @@ describe("FreezeFrame model", () => {
 		const store = createFreezeFrameModel("freeze-1", {
 			uri: "clip.mp4",
 			sourceTime: 1,
-		});
+		}, runtime);
 		await store.getState().init();
 
 		expect(mocks.acquireVideoAsset).toHaveBeenCalledWith("clip.mp4");
@@ -110,7 +113,7 @@ describe("FreezeFrame model", () => {
 		const store = createFreezeFrameModel("freeze-2", {
 			uri: "clip.mp4",
 			sourceTime: 1.01,
-		});
+		}, runtime);
 		await store.getState().init();
 
 		const alignedTime = alignSourceTime(1.01, 30);
@@ -142,7 +145,7 @@ describe("FreezeFrame model", () => {
 		const store = createFreezeFrameModel("freeze-3", {
 			uri: "clip.mp4",
 			sourceTime: 1,
-		});
+		}, runtime);
 		await store.getState().init();
 		store.getState().setProps({ sourceTime: 2 });
 		await store.getState().init();

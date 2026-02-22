@@ -82,6 +82,13 @@ vi.mock("../contexts/TimelineContext", () => {
 	};
 });
 
+vi.mock("../runtime/EditorRuntimeProvider", () => ({
+	useTimelineStoreApi: () =>
+		({
+			getState: () => ({}),
+		}) as unknown,
+}));
+
 vi.mock("./ExportVideoDialog", () => ({
 	default: () => <div>ExportVideoDialog</div>,
 }));

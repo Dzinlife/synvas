@@ -196,6 +196,13 @@ vi.mock("./preview/usePreviewInteractions", () => ({
 	}),
 }));
 
+vi.mock("@/editor/runtime/EditorRuntimeProvider", () => ({
+	useTimelineStoreApi: () => ({
+		getState: timelineStoreState.getState,
+		subscribe: timelineStoreState.subscribeSelector,
+	}),
+}));
+
 vi.mock("./contexts/TimelineContext", async () => {
 	const React = await import("react");
 

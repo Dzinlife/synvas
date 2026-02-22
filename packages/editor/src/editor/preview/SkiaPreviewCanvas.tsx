@@ -7,9 +7,19 @@ import { createFramePrecompileController } from "core/editor/preview/framePrecom
 import { schedulePrecompileTask } from "core/editor/preview/framePrecompileScheduler";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Canvas, type CanvasRef, Fill, Picture } from "react-skia-lite";
-import { modelRegistry } from "@/dsl/model/registry";
+import {
+	Canvas,
+	type CanvasRef,
+	Fill,
+	Picture,
+	useContextBridge,
+} from "react-skia-lite";
 import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import {
+	EditorRuntimeContext,
+	useModelRegistry,
+	useTimelineStoreApi,
+} from "@/editor/runtime/EditorRuntimeProvider";
 import type { TimelineTrack } from "@/editor/timeline/types";
 import { buildSkiaFrameSnapshot } from "./buildSkiaTree";
 
@@ -38,6 +48,9 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	getRenderTime,
 	canvasRef,
 }) => {
+	const RuntimeContextBridge = useContextBridge(EditorRuntimeContext);
+	const timelineStore = useTimelineStoreApi();
+	const modelRegistry = useModelRegistry();
 	const internalCanvasRef = useRef<CanvasRef>(null);
 	const targetCanvasRef = canvasRef ?? internalCanvasRef;
 	const renderTokenRef = useRef(0);
@@ -131,6 +144,10 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 							// 提供模型索引，供预览态准备帧使用
 							getModelStore: (id) => modelRegistry.get(id),
 						},
+					}, {
+						wrapRenderNode: (node) => (
+							<RuntimeContextBridge>{node}</RuntimeContextBridge>
+						),
 					});
 				return useQueue ? enqueueBuild(build) : build();
 			};
@@ -253,7 +270,9 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			fps,
 			getTrackIndexForElement,
 			isPlaying,
+			modelRegistry,
 			renderBlackFrame,
+			RuntimeContextBridge,
 			sortByTrackIndex,
 			targetCanvasRef,
 			tracks,
@@ -270,11 +289,11 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	}, [invalidateBuffer, runRender]);
 
 	useEffect(() => {
-		const unsub1 = useTimelineStore.subscribe(
+		const unsub1 = timelineStore.subscribe(
 			(state) => state.currentTime,
 			renderSkia,
 		);
-		const unsub2 = useTimelineStore.subscribe(
+		const unsub2 = timelineStore.subscribe(
 			(state) => state.previewTime,
 			renderSkia,
 		);
@@ -282,10 +301,10 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			unsub1();
 			unsub2();
 		};
-	}, [renderSkia]);
+	}, [renderSkia, timelineStore]);
 
 	useEffect(() => {
-		return useTimelineStore.subscribe(
+		return timelineStore.subscribe(
 			(state) => state.elements,
 			(newElements) => {
 				invalidateBuffer();
@@ -295,7 +314,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 				fireImmediately: true,
 			},
 		);
-	}, [getRenderTime, invalidateBuffer, runRender]);
+	}, [getRenderTime, invalidateBuffer, runRender, timelineStore]);
 
 	useEffect(() => {
 		return () => {

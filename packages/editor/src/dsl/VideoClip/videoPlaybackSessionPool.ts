@@ -1,5 +1,4 @@
 import type { CanvasSink, WrappedCanvas } from "mediabunny";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
 
 type VideoPlaybackSession = {
 	key: string;
@@ -14,6 +13,7 @@ type VideoPlaybackSession = {
 	isStepping: boolean;
 	lastTargetTime: number | null;
 	sink: CanvasSink | null;
+	getIsExporting: (() => boolean) | null;
 };
 
 type StepVideoPlaybackSessionOptions = {
@@ -21,6 +21,7 @@ type StepVideoPlaybackSessionOptions = {
 	sink: CanvasSink | null;
 	targetTime: number;
 	backJumpThresholdSeconds: number;
+	isExporting?: () => boolean;
 };
 
 const SESSION_DISPOSE_IDLE_MS = 500;
@@ -43,6 +44,7 @@ const createSession = (key: string): VideoPlaybackSession => ({
 	isStepping: false,
 	lastTargetTime: null,
 	sink: null,
+	getIsExporting: null,
 });
 
 const getOrCreateSession = (key: string): VideoPlaybackSession => {
@@ -80,7 +82,12 @@ const disposeSessionInternal = (session: VideoPlaybackSession) => {
 	}
 	stopSessionInternal(session);
 	session.sink = null;
+	session.getIsExporting = null;
 	sessionByKey.delete(session.key);
+};
+
+const isSessionExporting = (session: VideoPlaybackSession): boolean => {
+	return session.getIsExporting?.() === true;
 };
 
 const touchSession = (session: VideoPlaybackSession) => {
@@ -88,12 +95,12 @@ const touchSession = (session: VideoPlaybackSession) => {
 	if (session.playbackIdleTimer) {
 		clearTimeout(session.playbackIdleTimer);
 	}
-	if (useTimelineStore.getState().isExporting) {
+	if (isSessionExporting(session)) {
 		session.playbackIdleTimer = null;
 		return;
 	}
 	session.playbackIdleTimer = setTimeout(() => {
-		if (useTimelineStore.getState().isExporting) return;
+		if (isSessionExporting(session)) return;
 		const now = getNow();
 		if (now - session.lastTouch < PLAYBACK_IDLE_MS) return;
 		stopSessionInternal(session);
@@ -184,10 +191,12 @@ export const stepVideoPlaybackSession = async ({
 	sink,
 	targetTime,
 	backJumpThresholdSeconds,
+	isExporting,
 }: StepVideoPlaybackSessionOptions): Promise<WrappedCanvas | null> => {
 	if (!Number.isFinite(targetTime)) return null;
 	if (!sink) return null;
 	const session = getOrCreateSession(key);
+	session.getIsExporting = isExporting ?? null;
 	touchSession(session);
 	if (session.sink && session.sink !== sink) {
 		stopSessionInternal(session);

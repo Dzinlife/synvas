@@ -1,12 +1,13 @@
 import { useCallback, useSyncExternalStore } from "react";
+import { useModelRegistry } from "@/editor/runtime/EditorRuntimeProvider";
 import type {
 	ComponentConstraints,
 	ComponentModel,
 	ComponentModelStore,
 } from "./types";
 
-// Model 注册表（单例）
-class ModelRegistryClass {
+// Model 注册表
+export class ModelRegistryClass {
 	private models = new Map<string, ComponentModelStore<any, any>>();
 	private listeners = new Set<() => void>();
 
@@ -68,8 +69,9 @@ class ModelRegistryClass {
 	}
 }
 
-// 导出单例
-export const modelRegistry = new ModelRegistryClass();
+export const createModelRegistry = (): ModelRegistryClass => {
+	return new ModelRegistryClass();
+};
 
 // ========== Hooks ==========
 
@@ -84,6 +86,7 @@ export function useModel<
 >(
 	id: string,
 ): ComponentModelStore<P, Internal> {
+	const modelRegistry = useModelRegistry();
 	const store = modelRegistry.get<P, Internal>(id);
 	if (!store) {
 		throw new Error(`Model not found: ${id}`);
@@ -100,6 +103,7 @@ export function useModelSafe<
 >(
 	id: string,
 ): ComponentModelStore<P, Internal> | undefined {
+	const modelRegistry = useModelRegistry();
 	return modelRegistry.get<P, Internal>(id);
 }
 
@@ -196,6 +200,7 @@ export function useModelSelectorSafe<
 	defaultValue: T,
 	equalityFn?: (a: T, b: T) => boolean,
 ): T {
+	const modelRegistry = useModelRegistry();
 	const subscribe = useCallback(
 		(onStoreChange: () => void) => {
 			const unsubs: Array<() => void> = [];
@@ -222,14 +227,14 @@ export function useModelSelectorSafe<
 				unsubs.forEach((unsub) => unsub());
 			};
 		},
-		[id, selector, equalityFn],
+		[id, modelRegistry, selector, equalityFn],
 	);
 
 	const getSnapshot = useCallback(() => {
 		if (!id) return defaultValue;
 		const store = modelRegistry.get<P, Internal>(id);
 		return store ? selector(store.getState()) : defaultValue;
-	}, [id, selector, defaultValue]);
+	}, [defaultValue, id, modelRegistry, selector]);
 
 	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
@@ -248,6 +253,7 @@ export function useModelProps<
  * 检查 model 是否存在（响应式）
  */
 export function useModelExists(id: string): boolean {
+	const modelRegistry = useModelRegistry();
 	return useSyncExternalStore(
 		(onStoreChange) => modelRegistry.subscribe(onStoreChange),
 		() => modelRegistry.has(id),

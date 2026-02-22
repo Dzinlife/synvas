@@ -1,6 +1,7 @@
 import type { RendererPrepareFrameContext } from "core/dsl/model/types";
 import type { ElementType, TimelineElement, TrackRole } from "core/dsl/types";
 import type React from "react";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import type { ComponentModelStore } from "./types";
 
 export interface DSLComponentSettingProps<Props = Record<string, unknown>> {
@@ -21,6 +22,7 @@ export interface DSLComponentDefinition<Props = any, Internal = any> {
 	createModel: (
 		id: string,
 		props: Props,
+		runtime: EditorRuntime,
 	) => ComponentModelStore<Props, Internal>;
 
 	// 渲染组件（用于 Preview 和导出）

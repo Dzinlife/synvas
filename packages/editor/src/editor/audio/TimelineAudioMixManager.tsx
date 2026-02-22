@@ -1,7 +1,11 @@
 import type React from "react";
 import { useCallback, useEffect } from "react";
-import { modelRegistry } from "../../dsl/model/registry";
+import type { TimelineStore } from "../contexts/TimelineContext";
 import { useTimelineStore } from "../contexts/TimelineContext";
+import {
+	useModelRegistry,
+	useTimelineStoreApi,
+} from "../runtime/EditorRuntimeProvider";
 import { getAudioPlaybackSessionKey } from "../playback/clipContinuityIndex";
 import { isTimelineTrackAudible } from "../utils/trackAudibility";
 import { isVideoSourceAudioMuted } from "../utils/videoClipAudioSeparation";
@@ -30,7 +34,8 @@ type AudioMixModelInternal = {
 };
 
 const collectAudioMixTargets = (
-	state: ReturnType<typeof useTimelineStore.getState>,
+	state: TimelineStore,
+	modelRegistry: ReturnType<typeof useModelRegistry>,
 ): Map<string, AudioMixTarget> => {
 	const targets = new Map<string, AudioMixTarget>();
 	for (const element of state.elements) {
@@ -61,11 +66,13 @@ const collectAudioMixTargets = (
 };
 
 export const TimelineAudioMixManager: React.FC = () => {
+	const timelineStore = useTimelineStoreApi();
+	const modelRegistry = useModelRegistry();
 	const audioSettings = useTimelineStore((state) => state.audioSettings);
 
 	const runMix = useCallback(() => {
-		const state = useTimelineStore.getState();
-		const targets = collectAudioMixTargets(state);
+		const state = timelineStore.getState();
+		const targets = collectAudioMixTargets(state, modelRegistry);
 		runTimelineAudioMixFrame({
 			isPlaying: state.isPlaying,
 			isExporting: state.isExporting,
@@ -76,32 +83,32 @@ export const TimelineAudioMixManager: React.FC = () => {
 			audioTrackStates: state.audioTrackStates,
 			targets,
 		});
-	}, []);
+	}, [modelRegistry, timelineStore]);
 
 	const stopAllMixTargets = useCallback(() => {
-		const state = useTimelineStore.getState();
-		const targets = collectAudioMixTargets(state);
+		const state = timelineStore.getState();
+		const targets = collectAudioMixTargets(state, modelRegistry);
 		const handledSessionKeys = new Set<string>();
 		for (const target of targets.values()) {
 			if (handledSessionKeys.has(target.sessionKey)) continue;
 			handledSessionKeys.add(target.sessionKey);
 			invokeApplyAudioMix(target, null);
 		}
-	}, []);
+	}, [modelRegistry, timelineStore]);
 
 	useEffect(() => {
 		const trigger = () => {
 			runMix();
 		};
 		const unsubscribers = [
-			useTimelineStore.subscribe((state) => state.currentTime, trigger),
-			useTimelineStore.subscribe((state) => state.isPlaying, trigger),
-			useTimelineStore.subscribe((state) => state.isExporting, trigger),
-			useTimelineStore.subscribe((state) => state.exportTime, trigger),
-			useTimelineStore.subscribe((state) => state.elements, trigger),
-			useTimelineStore.subscribe((state) => state.tracks, trigger),
-			useTimelineStore.subscribe((state) => state.audioTrackStates, trigger),
-			useTimelineStore.subscribe((state) => state.fps, trigger),
+			timelineStore.subscribe((state) => state.currentTime, trigger),
+			timelineStore.subscribe((state) => state.isPlaying, trigger),
+			timelineStore.subscribe((state) => state.isExporting, trigger),
+			timelineStore.subscribe((state) => state.exportTime, trigger),
+			timelineStore.subscribe((state) => state.elements, trigger),
+			timelineStore.subscribe((state) => state.tracks, trigger),
+			timelineStore.subscribe((state) => state.audioTrackStates, trigger),
+			timelineStore.subscribe((state) => state.fps, trigger),
 			modelRegistry.subscribe(trigger),
 		];
 
@@ -113,7 +120,7 @@ export const TimelineAudioMixManager: React.FC = () => {
 			}
 			stopAllMixTargets();
 		};
-	}, [runMix, stopAllMixTargets]);
+	}, [modelRegistry, runMix, stopAllMixTargets, timelineStore]);
 
 	useEffect(() => {
 		setPreviewAudioDspSettings(audioSettings);

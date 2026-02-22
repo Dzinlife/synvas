@@ -4,12 +4,17 @@ import {
 	exportTimelineAsVideoCore,
 } from "core/editor/exportVideo";
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import { modelRegistry } from "@/dsl/model/registry";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { createElement } from "react";
+import type { ModelRegistryClass } from "@/dsl/model/registry";
+import { EditorRuntimeProvider } from "@/editor/runtime/EditorRuntimeProvider";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import { getAudioPlaybackSessionKey } from "@/editor/playback/clipContinuityIndex";
 import { buildSkiaFrameSnapshot } from "@/editor/preview/buildSkiaTree";
 
-const waitForStaticModelsReady = async (elements: TimelineElement[]) => {
+const waitForStaticModelsReady = async (
+	elements: TimelineElement[],
+	modelRegistry: ModelRegistryClass,
+) => {
 	const promises: Promise<void>[] = [];
 	for (const element of elements) {
 		const store = modelRegistry.get(element.id);
@@ -30,6 +35,7 @@ type ExportAudioModelInternal = {
 
 const getExportAudioSourceByElementId = (
 	elementId: string,
+	modelRegistry: ModelRegistryClass,
 ): ExportElementAudioSource | null => {
 	const store = modelRegistry.get(elementId);
 	if (!store) return null;
@@ -47,15 +53,17 @@ const getExportAudioSourceByElementId = (
 	};
 };
 
-export const exportTimelineAsVideo = async (options?: {
+export const exportTimelineAsVideo = async (options: {
 	filename?: string;
 	fps?: number;
 	startFrame?: number;
 	endFrame?: number;
 	signal?: AbortSignal;
 	onFrame?: (frame: number) => void;
+	runtime: EditorRuntime;
 }): Promise<void> => {
-	const timelineState = useTimelineStore.getState();
+	const modelRegistry = options.runtime.modelRegistry;
+	const timelineState = options.runtime.timelineStore.getState();
 	const elements = timelineState.elements;
 	const tracks = timelineState.tracks;
 	const fps = Number.isFinite(options?.fps)
@@ -82,6 +90,16 @@ export const exportTimelineAsVideo = async (options?: {
 	timelineState.setExportTime(startFrame);
 
 	try {
+		const buildFrameSnapshot = (
+			args: Parameters<typeof buildSkiaFrameSnapshot>[0],
+		) =>
+			buildSkiaFrameSnapshot(args, {
+				wrapRenderNode: (node) =>
+					createElement(EditorRuntimeProvider, {
+						runtime: options.runtime,
+						children: node,
+					}),
+			});
 		await exportTimelineAsVideoCore({
 			elements,
 			tracks,
@@ -90,17 +108,18 @@ export const exportTimelineAsVideo = async (options?: {
 			startFrame,
 			endFrame,
 			filename: options?.filename,
-			buildSkiaFrameSnapshot,
+			buildSkiaFrameSnapshot: buildFrameSnapshot,
 			getModelStore: (id) => modelRegistry.get(id),
 			audio: {
 				audioTrackStates: timelineState.audioTrackStates,
-				getAudioSourceByElementId: getExportAudioSourceByElementId,
+				getAudioSourceByElementId: (elementId) =>
+					getExportAudioSourceByElementId(elementId, modelRegistry),
 				getAudioSessionKeyByElementId: (elementId) =>
 					getAudioPlaybackSessionKey(elements, elementId),
 				dspConfig: timelineState.audioSettings,
 			},
 			signal: options?.signal,
-			waitForReady: () => waitForStaticModelsReady(elements),
+			waitForReady: () => waitForStaticModelsReady(elements, modelRegistry),
 			onFrame: (frame) => {
 				timelineState.setExportTime(frame);
 				options?.onFrame?.(frame);

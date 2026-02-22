@@ -1,5 +1,6 @@
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import type { ComponentModel, ComponentModelStore } from "../model/types";
 
 export interface BackdropZoomProps {
@@ -11,6 +12,7 @@ export type BackdropZoomModelStore = ComponentModelStore<BackdropZoomProps>;
 export function createBackdropZoomModel(
 	id: string,
 	initialProps: BackdropZoomProps,
+	_runtime: EditorRuntime,
 ): BackdropZoomModelStore {
 	return createStore<ComponentModel<BackdropZoomProps>>()(
 		subscribeWithSelector((set, _get) => ({

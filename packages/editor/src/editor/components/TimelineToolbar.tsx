@@ -49,6 +49,7 @@ import {
 	useTimelineStore,
 	useTracks,
 } from "../contexts/TimelineContext";
+import { useTimelineStoreApi } from "../runtime/EditorRuntimeProvider";
 import { getAudioTrackControlState } from "../utils/audioTrackState";
 import { MAX_TIMELINE_SCALE, MIN_TIMELINE_SCALE } from "../utils/timelineZoom";
 import {
@@ -108,6 +109,7 @@ const remapTransitionsAfterSplit = (
 };
 
 const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
+	const timelineStore = useTimelineStoreApi();
 	const { snapEnabled, setSnapEnabled } = useSnap();
 	const { attachments, autoAttach, setAutoAttach } = useAttachments();
 	const { rippleEditingEnabled, setRippleEditingEnabled } = useRippleEditing();
@@ -260,6 +262,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			const analysis = await analyzeVideoChangeForElement({
 				element: quickSplitCandidate,
 				fps,
+				timelineStore,
 				sensitivity: quickSplitSensitivity,
 				minSegmentSeconds: quickSplitMinSegmentSeconds,
 				mode: quickSplitMode,
@@ -309,6 +312,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		quickSplitMinSegmentSeconds,
 		quickSplitMode,
 		setElements,
+		timelineStore,
 	]);
 
 	const handleSplit = useCallback(() => {

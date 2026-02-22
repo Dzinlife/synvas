@@ -10,7 +10,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { modelRegistry } from "@/dsl/model/registry";
+import { useModelRegistry, useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import TimeIndicatorCanvas from "@/editor/components/TimeIndicatorCanvas";
 import { cn } from "@/lib/utils";
 import { clampFrame } from "@/utils/timecode";
@@ -85,6 +85,7 @@ const shouldUpdateOffset = (element: TimelineElementType): boolean => {
 };
 
 const getVideoClipHasSourceAudioTrack = (
+	modelRegistry: ReturnType<typeof useModelRegistry>,
 	element: TimelineElementType | undefined,
 ): boolean => {
 	if (!element || element.type !== "VideoClip") return false;
@@ -149,6 +150,8 @@ type TimelineContextMenuState =
 	  };
 
 const TimelineEditor = () => {
+	const timelineStore = useTimelineStoreApi();
+	const modelRegistry = useModelRegistry();
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
 	const setScrollLeft = useTimelineStore((state) => state.setScrollLeft);
 	const setTimelineMaxScrollLeft = useTimelineStore(
@@ -396,7 +399,7 @@ const TimelineEditor = () => {
 				if (!clipboardPayload) return;
 				event.preventDefault();
 				pasteFromClipboard({
-					time: clampFrame(useTimelineStore.getState().getDisplayTime()),
+					time: clampFrame(timelineStore.getState().getDisplayTime()),
 					trackIndex: clipboardPayload.anchor.trackIndex,
 					dropType: "track",
 				});
@@ -954,7 +957,7 @@ const TimelineEditor = () => {
 				e.preventDefault();
 				e.stopPropagation();
 
-				const currentScale = useTimelineStore.getState().timelineScale;
+				const currentScale = timelineStore.getState().timelineScale;
 				const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
 				const nextScale = Math.min(
 					MAX_TIMELINE_SCALE,
@@ -963,7 +966,7 @@ const TimelineEditor = () => {
 				const rect = scrollArea.getBoundingClientRect();
 				const viewportWidth = Math.max(
 					0,
-					useTimelineStore.getState().timelineViewportWidth,
+					timelineStore.getState().timelineViewportWidth,
 				);
 				const rawAnchorOffset = e.clientX - rect.left - leftColumnWidth;
 				const anchorOffsetPx = Math.min(
@@ -984,7 +987,7 @@ const TimelineEditor = () => {
 				e.stopPropagation();
 
 				// 修复方向：向右滚动（deltaX > 0）应该增加 scrollLeft
-				const currentScrollLeft = useTimelineStore.getState().scrollLeft;
+				const currentScrollLeft = timelineStore.getState().scrollLeft;
 				const newScrollLeft = Math.max(0, currentScrollLeft + e.deltaX);
 				setScrollLeft(newScrollLeft);
 			}
@@ -1043,7 +1046,7 @@ const TimelineEditor = () => {
 		let animationFrameId: number;
 
 		const animate = () => {
-			const currentScrollLeft = useTimelineStore.getState().scrollLeft;
+			const currentScrollLeft = timelineStore.getState().scrollLeft;
 			const newScrollLeft = Math.max(0, currentScrollLeft + autoScrollSpeed);
 			setScrollLeft(newScrollLeft);
 			animationFrameId = requestAnimationFrame(animate);
@@ -1091,7 +1094,7 @@ const TimelineEditor = () => {
 		let animationFrameId: number;
 
 		const animate = () => {
-			const currentScrollLeft = useTimelineStore.getState().scrollLeft;
+			const currentScrollLeft = timelineStore.getState().scrollLeft;
 			const newScrollLeft = Math.max(
 				0,
 				currentScrollLeft + globalAutoScrollSpeedX,
@@ -1329,8 +1332,10 @@ const TimelineEditor = () => {
 					: undefined;
 			const isSingleVideo = targetElement?.type === "VideoClip";
 			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
-			const hasSourceAudioTrack =
-				getVideoClipHasSourceAudioTrack(targetElement);
+				const hasSourceAudioTrack = getVideoClipHasSourceAudioTrack(
+					modelRegistry,
+					targetElement,
+				);
 			const videoUri = resolveElementSourceUri(targetElement, assets);
 			if (isSingleVideo && hasSourceAudioTrack) {
 				const isActionDisabled = !videoUri;

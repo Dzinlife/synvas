@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type React from "react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ModelManager } from "@/dsl/model";
@@ -49,7 +49,7 @@ const Editor = () => {
 		initialize();
 	}, [initialize]);
 
-	const queryClient = new QueryClient();
+	const queryClient = useMemo(() => new QueryClient(), []);
 
 	if (status !== "ready" || !currentProjectData) {
 		return <div>Loading timeline...</div>;

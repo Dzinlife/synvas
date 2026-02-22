@@ -1,3 +1,4 @@
+import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
 import { EllipsisIcon, X } from "lucide-react";
 import type React from "react";
 import { useCallback, useMemo, useState } from "react";
@@ -15,12 +16,15 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { exportCanvasAsImage } from "@/dsl/export";
+import { exportTimelineAsVideo } from "@/editor/exportVideo";
 import { usePreview } from "@/editor/contexts/PreviewProvider";
 import {
 	usePlaybackControl,
 	useTimelineStore,
 } from "@/editor/contexts/TimelineContext";
+import { useEditorRuntime } from "@/editor/runtime/EditorRuntimeProvider";
 import { framesToTimecode } from "@/utils/timecode";
+import ExportVideoDialog from "./ExportVideoDialog";
 import PreviewLoudnessMeterCanvas from "./PreviewLoudnessMeterCanvas";
 
 interface ScenePlaybackControlBarProps {
@@ -30,10 +34,13 @@ interface ScenePlaybackControlBarProps {
 const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 	onExitFocus,
 }) => {
+	const runtime = useEditorRuntime();
 	const { isPlaying, togglePlay } = usePlaybackControl();
 	const currentTime = useTimelineStore((state) => state.currentTime);
 	const previewTime = useTimelineStore((state) => state.previewTime);
 	const fps = useTimelineStore((state) => state.fps);
+	const elements = useTimelineStore((state) => state.elements);
+	const canvasSize = useTimelineStore((state) => state.canvasSize);
 	const {
 		canvasRef,
 		pinchState,
@@ -67,13 +74,34 @@ const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 			await exportCanvasAsImage(canvasRef.current, {
 				format: "png",
 				waitForReady: true,
+				runtime,
 			});
 		} finally {
 			setIsExportingFrame(false);
 		}
-	}, [canvasRef, isExportingFrame]);
+	}, [canvasRef, isExportingFrame, runtime]);
+	const handleExportVideo = useCallback(
+		async (options: {
+			filename: string;
+			fps: number;
+			startFrame: number;
+			endFrame: number;
+			signal: AbortSignal;
+			onFrame?: (frame: number) => void;
+		}) => {
+			await exportTimelineAsVideo({
+				...options,
+				runtime,
+			});
+		},
+		[runtime],
+	);
 
 	const displayTime = previewTime ?? currentTime;
+	const timelineEndFrame = useMemo(
+		() => resolveTimelineEndFrame(elements),
+		[elements],
+	);
 	const previewTimecode = useMemo(() => {
 		return framesToTimecode(displayTime, fps);
 	}, [displayTime, fps]);
@@ -109,6 +137,13 @@ const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 				<PreviewLoudnessMeterCanvas />
 			</div>
 			<div className="flex items-center gap-2">
+				<ExportVideoDialog
+					defaultFps={fps}
+					timelineEndFrame={timelineEndFrame}
+					canvasSize={canvasSize}
+					onExport={handleExportVideo}
+					triggerClassName="h-8 px-2 py-1 text-xs"
+				/>
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						chevron={false}

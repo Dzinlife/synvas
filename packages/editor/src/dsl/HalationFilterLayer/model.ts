@@ -1,5 +1,6 @@
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import type { ComponentModel, ComponentModelStore } from "../model/types";
 
 export interface HalationFilterLayerProps {
@@ -27,6 +28,7 @@ export type HalationFilterLayerModelStore =
 export function createHalationFilterLayerModel(
 	id: string,
 	initialProps: HalationFilterLayerProps,
+	_runtime: EditorRuntime,
 ): HalationFilterLayerModelStore {
 	return createStore<ComponentModel<HalationFilterLayerProps>>()(
 		subscribeWithSelector((set, _get) => ({

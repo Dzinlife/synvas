@@ -19,6 +19,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import { useAssets } from "../contexts/TimelineContext";
 
 interface SmartSpeechCutDialogProps {
@@ -125,6 +126,7 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 	elementId,
 	assetId,
 }) => {
+	const timelineStore = useTimelineStoreApi();
 	const asrClient = useAsrClient();
 	const { assets } = useAssets();
 	const source = useMemo(
@@ -168,6 +170,7 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 					language,
 					force,
 					signal: controller.signal,
+					timelineStore,
 					onStatus: setStatus,
 					onProgress: setProgress,
 				});
@@ -194,7 +197,7 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 				setAbortController(null);
 			}
 		},
-		[asrClient, isRunning, language, assetId],
+		[asrClient, isRunning, language, assetId, timelineStore],
 	);
 
 	const handleDebugLog = useCallback(() => {

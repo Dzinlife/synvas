@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ModelRegistryClass } from "@/dsl/model/registry";
+import type { EditorRuntime } from "@/editor/runtime/types";
 
 let timelineState: {
 	elements: Array<{ type?: string; timeline: { end: number } }>;
@@ -21,15 +23,10 @@ let timelineState: {
 	setExportTime: ReturnType<typeof vi.fn>;
 	setCurrentTime: ReturnType<typeof vi.fn>;
 };
+let runtime: EditorRuntime;
 
 const { exportTimelineAsVideoCoreMock } = vi.hoisted(() => ({
 	exportTimelineAsVideoCoreMock: vi.fn(),
-}));
-
-vi.mock("@/dsl/model/registry", () => ({
-	modelRegistry: {
-		get: vi.fn(() => null),
-	},
 }));
 
 vi.mock("@/editor/playback/clipContinuityIndex", () => ({
@@ -38,12 +35,6 @@ vi.mock("@/editor/playback/clipContinuityIndex", () => ({
 
 vi.mock("@/editor/preview/buildSkiaTree", () => ({
 	buildSkiaFrameSnapshot: vi.fn(),
-}));
-
-vi.mock("@/editor/contexts/TimelineContext", () => ({
-	useTimelineStore: {
-		getState: () => timelineState,
-	},
 }));
 
 vi.mock("core/editor/exportVideo", () => ({
@@ -104,6 +95,15 @@ const createTimelineState = (overrides?: Partial<typeof timelineState>) => {
 describe("editor.exportTimelineAsVideo", () => {
 	beforeEach(() => {
 		timelineState = createTimelineState();
+		runtime = {
+			id: "test-runtime",
+			timelineStore: {
+				getState: () => timelineState,
+			} as unknown as EditorRuntime["timelineStore"],
+			modelRegistry: {
+				get: vi.fn(() => null),
+			} as unknown as ModelRegistryClass,
+		};
 		exportTimelineAsVideoCoreMock.mockReset();
 	});
 
@@ -114,14 +114,15 @@ describe("editor.exportTimelineAsVideo", () => {
 			options.onFrame?.(15);
 		});
 
-		await exportTimelineAsVideo({
-			filename: "demo.mp4",
-			fps: 24,
-			startFrame: 10,
-			endFrame: 20,
-			signal: controller.signal,
-			onFrame,
-		});
+			await exportTimelineAsVideo({
+				filename: "demo.mp4",
+				fps: 24,
+				startFrame: 10,
+				endFrame: 20,
+				signal: controller.signal,
+				onFrame,
+				runtime,
+			});
 
 		expect(exportTimelineAsVideoCoreMock).toHaveBeenCalledTimes(1);
 		const passed = exportTimelineAsVideoCoreMock.mock.calls[0]?.[0];
@@ -151,7 +152,7 @@ describe("editor.exportTimelineAsVideo", () => {
 		});
 		exportTimelineAsVideoCoreMock.mockRejectedValueOnce(new Error("failed"));
 
-		await expect(exportTimelineAsVideo()).rejects.toThrow("failed");
+			await expect(exportTimelineAsVideo({ runtime })).rejects.toThrow("failed");
 
 		expect(timelineState.setIsExporting).toHaveBeenNthCalledWith(1, true);
 		expect(timelineState.setIsExporting).toHaveBeenLastCalledWith(false);
@@ -176,9 +177,9 @@ describe("editor.exportTimelineAsVideo", () => {
 			new Error("导出失败：无法构建第 12 帧 picture（已中止导出）"),
 		);
 
-		await expect(exportTimelineAsVideo()).rejects.toThrow(
-			"导出失败：无法构建第 12 帧 picture（已中止导出）",
-		);
+			await expect(exportTimelineAsVideo({ runtime })).rejects.toThrow(
+				"导出失败：无法构建第 12 帧 picture（已中止导出）",
+			);
 
 		expect(timelineState.setIsExporting).toHaveBeenNthCalledWith(1, true);
 		expect(timelineState.setIsExporting).toHaveBeenLastCalledWith(false);
@@ -201,7 +202,7 @@ describe("editor.exportTimelineAsVideo", () => {
 		});
 		exportTimelineAsVideoCoreMock.mockRejectedValueOnce(createAbortError());
 
-		await expect(exportTimelineAsVideo()).rejects.toBeDefined();
+			await expect(exportTimelineAsVideo({ runtime })).rejects.toBeDefined();
 
 		expect(timelineState.setIsExporting).toHaveBeenNthCalledWith(1, true);
 		expect(timelineState.setIsExporting).toHaveBeenLastCalledWith(false);
@@ -219,9 +220,10 @@ describe("editor.exportTimelineAsVideo", () => {
 		});
 		exportTimelineAsVideoCoreMock.mockResolvedValueOnce(undefined);
 
-		await exportTimelineAsVideo({
-			startFrame: 0,
-		});
+			await exportTimelineAsVideo({
+				startFrame: 0,
+				runtime,
+			});
 
 		const passed = exportTimelineAsVideoCoreMock.mock.calls[0]?.[0];
 		expect(passed?.endFrame).toBe(120);

@@ -21,9 +21,11 @@ import {
 	useLayoutEffect,
 	useMemo,
 	useRef,
+	useSyncExternalStore,
 } from "react";
-import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
+import { createStore, type Mutate, type StoreApi } from "zustand/vanilla";
+import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import { clampFrame } from "@/utils/timecode";
 import { getAudioContext } from "../audio/audioEngine";
 import type {
@@ -136,7 +138,7 @@ const createAssetId = (): string => {
 		.slice(2, 8)}`;
 };
 
-interface TimelineStore {
+export interface TimelineStore {
 	fps: number;
 	timelineScale: number;
 	currentTime: number;
@@ -281,6 +283,11 @@ interface TimelineStore {
 	) => void;
 }
 
+export type TimelineStoreApi = Mutate<
+	StoreApi<TimelineStore>,
+	[["zustand/subscribeWithSelector", never]]
+>;
+
 interface TimelineHistorySnapshot {
 	elements: TimelineElement[];
 	assets: TimelineAsset[];
@@ -290,23 +297,6 @@ interface TimelineHistorySnapshot {
 }
 
 const HISTORY_LIMIT = 100;
-
-// 元素索引缓存，避免频繁遍历
-let elementIndexById = new Map<string, TimelineElement>();
-
-const buildElementIndex = (
-	elements: TimelineElement[],
-): Map<string, TimelineElement> => {
-	const nextIndex = new Map<string, TimelineElement>();
-	for (const element of elements) {
-		nextIndex.set(element.id, element);
-	}
-	return nextIndex;
-};
-
-const syncElementIndex = (elements: TimelineElement[]) => {
-	elementIndexById = buildElementIndex(elements);
-};
 
 const trimHistory = (
 	history: TimelineHistorySnapshot[],
@@ -403,44 +393,45 @@ const resolveRenderDisplayTime = (params: {
 	return Math.max(0, timelineEndFrame - 1);
 };
 
-export const useTimelineStore = create<TimelineStore>()(
-	subscribeWithSelector((set, get) => ({
-		fps: DEFAULT_FPS,
-		timelineScale: 1,
-		currentTime: 0,
-		previewTime: null,
-		previewAxisEnabled: true,
-		elements: [],
-		assets: [],
-		tracks: [
-			{
-				id: MAIN_TRACK_ID,
-				role: "clip",
-				hidden: false,
-				locked: false,
-				muted: false,
-				solo: false,
-			},
-		],
-		audioTrackStates: {},
-		historyPast: [],
-		historyFuture: [],
-		historyLimit: HISTORY_LIMIT,
-		canvasSize: { width: 1920, height: 1080 },
-		isPlaying: false,
-		isExporting: false,
-		exportTime: null,
-		seekEpoch: 0,
-		isDragging: false,
-		selectedIds: [],
-		primarySelectedId: null,
-		// 吸附相关状态初始值
-		snapEnabled: true,
-		activeSnapPoint: null,
-		// 层叠关联相关状态初始值
-		autoAttach: true,
-		// 主轨波纹编辑模式初始值
-		rippleEditingEnabled: false,
+export const createTimelineStore = (): TimelineStoreApi => {
+	const timelineStore = createStore<TimelineStore>()(
+		subscribeWithSelector((set, get) => ({
+			fps: DEFAULT_FPS,
+			timelineScale: 1,
+			currentTime: 0,
+			previewTime: null,
+			previewAxisEnabled: true,
+			elements: [],
+			assets: [],
+			tracks: [
+				{
+					id: MAIN_TRACK_ID,
+					role: "clip",
+					hidden: false,
+					locked: false,
+					muted: false,
+					solo: false,
+				},
+			],
+			audioTrackStates: {},
+			historyPast: [],
+			historyFuture: [],
+			historyLimit: HISTORY_LIMIT,
+			canvasSize: { width: 1920, height: 1080 },
+			isPlaying: false,
+			isExporting: false,
+			exportTime: null,
+			seekEpoch: 0,
+			isDragging: false,
+			selectedIds: [],
+			primarySelectedId: null,
+			// 吸附相关状态初始值
+			snapEnabled: true,
+			activeSnapPoint: null,
+			// 层叠关联相关状态初始值
+			autoAttach: true,
+			// 主轨波纹编辑模式初始值
+			rippleEditingEnabled: false,
 		audioSettings: cloneAudioSettings(DEFAULT_TIMELINE_SETTINGS.audio),
 		// 拖拽目标指示状态初始值
 		activeDropTarget: null,
@@ -454,7 +445,9 @@ export const useTimelineStore = create<TimelineStore>()(
 		timelineMaxScrollLeft: 0,
 		timelineViewportWidth: 0,
 		revision: 0,
-		getElementById: (id: string) => elementIndexById.get(id) ?? null,
+		getElementById: (id: string) => {
+			return get().elements.find((element) => element.id === id) ?? null;
+		},
 		getAssetById: (id: string) => {
 			return get().assets.find((source) => source.id === id) ?? null;
 		},
@@ -1402,16 +1395,19 @@ export const useTimelineStore = create<TimelineStore>()(
 				};
 			});
 		},
-	})),
-);
-
-syncElementIndex(useTimelineStore.getState().elements);
-useTimelineStore.subscribe(
-	(state) => state.elements,
-	(elements) => {
-		syncElementIndex(elements);
-	},
-);
+		})),
+	);
+	timelineStore.subscribe(
+		selectRevisionDeps,
+		() => {
+			timelineStore.setState((state) => ({
+				revision: state.revision + 1,
+			}));
+		},
+		{ equalityFn: isRevisionDepsEqual },
+	);
+	return timelineStore;
+};
 
 interface TimelineRevisionDeps {
 	fps: number;
@@ -1490,15 +1486,30 @@ const isRevisionDepsEqual = (
 	);
 };
 
-useTimelineStore.subscribe(
-	selectRevisionDeps,
-	() => {
-		useTimelineStore.setState((state) => ({
-			revision: state.revision + 1,
-		}));
-	},
-	{ equalityFn: isRevisionDepsEqual },
-);
+export const useTimelineStore = <T,>(
+	selector: (state: TimelineStore) => T,
+	equalityFn?: (a: T, b: T) => boolean,
+): T => {
+	const timelineStore = useTimelineStoreApi();
+	return useSyncExternalStore(
+		useCallback(
+			(onStoreChange) =>
+				timelineStore.subscribe(
+					selector,
+					() => {
+						onStoreChange();
+					},
+					{ equalityFn },
+				),
+			[equalityFn, selector, timelineStore],
+		),
+		useCallback(() => selector(timelineStore.getState()), [selector, timelineStore]),
+		useCallback(
+			() => selector(timelineStore.getInitialState()),
+			[selector, timelineStore],
+		),
+	);
+};
 
 // 渲染时间：导出时使用导出帧；预览在末尾帧时回退一帧，避免结束黑屏
 const resolveRenderTime = (state: TimelineStore): number => {
@@ -2261,6 +2272,7 @@ export const TimelineProvider = ({
 	fps?: number;
 	settings?: TimelineSettings;
 }) => {
+	const timelineStore = useTimelineStoreApi();
 	const clockModeRef = useRef<"audio" | "perf" | null>(null);
 	const clockStartFrameRef = useRef(0);
 	const audioStartTimeRef = useRef<number | null>(null);
@@ -2281,9 +2293,9 @@ export const TimelineProvider = ({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 初始化仅执行一次，后续更新由下方 useEffect 处理。
 	useLayoutEffect(() => {
 		if (initialElements) {
-			const baseTracks = initialTracks ?? useTimelineStore.getState().tracks;
+			const baseTracks = initialTracks ?? timelineStore.getState().tracks;
 			const { tracks, elements } = reconcileTracks(initialElements, baseTracks);
-			useTimelineStore.setState({
+			timelineStore.setState({
 				currentTime: clampFrame(initialCurrentTime ?? 0),
 				elements,
 				assets: initialSources ?? [],
@@ -2294,22 +2306,22 @@ export const TimelineProvider = ({
 				fps: normalizeFps(initialFps ?? DEFAULT_FPS),
 				...(settingsState ?? {}),
 			});
-			useTimelineStore.getState().resetHistory();
+			timelineStore.getState().resetHistory();
 			return;
 		}
 		if (initialTracks) {
-			useTimelineStore.setState({
+			timelineStore.setState({
 				tracks: initialTracks,
 				...(initialSources ? { assets: initialSources } : {}),
 				audioTrackStates: {},
 				scrollLeft: 0,
 				...(settingsState ?? {}),
 			});
-			useTimelineStore.getState().resetHistory();
+			timelineStore.getState().resetHistory();
 			return;
 		}
 		if (settingsState) {
-			useTimelineStore.setState({
+			timelineStore.setState({
 				...(initialSources ? { assets: initialSources } : {}),
 				scrollLeft: 0,
 				...settingsState,
@@ -2320,54 +2332,54 @@ export const TimelineProvider = ({
 	// 后续更新
 	useEffect(() => {
 		if (initialElements) {
-			const baseTracks = initialTracks ?? useTimelineStore.getState().tracks;
+			const baseTracks = initialTracks ?? timelineStore.getState().tracks;
 			const { tracks, elements } = reconcileTracks(initialElements, baseTracks);
-			useTimelineStore.setState({
+			timelineStore.setState({
 				elements,
 				assets: initialSources ?? [],
 				tracks,
 				audioTrackStates: {},
 				scrollLeft: 0,
 			});
-			useTimelineStore.getState().resetHistory();
+			timelineStore.getState().resetHistory();
 		}
-	}, [initialElements, initialSources, initialTracks]);
+	}, [initialElements, initialSources, initialTracks, timelineStore]);
 
 	useEffect(() => {
 		if (!initialElements && initialTracks) {
-			useTimelineStore.setState({
+			timelineStore.setState({
 				tracks: initialTracks,
 				...(initialSources ? { assets: initialSources } : {}),
 				audioTrackStates: {},
 				scrollLeft: 0,
 			});
-			useTimelineStore.getState().resetHistory();
+			timelineStore.getState().resetHistory();
 		}
-	}, [initialElements, initialSources, initialTracks]);
+	}, [initialElements, initialSources, initialTracks, timelineStore]);
 
 	useEffect(() => {
 		if (initialCurrentTime !== undefined) {
-			useTimelineStore.setState({
+			timelineStore.setState({
 				currentTime: clampFrame(initialCurrentTime),
 			});
 		}
-	}, [initialCurrentTime]);
+	}, [initialCurrentTime, timelineStore]);
 
 	useEffect(() => {
 		if (initialCanvasSize !== undefined) {
-			useTimelineStore.setState({
+			timelineStore.setState({
 				canvasSize: initialCanvasSize,
 			});
 		}
-	}, [initialCanvasSize]);
+	}, [initialCanvasSize, timelineStore]);
 
 	useEffect(() => {
 		if (initialFps !== undefined) {
-			useTimelineStore.setState({
+			timelineStore.setState({
 				fps: normalizeFps(initialFps),
 			});
 		}
-	}, [initialFps]);
+	}, [initialFps, timelineStore]);
 
 	const elements = useTimelineStore((state) => state.elements);
 	const tracks = useTimelineStore((state) => state.tracks);
@@ -2385,7 +2397,7 @@ export const TimelineProvider = ({
 			result.didChangeTracks ||
 			didChangeAudioTrackStates
 		) {
-			useTimelineStore.setState({
+			timelineStore.setState({
 				elements: result.elements,
 				tracks: result.tracks,
 				...(didChangeAudioTrackStates
@@ -2393,11 +2405,11 @@ export const TimelineProvider = ({
 					: {}),
 			});
 		}
-	}, [elements, tracks, audioTrackStates]);
+	}, [elements, tracks, audioTrackStates, timelineStore]);
 
 	// 播放循环
 	useEffect(() => {
-		const unsubscribe = useTimelineStore.subscribe(
+		const unsubscribe = timelineStore.subscribe(
 			(state) => state.isPlaying,
 			(isPlaying) => {
 				if (isPlaying) {
@@ -2417,7 +2429,7 @@ export const TimelineProvider = ({
 						audioStartTimeRef.current = null;
 					};
 					const animate = (now: number) => {
-						const state = useTimelineStore.getState();
+						const state = timelineStore.getState();
 						if (!state.isPlaying) return;
 						const timelineEndFrame = resolveTimelineEndFrame(state.elements);
 						if (state.currentTime >= timelineEndFrame) {
@@ -2502,7 +2514,7 @@ export const TimelineProvider = ({
 		);
 
 		return () => unsubscribe();
-	}, []);
+	}, [timelineStore]);
 
 	return <>{children}</>;
 };

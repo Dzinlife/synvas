@@ -1,10 +1,10 @@
 import type { TimelineElement, TimelineAsset } from "core/dsl/types";
 import { isAssetBackedElementType } from "core/dsl/types";
 import { useEffect, useMemo, useRef } from "react";
+import { useEditorRuntime } from "@/editor/runtime/EditorRuntimeProvider";
 import { TimelineAudioMixManager } from "@/editor/audio/TimelineAudioMixManager";
 import { useElements, useAssets } from "@/editor/contexts/TimelineContext";
 import { componentRegistry } from "./componentRegistry";
-import { modelRegistry } from "./registry";
 
 const buildSourceById = (assets: TimelineAsset[]): Map<string, TimelineAsset> => {
 	return new Map(assets.map((source) => [source.id, source]));
@@ -50,6 +50,8 @@ const arePropsShallowEqual = (
 export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 	children,
 }) => {
+	const runtime = useEditorRuntime();
+	const modelRegistry = runtime.modelRegistry;
 	const { elements } = useElements();
 	const { assets } = useAssets();
 	const prevElementsRef = useRef<TimelineElement[]>([]);
@@ -74,6 +76,7 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 			const store = definition.createModel(
 				id,
 				resolveModelProps(element, sourceById),
+				runtime,
 			);
 			modelRegistry.register(id, store);
 			store.getState().init();
@@ -113,6 +116,7 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 				const store = definition.createModel(
 					id,
 					resolveModelProps(element, sourceById),
+					runtime,
 				);
 				modelRegistry.register(id, store);
 
@@ -151,7 +155,7 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 		}
 
 		prevElementsRef.current = elements;
-	}, [elements, sourceById]);
+	}, [elements, modelRegistry, runtime, sourceById]);
 
 	// 组件卸载时清理所有 model
 	useEffect(() => {
@@ -160,7 +164,7 @@ export const ModelManager: React.FC<{ children: React.ReactNode }> = ({
 				modelRegistry.unregister(id);
 			}
 		};
-	}, []);
+	}, [modelRegistry]);
 
 	return (
 		<>

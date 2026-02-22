@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { TimelineAsset } from "core/dsl/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { createTestEditorRuntime } from "@/editor/runtime/testUtils";
 import type { AsrClient } from "./AsrContext";
 import type { TranscriptSegment } from "./types";
 import { transcribeAssetById } from "./assetTranscriptionService";
@@ -26,10 +26,12 @@ const mockedResolveAssetMediaFile = vi.mocked(resolveAssetMediaFile);
 const mockedReadAudioMetadata = vi.mocked(readAudioMetadata);
 const mockedReadVideoMetadata = vi.mocked(readVideoMetadata);
 
-const initialState = useTimelineStore.getState();
+const runtime = createTestEditorRuntime("asr-transcription-service-test");
+const timelineStore = runtime.timelineStore;
+const initialState = timelineStore.getState();
 
 afterEach(() => {
-	useTimelineStore.setState(initialState, true);
+	timelineStore.setState(initialState, true);
 	mockedResolveAssetMediaFile.mockReset();
 	mockedReadAudioMetadata.mockReset();
 	mockedReadVideoMetadata.mockReset();
@@ -94,7 +96,7 @@ describe("assetTranscriptionService", () => {
 			width: 1920,
 			height: 1080,
 		});
-		useTimelineStore.setState({
+		timelineStore.setState({
 			assets: [createSource()],
 		});
 
@@ -114,10 +116,11 @@ describe("assetTranscriptionService", () => {
 			asrClient,
 			signal: controller.signal,
 			language: "zh",
+			timelineStore,
 		});
 		expect(result.status).toBe("done");
 		expect(result.changed).toBe(true);
-		const asr = useTimelineStore.getState().getAssetById("source-1")?.meta?.asr;
+		const asr = timelineStore.getState().getAssetById("source-1")?.meta?.asr;
 		expect(asr?.segments).toHaveLength(1);
 		expect(asr?.segments[0]?.text).toBe("你好");
 	});
@@ -135,7 +138,7 @@ describe("assetTranscriptionService", () => {
 			width: 1920,
 			height: 1080,
 		});
-		useTimelineStore.setState({
+		timelineStore.setState({
 			assets: [createSource({ withAsr: true })],
 		});
 
@@ -157,10 +160,11 @@ describe("assetTranscriptionService", () => {
 			signal: controller.signal,
 			language: "zh",
 			force: true,
+			timelineStore,
 		});
 		expect(result.status).toBe("canceled");
 		expect(result.changed).toBe(false);
-		const asr = useTimelineStore.getState().getAssetById("source-1")?.meta?.asr;
+		const asr = timelineStore.getState().getAssetById("source-1")?.meta?.asr;
 		expect(asr?.id).toBe("old-asr");
 		expect(asr?.segments[0]?.text).toBe("旧内容");
 	});
@@ -178,7 +182,7 @@ describe("assetTranscriptionService", () => {
 			width: 1920,
 			height: 1080,
 		});
-		useTimelineStore.setState({
+		timelineStore.setState({
 			assets: [createSource({ withAsr: true })],
 		});
 
@@ -199,9 +203,10 @@ describe("assetTranscriptionService", () => {
 			signal: controller.signal,
 			language: "zh",
 			force: true,
+			timelineStore,
 		});
 		expect(result.status).toBe("done");
-		const asr = useTimelineStore.getState().getAssetById("source-1")?.meta?.asr;
+		const asr = timelineStore.getState().getAssetById("source-1")?.meta?.asr;
 		expect(asr?.id).not.toBe("old-asr");
 		expect(asr?.segments[0]?.text).toBe("新内容");
 	});

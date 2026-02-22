@@ -1,5 +1,6 @@
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import type { ComponentModel, ComponentModelStore } from "../model/types";
 export interface ColorFilterLayerProps {
 	hue?: number;
@@ -14,6 +15,7 @@ export type ColorFilterLayerModelStore =
 export function createColorFilterLayerModel(
 	id: string,
 	initialProps: ColorFilterLayerProps,
+	_runtime: EditorRuntime,
 ): ColorFilterLayerModelStore {
 	return createStore<ComponentModel<ColorFilterLayerProps>>()(
 		subscribeWithSelector((set, _get) => ({

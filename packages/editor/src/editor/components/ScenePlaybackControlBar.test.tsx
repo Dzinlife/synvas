@@ -10,6 +10,8 @@ const { timelineState, playbackState, previewState, togglePlayMock } = vi.hoiste
 			currentTime: 120,
 			previewTime: null as number | null,
 			fps: 30,
+			elements: [],
+			canvasSize: { width: 1920, height: 1080 },
 		},
 		playbackState: {
 			isPlaying: false,
@@ -37,7 +39,7 @@ vi.mock("@/editor/contexts/TimelineContext", () => {
 	) =>
 		selector(
 			timelineState,
-		)) as typeof import("@/editor/contexts/TimelineContext").useTimelineStore;
+		)) as unknown as typeof import("@/editor/contexts/TimelineContext").useTimelineStore;
 	return {
 		usePlaybackControl: () => ({
 			isPlaying: playbackState.isPlaying,
@@ -61,6 +63,17 @@ vi.mock("@/dsl/export", () => ({
 	exportCanvasAsImage: vi.fn(async () => {}),
 }));
 
+vi.mock("@/editor/exportVideo", () => ({
+	exportTimelineAsVideo: vi.fn(async () => {}),
+}));
+
+vi.mock("@/editor/runtime/EditorRuntimeProvider", () => ({
+	useEditorRuntime: () =>
+		({
+			id: "test-runtime",
+		}) as unknown,
+}));
+
 afterEach(() => {
 	cleanup();
 });
@@ -69,6 +82,8 @@ beforeEach(() => {
 	timelineState.currentTime = 120;
 	timelineState.previewTime = null;
 	timelineState.fps = 30;
+	timelineState.elements = [];
+	timelineState.canvasSize = { width: 1920, height: 1080 };
 	playbackState.isPlaying = false;
 	previewState.zoomLevel = 1;
 	previewState.pinchState.isPinching = false;

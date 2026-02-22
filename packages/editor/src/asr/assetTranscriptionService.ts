@@ -1,6 +1,6 @@
 import type { TimelineAsset } from "core/dsl/types";
 import { readVideoMetadata } from "@/editor/utils/externalVideo";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import type { TimelineStoreApi } from "@/editor/contexts/TimelineContext";
 import type { AsrClient } from "./AsrContext";
 import { resolveAssetMediaFile } from "./assetMediaFile";
 import { readAudioMetadata } from "./opfsAudio";
@@ -67,6 +67,7 @@ export interface TranscribeAssetByIdOptions {
 	force?: boolean;
 	model?: AsrModelSize;
 	signal: AbortSignal;
+	timelineStore: TimelineStoreApi;
 	onStatus?: (status: AsrJobStatus) => void;
 	onProgress?: (progress: number) => void;
 	onChunk?: (segment: TranscriptSegment) => void;
@@ -88,6 +89,7 @@ export const transcribeAssetById = async (
 		assetId,
 		asrClient,
 		signal,
+		timelineStore,
 		onStatus,
 		onProgress,
 		onChunk,
@@ -96,7 +98,7 @@ export const transcribeAssetById = async (
 	const force = options.force === true;
 	const model = options.model ?? resolveDefaultModel();
 
-	const asset = useTimelineStore.getState().getAssetById(assetId);
+	const asset = timelineStore.getState().getAssetById(assetId);
 	if (!asset) {
 		throw new Error(`未找到 asset: ${assetId}`);
 	}
@@ -139,7 +141,7 @@ export const transcribeAssetById = async (
 	const writeRecord = (segments: TranscriptSegment[]) => {
 		latestSegments = segments;
 		const updatedAt = Date.now();
-		useTimelineStore.getState().updateAssetMeta(
+		timelineStore.getState().updateAssetMeta(
 			assetId,
 			(prevData) => ({
 				...(prevData ?? {}),
@@ -191,7 +193,7 @@ export const transcribeAssetById = async (
 
 		onStatus?.("done");
 		const currentRecord =
-			useTimelineStore.getState().getAssetById(assetId)?.meta?.asr ?? null;
+			timelineStore.getState().getAssetById(assetId)?.meta?.asr ?? null;
 		return {
 			status: "done",
 			changed,
@@ -206,9 +208,7 @@ export const transcribeAssetById = async (
 	} catch (error) {
 		if (signal.aborted) {
 			onStatus?.("canceled");
-			const currentRecord = useTimelineStore
-				.getState()
-				.getAssetById(assetId)?.meta?.asr ?? null;
+			const currentRecord = timelineStore.getState().getAssetById(assetId)?.meta?.asr ?? null;
 			return {
 				status: "canceled",
 				changed,

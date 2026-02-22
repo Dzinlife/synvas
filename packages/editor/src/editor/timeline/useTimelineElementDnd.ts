@@ -9,6 +9,7 @@ import {
 	insertElementsIntoMainTrackGroup,
 } from "core/editor/utils/mainTrackMagnet";
 import { useCallback, useMemo, useRef } from "react";
+import { useTimelineStoreApi } from "../runtime/EditorRuntimeProvider";
 import {
 	type DragGhostState,
 	useTimelineStore,
@@ -356,6 +357,7 @@ export const useTimelineElementDnd = ({
 	elementRef,
 	transitionDuration,
 }: UseTimelineElementDndOptions) => {
+	const timelineStore = useTimelineStoreApi();
 	const dragRefs = useRef<DragRefs>({
 		initialStart: 0,
 		initialEnd: 0,
@@ -1088,7 +1090,7 @@ export const useTimelineElementDnd = ({
 	const bindBodyDrag = useDrag(
 		({ movement: [mx, my], first, last, event, tap, xy }) => {
 			if (tap) return;
-			const currentScrollLeft = useTimelineStore.getState().scrollLeft;
+			const currentScrollLeft = timelineStore.getState().scrollLeft;
 			const maxStoredTrack = Math.max(
 				0,
 				...elements.map((el) => el.timeline.trackIndex ?? 0),

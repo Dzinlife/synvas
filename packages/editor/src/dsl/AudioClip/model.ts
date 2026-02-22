@@ -9,7 +9,7 @@ import {
 	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
 } from "@/editor/audio/audioPlayback";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import { getAudioPlaybackSessionKey } from "@/editor/playback/clipContinuityIndex";
 import { isTimelineTrackAudible } from "@/editor/utils/trackAudibility";
 import { secondsToFrames } from "@/utils/timecode";
@@ -47,7 +47,9 @@ const normalizeOffsetFrames = (offset?: number): number => {
 export function createAudioClipModel(
 	id: string,
 	initialProps: AudioClipProps,
+	runtime: EditorRuntime,
 ): ComponentModelStore<AudioClipProps, AudioClipInternal> {
+	const timelineStore = runtime.timelineStore;
 	let initEpoch = 0;
 
 	let assetHandle: AssetHandle<AudioAsset> | null = null;
@@ -55,13 +57,13 @@ export function createAudioClipModel(
 	let audioPlayback: AudioPlaybackController | null = null;
 
 	const getTimelineFps = () => {
-		const fps = useTimelineStore.getState().fps;
+		const fps = timelineStore.getState().fps;
 		if (!Number.isFinite(fps) || fps <= 0) return DEFAULT_FPS;
 		return Math.round(fps);
 	};
 
 	const getTimeline = () => {
-		return useTimelineStore.getState().getElementById(id)?.timeline;
+		return timelineStore.getState().getElementById(id)?.timeline;
 	};
 
 	const getTimelineOffsetFrames = (): number => {
@@ -220,7 +222,7 @@ export function createAudioClipModel(
 					}));
 
 					if (!unsubscribeTimelineOffset) {
-						unsubscribeTimelineOffset = useTimelineStore.subscribe(
+						unsubscribeTimelineOffset = timelineStore.subscribe(
 							(state) => state.getElementById(id)?.timeline?.offset ?? 0,
 							() => {
 								const duration = assetHandle?.asset.duration ?? 0;
@@ -280,13 +282,13 @@ export function createAudioClipModel(
 		getTimeline,
 		getFps: getTimelineFps,
 		getState: getAudioPlaybackState,
-		getSeekEpoch: () => useTimelineStore.getState().seekEpoch,
+		getSeekEpoch: () => timelineStore.getState().seekEpoch,
 		getRuntimeKey: () => {
-			const timelineState = useTimelineStore.getState();
-			return getAudioPlaybackSessionKey(timelineState.elements, id);
+			const timelineState = timelineStore.getState();
+			return `${runtime.id}:${getAudioPlaybackSessionKey(timelineState.elements, id)}`;
 		},
 		isPlaybackEnabled: () => {
-			const timelineState = useTimelineStore.getState();
+			const timelineState = timelineStore.getState();
 			return isTimelineTrackAudible(
 				timelineState.getElementById(id)?.timeline,
 				timelineState.tracks,

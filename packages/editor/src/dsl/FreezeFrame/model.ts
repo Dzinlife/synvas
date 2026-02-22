@@ -4,7 +4,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import type { AssetHandle } from "@/dsl/assets/AssetStore";
 import { acquireVideoAsset, type VideoAsset } from "@/dsl/assets/videoAsset";
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import { framesToSeconds } from "@/utils/timecode";
 import type {
 	ComponentModel,
@@ -87,7 +87,9 @@ export const decodeFrameAtTime = async (
 export function createFreezeFrameModel(
 	id: string,
 	initialProps: FreezeFrameProps,
+	runtime: EditorRuntime,
 ): ComponentModelStore<FreezeFrameProps, FreezeFrameInternal> {
+	const timelineStore = runtime.timelineStore;
 	let initEpoch = 0;
 	let assetHandle: AssetHandle<VideoAsset> | null = null;
 	let pinnedFrame: SkImage | null = null;
@@ -191,7 +193,7 @@ export function createFreezeFrameModel(
 					assetHandle?.release();
 					assetHandle = localHandle;
 
-					const fps = normalizeFps(useTimelineStore.getState().fps);
+					const fps = normalizeFps(timelineStore.getState().fps);
 					const sourceTime = resolveSourceTime(get().props, fps);
 					const alignedSourceTime = alignSourceTime(sourceTime, fps);
 					const cached = localHandle.asset.getCachedFrame(alignedSourceTime);

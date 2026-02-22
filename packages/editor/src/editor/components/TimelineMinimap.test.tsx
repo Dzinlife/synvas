@@ -8,7 +8,10 @@ import {
 } from "@testing-library/react";
 import type { TimelineElement } from "core/dsl/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useTimelineStore } from "../contexts/TimelineContext";
+import {
+	createEditorRuntimeWrapper,
+	createTestEditorRuntime,
+} from "../runtime/testUtils";
 import { getPixelsPerFrame } from "../utils/timelineScale";
 import {
 	MAX_TIMELINE_SCALE,
@@ -43,12 +46,15 @@ const createElement = ({
 	props: {},
 });
 
-const initialState = useTimelineStore.getState();
+const runtime = createTestEditorRuntime("timeline-minimap-test");
+const timelineStore = runtime.timelineStore;
+const wrapper = createEditorRuntimeWrapper(runtime);
+const initialState = timelineStore.getState();
 const FPS = 30;
 const TIMELINE_PADDING_LEFT = 48;
 
 const resolveVisibleRange = () => {
-	const state = useTimelineStore.getState();
+	const state = timelineStore.getState();
 	const ratio = getPixelsPerFrame(FPS, state.timelineScale);
 	const visibleFrameCount =
 		ratio > 0 ? state.timelineViewportWidth / ratio : 0;
@@ -86,7 +92,7 @@ describe("TimelineMinimap", () => {
 					toJSON: () => ({}),
 				}) as DOMRect,
 		);
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [
 				createElement({
 					id: "video-1",
@@ -114,11 +120,11 @@ describe("TimelineMinimap", () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
-		useTimelineStore.setState(initialState, true);
+		timelineStore.setState(initialState, true);
 	});
 
 	it("点击 minimap 空白区域会跳转 viewport 且不影响 currentTime", () => {
-		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />);
+		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />, { wrapper });
 
 		const minimap = screen.getByLabelText("timeline minimap");
 		fireEvent.pointerDown(minimap, { button: 0, clientX: 100, pointerId: 1 });
@@ -128,15 +134,15 @@ describe("TimelineMinimap", () => {
 		const expectedStartFrame = 180 - visibleFrameCount / 2;
 		const expectedScrollLeft = expectedStartFrame * ratio + TIMELINE_PADDING_LEFT;
 
-		expect(useTimelineStore.getState().scrollLeft).toBeCloseTo(
+		expect(timelineStore.getState().scrollLeft).toBeCloseTo(
 			expectedScrollLeft,
 		);
-		expect(useTimelineStore.getState().currentTime).toBe(88);
+		expect(timelineStore.getState().currentTime).toBe(88);
 	});
 
 	it("拖动 viewport 会连续更新 scrollLeft", () => {
-		useTimelineStore.setState({ scrollLeft: 100 });
-		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />);
+		timelineStore.setState({ scrollLeft: 100 });
+		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />, { wrapper });
 
 		const minimap = screen.getByLabelText("timeline minimap");
 		const viewport = minimap.querySelector('[data-minimap-viewport="true"]');
@@ -150,24 +156,24 @@ describe("TimelineMinimap", () => {
 		fireEvent.pointerMove(minimap, { clientX: 120, pointerId: 2 });
 		fireEvent.pointerUp(minimap, { pointerId: 2 });
 
-		expect(useTimelineStore.getState().scrollLeft).toBeGreaterThan(100);
+		expect(timelineStore.getState().scrollLeft).toBeGreaterThan(100);
 	});
 
 	it("拖拽/点击时会正确 clamp 到边界", () => {
-		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />);
+		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />, { wrapper });
 		const minimap = screen.getByLabelText("timeline minimap");
 		fireEvent.pointerDown(minimap, { button: 0, clientX: 500, pointerId: 3 });
 
 		const maxScrollLeft = 528;
-		expect(useTimelineStore.getState().scrollLeft).toBeCloseTo(maxScrollLeft);
+		expect(timelineStore.getState().scrollLeft).toBeCloseTo(maxScrollLeft);
 	});
 
 	it("无元素时仍可渲染且不会抛错", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			elements: [],
 			scrollLeft: 0,
 		});
-		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />);
+		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />, { wrapper });
 		expect(screen.getByLabelText("timeline minimap")).toBeTruthy();
 		expect(
 			screen
@@ -180,7 +186,7 @@ describe("TimelineMinimap", () => {
 	});
 
 	it("缩放变化时 viewport 宽度会按比例变化", () => {
-		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />);
+		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />, { wrapper });
 		const minimap = screen.getByLabelText("timeline minimap");
 		const viewport = minimap.querySelector('[data-minimap-viewport="true"]');
 		expect(viewport).not.toBeNull();
@@ -189,19 +195,19 @@ describe("TimelineMinimap", () => {
 			(viewport as HTMLElement).style.width,
 		);
 		act(() => {
-			useTimelineStore.setState({ timelineScale: 2 });
+			timelineStore.setState({ timelineScale: 2 });
 		});
 		const afterWidth = Number.parseFloat((viewport as HTMLElement).style.width);
 		expect(afterWidth).toBeLessThan(beforeWidth);
 	});
 
 	it("左手柄拖拽会改变缩放并保持右边界帧稳定", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			scrollLeft: 100,
 			timelineScale: 1,
 			timelineMaxScrollLeft: 10_000,
 		});
-		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />);
+		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />, { wrapper });
 		const minimap = screen.getByLabelText("timeline minimap");
 		const leftHandle = minimap.querySelector(
 			'[data-minimap-resize-handle="left"]',
@@ -218,17 +224,17 @@ describe("TimelineMinimap", () => {
 		fireEvent.pointerUp(minimap, { pointerId: 10 });
 
 		const after = resolveVisibleRange();
-		expect(useTimelineStore.getState().timelineScale).toBeGreaterThan(1);
+		expect(timelineStore.getState().timelineScale).toBeGreaterThan(1);
 		expect(after.endFrame).toBeCloseTo(before.endFrame, 1);
 	});
 
 	it("右手柄拖拽会改变缩放并保持左边界帧稳定", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			scrollLeft: 100,
 			timelineScale: 1,
 			timelineMaxScrollLeft: 10_000,
 		});
-		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />);
+		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />, { wrapper });
 		const minimap = screen.getByLabelText("timeline minimap");
 		const rightHandle = minimap.querySelector(
 			'[data-minimap-resize-handle="right"]',
@@ -245,16 +251,16 @@ describe("TimelineMinimap", () => {
 		fireEvent.pointerUp(minimap, { pointerId: 11 });
 
 		const after = resolveVisibleRange();
-		expect(useTimelineStore.getState().timelineScale).toBeGreaterThan(1);
+		expect(timelineStore.getState().timelineScale).toBeGreaterThan(1);
 		expect(after.startFrame).toBeCloseTo(before.startFrame, 1);
 	});
 
 	it("手柄缩放会被最小/最大缩放范围 clamp", () => {
-		useTimelineStore.setState({
+		timelineStore.setState({
 			scrollLeft: 120,
 			timelineScale: 1,
 		});
-		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />);
+		render(<TimelineMinimap fps={FPS} timelinePaddingLeft={TIMELINE_PADDING_LEFT} />, { wrapper });
 		const minimap = screen.getByLabelText("timeline minimap");
 		const leftHandle = minimap.querySelector(
 			'[data-minimap-resize-handle="left"]',
@@ -272,7 +278,7 @@ describe("TimelineMinimap", () => {
 		});
 		fireEvent.pointerMove(minimap, { clientX: 500, pointerId: 12 });
 		fireEvent.pointerUp(minimap, { pointerId: 12 });
-		expect(useTimelineStore.getState().timelineScale).toBeLessThanOrEqual(
+		expect(timelineStore.getState().timelineScale).toBeLessThanOrEqual(
 			MAX_TIMELINE_SCALE,
 		);
 
@@ -283,10 +289,10 @@ describe("TimelineMinimap", () => {
 		});
 		fireEvent.pointerMove(minimap, { clientX: 5000, pointerId: 13 });
 		fireEvent.pointerUp(minimap, { pointerId: 13 });
-		expect(useTimelineStore.getState().timelineScale).toBeGreaterThanOrEqual(
+		expect(timelineStore.getState().timelineScale).toBeGreaterThanOrEqual(
 			MIN_TIMELINE_SCALE,
 		);
-		expect(useTimelineStore.getState().timelineScale).toBeLessThanOrEqual(
+		expect(timelineStore.getState().timelineScale).toBeLessThanOrEqual(
 			MAX_TIMELINE_SCALE,
 		);
 	});

@@ -21,6 +21,7 @@ import {
 	usePlaybackControl,
 	useTimelineStore,
 } from "@/editor/contexts/TimelineContext";
+import { useEditorRuntime } from "@/editor/runtime/EditorRuntimeProvider";
 import { cn } from "@/lib/utils";
 import { useStudioStore } from "@/studio/studioStore";
 import { framesToTimecode } from "@/utils/timecode";
@@ -41,6 +42,7 @@ const BAR_PRESENCE_TRANSITION: Transition = {
 };
 
 const PreviewControlBarComponent: React.FC = () => {
+	const runtime = useEditorRuntime();
 	const { isPlaying, togglePlay } = usePlaybackControl();
 	const currentTime = useTimelineStore((state) => state.currentTime);
 	const previewTime = useTimelineStore((state) => state.previewTime);
@@ -80,11 +82,12 @@ const PreviewControlBarComponent: React.FC = () => {
 			await exportCanvasAsImage(canvasRef.current, {
 				format: "png",
 				waitForReady: true,
+				runtime,
 			});
 		} finally {
 			setIsExportingFrame(false);
 		}
-	}, [activeMainView, canvasRef, isExportingFrame]);
+	}, [activeMainView, canvasRef, isExportingFrame, runtime]);
 
 	const displayTime = previewTime ?? currentTime;
 	const previewTimecode = useMemo(() => {
