@@ -10,6 +10,12 @@ import { useTimelineRuntimeRegistryBridge } from "@/studio/scene/useTimelineRunt
 import { useStudioHotkeys } from "@/studio/useStudioHotkeys";
 import PreviewProvider from "./contexts/PreviewProvider";
 import { TimelineProvider } from "./contexts/TimelineContext";
+import {
+	EditorRuntimeProvider,
+	useEditorRuntime,
+} from "./runtime/EditorRuntimeProvider";
+import { createScopedStudioRuntime } from "./runtime/createScopedStudioRuntime";
+import type { EditorRuntime, StudioRuntimeManager } from "./runtime/types";
 import ViewportHost from "./ViewportHost";
 
 // 导入所有组件以触发注册
@@ -41,9 +47,14 @@ const EditorContent: React.FC = () => {
 };
 
 const Editor = () => {
+	const runtimeManager = useEditorRuntime() as EditorRuntime &
+		StudioRuntimeManager;
 	const status = useProjectStore((state) => state.status);
 	const currentProjectData = useProjectStore(
 		(state) => state.currentProjectData,
+	);
+	const activeSceneId = useProjectStore(
+		(state) => state.currentProject?.ui.activeSceneId ?? null,
 	);
 	const initialize = useProjectStore((state) => state.initialize);
 
@@ -52,6 +63,14 @@ const Editor = () => {
 	}, [initialize]);
 
 	const queryClient = useMemo(() => new QueryClient(), []);
+	const scopedRuntime = useMemo(
+		() =>
+			createScopedStudioRuntime({
+				runtimeManager,
+				activeSceneId,
+			}),
+		[activeSceneId, runtimeManager],
+	);
 
 	if (status !== "ready" || !currentProjectData) {
 		return <div>Loading timeline...</div>;
@@ -61,13 +80,15 @@ const Editor = () => {
 		<QueryClientProvider client={queryClient}>
 			<TooltipProvider>
 				<Toaster />
-				<TimelineProvider>
-					<ModelManager>
-						<PreviewProvider>
-							<EditorContent />
-						</PreviewProvider>
-					</ModelManager>
-				</TimelineProvider>
+				<EditorRuntimeProvider runtime={scopedRuntime}>
+					<TimelineProvider>
+						<ModelManager>
+							<PreviewProvider>
+								<EditorContent />
+							</PreviewProvider>
+						</ModelManager>
+					</TimelineProvider>
+				</EditorRuntimeProvider>
 			</TooltipProvider>
 		</QueryClientProvider>
 	);

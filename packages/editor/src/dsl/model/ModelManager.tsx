@@ -199,23 +199,23 @@ export const TimelineAudioMixBridge: React.FC = () => {
 				.find((runtime) => runtime.id === ownerRuntimeId) ?? null
 		);
 	}, [ownerRuntimeId, runtimeManager]);
+	const scopedRuntime = useMemo<EditorRuntime | null>(() => {
+		if (!ownerRuntime) return null;
+		return {
+			id: `${rootRuntime.id}:${ownerRuntime.id}:audio-mix`,
+			timelineStore: ownerRuntime.timelineStore,
+			modelRegistry: ownerRuntime.modelRegistry,
+		};
+	}, [ownerRuntime, rootRuntime.id]);
 
-	if (!ownerRuntime) return null;
-	if (activeRuntime && activeRuntime.id === ownerRuntime.id) {
-		return <TimelineAudioMixManager />;
-	}
-
-	const scopedRuntime: EditorRuntime = {
-		id: `${rootRuntime.id}:${ownerRuntime.id}:audio-mix`,
-		timelineStore: ownerRuntime.timelineStore,
-		modelRegistry: ownerRuntime.modelRegistry,
-	};
+	if (!ownerRuntime || !scopedRuntime) return null;
+	const shouldDriveOwnerPlaybackClock =
+		!activeRuntime || activeRuntime.id !== ownerRuntime.id;
 
 	return (
 		<EditorRuntimeProvider runtime={scopedRuntime}>
-			<TimelineProvider>
-				<TimelineAudioMixManager />
-			</TimelineProvider>
+			<TimelineAudioMixManager />
+			{shouldDriveOwnerPlaybackClock ? <TimelineProvider>{null}</TimelineProvider> : null}
 		</EditorRuntimeProvider>
 	);
 };
