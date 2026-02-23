@@ -1,69 +1,17 @@
 // @vitest-environment jsdom
-import {
-	act,
-	cleanup,
-	fireEvent,
-	render,
-	screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { StudioProject } from "core/studio/types";
-import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import CanvasWorkspace from "./CanvasWorkspace";
 
-const stageMockState = vi.hoisted(() => ({
-	props: null as Record<string, unknown> | null,
-	togglePlaybackMock: vi.fn(),
-}));
+const togglePlaybackMock = vi.fn();
 
-const motionMockState = vi.hoisted(() => ({
-	animations: [] as Array<{
-		onUpdate?: (latest: number) => void;
-		onComplete?: () => void;
-		stop: ReturnType<typeof vi.fn>;
-	}>,
-}));
-
-vi.mock("motion", () => ({
-	animate: (
-		_from: number,
-		_to: number,
-		options?: {
-			onUpdate?: (latest: number) => void;
-			onComplete?: () => void;
-		},
-	) => {
-		const stop = vi.fn();
-		motionMockState.animations.push({
-			onUpdate: options?.onUpdate,
-			onComplete: options?.onComplete,
-			stop,
-		});
-		return { stop };
-	},
-}));
-
-vi.mock("react-konva", () => ({
-	Stage: ({ children, ...props }: Record<string, unknown>) => {
-		stageMockState.props = props;
-		return <div>{children as ReactNode}</div>;
-	},
-	Layer: ({ children }: Record<string, unknown>) => (
-		<div>{children as ReactNode}</div>
-	),
-	Rect: ({ children, onClick, className }: Record<string, unknown>) => (
-		<button
-			type="button"
-			data-testid={String(className ?? "rect")}
-			onClick={onClick as () => void}
-		>
-			{children as ReactNode}
-		</button>
-	),
-	Text: ({ text }: { text: string }) => <span>{text}</span>,
-	Line: () => <span />,
-	Transformer: () => <span data-testid="transformer" />,
+vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
+	usePlaybackOwnerController: () => ({
+		togglePlayback: togglePlaybackMock,
+		isOwnerPlaying: () => false,
+	}),
 }));
 
 vi.mock("./InfiniteSkiaCanvas", () => ({
@@ -77,32 +25,135 @@ vi.mock("./FocusSceneKonvaLayer", () => ({
 vi.mock("@/editor/components/SceneTimelineDrawer", () => ({
 	SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT: 320,
 	default: ({ onExitFocus }: { onExitFocus: () => void }) => (
-		<button
-			type="button"
-			onClick={onExitFocus}
-			data-testid="scene-timeline-drawer"
-		>
+		<button type="button" data-testid="scene-timeline-drawer" onClick={onExitFocus}>
 			drawer
 		</button>
 	),
 }));
 
 vi.mock("@/editor/MaterialLibrary", () => ({
-	default: () => (
-		<div data-testid="material-library-content">material-library</div>
-	),
+	default: () => <div data-testid="material-library-content" />,
 }));
 
-vi.mock("@/editor/runtime/EditorRuntimeProvider", () => ({
-	useTimelineStoreApi: () => null,
-}));
-
-vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
-	usePlaybackOwnerController: () => ({
-		togglePlayback: stageMockState.togglePlaybackMock,
-		isOwnerPlaying: () => false,
-	}),
-}));
+vi.mock("@/studio/canvas/node-system/registry", () => {
+	const SceneRenderer = ({ node, onTogglePreview }: { node: { id: string }; onTogglePreview: () => void }) => (
+		<div>
+			<div>scene-{node.id}</div>
+			<button
+				type="button"
+				data-testid={`scene-preview-toggle-${node.id}`}
+				onClick={(event) => {
+					event.stopPropagation();
+					onTogglePreview();
+				}}
+			>
+				preview
+			</button>
+		</div>
+	);
+	const GenericRenderer = ({ node }: { node: { id: string; type: string } }) => (
+		<div>{node.type}-{node.id}</div>
+	);
+	const createToolbar = (type: string) => () => <div data-testid={`node-toolbar-${type}`} />;
+	const definitions = {
+		scene: {
+			type: "scene",
+			title: "Scene",
+			create: () => ({ type: "scene" }),
+			renderer: SceneRenderer,
+			toolbar: createToolbar("scene"),
+		},
+		video: {
+			type: "video",
+			title: "Video",
+			create: () => ({ type: "video" }),
+			renderer: GenericRenderer,
+			toolbar: createToolbar("video"),
+			fromExternalFile: async (
+				file: File,
+				context: {
+					ensureProjectAssetByUri: (input: {
+						uri: string;
+						kind: "video" | "audio" | "image";
+						name?: string;
+					}) => string;
+				},
+			) => {
+				if (!file.type.startsWith("video/")) return null;
+				const uri = `file://${file.name}`;
+				const assetId = context.ensureProjectAssetByUri({
+					uri,
+					kind: "video",
+					name: file.name,
+				});
+				return { type: "video", assetId, name: file.name, width: 200, height: 120 };
+			},
+		},
+		audio: {
+			type: "audio",
+			title: "Audio",
+			create: () => ({ type: "audio" }),
+			renderer: GenericRenderer,
+			toolbar: createToolbar("audio"),
+			fromExternalFile: async (
+				file: File,
+				context: {
+					ensureProjectAssetByUri: (input: {
+						uri: string;
+						kind: "video" | "audio" | "image";
+						name?: string;
+					}) => string;
+				},
+			) => {
+				if (!file.type.startsWith("audio/")) return null;
+				const uri = `file://${file.name}`;
+				const assetId = context.ensureProjectAssetByUri({
+					uri,
+					kind: "audio",
+					name: file.name,
+				});
+				return { type: "audio", assetId, name: file.name, width: 180, height: 80 };
+			},
+		},
+		image: {
+			type: "image",
+			title: "Image",
+			create: () => ({ type: "image" }),
+			renderer: GenericRenderer,
+			toolbar: createToolbar("image"),
+			fromExternalFile: async (
+				file: File,
+				context: {
+					ensureProjectAssetByUri: (input: {
+						uri: string;
+						kind: "video" | "audio" | "image";
+						name?: string;
+					}) => string;
+				},
+			) => {
+				if (!file.type.startsWith("image/")) return null;
+				const uri = `file://${file.name}`;
+				const assetId = context.ensureProjectAssetByUri({
+					uri,
+					kind: "image",
+					name: file.name,
+				});
+				return { type: "image", assetId, name: file.name, width: 240, height: 140 };
+			},
+		},
+		text: {
+			type: "text",
+			title: "Text",
+			create: () => ({ type: "text", text: "新建文本", name: "Text" }),
+			renderer: GenericRenderer,
+			toolbar: createToolbar("text"),
+		},
+	};
+	return {
+		canvasNodeDefinitionList: Object.values(definitions),
+		getCanvasNodeDefinition: (type: keyof typeof definitions) => definitions[type],
+	};
+});
 
 const mockDOMRect = {
 	x: 0,
@@ -123,10 +174,18 @@ vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
 const createProject = (): StudioProject => ({
 	id: "project-1",
 	revision: 0,
+	assets: [
+		{
+			id: "asset-scene",
+			uri: "file:///scene.png",
+			kind: "image",
+			name: "scene.png",
+		},
+	],
 	canvas: {
 		nodes: [
 			{
-				id: "node-1",
+				id: "node-scene-1",
 				type: "scene",
 				sceneId: "scene-1",
 				name: "Scene 1",
@@ -141,14 +200,14 @@ const createProject = (): StudioProject => ({
 				updatedAt: 1,
 			},
 			{
-				id: "node-2",
-				type: "scene",
-				sceneId: "scene-2",
-				name: "Scene 2",
-				x: 100,
-				y: 100,
-				width: 960,
-				height: 540,
+				id: "node-video-1",
+				type: "video",
+				assetId: "asset-scene",
+				name: "Video 1",
+				x: 240,
+				y: 120,
+				width: 320,
+				height: 180,
 				zIndex: 1,
 				locked: false,
 				hidden: false,
@@ -188,41 +247,6 @@ const createProject = (): StudioProject => ({
 					},
 				},
 				tracks: [],
-				assets: [],
-				elements: [],
-			},
-		},
-		"scene-2": {
-			id: "scene-2",
-			name: "Scene 2",
-			posterFrame: 0,
-			createdAt: 1,
-			updatedAt: 1,
-			timeline: {
-				fps: 30,
-				canvas: { width: 1920, height: 1080 },
-				settings: {
-					snapEnabled: true,
-					autoAttach: true,
-					rippleEditingEnabled: false,
-					previewAxisEnabled: true,
-					audio: {
-						exportSampleRate: 48000,
-						exportBlockSize: 512,
-						masterGainDb: 0,
-						compressor: {
-							enabled: true,
-							thresholdDb: -12,
-							ratio: 4,
-							kneeDb: 6,
-							attackMs: 10,
-							releaseMs: 80,
-							makeupGainDb: 0,
-						},
-					},
-				},
-				tracks: [],
-				assets: [],
 				elements: [],
 			},
 		},
@@ -230,6 +254,7 @@ const createProject = (): StudioProject => ({
 	ui: {
 		activeSceneId: "scene-1",
 		focusedSceneId: null,
+		activeNodeId: "node-scene-1",
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,
@@ -237,8 +262,7 @@ const createProject = (): StudioProject => ({
 });
 
 beforeEach(() => {
-	stageMockState.togglePlaybackMock.mockReset();
-	motionMockState.animations.length = 0;
+	togglePlaybackMock.mockReset();
 	useProjectStore.setState({
 		status: "ready",
 		projects: [],
@@ -255,244 +279,99 @@ afterEach(() => {
 });
 
 describe("CanvasWorkspace", () => {
-	const getLatestCameraAnimation = () => {
-		const latest =
-			motionMockState.animations[motionMockState.animations.length - 1];
-		expect(latest).toBeTruthy();
-		if (!latest) {
-			throw new Error("Expected latest camera animation");
-		}
-		return latest;
-	};
-
-	const finishLatestCameraAnimation = () => {
-		const animation = getLatestCameraAnimation();
-		act(() => {
-			animation.onUpdate?.(1);
-			animation.onComplete?.();
-		});
-	};
-
-	const triggerStageWheel = (
-		wheelEvent: WheelEvent,
-		pointer = { x: 0, y: 0 },
-	) => {
-		const onWheel = stageMockState.props?.onWheel as
-			| ((event: {
-					evt: WheelEvent;
-					target: {
-						getStage: () => {
-							getPointerPosition: () => { x: number; y: number };
-						};
-					};
-			  }) => void)
-			| undefined;
-		expect(onWheel).toBeTypeOf("function");
-		onWheel?.({
-			evt: wheelEvent,
-			target: {
-				getStage: () => ({
-					getPointerPosition: () => pointer,
-				}),
-			},
-		});
-	};
-
-	it("canvas 模式渲染 scene 节点", () => {
+	it("active node 切换会更新顶部 toolbar", () => {
 		render(<CanvasWorkspace />);
-		expect(screen.getByTestId("infinite-skia-canvas")).toBeTruthy();
-		expect(screen.getByText(/Scene 1/)).toBeTruthy();
-		expect(screen.getByText(/Scene 2/)).toBeTruthy();
-	});
+		expect(screen.getByTestId("node-toolbar-scene")).toBeTruthy();
 
-	it("点击节点进入 focus 并显示 timeline drawer", () => {
-		render(<CanvasWorkspace />);
-		const firstNode = screen.getAllByTestId("scene-node-node-1")[0];
-		expect(firstNode).toBeTruthy();
-		if (!firstNode) return;
-		fireEvent.click(firstNode);
-		expect(screen.getByTestId("scene-timeline-drawer")).toBeTruthy();
-		expect(screen.getByTestId("focus-material-library")).toBeTruthy();
-		expect(screen.getByTestId("material-library-content")).toBeTruthy();
-		expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
-		expect(motionMockState.animations.length).toBeGreaterThan(0);
-	});
-
-	it("非 focus 状态下可触发节点快速预览", () => {
-		render(<CanvasWorkspace />);
-		const previewToggle = screen.getAllByTestId(
-			"scene-preview-toggle-node-1",
-		)[0];
-		expect(previewToggle).toBeTruthy();
-		if (!previewToggle) return;
-		fireEvent.click(previewToggle);
-		expect(stageMockState.togglePlaybackMock).toHaveBeenCalledTimes(1);
-		expect(stageMockState.togglePlaybackMock).toHaveBeenCalledWith({
-			kind: "scene",
-			sceneId: "scene-1",
-		});
-	});
-
-	it("focus 状态禁用其他节点交互", () => {
-		render(<CanvasWorkspace />);
-		const node1 = screen.getAllByTestId("scene-node-node-1")[0];
-		expect(node1).toBeTruthy();
-		if (!node1) return;
-		fireEvent.click(node1);
-		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
-			"scene-1",
+		fireEvent.click(screen.getByTestId("canvas-node-node-video-1"));
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-video-1",
 		);
+		expect(screen.getByTestId("node-toolbar-video")).toBeTruthy();
+	});
 
-		const node2 = screen.getAllByTestId("scene-node-node-2")[0];
-		expect(node2).toBeTruthy();
-		if (!node2) return;
-		fireEvent.click(node2);
-		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
-			"scene-1",
-		);
+	it("scene 节点可进入 focus，非 scene 仅选中不改 focus", () => {
+		render(<CanvasWorkspace />);
+
+		fireEvent.click(screen.getByTestId("canvas-node-node-video-1"));
+		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBeNull();
 		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
 			"scene-1",
 		);
+
+		fireEvent.click(screen.getByTestId("canvas-node-node-scene-1"));
+		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
+			"scene-1",
+		);
+		expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
 	});
 
-	it("camera 动画期间滚轮不应平移或缩放", () => {
+	it("右键菜单可在画布位置创建 text 节点", async () => {
 		render(<CanvasWorkspace />);
-		const firstNode = screen.getAllByTestId("scene-node-node-1")[0];
-		expect(firstNode).toBeTruthy();
-		if (!firstNode) return;
-		fireEvent.click(firstNode);
-		expect(motionMockState.animations.length).toBeGreaterThan(0);
 
-		triggerStageWheel(new WheelEvent("wheel", { deltaX: 20, deltaY: 30 }));
-		const camera = useProjectStore.getState().currentProject?.ui.camera;
-		expect(camera).toMatchObject({ x: 0, y: 0, zoom: 1 });
+		fireEvent.contextMenu(screen.getByTestId("canvas-workspace"), {
+			clientX: 420,
+			clientY: 260,
+		});
+		fireEvent.click(screen.getByRole("menuitem", { name: "新建文本节点" }));
+
+		await waitFor(() => {
+			const textNode = useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.find((node) => node.type === "text");
+			expect(textNode).toBeTruthy();
+			expect(textNode?.x).toBe(420);
+			expect(textNode?.y).toBe(260);
+		});
 	});
 
-	it("退出 focus 时应仅恢复 zoom 且不回到进入前 x/y", () => {
-		const restoreCamera = { x: 120, y: -60, zoom: 0.72 };
-		const currentState = useProjectStore.getState();
-		const currentProject = currentState.currentProject;
-		expect(currentProject).toBeTruthy();
-		if (!currentProject) return;
-		useProjectStore.setState({
-			currentProject: {
-				...currentProject,
-				ui: {
-					...currentProject.ui,
-					camera: restoreCamera,
-				},
+	it("外部文件 drop 可创建多类型节点并按 4 列网格偏移", async () => {
+		render(<CanvasWorkspace />);
+		const video = new File([new Uint8Array([1])], "drop-video.mp4", {
+			type: "video/mp4",
+		});
+		const audio = new File([new Uint8Array([1])], "drop-audio.mp3", {
+			type: "audio/mpeg",
+		});
+		const image = new File([new Uint8Array([1])], "drop-image.png", {
+			type: "image/png",
+		});
+		fireEvent.drop(screen.getByTestId("canvas-workspace"), {
+			clientX: 100,
+			clientY: 120,
+			dataTransfer: {
+				files: [video, audio, image],
+				items: [],
+				types: ["Files"],
 			},
 		});
 
-		render(<CanvasWorkspace />);
-		const firstNode = screen.getAllByTestId("scene-node-node-1")[0];
-		expect(firstNode).toBeTruthy();
-		if (!firstNode) return;
-		fireEvent.click(firstNode);
-		expect(motionMockState.animations.length).toBe(1);
-		finishLatestCameraAnimation();
-		const cameraBeforeExit =
-			useProjectStore.getState().currentProject?.ui.camera;
-		expect(cameraBeforeExit).toBeTruthy();
-		if (!cameraBeforeExit) return;
-		const viewportCenter = { x: 600, y: 400 };
-		const centerWorldBeforeExit = {
-			x: viewportCenter.x / cameraBeforeExit.zoom - cameraBeforeExit.x,
-			y: viewportCenter.y / cameraBeforeExit.zoom - cameraBeforeExit.y,
-		};
+		await waitFor(() => {
+			const project = useProjectStore.getState().currentProject;
+			const droppedNodes =
+				project?.canvas.nodes.filter((node) =>
+					["video", "audio", "image"].includes(node.type),
+				) ?? [];
+			expect(droppedNodes.length).toBeGreaterThanOrEqual(4);
+		});
 
-		fireEvent.click(screen.getByTestId("scene-timeline-drawer"));
-		expect(motionMockState.animations.length).toBe(2);
-		finishLatestCameraAnimation();
-
-		const camera = useProjectStore.getState().currentProject?.ui.camera;
-		expect(camera?.zoom).toBeCloseTo(restoreCamera.zoom, 4);
-		expect(camera?.x).not.toBeCloseTo(restoreCamera.x, 4);
-		expect(camera?.y).not.toBeCloseTo(restoreCamera.y, 4);
-		if (!camera) return;
-		const centerWorldAfterExit = {
-			x: viewportCenter.x / camera.zoom - camera.x,
-			y: viewportCenter.y / camera.zoom - camera.y,
-		};
-		expect(centerWorldAfterExit.x).toBeCloseTo(centerWorldBeforeExit.x, 4);
-		expect(centerWorldAfterExit.y).toBeCloseTo(centerWorldBeforeExit.y, 4);
-	});
-
-	it("camera 动画完成后滚轮恢复可用", () => {
-		render(<CanvasWorkspace />);
-		const firstNode = screen.getAllByTestId("scene-node-node-1")[0];
-		expect(firstNode).toBeTruthy();
-		if (!firstNode) return;
-		fireEvent.click(firstNode);
-		finishLatestCameraAnimation();
-
-		const beforeWheelCamera =
-			useProjectStore.getState().currentProject?.ui.camera;
-		expect(beforeWheelCamera).toBeTruthy();
-		if (!beforeWheelCamera) return;
-
-		triggerStageWheel(new WheelEvent("wheel", { deltaX: 20, deltaY: 30 }));
-		const camera = useProjectStore.getState().currentProject?.ui.camera;
-		expect(camera?.x).toBeCloseTo(
-			beforeWheelCamera.x - 20 / beforeWheelCamera.zoom,
-			4,
+		const project = useProjectStore.getState().currentProject;
+		const newVideo = project?.canvas.nodes.find(
+			(node) => node.type === "video" && node.id !== "node-video-1",
 		);
-		expect(camera?.y).toBeCloseTo(
-			beforeWheelCamera.y - 30 / beforeWheelCamera.zoom,
-			4,
+		const newAudio = project?.canvas.nodes.find((node) => node.type === "audio");
+		const newImage = project?.canvas.nodes.find((node) => node.type === "image");
+		expect(newVideo).toBeTruthy();
+		expect(newAudio).toBeTruthy();
+		expect(newImage).toBeTruthy();
+		if (!newVideo || !newAudio || !newImage) return;
+		expect(newAudio.x - newVideo.x).toBe(48);
+		expect(newImage.x - newAudio.x).toBe(48);
+		expect(newVideo.y).toBe(newAudio.y);
+		expect(newAudio.y).toBe(newImage.y);
+		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
+			"scene-1",
 		);
-		expect(camera?.zoom).toBeCloseTo(beforeWheelCamera.zoom, 4);
-	});
-
-	it("普通滚轮应平移画布", () => {
-		render(<CanvasWorkspace />);
-		triggerStageWheel(new WheelEvent("wheel", { deltaX: 20, deltaY: 30 }));
-		const camera = useProjectStore.getState().currentProject?.ui.camera;
-		expect(camera).toMatchObject({ x: -20, y: -30, zoom: 1 });
-	});
-
-	it("Ctrl + 滚轮应缩放画布", () => {
-		render(<CanvasWorkspace />);
-		triggerStageWheel(
-			new WheelEvent("wheel", {
-				deltaY: -10,
-				ctrlKey: true,
-			}),
-			{ x: 100, y: 120 },
-		);
-		const camera = useProjectStore.getState().currentProject?.ui.camera;
-		expect(camera?.zoom).toBeCloseTo(1.08, 4);
-		expect(camera?.x).toBeCloseTo(-7.4074, 4);
-		expect(camera?.y).toBeCloseTo(-8.8889, 4);
-	});
-
-	it("Cmd + 滚轮应缩放画布", () => {
-		render(<CanvasWorkspace />);
-		triggerStageWheel(
-			new WheelEvent("wheel", {
-				deltaY: -10,
-				metaKey: true,
-			}),
-			{ x: 100, y: 120 },
-		);
-		const camera = useProjectStore.getState().currentProject?.ui.camera;
-		expect(camera?.zoom).toBeCloseTo(1.08, 4);
-		expect(camera?.x).toBeCloseTo(-7.4074, 4);
-		expect(camera?.y).toBeCloseTo(-8.8889, 4);
-	});
-
-	it("按下空白区域不会触发拖拽平移", () => {
-		render(<CanvasWorkspace />);
-		const stage = {
-			getStage: () => stage,
-		};
-		const onMouseDown = stageMockState.props?.onMouseDown as
-			| ((event: { target: { getStage: () => unknown } }) => void)
-			| undefined;
-		expect(onMouseDown).toBeTypeOf("function");
-		onMouseDown?.({ target: stage });
-		expect(stageMockState.props?.onMouseMove).toBeUndefined();
-		const camera = useProjectStore.getState().currentProject?.ui.camera;
-		expect(camera).toMatchObject({ x: 0, y: 0, zoom: 1 });
+		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBeNull();
 	});
 });

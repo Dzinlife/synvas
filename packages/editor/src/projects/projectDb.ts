@@ -29,7 +29,7 @@ interface ProjectDbSchema extends DBSchema {
 	};
 }
 
-const DB_NAME = "ai-nle";
+const DB_NAME = "ai-nle-v2";
 const DB_VERSION = 1;
 const PROJECT_STORE = "projects";
 const META_STORE = "meta";
@@ -63,7 +63,6 @@ const buildEmptyTimeline = (): TimelineJSON => ({
 		},
 	},
 	tracks: [],
-	assets: [],
 	elements: [],
 });
 
@@ -103,9 +102,11 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 				updatedAt: now,
 			},
 		},
+		assets: [],
 		ui: {
 			activeSceneId: sceneId,
 			focusedSceneId: null,
+			activeNodeId: nodeId,
 			camera: {
 				x: 0,
 				y: 0,

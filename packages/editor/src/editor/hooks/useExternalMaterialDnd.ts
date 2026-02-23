@@ -14,6 +14,7 @@ import { createTransformMeta } from "@/dsl/transform";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { toast } from "@/lib/toast";
 import { useProjectStore } from "@/projects/projectStore";
+import { useProjectAssets } from "@/projects/useProjectAssets";
 import { clampFrame } from "@/utils/timecode";
 import {
 	useAttachments,
@@ -21,7 +22,6 @@ import {
 	useElements,
 	useFps,
 	useRippleEditing,
-	useAssets,
 } from "../contexts/TimelineContext";
 import {
 	resolveMaterialDropTarget,
@@ -184,7 +184,7 @@ export function useExternalMaterialDnd({
 	const { fps } = useFps();
 	const { currentTime } = useCurrentTime();
 	const { setElements } = useElements();
-	const { ensureAssetByUri } = useAssets();
+	const { ensureProjectAssetByUri } = useProjectAssets();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
 	const materialDndContext = useMaterialDndContext();
@@ -628,6 +628,14 @@ export function useExternalMaterialDnd({
 				}
 
 				if (prepared.length === 0) return;
+				const preparedWithAssetIds = prepared.map((item) => ({
+					...item,
+					assetId: ensureProjectAssetByUri({
+						uri: item.uri,
+						kind: "audio",
+						name: item.file.name,
+					}),
+				}));
 
 				const primaryDurationFrames = Math.max(
 					1,
@@ -661,7 +669,7 @@ export function useExternalMaterialDnd({
 					let assignments = getStoredTrackAssignments(prev);
 					const trackCount = getTrackCount(assignments);
 
-					prepared.forEach((item, index) => {
+					preparedWithAssetIds.forEach((item, index) => {
 						const durationFrames = Math.max(1, Math.round(item.duration * fps));
 						const startFrame = nextStart;
 						const endFrame = startFrame + durationFrames;
@@ -701,17 +709,12 @@ export function useExternalMaterialDnd({
 							newId,
 							trackCount,
 						);
-						const assetId = ensureAssetByUri({
-							uri: item.uri,
-							kind: "audio",
-							name: item.file.name,
-						});
 						const newElement: TimelineElementType = {
 							id: newId,
 							type: "AudioClip",
 							component: "audio-clip",
 							name: item.file.name,
-							assetId,
+							assetId: item.assetId,
 							props: {
 								reversed: false,
 							},
@@ -780,6 +783,14 @@ export function useExternalMaterialDnd({
 				}
 
 				if (prepared.length === 0) return;
+				const preparedWithAssetIds = prepared.map((item) => ({
+					...item,
+					assetId: ensureProjectAssetByUri({
+						uri: item.uri,
+						kind: "image",
+						name: item.file.name,
+					}),
+				}));
 
 				const primaryDurationFrames = Math.max(
 					1,
@@ -808,7 +819,7 @@ export function useExternalMaterialDnd({
 						const assignments = getStoredTrackAssignments(prev);
 						let nextTrackCount = getTrackCount(assignments);
 
-						prepared.forEach((item, index) => {
+						preparedWithAssetIds.forEach((item, index) => {
 							const durationFrames = Math.max(
 								1,
 								materialDndContext.defaultDurationFrames,
@@ -826,17 +837,12 @@ export function useExternalMaterialDnd({
 								newId,
 								nextTrackCount,
 							);
-							const assetId = ensureAssetByUri({
-								uri: item.uri,
-								kind: "image",
-								name: item.file.name,
-							});
 							const newElement: TimelineElementType = {
 								id: newId,
 								type: "Image",
 								component: "image",
 								name: item.file.name,
-								assetId,
+								assetId: item.assetId,
 								props: {},
 								transform: createTransformMeta({
 									width: item.width,
@@ -887,7 +893,7 @@ export function useExternalMaterialDnd({
 						trackLockedMap,
 					};
 
-					prepared.forEach((item, index) => {
+					preparedWithAssetIds.forEach((item, index) => {
 						const durationFrames = Math.max(
 							1,
 							materialDndContext.defaultDurationFrames,
@@ -898,18 +904,13 @@ export function useExternalMaterialDnd({
 							targetType === "gap"
 								? Math.max(1, targetTrackIndex)
 								: targetTrackIndex;
-						const assetId = ensureAssetByUri({
-							uri: item.uri,
-							kind: "image",
-							name: item.file.name,
-						});
 
 						const newElement: TimelineElementType = {
 							id: `external-image-${Date.now()}-${index}`,
 							type: "Image",
 							component: "image",
 							name: item.file.name,
-							assetId,
+							assetId: item.assetId,
 							props: {},
 							transform: createTransformMeta({
 								width: item.width,
@@ -1006,6 +1007,14 @@ export function useExternalMaterialDnd({
 			}
 
 			if (prepared.length === 0) return;
+			const preparedWithAssetIds = prepared.map((item) => ({
+				...item,
+				assetId: ensureProjectAssetByUri({
+					uri: item.uri,
+					kind: "video",
+					name: item.file.name,
+				}),
+			}));
 
 			const primaryDurationFrames = Math.max(
 				1,
@@ -1034,7 +1043,7 @@ export function useExternalMaterialDnd({
 					const assignments = getStoredTrackAssignments(prev);
 					let nextTrackCount = getTrackCount(assignments);
 
-					prepared.forEach((item, index) => {
+					preparedWithAssetIds.forEach((item, index) => {
 						const durationFrames = Math.max(
 							1,
 							Math.round(item.metadata.duration * fps),
@@ -1052,17 +1061,12 @@ export function useExternalMaterialDnd({
 							newId,
 							nextTrackCount,
 						);
-						const assetId = ensureAssetByUri({
-							uri: item.uri,
-							kind: "video",
-							name: item.file.name,
-						});
 						const newElement: TimelineElementType = {
 							id: newId,
 							type: "VideoClip",
 							component: "video-clip",
 							name: item.file.name,
-							assetId,
+							assetId: item.assetId,
 							props: {},
 							transform: createTransformMeta({
 								width: item.metadata.width,
@@ -1113,7 +1117,7 @@ export function useExternalMaterialDnd({
 					trackLockedMap,
 				};
 
-				prepared.forEach((item, index) => {
+				preparedWithAssetIds.forEach((item, index) => {
 					const durationFrames = Math.max(
 						1,
 						Math.round(item.metadata.duration * fps),
@@ -1124,18 +1128,13 @@ export function useExternalMaterialDnd({
 						targetType === "gap"
 							? Math.max(1, targetTrackIndex)
 							: targetTrackIndex;
-					const assetId = ensureAssetByUri({
-						uri: item.uri,
-						kind: "video",
-						name: item.file.name,
-					});
 
 					const newElement: TimelineElementType = {
 						id: `external-video-${Date.now()}-${index}`,
 						type: "VideoClip",
 						component: "video-clip",
 						name: item.file.name,
-						assetId,
+						assetId: item.assetId,
 						props: {},
 						transform: createTransformMeta({
 							width: item.metadata.width,
@@ -1217,7 +1216,7 @@ export function useExternalMaterialDnd({
 			attachments,
 			autoAttach,
 			trackLockedMap,
-			ensureAssetByUri,
+			ensureProjectAssetByUri,
 			resolveExternalAudioUri,
 			resolveExternalImageUri,
 			currentProjectId,

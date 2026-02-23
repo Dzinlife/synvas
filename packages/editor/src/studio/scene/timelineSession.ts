@@ -24,7 +24,6 @@ export const applyTimelineJsonToStore = (
 	timelineStore.setState((state) => ({
 		currentTime: clampFrame(state.currentTime),
 		elements,
-		assets: data.assets,
 		tracks,
 		audioTrackStates: {},
 		scrollLeft: 0,
@@ -55,6 +54,5 @@ export const snapshotTimelineFromStore = (
 			previewAxisEnabled: state.previewAxisEnabled,
 			audio: cloneAudioSettings(state.audioSettings),
 		},
-		state.assets,
 	);
 };

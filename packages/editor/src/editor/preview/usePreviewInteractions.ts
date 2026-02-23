@@ -557,7 +557,6 @@ export const usePreviewInteractions = ({
 		const state = timelineStore.getState();
 		return {
 			elements: state.elements,
-			assets: state.assets,
 			tracks: state.tracks,
 			audioTrackStates: state.audioTrackStates,
 			rippleEditingEnabled: state.rippleEditingEnabled,

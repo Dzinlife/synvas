@@ -1,31 +1,40 @@
-import type { SceneNode } from "core/studio/types";
+import type { CanvasNode, SceneNode } from "core/studio/types";
 import type Konva from "konva";
 import { Plus, Search, SearchX } from "lucide-react";
-import { animate } from "motion";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Layer, Line, Rect, Stage, Text, Transformer } from "react-konva";
 import SceneTimelineDrawer, {
 	SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
 } from "@/editor/components/SceneTimelineDrawer";
+import TimelineContextMenu from "@/editor/components/TimelineContextMenu";
 import MaterialLibrary from "@/editor/MaterialLibrary";
-import { useProjectStore } from "@/projects/projectStore";
+import { writeAudioToOpfs } from "@/asr/opfsAudio";
+import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import {
-	type SceneNodeLayoutSnapshot,
+	type CanvasNodeLayoutSnapshot,
 	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
+import { useProjectStore } from "@/projects/projectStore";
+import {
+	canvasNodeDefinitionList,
+	getCanvasNodeDefinition,
+} from "@/studio/canvas/node-system/registry";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { usePlaybackOwnerController } from "@/studio/scene/usePlaybackOwnerController";
+import {
+	resolveExternalVideoUri,
+} from "@/editor/utils/externalVideo";
 import FocusSceneKonvaLayer from "./FocusSceneKonvaLayer";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2;
-const GRID_SIZE = 100;
-const GRID_RANGE = 16000;
-const CAMERA_ANIMATION_DURATION = 0.35;
-const CAMERA_ANIMATION_EASING = "easeInOut";
+const GRID_SIZE = 120;
 const CAMERA_ZOOM_EPSILON = 1e-6;
+const DROP_GRID_COLUMNS = 4;
+const DROP_GRID_OFFSET_X = 48;
+const DROP_GRID_OFFSET_Y = 40;
+const FILE_PREFIX = "file://";
 
 interface CameraState {
 	x: number;
@@ -33,7 +42,33 @@ interface CameraState {
 	zoom: number;
 }
 
-const pickLayout = (node: SceneNode): SceneNodeLayoutSnapshot => ({
+type CanvasContextMenuState =
+	| { open: false }
+	| {
+			open: true;
+			x: number;
+			y: number;
+			worldX: number;
+			worldY: number;
+	  };
+
+interface DragState {
+	nodeId: string;
+	startClientX: number;
+	startClientY: number;
+	startNodeX: number;
+	startNodeY: number;
+	before: CanvasNodeLayoutSnapshot;
+	moved: boolean;
+}
+
+type FileWithPath = File & { path?: string };
+
+const clampZoom = (zoom: number): number => {
+	return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+};
+
+const pickLayout = (node: CanvasNode): CanvasNodeLayoutSnapshot => ({
 	x: node.x,
 	y: node.y,
 	width: node.width,
@@ -44,8 +79,8 @@ const pickLayout = (node: SceneNode): SceneNodeLayoutSnapshot => ({
 });
 
 const isLayoutEqual = (
-	before: SceneNodeLayoutSnapshot,
-	after: SceneNodeLayoutSnapshot,
+	before: CanvasNodeLayoutSnapshot,
+	after: CanvasNodeLayoutSnapshot,
 ): boolean => {
 	return (
 		before.x === after.x &&
@@ -58,56 +93,134 @@ const isLayoutEqual = (
 	);
 };
 
-const clampZoom = (zoom: number): number => {
-	return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+const isSceneNode = (node: CanvasNode): node is SceneNode => {
+	return node.type === "scene";
+};
+
+const buildNodeStyle = (
+	node: CanvasNode,
+	camera: CameraState,
+): React.CSSProperties => {
+	const left = (node.x + camera.x) * camera.zoom;
+	const top = (node.y + camera.y) * camera.zoom;
+	const width = Math.max(1, node.width * camera.zoom);
+	const height = Math.max(1, node.height * camera.zoom);
+	return {
+		left,
+		top,
+		width,
+		height,
+	};
 };
 
 const isCameraAlmostEqual = (
-	left: { x: number; y: number; zoom: number },
-	right: { x: number; y: number; zoom: number },
+	left: CameraState,
+	right: CameraState,
 ): boolean => {
 	return (
 		Math.abs(left.x - right.x) < 0.5 &&
 		Math.abs(left.y - right.y) < 0.5 &&
-		Math.abs(left.zoom - right.zoom) < 0.001
+		Math.abs(left.zoom - right.zoom) < 0.0001
 	);
+};
+
+const isElectronEnv = (): boolean => {
+	return typeof window !== "undefined" && "aiNleElectron" in window;
+};
+
+const getFilePath = (file: File): string | null => {
+	const rawPath = (file as FileWithPath).path;
+	if (typeof rawPath !== "string") return null;
+	const trimmed = rawPath.trim();
+	return trimmed ? trimmed : null;
+};
+
+const getElectronFilePath = (file: File): string | null => {
+	if (typeof window === "undefined") return null;
+	const bridge = (
+		window as Window & {
+			aiNleElectron?: {
+				webUtils?: {
+					getPathForFile?: (file: File) => string | null | undefined;
+				};
+			};
+		}
+	).aiNleElectron;
+	const resolved = bridge?.webUtils?.getPathForFile?.(file);
+	if (typeof resolved !== "string") return null;
+	const trimmed = resolved.trim();
+	return trimmed ? trimmed : null;
+};
+
+const buildFileUrlFromPath = (rawPath: string): string => {
+	if (rawPath.startsWith(FILE_PREFIX)) return rawPath;
+	const normalized = rawPath.replace(/\\/g, "/");
+	let pathPart = normalized;
+	let isUnc = false;
+	if (pathPart.startsWith("//")) {
+		isUnc = true;
+		pathPart = pathPart.slice(2);
+	} else if (/^[a-zA-Z]:\//.test(pathPart)) {
+		pathPart = `/${pathPart}`;
+	} else if (!pathPart.startsWith("/")) {
+		pathPart = `/${pathPart}`;
+	}
+	const encoded = pathPart
+		.split("/")
+		.map((segment) => {
+			if (!segment) return "";
+			if (!isUnc && /^[a-zA-Z]:$/.test(segment)) return segment;
+			return encodeURIComponent(segment);
+		})
+		.join("/");
+	return `${FILE_PREFIX}${encoded}`;
+};
+
+const resolveDroppedFiles = (dataTransfer: DataTransfer | null): File[] => {
+	if (!dataTransfer) return [];
+	if (dataTransfer.files && dataTransfer.files.length > 0) {
+		return Array.from(dataTransfer.files);
+	}
+	if (!dataTransfer.items) return [];
+	return Array.from(dataTransfer.items)
+		.map((item) => (item.kind === "file" ? item.getAsFile() : null))
+		.filter((file): file is File => Boolean(file));
 };
 
 const CanvasWorkspace = () => {
 	const currentProject = useProjectStore((state) => state.currentProject);
-	const createSceneNode = useProjectStore((state) => state.createSceneNode);
-	const updateSceneNodeLayout = useProjectStore(
-		(state) => state.updateSceneNodeLayout,
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
+	const createCanvasNode = useProjectStore((state) => state.createCanvasNode);
+	const updateCanvasNode = useProjectStore((state) => state.updateCanvasNode);
+	const updateCanvasNodeLayout = useProjectStore(
+		(state) => state.updateCanvasNodeLayout,
+	);
+	const ensureProjectAssetByUri = useProjectStore(
+		(state) => state.ensureProjectAssetByUri,
 	);
 	const setFocusedScene = useProjectStore((state) => state.setFocusedScene);
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
+	const setActiveNode = useProjectStore((state) => state.setActiveNode);
 	const setCanvasCamera = useProjectStore((state) => state.setCanvasCamera);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 	const { togglePlayback, isOwnerPlaying } = usePlaybackOwnerController();
 
 	const focusedSceneId = currentProject?.ui.focusedSceneId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
+	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const camera = currentProject?.ui.camera ?? { x: 0, y: 0, zoom: 1 };
 	const isCanvasInteractionLocked = Boolean(focusedSceneId);
 	const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
 	const [focusTimelineDrawerHeight, setFocusTimelineDrawerHeight] = useState(
 		SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
 	);
-	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-	const stageRef = useRef<Konva.Stage | null>(null);
-	const transformerRef = useRef<Konva.Transformer | null>(null);
+	const [contextMenuState, setContextMenuState] =
+		useState<CanvasContextMenuState>({ open: false });
 	const containerRef = useRef<HTMLDivElement | null>(null);
-	const cameraAnimationRef = useRef<{ stop: () => void } | null>(null);
-	const cameraAnimationRunIdRef = useRef(0);
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const prevFocusedSceneIdRef = useRef<string | null>(focusedSceneId);
-	const dragBeforeRef = useRef<Map<string, SceneNodeLayoutSnapshot>>(new Map());
-	const transformBeforeRef = useRef<Map<string, SceneNodeLayoutSnapshot>>(
-		new Map(),
-	);
-	const dragMovedRef = useRef(false);
-	const focusCameraAlignKeyRef = useRef<string | null>(null);
-	const [isCameraAnimating, setIsCameraAnimating] = useState(false);
+	const dragStateRef = useRef<DragState | null>(null);
+	const nodeAnchorRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
 	const sortedNodes = useMemo(() => {
 		if (!currentProject) return [];
@@ -119,10 +232,63 @@ const CanvasWorkspace = () => {
 			});
 	}, [currentProject]);
 
+	const sceneNodes = useMemo(() => {
+		return sortedNodes.filter((node): node is SceneNode => isSceneNode(node));
+	}, [sortedNodes]);
+
 	const focusedNode = useMemo(() => {
 		if (!focusedSceneId) return null;
-		return sortedNodes.find((node) => node.sceneId === focusedSceneId) ?? null;
-	}, [focusedSceneId, sortedNodes]);
+		return sceneNodes.find((node) => node.sceneId === focusedSceneId) ?? null;
+	}, [focusedSceneId, sceneNodes]);
+
+	const activeNode = useMemo(() => {
+		if (!activeNodeId) return null;
+		return (
+			currentProject?.canvas.nodes.find((node) => node.id === activeNodeId) ?? null
+		);
+	}, [activeNodeId, currentProject]);
+
+	const activeNodeDefinition = useMemo(() => {
+		if (!activeNode) return null;
+		return getCanvasNodeDefinition(activeNode.type);
+	}, [activeNode]);
+	const ActiveNodeToolbar = activeNodeDefinition?.toolbar ?? null;
+
+	const activeNodeScene = useMemo(() => {
+		if (!activeNode || activeNode.type !== "scene") return null;
+		return currentProject?.scenes[activeNode.sceneId] ?? null;
+	}, [activeNode, currentProject]);
+
+	const activeNodeAsset = useMemo(() => {
+		if (!activeNode || !("assetId" in activeNode)) return null;
+		return (
+			currentProject?.assets.find((asset) => asset.id === activeNode.assetId) ??
+			null
+		);
+	}, [activeNode, currentProject]);
+
+	const activeAnchorElement = useMemo(() => {
+		if (!activeNode) return null;
+		return nodeAnchorRef.current.get(activeNode.id) ?? null;
+	}, [activeNode, sortedNodes]);
+
+	const resolveWorldPoint = useCallback(
+		(clientX: number, clientY: number) => {
+			const container = containerRef.current;
+			if (!container) return { x: 0, y: 0 };
+			const rect = container.getBoundingClientRect();
+			const safeClientX = Number.isFinite(clientX) ? clientX : rect.left;
+			const safeClientY = Number.isFinite(clientY) ? clientY : rect.top;
+			const localX = safeClientX - rect.left;
+			const localY = safeClientY - rect.top;
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			return {
+				x: localX / safeZoom - camera.x,
+				y: localY / safeZoom - camera.y,
+			};
+		},
+		[camera],
+	);
 
 	useEffect(() => {
 		const container = containerRef.current;
@@ -130,10 +296,7 @@ const CanvasWorkspace = () => {
 		const updateSize = () => {
 			const rect = container.getBoundingClientRect();
 			if (rect.width <= 0 || rect.height <= 0) return;
-			setStageSize({
-				width: rect.width,
-				height: rect.height,
-			});
+			setStageSize({ width: rect.width, height: rect.height });
 		};
 		updateSize();
 		if (typeof ResizeObserver === "undefined") {
@@ -144,35 +307,6 @@ const CanvasWorkspace = () => {
 		observer.observe(container);
 		return () => observer.disconnect();
 	}, []);
-
-	useEffect(() => {
-		const transformer = transformerRef.current;
-		const stage = stageRef.current;
-		if (!transformer || !stage) return;
-		if (!selectedNodeId || isCanvasInteractionLocked) {
-			transformer.nodes([]);
-			transformer.getLayer()?.batchDraw();
-			return;
-		}
-		const hasSelectedNode = sortedNodes.some(
-			(node) => node.id === selectedNodeId,
-		);
-		if (!hasSelectedNode) {
-			transformer.nodes([]);
-			transformer.getLayer()?.batchDraw();
-			return;
-		}
-		const node = stage.findOne(
-			`.scene-node-${selectedNodeId}`,
-		) as Konva.Rect | null;
-		if (!node) {
-			transformer.nodes([]);
-			transformer.getLayer()?.batchDraw();
-			return;
-		}
-		transformer.nodes([node]);
-		transformer.getLayer()?.batchDraw();
-	}, [isCanvasInteractionLocked, selectedNodeId, sortedNodes]);
 
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -187,134 +321,28 @@ const CanvasWorkspace = () => {
 
 	useEffect(() => {
 		if (focusedSceneId) return;
-		focusCameraAlignKeyRef.current = null;
 		setFocusTimelineDrawerHeight(SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT);
 	}, [focusedSceneId]);
-
-	const stopCameraAnimation = useCallback((unlock: boolean) => {
-		const animation = cameraAnimationRef.current;
-		if (animation) {
-			cameraAnimationRef.current = null;
-			animation.stop();
-		}
-		cameraAnimationRunIdRef.current += 1;
-		if (unlock) {
-			setIsCameraAnimating(false);
-		}
-	}, []);
-
-	const startCameraAnimation = useCallback(
-		(targetCamera: CameraState) => {
-			stopCameraAnimation(false);
-			const snapshotCamera =
-				useProjectStore.getState().currentProject?.ui.camera ?? camera;
-			if (isCameraAlmostEqual(snapshotCamera, targetCamera)) {
-				setCanvasCamera(targetCamera);
-				setIsCameraAnimating(false);
-				return;
-			}
-
-			const runId = cameraAnimationRunIdRef.current + 1;
-			cameraAnimationRunIdRef.current = runId;
-			setIsCameraAnimating(true);
-			const safeSnapshotZoom = Math.max(
-				snapshotCamera.zoom,
-				CAMERA_ZOOM_EPSILON,
-			);
-			const safeTargetZoom = Math.max(targetCamera.zoom, CAMERA_ZOOM_EPSILON);
-			const snapshotTranslateX = snapshotCamera.x * safeSnapshotZoom;
-			const snapshotTranslateY = snapshotCamera.y * safeSnapshotZoom;
-			const targetTranslateX = targetCamera.x * safeTargetZoom;
-			const targetTranslateY = targetCamera.y * safeTargetZoom;
-			cameraAnimationRef.current = animate(0, 1, {
-				duration: CAMERA_ANIMATION_DURATION,
-				ease: CAMERA_ANIMATION_EASING,
-				onUpdate: (progress) => {
-					if (cameraAnimationRunIdRef.current !== runId) return;
-					const interpolatedZoom =
-						snapshotCamera.zoom +
-						(targetCamera.zoom - snapshotCamera.zoom) * progress;
-					const safeInterpolatedZoom = Math.max(
-						interpolatedZoom,
-						CAMERA_ZOOM_EPSILON,
-					);
-					const interpolatedTranslateX =
-						snapshotTranslateX +
-						(targetTranslateX - snapshotTranslateX) * progress;
-					const interpolatedTranslateY =
-						snapshotTranslateY +
-						(targetTranslateY - snapshotTranslateY) * progress;
-					setCanvasCamera({
-						x: interpolatedTranslateX / safeInterpolatedZoom,
-						y: interpolatedTranslateY / safeInterpolatedZoom,
-						zoom: interpolatedZoom,
-					});
-				},
-				onComplete: () => {
-					if (cameraAnimationRunIdRef.current !== runId) return;
-					cameraAnimationRef.current = null;
-					setCanvasCamera(targetCamera);
-					setIsCameraAnimating(false);
-				},
-			});
-		},
-		[camera, setCanvasCamera, stopCameraAnimation],
-	);
 
 	useEffect(() => {
 		const prevFocusedSceneId = prevFocusedSceneIdRef.current;
 		if (!prevFocusedSceneId && focusedSceneId) {
 			preFocusCameraRef.current = camera;
-		} else if (prevFocusedSceneId && !focusedSceneId) {
-			const restoreCamera = preFocusCameraRef.current;
+		}
+		if (prevFocusedSceneId && !focusedSceneId) {
+			const previous = preFocusCameraRef.current;
 			preFocusCameraRef.current = null;
-			if (!restoreCamera) {
-				stopCameraAnimation(true);
-			} else {
-				const safeCurrentZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-				const safeRestoreZoom = Math.max(
-					restoreCamera.zoom,
-					CAMERA_ZOOM_EPSILON,
-				);
-				const anchorX = stageSize.width > 0 ? stageSize.width / 2 : 0;
-				const anchorY = stageSize.height > 0 ? stageSize.height / 2 : 0;
-				const anchorWorldX = anchorX / safeCurrentZoom - camera.x;
-				const anchorWorldY = anchorY / safeCurrentZoom - camera.y;
-				const zoomRestoreCamera = {
-					x: anchorX / safeRestoreZoom - anchorWorldX,
-					y: anchorY / safeRestoreZoom - anchorWorldY,
-					zoom: restoreCamera.zoom,
-				};
-				if (isCameraAlmostEqual(camera, zoomRestoreCamera)) {
-					stopCameraAnimation(true);
-					setCanvasCamera(zoomRestoreCamera);
-				} else {
-					startCameraAnimation(zoomRestoreCamera);
-				}
+			if (previous && !isCameraAlmostEqual(previous, camera)) {
+				setCanvasCamera(previous);
 			}
 		}
 		prevFocusedSceneIdRef.current = focusedSceneId;
-	}, [
-		camera,
-		focusedSceneId,
-		setCanvasCamera,
-		startCameraAnimation,
-		stageSize.height,
-		stageSize.width,
-		stopCameraAnimation,
-	]);
+	}, [camera, focusedSceneId, setCanvasCamera]);
 
 	useEffect(() => {
 		if (!focusedSceneId) return;
-		if (!currentProject) return;
-		if (stageSize.width <= 0 || stageSize.height <= 0) return;
-
-		const focusedNode = currentProject.canvas.nodes.find(
-			(node) => node.sceneId === focusedSceneId,
-		);
 		if (!focusedNode) return;
-
-		// focus 仅改变摄像机，不切换 timeline 实例。
+		if (stageSize.width <= 0 || stageSize.height <= 0) return;
 		const viewPadding = 80;
 		const visibleCanvasHeight = Math.max(
 			1,
@@ -325,60 +353,40 @@ const CanvasWorkspace = () => {
 		const zoomX = availableWidth / focusedNode.width;
 		const zoomY = availableHeight / focusedNode.height;
 		const nextZoom = clampZoom(Math.min(zoomX, zoomY));
+		const safeZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
 		const worldCenterX = focusedNode.x + focusedNode.width / 2;
 		const worldCenterY = focusedNode.y + focusedNode.height / 2;
-		const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
 		const nextCamera = {
-			x: stageSize.width / 2 / safeNextZoom - worldCenterX,
-			y: visibleCanvasHeight / 2 / safeNextZoom - worldCenterY,
+			x: stageSize.width / 2 / safeZoom - worldCenterX,
+			y: visibleCanvasHeight / 2 / safeZoom - worldCenterY,
 			zoom: nextZoom,
 		};
-		const alignKey = [
-			focusedSceneId,
-			stageSize.width,
-			stageSize.height,
-			focusTimelineDrawerHeight,
-			focusedNode.x,
-			focusedNode.y,
-			focusedNode.width,
-			focusedNode.height,
-		].join(":");
-		if (focusCameraAlignKeyRef.current === alignKey) return;
-		focusCameraAlignKeyRef.current = alignKey;
 		if (isCameraAlmostEqual(camera, nextCamera)) return;
-		startCameraAnimation(nextCamera);
+		setCanvasCamera(nextCamera);
 	}, [
 		camera,
-		currentProject,
 		focusTimelineDrawerHeight,
+		focusedNode,
 		focusedSceneId,
-		stageSize,
-		startCameraAnimation,
+		setCanvasCamera,
+		stageSize.height,
+		stageSize.width,
 	]);
 
-	useEffect(() => {
-		return () => {
-			stopCameraAnimation(false);
-		};
-	}, [stopCameraAnimation]);
-
 	const handleCreateScene = useCallback(() => {
-		const sceneId = createSceneNode();
+		const nodeId = createCanvasNode({ type: "scene" });
 		const latestProject = useProjectStore.getState().currentProject;
 		if (!latestProject) return;
-		const scene = latestProject.scenes[sceneId];
-		const node = latestProject.canvas.nodes.find(
-			(item) => item.sceneId === sceneId,
-		);
-		if (!scene || !node) return;
+		const node = latestProject.canvas.nodes.find((item) => item.id === nodeId);
+		if (!node || node.type !== "scene") return;
+		const scene = latestProject.scenes[node.sceneId];
 		pushHistory({
-			kind: "canvas.scene-create",
-			scene,
+			kind: "canvas.node-create",
 			node,
+			scene,
 			focusSceneId: latestProject.ui.focusedSceneId,
 		});
-		setSelectedNodeId(node.id);
-	}, [createSceneNode, pushHistory]);
+	}, [createCanvasNode, pushHistory]);
 
 	const handleZoomByStep = useCallback(
 		(multiplier: number) => {
@@ -409,10 +417,10 @@ const CanvasWorkspace = () => {
 
 	const handleStageWheel = useCallback(
 		(event: Konva.KonvaEventObject<WheelEvent>) => {
-			event.evt.preventDefault();
-			if (isCameraAnimating) return;
+			if (event.evt.cancelable) {
+				event.evt.preventDefault();
+			}
 			const nativeEvent = event.evt;
-
 			if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
 				const stage = event.target.getStage();
 				if (!stage) return;
@@ -433,7 +441,6 @@ const CanvasWorkspace = () => {
 				});
 				return;
 			}
-
 			const deltaX = nativeEvent.shiftKey
 				? nativeEvent.deltaY
 				: nativeEvent.deltaX;
@@ -445,87 +452,153 @@ const CanvasWorkspace = () => {
 				zoom: camera.zoom,
 			});
 		},
-		[camera, isCameraAnimating, setCanvasCamera],
+		[camera, setCanvasCamera],
 	);
 
-	const handleStageMouseDown = useCallback(
-		(event: Konva.KonvaEventObject<MouseEvent>) => {
-			if (event.target !== event.target.getStage()) return;
+	const handleContainerWheel = useCallback(
+		(event: WheelEvent) => {
+			event.preventDefault();
+			if (event.ctrlKey || event.metaKey) {
+				const oldZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+				const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
+				const nextZoom = clampZoom(oldZoom * zoomDelta);
+				const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
+				const container = containerRef.current;
+				if (!container) return;
+				const rect = container.getBoundingClientRect();
+				const pointerX = event.clientX - rect.left;
+				const pointerY = event.clientY - rect.top;
+				const worldPoint = {
+					x: pointerX / oldZoom - camera.x,
+					y: pointerY / oldZoom - camera.y,
+				};
+				setCanvasCamera({
+					x: pointerX / safeNextZoom - worldPoint.x,
+					y: pointerY / safeNextZoom - worldPoint.y,
+					zoom: nextZoom,
+				});
+				return;
+			}
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			setCanvasCamera({
+				x: camera.x - event.deltaX / safeZoom,
+				y: camera.y - event.deltaY / safeZoom,
+				zoom: camera.zoom,
+			});
+		},
+		[camera, setCanvasCamera],
+	);
+
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+		const listener = (event: WheelEvent) => {
+			handleContainerWheel(event);
+		};
+		container.addEventListener("wheel", listener, { passive: false });
+		return () => {
+			container.removeEventListener("wheel", listener);
+		};
+	}, [handleContainerWheel]);
+
+	const handleNodePointerDown = useCallback(
+		(node: CanvasNode, event: React.PointerEvent<HTMLDivElement>) => {
+			if (event.button !== 0) return;
+			const canInteractNode =
+				!isCanvasInteractionLocked ||
+				(node.type === "scene" && node.sceneId === focusedSceneId);
+			if (!canInteractNode || node.locked) return;
+			event.currentTarget.setPointerCapture(event.pointerId);
+			dragStateRef.current = {
+				nodeId: node.id,
+				startClientX: event.clientX,
+				startClientY: event.clientY,
+				startNodeX: node.x,
+				startNodeY: node.y,
+				before: pickLayout(node),
+				moved: false,
+			};
+		},
+		[focusedSceneId, isCanvasInteractionLocked],
+	);
+
+	useEffect(() => {
+		const handlePointerMove = (event: PointerEvent) => {
+			const dragState = dragStateRef.current;
+			if (!dragState) return;
+			const deltaX = event.clientX - dragState.startClientX;
+			const deltaY = event.clientY - dragState.startClientY;
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const nextX = dragState.startNodeX + deltaX / safeZoom;
+			const nextY = dragState.startNodeY + deltaY / safeZoom;
+			dragState.moved = dragState.moved || Math.abs(deltaX) + Math.abs(deltaY) > 2;
+			updateCanvasNodeLayout(dragState.nodeId, {
+				x: nextX,
+				y: nextY,
+			});
+		};
+
+		const handlePointerUp = () => {
+			const dragState = dragStateRef.current;
+			dragStateRef.current = null;
+			if (!dragState || !dragState.moved) return;
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const node = latestProject.canvas.nodes.find(
+				(item) => item.id === dragState.nodeId,
+			);
+			if (!node) return;
+			const after = pickLayout(node);
+			if (isLayoutEqual(dragState.before, after)) return;
+			pushHistory({
+				kind: "canvas.node-layout",
+				nodeId: node.id,
+				before: dragState.before,
+				after,
+				focusSceneId: latestProject.ui.focusedSceneId,
+			});
+		};
+
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
+		return () => {
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+		};
+	}, [camera.zoom, pushHistory, updateCanvasNodeLayout]);
+
+	const handleNodeClick = useCallback(
+		(node: CanvasNode) => {
+			const canInteractNode =
+				!isCanvasInteractionLocked ||
+				(node.type === "scene" && node.sceneId === focusedSceneId);
+			if (!canInteractNode) return;
+			setActiveNode(node.id);
+			if (node.type === "scene") {
+				setActiveScene(node.sceneId);
+				if (!focusedSceneId) {
+					setFocusedScene(node.sceneId);
+				}
+			}
+		},
+		[
+			focusedSceneId,
+			isCanvasInteractionLocked,
+			setActiveNode,
+			setActiveScene,
+			setFocusedScene,
+		],
+	);
+
+	const handleCanvasPointerDown = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			if (event.target !== event.currentTarget) return;
 			if (isCanvasInteractionLocked) return;
-			setSelectedNodeId(null);
+			setActiveNode(null);
 		},
-		[isCanvasInteractionLocked],
-	);
-
-	const handleNodeDragStart = useCallback((node: SceneNode) => {
-		dragMovedRef.current = false;
-		dragBeforeRef.current.set(node.id, pickLayout(node));
-	}, []);
-
-	const handleNodeDragMove = useCallback(() => {
-		dragMovedRef.current = true;
-	}, []);
-
-	const handleNodeDragEnd = useCallback(
-		(node: SceneNode, event: Konva.KonvaEventObject<DragEvent>) => {
-			const before = dragBeforeRef.current.get(node.id);
-			dragBeforeRef.current.delete(node.id);
-			const currentNode = event.target;
-			const after: SceneNodeLayoutSnapshot = {
-				...pickLayout(node),
-				x: currentNode.x(),
-				y: currentNode.y(),
-			};
-			updateSceneNodeLayout(node.id, after);
-			if (before && !isLayoutEqual(before, after)) {
-				pushHistory({
-					kind: "canvas.scene-node-layout",
-					nodeId: node.id,
-					before,
-					after,
-					focusSceneId: focusedSceneId,
-				});
-			}
-		},
-		[focusedSceneId, pushHistory, updateSceneNodeLayout],
-	);
-
-	const handleTransformStart = useCallback((node: SceneNode) => {
-		transformBeforeRef.current.set(node.id, pickLayout(node));
-	}, []);
-
-	const handleTransformEnd = useCallback(
-		(node: SceneNode, event: Konva.KonvaEventObject<Event>) => {
-			const before = transformBeforeRef.current.get(node.id);
-			transformBeforeRef.current.delete(node.id);
-			const shape = event.target as Konva.Rect;
-			const scaleX = shape.scaleX() || 1;
-			const scaleY = shape.scaleY() || 1;
-			const nextWidth = Math.max(80, Math.round(shape.width() * scaleX));
-			const nextHeight = Math.max(45, Math.round(shape.height() * scaleY));
-			shape.scaleX(1);
-			shape.scaleY(1);
-			shape.width(nextWidth);
-			shape.height(nextHeight);
-			const after: SceneNodeLayoutSnapshot = {
-				...pickLayout(node),
-				x: shape.x(),
-				y: shape.y(),
-				width: nextWidth,
-				height: nextHeight,
-			};
-			updateSceneNodeLayout(node.id, after);
-			if (before && !isLayoutEqual(before, after)) {
-				pushHistory({
-					kind: "canvas.scene-node-layout",
-					nodeId: node.id,
-					before,
-					after,
-					focusSceneId: focusedSceneId,
-				});
-			}
-		},
-		[focusedSceneId, pushHistory, updateSceneNodeLayout],
+		[isCanvasInteractionLocked, setActiveNode],
 	);
 
 	const handleToggleScenePreview = useCallback(
@@ -535,64 +608,284 @@ const CanvasWorkspace = () => {
 		[togglePlayback],
 	);
 
-	const gridLines = useMemo(() => {
-		const lines: React.ReactElement[] = [];
-		for (let x = -GRID_RANGE; x <= GRID_RANGE; x += GRID_SIZE) {
-			lines.push(
-				<Line
-					key={`grid-v-${x}`}
-					points={[x, -GRID_RANGE, x, GRID_RANGE]}
-					stroke={x === 0 ? "#444" : "#2a2a2a"}
-					strokeWidth={x === 0 ? 2 : 1}
-					listening={false}
-				/>,
-			);
-		}
-		for (let y = -GRID_RANGE; y <= GRID_RANGE; y += GRID_SIZE) {
-			lines.push(
-				<Line
-					key={`grid-h-${y}`}
-					points={[-GRID_RANGE, y, GRID_RANGE, y]}
-					stroke={y === 0 ? "#444" : "#2a2a2a"}
-					strokeWidth={y === 0 ? 2 : 1}
-					listening={false}
-				/>,
-			);
-		}
-		return lines;
+	const handleCanvasContextMenu = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			event.preventDefault();
+			if (isCanvasInteractionLocked) return;
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			setContextMenuState({
+				open: true,
+				x: event.clientX,
+				y: event.clientY,
+				worldX: world.x,
+				worldY: world.y,
+			});
+		},
+		[isCanvasInteractionLocked, resolveWorldPoint],
+	);
+
+	const closeContextMenu = useCallback(() => {
+		setContextMenuState({ open: false });
 	}, []);
+
+	const handleCreateTextNodeAt = useCallback(
+		(worldX: number, worldY: number) => {
+			const textNodeDefinition = getCanvasNodeDefinition("text");
+			const nodeId = createCanvasNode({
+				...textNodeDefinition.create(),
+				x: worldX,
+				y: worldY,
+			});
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const node = latestProject.canvas.nodes.find((item) => item.id === nodeId);
+			if (!node) return;
+			pushHistory({
+				kind: "canvas.node-create",
+				node,
+				focusSceneId: latestProject.ui.focusedSceneId,
+			});
+		},
+		[createCanvasNode, pushHistory],
+	);
+
+	const handleCanvasDrop = useCallback(
+		async (event: React.DragEvent<HTMLDivElement>) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (!currentProjectId || !currentProject) return;
+			const files = resolveDroppedFiles(event.dataTransfer);
+			if (files.length === 0) return;
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			const activeSceneTimeline =
+				(activeSceneId
+					? currentProject.scenes[activeSceneId]?.timeline
+					: undefined) ?? Object.values(currentProject.scenes)[0]?.timeline;
+			const fps = activeSceneTimeline?.fps ?? 30;
+
+			const resolveExternalFileUri = async (
+				file: File,
+				kind: "video" | "audio" | "image",
+			): Promise<string> => {
+				if (kind === "video") {
+					return resolveExternalVideoUri(file, currentProjectId);
+				}
+				if (isElectronEnv()) {
+					const filePath = getFilePath(file) ?? getElectronFilePath(file);
+					if (!filePath) {
+						throw new Error("无法读取本地文件路径");
+					}
+					return buildFileUrlFromPath(filePath);
+				}
+				if (kind === "audio") {
+					const { uri } = await writeAudioToOpfs(file, currentProjectId);
+					return uri;
+				}
+				const { uri } = await writeProjectFileToOpfs(
+					file,
+					currentProjectId,
+					"images",
+				);
+				return uri;
+			};
+
+			const nodeInputs: Array<{
+				input: Parameters<typeof createCanvasNode>[0];
+				index: number;
+			}> = [];
+
+			for (const [index, file] of files.entries()) {
+				let resolvedInput: Parameters<typeof createCanvasNode>[0] | null = null;
+				for (const definition of canvasNodeDefinitionList) {
+					if (!definition.fromExternalFile) continue;
+					const matched = await definition.fromExternalFile(file, {
+						projectId: currentProjectId,
+						fps,
+						ensureProjectAssetByUri,
+						resolveExternalFileUri,
+					});
+					if (!matched) continue;
+					resolvedInput = matched;
+					break;
+				}
+				if (!resolvedInput) continue;
+				nodeInputs.push({ input: resolvedInput, index });
+			}
+
+			for (const item of nodeInputs) {
+				const column = item.index % DROP_GRID_COLUMNS;
+				const row = Math.floor(item.index / DROP_GRID_COLUMNS);
+				const nodeId = createCanvasNode({
+					...item.input,
+					x: world.x + column * DROP_GRID_OFFSET_X,
+					y: world.y + row * DROP_GRID_OFFSET_Y,
+				});
+				const latestProject = useProjectStore.getState().currentProject;
+				if (!latestProject) continue;
+				const node = latestProject.canvas.nodes.find(
+					(candidate) => candidate.id === nodeId,
+				);
+				if (!node) continue;
+				if (node.type === "scene") continue;
+				pushHistory({
+					kind: "canvas.node-create",
+					node,
+					focusSceneId: latestProject.ui.focusedSceneId,
+				});
+			}
+		},
+		[
+			activeSceneId,
+			createCanvasNode,
+			currentProject,
+			currentProjectId,
+			ensureProjectAssetByUri,
+			pushHistory,
+			resolveWorldPoint,
+		],
+	);
 
 	if (!currentProject) {
 		return (
-			<div className="flex h-full w-full items-center justify-center">
-				Loading...
-			</div>
+			<div className="flex h-full w-full items-center justify-center">Loading...</div>
 		);
 	}
 
+	const gridSizePx = Math.max(20, GRID_SIZE * camera.zoom);
+	const gridOffsetX = (camera.x * camera.zoom) % gridSizePx;
+	const gridOffsetY = (camera.y * camera.zoom) % gridSizePx;
+
+	const toolbarActions =
+		contextMenuState.open && !focusedSceneId
+			? [
+					{
+						key: "new-text-node",
+						label: "新建文本节点",
+						onSelect: () => {
+							handleCreateTextNodeAt(
+								contextMenuState.worldX,
+								contextMenuState.worldY,
+							);
+						},
+					},
+			  ]
+			: [];
+
 	return (
-		<div ref={containerRef} className="relative h-full w-full overflow-hidden">
-			<Stage
-				width={stageSize.width}
-				height={stageSize.height}
-				className="absolute left-0 top-0"
-			>
-				<Layer
-					x={camera.x * camera.zoom}
-					y={camera.y * camera.zoom}
-					scaleX={camera.zoom}
-					scaleY={camera.zoom}
-				>
-					{gridLines}
-				</Layer>
-			</Stage>
+		<div
+			ref={containerRef}
+			data-testid="canvas-workspace"
+			className="relative h-full w-full overflow-hidden"
+			onMouseDown={handleCanvasPointerDown}
+			onContextMenu={handleCanvasContextMenu}
+			onDragOver={(event) => {
+				event.preventDefault();
+				event.dataTransfer.dropEffect = "copy";
+			}}
+			onDrop={handleCanvasDrop}
+		>
+			<div
+				className="pointer-events-none absolute inset-0"
+				style={{
+					backgroundImage:
+						"linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
+					backgroundSize: `${gridSizePx}px ${gridSizePx}px`,
+					backgroundPosition: `${gridOffsetX}px ${gridOffsetY}px`,
+				}}
+			/>
+
 			<InfiniteSkiaCanvas
 				width={stageSize.width}
 				height={stageSize.height}
 				camera={camera}
-				nodes={sortedNodes}
+				nodes={sceneNodes}
 				scenes={currentProject.scenes}
 			/>
+
+			<div className="absolute inset-0 z-20">
+				{sortedNodes.map((node) => {
+					const definition = getCanvasNodeDefinition(node.type);
+					const Renderer = definition.renderer;
+					const scene =
+						node.type === "scene"
+							? currentProject.scenes[node.sceneId] ?? null
+							: null;
+					const asset =
+						"assetId" in node
+							? currentProject.assets.find((item) => item.id === node.assetId) ?? null
+							: null;
+					const isFocused = node.type === "scene" && node.sceneId === focusedSceneId;
+					const canInteractNode =
+						!isCanvasInteractionLocked ||
+						(node.type === "scene" && node.sceneId === focusedSceneId);
+					const sceneRef =
+						node.type === "scene" ? toSceneTimelineRef(node.sceneId) : null;
+					const isPreviewPlaying = sceneRef ? isOwnerPlaying(sceneRef) : false;
+					const isActive = node.id === activeNodeId;
+					return (
+						<div
+							key={node.id}
+							ref={(element) => {
+								if (element) {
+									nodeAnchorRef.current.set(node.id, element);
+									return;
+								}
+								nodeAnchorRef.current.delete(node.id);
+							}}
+							data-node-anchor={node.id}
+							data-testid={`canvas-node-${node.id}`}
+							className={`absolute overflow-hidden rounded-xl border transition-shadow ${
+								isActive
+									? "border-orange-400 shadow-[0_0_0_2px_rgba(251,146,60,0.35)]"
+									: "border-white/20"
+							}`}
+							style={{
+								...buildNodeStyle(node, camera),
+								pointerEvents: canInteractNode ? "auto" : "none",
+								opacity:
+									isCanvasInteractionLocked && !isFocused
+										? 0.35
+										: 1,
+							}}
+							onPointerDown={(event) => handleNodePointerDown(node, event)}
+							onClick={() => handleNodeClick(node)}
+						>
+							<Renderer
+								node={node}
+								scene={scene}
+								asset={asset}
+								isActive={isActive}
+								isFocused={isFocused}
+								isPreviewPlaying={isPreviewPlaying}
+								onTogglePreview={() => {
+									if (node.type !== "scene") return;
+									handleToggleScenePreview(node.sceneId);
+								}}
+							/>
+						</div>
+					);
+				})}
+			</div>
+
+			{activeNode && ActiveNodeToolbar && (
+				<div
+					className="absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-3 py-2 backdrop-blur"
+					data-node-toolbar-anchor={
+						activeAnchorElement?.dataset.nodeAnchor ?? undefined
+					}
+				>
+					<ActiveNodeToolbar
+						node={activeNode}
+						scene={activeNodeScene}
+						asset={activeNodeAsset}
+						updateNode={(patch) => {
+							updateCanvasNode(activeNode.id, patch as never);
+						}}
+						setFocusedScene={setFocusedScene}
+						setActiveScene={setActiveScene}
+					/>
+				</div>
+			)}
 
 			{!focusedSceneId && (
 				<div className="absolute left-4 top-4 z-30 flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur">
@@ -627,127 +920,10 @@ const CanvasWorkspace = () => {
 					>
 						重置视图
 					</button>
-					<span className="text-white/70">
-						{Math.round(camera.zoom * 100)}%
-					</span>
+					<span className="text-white/70">{Math.round(camera.zoom * 100)}%</span>
 				</div>
 			)}
 
-			<Stage
-				ref={stageRef}
-				width={stageSize.width}
-				height={stageSize.height}
-				onWheel={handleStageWheel}
-				onMouseDown={handleStageMouseDown}
-			>
-				<Layer
-					x={camera.x * camera.zoom}
-					y={camera.y * camera.zoom}
-					scaleX={camera.zoom}
-					scaleY={camera.zoom}
-				>
-					{/* {gridLines} */}
-					{sortedNodes.map((node) => {
-						const scene = currentProject.scenes[node.sceneId];
-						const isActive = node.sceneId === activeSceneId;
-						const isFocused = node.sceneId === focusedSceneId;
-						const sceneRef = toSceneTimelineRef(node.sceneId);
-						const isPreviewPlaying = isOwnerPlaying(sceneRef);
-						const canInteractNode = !isCanvasInteractionLocked || isFocused;
-
-						return [
-							<Rect
-								key={node.id}
-								className={`scene-node-${node.id}`}
-								x={node.x}
-								y={node.y}
-								width={node.width}
-								height={node.height}
-								cornerRadius={10}
-								fill={
-									isFocused
-										? "rgba(30,58,138,0.18)"
-										: isActive
-											? "rgba(31,41,55,0.12)"
-											: "rgba(32,32,32,0.08)"
-								}
-								stroke={selectedNodeId === node.id ? "#f97316" : "#3f3f46"}
-								strokeWidth={selectedNodeId === node.id ? 3 : 1}
-								draggable={!node.locked && canInteractNode}
-								listening={canInteractNode}
-								onClick={() => {
-									if (!canInteractNode) return;
-									if (dragMovedRef.current) {
-										dragMovedRef.current = false;
-										return;
-									}
-									setSelectedNodeId(node.id);
-									setActiveScene(node.sceneId);
-									if (!focusedSceneId) {
-										setFocusedScene(node.sceneId);
-									}
-								}}
-								onDragStart={() => handleNodeDragStart(node)}
-								onDragMove={handleNodeDragMove}
-								onDragEnd={(event) => handleNodeDragEnd(node, event)}
-								onTransformStart={() => handleTransformStart(node)}
-								onTransformEnd={(event) => handleTransformEnd(node, event)}
-							/>,
-							<Text
-								key={`${node.id}-label`}
-								x={node.x + 12}
-								y={node.y + 12}
-								text={`${scene?.name ?? node.name}`}
-								fontSize={16}
-								fill="#f5f5f5"
-								listening={false}
-							/>,
-							!focusedSceneId && (
-								<Rect
-									key={`${node.id}-preview-toggle`}
-									className={`scene-preview-toggle-${node.id}`}
-									x={node.x + node.width - 44}
-									y={node.y + 12}
-									width={32}
-									height={24}
-									cornerRadius={6}
-									fill={isPreviewPlaying ? "#166534" : "#27272a"}
-									stroke={isPreviewPlaying ? "#22c55e" : "#3f3f46"}
-									strokeWidth={1}
-									onClick={(event) => {
-										event.cancelBubble = true;
-										handleToggleScenePreview(node.sceneId);
-									}}
-								/>
-							),
-							!focusedSceneId && (
-								<Text
-									key={`${node.id}-preview-toggle-label`}
-									x={node.x + node.width - 34}
-									y={node.y + 16}
-									text={isPreviewPlaying ? "⏸" : "▶"}
-									fontSize={12}
-									fill="#f4f4f5"
-									listening={false}
-								/>
-							),
-						];
-					})}
-					{!isCanvasInteractionLocked && (
-						<Transformer
-							ref={transformerRef}
-							enabledAnchors={[
-								"top-left",
-								"top-right",
-								"bottom-left",
-								"bottom-right",
-							]}
-							rotateEnabled={false}
-							ignoreStroke
-						/>
-					)}
-				</Layer>
-			</Stage>
 			{focusedSceneId && focusedNode && (
 				<FocusSceneKonvaLayer
 					width={stageSize.width}
@@ -763,7 +939,7 @@ const CanvasWorkspace = () => {
 				<>
 					<div
 						data-testid="focus-material-library"
-						className="absolute left-4 top-4 z-50 w-60 max-h-[45vh] overflow-y-auto rounded-xl border border-white/10 bg-neutral-900/85 p-3 backdrop-blur-xl"
+						className="absolute left-4 top-4 z-50 max-h-[45vh] w-60 overflow-y-auto rounded-xl border border-white/10 bg-neutral-900/85 p-3 backdrop-blur-xl"
 					>
 						<div className="mb-2 text-xs font-medium text-white/80">素材库</div>
 						<MaterialLibrary />
@@ -774,6 +950,14 @@ const CanvasWorkspace = () => {
 					/>
 				</>
 			)}
+
+			<TimelineContextMenu
+				open={contextMenuState.open}
+				x={contextMenuState.open ? contextMenuState.x : 0}
+				y={contextMenuState.open ? contextMenuState.y : 0}
+				actions={toolbarActions}
+				onClose={closeContextMenu}
+			/>
 		</div>
 	);
 };

@@ -4,10 +4,6 @@ import type { TimelineAsset } from "core/dsl/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AsrProvider } from "@/asr";
 import type { AsrClient } from "@/asr/AsrContext";
-import {
-	createEditorRuntimeWrapper,
-	createTestEditorRuntime,
-} from "../runtime/testUtils";
 import SmartSpeechCutDialog from "./SmartSpeechCutDialog";
 
 vi.mock("@/asr/assetTranscriptionService", () => ({
@@ -16,15 +12,38 @@ vi.mock("@/asr/assetTranscriptionService", () => ({
 
 import { transcribeAssetById } from "@/asr/assetTranscriptionService";
 
+const { projectAssetsState } = vi.hoisted(() => ({
+	projectAssetsState: {
+		assets: [] as TimelineAsset[],
+	},
+}));
+
+vi.mock("@/projects/useProjectAssets", () => ({
+	useProjectAssets: () => ({
+		assets: projectAssetsState.assets,
+		getProjectAssetById: (assetId: string) =>
+			projectAssetsState.assets.find((asset) => asset.id === assetId) ?? null,
+		updateProjectAssetMeta: (
+			assetId: string,
+			updater: (
+				prevMeta: TimelineAsset["meta"] | undefined,
+			) => TimelineAsset["meta"] | undefined,
+		) => {
+			projectAssetsState.assets = projectAssetsState.assets.map((asset) => {
+				if (asset.id !== assetId) return asset;
+				return {
+					...asset,
+					meta: updater(asset.meta),
+				};
+			});
+		},
+	}),
+}));
+
 const mockedTranscribeAssetById = vi.mocked(transcribeAssetById);
 
-const runtime = createTestEditorRuntime("smart-speech-cut-dialog-test");
-const timelineStore = runtime.timelineStore;
-const wrapper = createEditorRuntimeWrapper(runtime);
-const initialState = timelineStore.getState();
-
 afterEach(() => {
-	timelineStore.setState(initialState, true);
+	projectAssetsState.assets = [];
 	mockedTranscribeAssetById.mockReset();
 	vi.restoreAllMocks();
 });
@@ -88,15 +107,12 @@ const renderDialog = () => {
 				assetId="source-1"
 			/>
 		</AsrProvider>,
-		{ wrapper },
 	);
 };
 
 describe("SmartSpeechCutDialog", () => {
 	it("应根据 asr 数据在转写模式和文本模式间切换", async () => {
-		timelineStore.setState({
-			assets: [createSource(false)],
-		});
+		projectAssetsState.assets = [createSource(false)];
 		const { rerender } = render(
 			<AsrProvider value={asrClient}>
 				<SmartSpeechCutDialog
@@ -106,14 +122,11 @@ describe("SmartSpeechCutDialog", () => {
 					assetId="source-1"
 				/>
 			</AsrProvider>,
-			{ wrapper },
 		);
 		expect(screen.getByText("当前素材尚未转写，可选择语言并开始转写。")).toBeTruthy();
 		expect(screen.getByRole("button", { name: "开始转写" })).toBeTruthy();
 
-		timelineStore.setState({
-			assets: [createSource(true)],
-		});
+		projectAssetsState.assets = [createSource(true)];
 		rerender(
 			<AsrProvider value={asrClient}>
 				<SmartSpeechCutDialog
@@ -137,9 +150,7 @@ describe("SmartSpeechCutDialog", () => {
 			summaryText: "转写完成",
 			record: null,
 		});
-		timelineStore.setState({
-			assets: [createSource(true)],
-		});
+		projectAssetsState.assets = [createSource(true)];
 		renderDialog();
 
 		fireEvent.click(screen.getByRole("button", { name: "强制重新转写" }));
@@ -155,9 +166,7 @@ describe("SmartSpeechCutDialog", () => {
 	});
 
 	it("点击调试按钮应输出当前 asr 数据", () => {
-		timelineStore.setState({
-			assets: [createSource(true)],
-		});
+		projectAssetsState.assets = [createSource(true)];
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		renderDialog();
 

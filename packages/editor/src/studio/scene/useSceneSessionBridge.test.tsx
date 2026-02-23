@@ -26,6 +26,14 @@ const wrapper = createEditorRuntimeWrapper(runtime);
 const createProject = (): StudioProject => ({
 	id: "project-1",
 	revision: 0,
+	assets: [
+		{
+			id: "asset-1",
+			uri: "file:///asset-1.png",
+			kind: "image",
+			name: "asset-1",
+		},
+	],
 	canvas: { nodes: [] },
 	scenes: {
 		"scene-1": {
@@ -58,14 +66,6 @@ const createProject = (): StudioProject => ({
 					},
 				},
 				tracks: [],
-				assets: [
-					{
-						id: "asset-1",
-						uri: "file:///asset-1.png",
-						kind: "image",
-						name: "asset-1",
-					},
-				],
 				elements: [
 					{
 						id: "element-1",
@@ -90,6 +90,7 @@ const createProject = (): StudioProject => ({
 	ui: {
 		activeSceneId: "scene-1",
 		focusedSceneId: null,
+		activeNodeId: null,
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,

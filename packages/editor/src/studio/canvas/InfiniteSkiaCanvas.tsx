@@ -3,7 +3,6 @@ import type { SceneNode, StudioProject } from "core/studio/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	Canvas,
-	Fill,
 	Group,
 	Picture,
 	Rect,
@@ -70,7 +69,6 @@ const buildRenderSignature = (runtime: TimelineRuntime): unknown[] => {
 		state.exportTime,
 		state.elements,
 		state.tracks,
-		state.assets,
 		state.canvasSize,
 		state.fps,
 	];

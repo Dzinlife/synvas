@@ -13,6 +13,7 @@ import {
 import { useModelRegistry, useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import TimeIndicatorCanvas from "@/editor/components/TimeIndicatorCanvas";
 import { cn } from "@/lib/utils";
+import { useProjectAssets } from "@/projects/useProjectAssets";
 import { clampFrame } from "@/utils/timecode";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
@@ -34,7 +35,6 @@ import {
 	usePreviewAxis,
 	useRippleEditing,
 	useSnap,
-	useAssets,
 	useTimelineScale,
 	useTimelineStore,
 	useTrackAssignments,
@@ -165,7 +165,7 @@ const TimelineEditor = () => {
 	const { isPlaying, pause } = usePlaybackControl();
 	const { currentTime, setCurrentTime: seekTo } = useCurrentTime();
 	const { fps } = useFps();
-	const { assets } = useAssets();
+	const { assets } = useProjectAssets();
 	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId, deselectAll, setSelection } =

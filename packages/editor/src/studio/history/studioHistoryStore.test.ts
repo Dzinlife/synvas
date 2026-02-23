@@ -30,14 +30,6 @@ const createTimeline = (elementsCount: number): TimelineJSON => ({
 		},
 	},
 	tracks: [],
-	assets: [
-		{
-			id: "asset-1",
-			uri: "file:///asset-1.png",
-			kind: "image",
-			name: "asset-1",
-		},
-	],
 	elements: Array.from({ length: elementsCount }).map((_, index) => {
 		const start = index * 30;
 		const end = start + 30;
@@ -63,6 +55,14 @@ const createTimeline = (elementsCount: number): TimelineJSON => ({
 const createProject = (): StudioProject => ({
 	id: "project-1",
 	revision: 0,
+	assets: [
+		{
+			id: "asset-1",
+			uri: "file:///asset-1.png",
+			kind: "image",
+			name: "asset-1",
+		},
+	],
 	canvas: {
 		nodes: [
 			{
@@ -103,6 +103,7 @@ const createProject = (): StudioProject => ({
 	ui: {
 		activeSceneId: "scene-1",
 		focusedSceneId: "scene-1",
+		activeNodeId: "node-1",
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,
@@ -151,7 +152,7 @@ describe("studioHistoryStore", () => {
 		).toBe(2);
 	});
 
-	it("scene-create 可撤销和重做", () => {
+	it("canvas.node-create(scene) 可撤销和重做", () => {
 		const scene = {
 			id: "scene-3",
 			name: "Scene 3",
@@ -176,7 +177,7 @@ describe("studioHistoryStore", () => {
 			updatedAt: 1,
 		};
 		useStudioHistoryStore.getState().push({
-			kind: "canvas.scene-create",
+			kind: "canvas.node-create",
 			scene,
 			node,
 			focusSceneId: null,

@@ -1,6 +1,5 @@
 import type { TimelineAsset } from "core/dsl/types";
 import { readVideoMetadata } from "@/editor/utils/externalVideo";
-import type { TimelineStoreApi } from "@/editor/contexts/TimelineContext";
 import type { AsrClient } from "./AsrContext";
 import { resolveAssetMediaFile } from "./assetMediaFile";
 import { readAudioMetadata } from "./opfsAudio";
@@ -67,7 +66,13 @@ export interface TranscribeAssetByIdOptions {
 	force?: boolean;
 	model?: AsrModelSize;
 	signal: AbortSignal;
-	timelineStore: TimelineStoreApi;
+	getProjectAssetById: (assetId: string) => TimelineAsset | null;
+	updateProjectAssetMeta: (
+		assetId: string,
+		updater: (
+			prevMeta: TimelineAsset["meta"] | undefined,
+		) => TimelineAsset["meta"] | undefined,
+	) => void;
 	onStatus?: (status: AsrJobStatus) => void;
 	onProgress?: (progress: number) => void;
 	onChunk?: (segment: TranscriptSegment) => void;
@@ -89,7 +94,8 @@ export const transcribeAssetById = async (
 		assetId,
 		asrClient,
 		signal,
-		timelineStore,
+		getProjectAssetById,
+		updateProjectAssetMeta,
 		onStatus,
 		onProgress,
 		onChunk,
@@ -98,7 +104,7 @@ export const transcribeAssetById = async (
 	const force = options.force === true;
 	const model = options.model ?? resolveDefaultModel();
 
-	const asset = timelineStore.getState().getAssetById(assetId);
+	const asset = getProjectAssetById(assetId);
 	if (!asset) {
 		throw new Error(`未找到 asset: ${assetId}`);
 	}
@@ -141,7 +147,7 @@ export const transcribeAssetById = async (
 	const writeRecord = (segments: TranscriptSegment[]) => {
 		latestSegments = segments;
 		const updatedAt = Date.now();
-		timelineStore.getState().updateAssetMeta(
+		updateProjectAssetMeta(
 			assetId,
 			(prevData) => ({
 				...(prevData ?? {}),
@@ -151,7 +157,6 @@ export const transcribeAssetById = async (
 					updatedAt,
 				},
 			}),
-			{ history: false },
 		);
 		changed = true;
 	};
@@ -192,8 +197,7 @@ export const transcribeAssetById = async (
 		}
 
 		onStatus?.("done");
-		const currentRecord =
-			timelineStore.getState().getAssetById(assetId)?.meta?.asr ?? null;
+		const currentRecord = getProjectAssetById(assetId)?.meta?.asr ?? null;
 		return {
 			status: "done",
 			changed,
@@ -208,7 +212,7 @@ export const transcribeAssetById = async (
 	} catch (error) {
 		if (signal.aborted) {
 			onStatus?.("canceled");
-			const currentRecord = timelineStore.getState().getAssetById(assetId)?.meta?.asr ?? null;
+			const currentRecord = getProjectAssetById(assetId)?.meta?.asr ?? null;
 			return {
 				status: "canceled",
 				changed,

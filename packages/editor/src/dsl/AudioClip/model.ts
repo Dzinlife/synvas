@@ -9,8 +9,8 @@ import {
 	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
 } from "@/editor/audio/audioPlayback";
-import type { EditorRuntime } from "@/editor/runtime/types";
 import { getAudioPlaybackSessionKey } from "@/editor/playback/clipContinuityIndex";
+import type { EditorRuntime } from "@/editor/runtime/types";
 import { isTimelineTrackAudible } from "@/editor/utils/trackAudibility";
 import { secondsToFrames } from "@/utils/timecode";
 import type {

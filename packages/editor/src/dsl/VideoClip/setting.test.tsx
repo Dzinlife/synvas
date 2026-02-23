@@ -7,14 +7,11 @@ import { createTransformMeta } from "@/dsl/transform";
 import type { VideoClipProps } from "./model";
 import { VideoClipSetting } from "./setting";
 
-vi.mock("@/editor/contexts/TimelineContext", () => ({
-	useTimelineStore: (selector: (state: { getAssetById: (id: string) => { id: string; uri: string } | null }) => unknown) =>
-		selector({
-			getAssetById: (id: string) =>
-				id === "source-video-1"
-					? { id: "source-video-1", uri: "/origin.mp4" }
-					: null,
-		}),
+vi.mock("@/projects/useProjectAssets", () => ({
+	useProjectAssets: () => ({
+		getProjectAssetById: (id: string) =>
+			id === "source-video-1" ? { id: "source-video-1", uri: "/origin.mp4" } : null,
+	}),
 }));
 
 const createVideoClipElement = (

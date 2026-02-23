@@ -19,8 +19,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
-import { useAssets } from "../contexts/TimelineContext";
+import { useProjectAssets } from "@/projects/useProjectAssets";
 
 interface SmartSpeechCutDialogProps {
 	open: boolean;
@@ -126,9 +125,12 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 	elementId,
 	assetId,
 }) => {
-	const timelineStore = useTimelineStoreApi();
 	const asrClient = useAsrClient();
-	const { assets } = useAssets();
+	const {
+		assets,
+		getProjectAssetById,
+		updateProjectAssetMeta,
+	} = useProjectAssets();
 	const source = useMemo(
 		() => resolveSourceById(assets, assetId),
 		[assets, assetId],
@@ -170,7 +172,8 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 					language,
 					force,
 					signal: controller.signal,
-					timelineStore,
+					getProjectAssetById,
+					updateProjectAssetMeta,
 					onStatus: setStatus,
 					onProgress: setProgress,
 				});
@@ -197,7 +200,14 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 				setAbortController(null);
 			}
 		},
-		[asrClient, isRunning, language, assetId, timelineStore],
+		[
+			asrClient,
+			isRunning,
+			language,
+			assetId,
+			getProjectAssetById,
+			updateProjectAssetMeta,
+		],
 	);
 
 	const handleDebugLog = useCallback(() => {

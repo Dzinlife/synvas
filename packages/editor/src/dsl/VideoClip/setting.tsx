@@ -1,4 +1,4 @@
-import { useTimelineStore } from "@/editor/contexts/TimelineContext";
+import { useProjectAssets } from "@/projects/useProjectAssets";
 import type { DSLComponentSettingProps } from "../model/componentRegistry";
 import type { VideoClipProps } from "./model";
 
@@ -7,9 +7,8 @@ export const VideoClipSetting = ({
 	updateProps,
 }: DSLComponentSettingProps<VideoClipProps>) => {
 	const reversed = Boolean(element.props.reversed);
-	const source = useTimelineStore((state) =>
-		state.getAssetById(element.assetId ?? ""),
-	);
+	const { getProjectAssetById } = useProjectAssets();
+	const source = getProjectAssetById(element.assetId ?? "");
 
 	return (
 		<div className="space-y-3 pt-2 border-t border-white/10">

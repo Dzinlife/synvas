@@ -3,9 +3,15 @@ import {
 	type TimelineData,
 	type TimelineJSON,
 } from "core/editor/timelineLoader";
+import type { TimelineAsset } from "core/dsl/types";
 import { selectTimelineForActiveScene } from "core/studio/selectors";
 import { parseStudioProject } from "core/studio/schema";
-import type { SceneDocument, SceneNode, StudioProject } from "core/studio/types";
+import type {
+	CanvasNode,
+	SceneDocument,
+	SceneNode,
+	StudioProject,
+} from "core/studio/types";
 import { create } from "zustand";
 import {
 	buildAutoProjectName,
@@ -34,7 +40,7 @@ interface UpdateSceneTimelineOptions {
 	recordHistory?: boolean;
 }
 
-interface SceneNodeLayoutPatch {
+export interface CanvasNodeLayoutPatch {
 	x?: number;
 	y?: number;
 	width?: number;
@@ -44,11 +50,40 @@ interface SceneNodeLayoutPatch {
 	locked?: boolean;
 }
 
-interface SceneCreateInput {
+export interface SceneCreateInput {
 	x?: number;
 	y?: number;
 	width?: number;
 	height?: number;
+	name?: string;
+}
+
+type CanvasNodePatch = Partial<
+	Omit<CanvasNode, "id" | "createdAt" | "type" | "sceneId">
+>;
+
+export type CanvasNodeCreateInput =
+	| ({
+			type: "scene";
+	  } & SceneCreateInput)
+	| {
+			type: Exclude<CanvasNode["type"], "scene">;
+			x?: number;
+			y?: number;
+			width?: number;
+			height?: number;
+			name?: string;
+			assetId?: string;
+			duration?: number;
+			naturalWidth?: number;
+			naturalHeight?: number;
+			text?: string;
+			fontSize?: number;
+	  };
+
+interface EnsureProjectAssetInput {
+	uri: string;
+	kind: TimelineAsset["kind"];
 	name?: string;
 }
 
@@ -70,8 +105,21 @@ interface ProjectStoreState {
 	createProject: () => Promise<void>;
 	saveCurrentProject: () => Promise<void>;
 	switchProject: (id: string) => Promise<void>;
+	createCanvasNode: (input: CanvasNodeCreateInput) => string;
+	updateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => void;
+	updateCanvasNodeLayout: (nodeId: string, patch: CanvasNodeLayoutPatch) => void;
+	setActiveNode: (nodeId: string | null) => void;
 	createSceneNode: (input?: SceneCreateInput) => string;
-	updateSceneNodeLayout: (nodeId: string, patch: SceneNodeLayoutPatch) => void;
+	updateSceneNodeLayout: (nodeId: string, patch: CanvasNodeLayoutPatch) => void;
+	ensureProjectAssetByUri: (input: EnsureProjectAssetInput) => string;
+	getProjectAssetById: (assetId: string) => TimelineAsset | null;
+	findProjectAssetByUri: (uri: string) => TimelineAsset | null;
+	updateProjectAssetMeta: (
+		assetId: string,
+		updater: (
+			prev: TimelineAsset["meta"] | undefined,
+		) => TimelineAsset["meta"] | undefined,
+	) => void;
 	setFocusedScene: (sceneId: string | null) => void;
 	setActiveScene: (sceneId: string | null) => void;
 	setCanvasCamera: (camera: CameraState) => void;
@@ -87,6 +135,8 @@ interface ProjectStoreState {
 	) => void;
 	setFocusedSceneDraft: (sceneId: string, timeline: TimelineJSON) => void;
 	flushFocusedSceneDraft: () => void;
+	removeCanvasNodeForHistory: (nodeId: string) => void;
+	restoreCanvasNodeForHistory: (node: CanvasNode) => void;
 	removeSceneGraphForHistory: (sceneId: string, nodeId: string) => void;
 	restoreSceneGraphForHistory: (scene: SceneDocument, node: SceneNode) => void;
 }
@@ -134,8 +184,45 @@ const createEntityId = (prefix: string): string => {
 	.slice(2, 8)}`;
 };
 
+const createAssetId = (): string => createEntityId("asset");
+
+const DEFAULT_IMAGE_NODE_WIDTH = 640;
+const DEFAULT_IMAGE_NODE_HEIGHT = 360;
+const DEFAULT_VIDEO_NODE_WIDTH = 640;
+const DEFAULT_VIDEO_NODE_HEIGHT = 360;
+const DEFAULT_AUDIO_NODE_WIDTH = 640;
+const DEFAULT_AUDIO_NODE_HEIGHT = 180;
+const DEFAULT_TEXT_NODE_WIDTH = 500;
+const DEFAULT_TEXT_NODE_HEIGHT = 160;
+const DEFAULT_TEXT_FONT_SIZE = 48;
+
+const getMaxCanvasNodeZIndex = (nodes: CanvasNode[]): number => {
+	return nodes.reduce(
+		(maxValue, node) => Math.max(maxValue, node.zIndex),
+		-1,
+	);
+};
+
+const findSceneNodeBySceneId = (
+	project: StudioProject,
+	sceneId: string | null | undefined,
+): SceneNode | null => {
+	if (!sceneId) return null;
+	const found = project.canvas.nodes.find(
+		(node): node is SceneNode =>
+			node.type === "scene" && node.sceneId === sceneId,
+	);
+	return found ?? null;
+};
+
 const cloneTimelineJson = (timeline: TimelineJSON): TimelineJSON => {
 	return JSON.parse(JSON.stringify(timeline)) as TimelineJSON;
+};
+
+const buildProjectAssetIdSet = (
+	project: Pick<StudioProject, "assets">,
+): ReadonlySet<string> => {
+	return new Set(project.assets.map((asset) => asset.id));
 };
 
 const createDefaultTimeline = (): TimelineJSON => {
@@ -150,9 +237,13 @@ const createDefaultTimeline = (): TimelineJSON => {
 	return cloneTimelineJson(timeline);
 };
 
-const loadTimelineData = (timeline: TimelineJSON): TimelineData => {
+const loadTimelineData = (
+	timeline: TimelineJSON,
+	project: Pick<StudioProject, "assets">,
+): TimelineData => {
+	const assetIdSet = buildProjectAssetIdSet(project);
 	try {
-		return loadTimelineFromObject(timeline);
+		return loadTimelineFromObject(timeline, assetIdSet);
 	} catch (error) {
 		console.error("Failed to load timeline data:", error);
 		const fallbackProject = buildEmptyProject(createProjectId());
@@ -163,14 +254,17 @@ const loadTimelineData = (timeline: TimelineJSON): TimelineData => {
 		if (!fallbackTimeline) {
 			throw new Error("Failed to build fallback timeline.");
 		}
-		return loadTimelineFromObject(fallbackTimeline);
+		return loadTimelineFromObject(
+			fallbackTimeline,
+			buildProjectAssetIdSet(fallbackProject),
+		);
 	}
 };
 
 const resolveTimelineData = (project: StudioProject): TimelineData | null => {
 	const selectedTimeline = selectTimelineForActiveScene(project);
 	if (!selectedTimeline) return null;
-	return loadTimelineData(selectedTimeline);
+	return loadTimelineData(selectedTimeline, project);
 };
 
 const formatError = (error: unknown): string => {
@@ -386,59 +480,158 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			set({ error: formatError(error) });
 		}
 	},
-	createSceneNode: (input) => {
-		let createdSceneId = "";
+	createCanvasNode: (input) => {
+		let createdNodeId = "";
 		set((state) => {
 			if (!state.currentProject) return state;
-			const now = Date.now();
 			const project = state.currentProject;
-			const sceneIndex = Object.keys(project.scenes).length + 1;
-			const sceneId = createEntityId("scene");
+			const now = Date.now();
 			const nodeId = createEntityId("node");
-			const name = input?.name?.trim() ? input.name.trim() : `Scene ${sceneIndex}`;
-			const width = input?.width ?? DEFAULT_SCENE_NODE_WIDTH;
-			const height = input?.height ?? DEFAULT_SCENE_NODE_HEIGHT;
-			const maxZIndex = project.canvas.nodes.reduce(
-				(maxValue, node) => Math.max(maxValue, node.zIndex),
-				0,
-			);
-			createdSceneId = sceneId;
-			const nextProject = withProjectRevision({
-				...project,
-				scenes: {
-					...project.scenes,
-					[sceneId]: {
-						id: sceneId,
-						name,
-						timeline: createDefaultTimeline(),
-						posterFrame: 0,
-						createdAt: now,
-						updatedAt: now,
-					},
-				},
-				canvas: {
-					nodes: [
-						...project.canvas.nodes,
-						{
-							id: nodeId,
-							type: "scene",
-							sceneId,
+			const maxZIndex = getMaxCanvasNodeZIndex(project.canvas.nodes);
+			const sceneIndex = Object.keys(project.scenes).length + 1;
+
+			let nextScenes = project.scenes;
+			let nextActiveSceneId = project.ui.activeSceneId;
+			let nextFocusedSceneId = project.ui.focusedSceneId;
+			let node: CanvasNode;
+
+			switch (input.type) {
+				case "scene": {
+					const sceneId = createEntityId("scene");
+					const name = input.name?.trim() ? input.name.trim() : `Scene ${sceneIndex}`;
+					const width = input.width ?? DEFAULT_SCENE_NODE_WIDTH;
+					const height = input.height ?? DEFAULT_SCENE_NODE_HEIGHT;
+					nextScenes = {
+						...project.scenes,
+						[sceneId]: {
+							id: sceneId,
 							name,
-							x: input?.x ?? -width / 2,
-							y: input?.y ?? -height / 2,
-							width,
-							height,
-							zIndex: maxZIndex + 1,
-							locked: false,
-							hidden: false,
+							timeline: createDefaultTimeline(),
+							posterFrame: 0,
 							createdAt: now,
 							updatedAt: now,
 						},
-					],
+					};
+					nextActiveSceneId = sceneId;
+					if (!nextFocusedSceneId) {
+						nextFocusedSceneId = sceneId;
+					}
+					node = {
+						id: nodeId,
+						type: "scene",
+						sceneId,
+						name,
+						x: input.x ?? -width / 2,
+						y: input.y ?? -height / 2,
+						width,
+						height,
+						zIndex: maxZIndex + 1,
+						locked: false,
+						hidden: false,
+						createdAt: now,
+						updatedAt: now,
+					};
+					break;
+				}
+				case "video": {
+					const width = input.width ?? DEFAULT_VIDEO_NODE_WIDTH;
+					const height = input.height ?? DEFAULT_VIDEO_NODE_HEIGHT;
+					node = {
+						id: nodeId,
+						type: "video",
+						assetId: input.assetId ?? "",
+						duration: input.duration,
+						name: input.name?.trim() ? input.name.trim() : "Video",
+						x: input.x ?? -width / 2,
+						y: input.y ?? -height / 2,
+						width,
+						height,
+						zIndex: maxZIndex + 1,
+						locked: false,
+						hidden: false,
+						createdAt: now,
+						updatedAt: now,
+					};
+					break;
+				}
+				case "audio": {
+					const width = input.width ?? DEFAULT_AUDIO_NODE_WIDTH;
+					const height = input.height ?? DEFAULT_AUDIO_NODE_HEIGHT;
+					node = {
+						id: nodeId,
+						type: "audio",
+						assetId: input.assetId ?? "",
+						duration: input.duration,
+						name: input.name?.trim() ? input.name.trim() : "Audio",
+						x: input.x ?? -width / 2,
+						y: input.y ?? -height / 2,
+						width,
+						height,
+						zIndex: maxZIndex + 1,
+						locked: false,
+						hidden: false,
+						createdAt: now,
+						updatedAt: now,
+					};
+					break;
+				}
+				case "image": {
+					const width = input.width ?? DEFAULT_IMAGE_NODE_WIDTH;
+					const height = input.height ?? DEFAULT_IMAGE_NODE_HEIGHT;
+					node = {
+						id: nodeId,
+						type: "image",
+						assetId: input.assetId ?? "",
+						name: input.name?.trim() ? input.name.trim() : "Image",
+						naturalWidth: input.naturalWidth,
+						naturalHeight: input.naturalHeight,
+						x: input.x ?? -width / 2,
+						y: input.y ?? -height / 2,
+						width,
+						height,
+						zIndex: maxZIndex + 1,
+						locked: false,
+						hidden: false,
+						createdAt: now,
+						updatedAt: now,
+					};
+					break;
+				}
+				case "text": {
+					const width = input.width ?? DEFAULT_TEXT_NODE_WIDTH;
+					const height = input.height ?? DEFAULT_TEXT_NODE_HEIGHT;
+					node = {
+						id: nodeId,
+						type: "text",
+						text: input.text ?? "New Text",
+						fontSize: input.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
+						name: input.name?.trim() ? input.name.trim() : "Text",
+						x: input.x ?? -width / 2,
+						y: input.y ?? -height / 2,
+						width,
+						height,
+						zIndex: maxZIndex + 1,
+						locked: false,
+						hidden: false,
+						createdAt: now,
+						updatedAt: now,
+					};
+					break;
+				}
+			}
+
+			createdNodeId = node.id;
+			const nextProject = withProjectRevision({
+				...project,
+				scenes: nextScenes,
+				canvas: {
+					nodes: [...project.canvas.nodes, node],
 				},
 				ui: {
 					...project.ui,
-					activeSceneId: sceneId,
+					activeSceneId: nextActiveSceneId,
+					focusedSceneId: nextFocusedSceneId,
+					activeNodeId: node.id,
 				},
 			});
 			return {
@@ -447,9 +640,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				error: null,
 			};
 		});
-		return createdSceneId;
+		return createdNodeId;
 	},
-	updateSceneNodeLayout: (nodeId, patch) => {
+	updateCanvasNode: (nodeId, patch) => {
 		set((state) => {
 			if (!state.currentProject) return state;
 			let didUpdate = false;
@@ -460,6 +653,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				return {
 					...node,
 					...patch,
+					id: node.id,
+					createdAt: node.createdAt,
 					updatedAt: now,
 				};
 			});
@@ -476,16 +671,126 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			};
 		});
 	},
+	updateCanvasNodeLayout: (nodeId, patch) => {
+		get().updateCanvasNode(nodeId, patch);
+	},
+	setActiveNode: (nodeId) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			if (nodeId && !state.currentProject.canvas.nodes.some((node) => node.id === nodeId)) {
+				return state;
+			}
+			const nextProject = {
+				...state.currentProject,
+				ui: {
+					...state.currentProject.ui,
+					activeNodeId: nodeId,
+				},
+			};
+			return {
+				currentProject: nextProject,
+			};
+		});
+	},
+	createSceneNode: (input) => {
+		const nodeId = get().createCanvasNode({
+			type: "scene",
+			...input,
+		});
+		const currentProject = get().currentProject;
+		if (!currentProject) return "";
+		const node = currentProject.canvas.nodes.find((item) => item.id === nodeId);
+		if (!node || node.type !== "scene") return "";
+		return node.sceneId;
+	},
+	updateSceneNodeLayout: (nodeId, patch) => {
+		get().updateCanvasNodeLayout(nodeId, patch);
+	},
+	ensureProjectAssetByUri: (input) => {
+		const uri = input.uri.trim();
+		if (!uri) {
+			throw new Error("Asset uri is required.");
+		}
+		let resolvedId = "";
+		set((state) => {
+			if (!state.currentProject) return state;
+			const existed = state.currentProject.assets.find(
+				(asset) => asset.uri === uri && asset.kind === input.kind,
+			);
+			if (existed) {
+				resolvedId = existed.id;
+				return state;
+			}
+			const nextAsset: TimelineAsset = {
+				id: createAssetId(),
+				uri,
+				kind: input.kind,
+				...(input.name ? { name: input.name } : {}),
+			};
+			resolvedId = nextAsset.id;
+			const nextProject = withProjectRevision({
+				...state.currentProject,
+				assets: [...state.currentProject.assets, nextAsset],
+			});
+			return {
+				currentProject: nextProject,
+				currentProjectData: resolveTimelineData(nextProject),
+			};
+		});
+		if (!resolvedId) {
+			throw new Error("Failed to ensure project asset.");
+		}
+		return resolvedId;
+	},
+	getProjectAssetById: (assetId) => {
+		const project = get().currentProject;
+		if (!project) return null;
+		return project.assets.find((asset) => asset.id === assetId) ?? null;
+	},
+	findProjectAssetByUri: (uri) => {
+		const project = get().currentProject;
+		if (!project) return null;
+		return project.assets.find((asset) => asset.uri === uri) ?? null;
+	},
+	updateProjectAssetMeta: (assetId, updater) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			let didUpdate = false;
+			const nextAssets = state.currentProject.assets.map((asset) => {
+				if (asset.id !== assetId) return asset;
+				const nextMeta = updater(asset.meta);
+				if (nextMeta === asset.meta) return asset;
+				didUpdate = true;
+				return {
+					...asset,
+					meta: nextMeta,
+				};
+			});
+			if (!didUpdate) return state;
+			const nextProject = withProjectRevision({
+				...state.currentProject,
+				assets: nextAssets,
+			});
+			return {
+				currentProject: nextProject,
+				currentProjectData: resolveTimelineData(nextProject),
+			};
+		});
+	},
 	setFocusedScene: (sceneId) => {
 		set((state) => {
 			if (!state.currentProject) return state;
 			if (sceneId && !state.currentProject.scenes[sceneId]) return state;
+			const focusedNode = findSceneNodeBySceneId(state.currentProject, sceneId);
 			const nextProject = {
 				...state.currentProject,
 				ui: {
 					...state.currentProject.ui,
 					focusedSceneId: sceneId,
 					activeSceneId: sceneId ?? state.currentProject.ui.activeSceneId,
+					activeNodeId:
+						focusedNode?.id ??
+						(sceneId ? state.currentProject.ui.activeNodeId : null),
 				},
 			};
 			return {
@@ -498,11 +803,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 		set((state) => {
 			if (!state.currentProject) return state;
 			if (sceneId && !state.currentProject.scenes[sceneId]) return state;
+			const sceneNode = findSceneNodeBySceneId(state.currentProject, sceneId);
 			const nextProject = {
 				...state.currentProject,
 				ui: {
 					...state.currentProject.ui,
 					activeSceneId: sceneId,
+					activeNodeId:
+						sceneNode?.id ?? state.currentProject.ui.activeNodeId,
 				},
 			};
 			return {
@@ -596,6 +904,57 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			return { focusedSceneDrafts: rest };
 		});
 	},
+	removeCanvasNodeForHistory: (nodeId) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			const currentProject = state.currentProject;
+			const existed = currentProject.canvas.nodes.some(
+				(node) => node.id === nodeId,
+			);
+			if (!existed) return state;
+			const nextProject = withProjectRevision({
+				...currentProject,
+				canvas: {
+					nodes: currentProject.canvas.nodes.filter((node) => node.id !== nodeId),
+				},
+				ui: {
+					...currentProject.ui,
+					activeNodeId:
+						currentProject.ui.activeNodeId === nodeId
+							? null
+							: currentProject.ui.activeNodeId,
+				},
+			});
+			return {
+				currentProject: nextProject,
+				currentProjectData: resolveTimelineData(nextProject),
+			};
+		});
+	},
+	restoreCanvasNodeForHistory: (node) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			const currentProject = state.currentProject;
+			const existed = currentProject.canvas.nodes.some(
+				(item) => item.id === node.id,
+			);
+			if (existed) return state;
+			const nextProject = withProjectRevision({
+				...currentProject,
+				canvas: {
+					nodes: [...currentProject.canvas.nodes, node],
+				},
+				ui: {
+					...currentProject.ui,
+					activeNodeId: currentProject.ui.activeNodeId ?? node.id,
+				},
+			});
+			return {
+				currentProject: nextProject,
+				currentProjectData: resolveTimelineData(nextProject),
+			};
+		});
+	},
 	removeSceneGraphForHistory: (sceneId, nodeId) => {
 		set((state) => {
 			if (!state.currentProject) return state;
@@ -621,6 +980,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						currentProject.ui.focusedSceneId === sceneId
 							? null
 							: currentProject.ui.focusedSceneId,
+					activeNodeId:
+						currentProject.ui.activeNodeId === nodeId
+							? null
+							: currentProject.ui.activeNodeId,
 				},
 			});
 			return {
@@ -646,6 +1009,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				ui: {
 					...currentProject.ui,
 					activeSceneId: currentProject.ui.activeSceneId ?? scene.id,
+					activeNodeId: currentProject.ui.activeNodeId ?? node.id,
 				},
 			});
 			return {

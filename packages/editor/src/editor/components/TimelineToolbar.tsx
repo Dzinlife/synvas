@@ -35,6 +35,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useProjectAssets } from "@/projects/useProjectAssets";
 import { clampFrame } from "@/utils/timecode";
 import {
 	useAttachments,
@@ -44,12 +45,10 @@ import {
 	usePreviewAxis,
 	useRippleEditing,
 	useSnap,
-	useAssets,
 	useTimelineScale,
 	useTimelineStore,
 	useTracks,
 } from "../contexts/TimelineContext";
-import { useTimelineStoreApi } from "../runtime/EditorRuntimeProvider";
 import { getAudioTrackControlState } from "../utils/audioTrackState";
 import { MAX_TIMELINE_SCALE, MIN_TIMELINE_SCALE } from "../utils/timelineZoom";
 import {
@@ -109,7 +108,6 @@ const remapTransitionsAfterSplit = (
 };
 
 const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
-	const timelineStore = useTimelineStoreApi();
 	const { snapEnabled, setSnapEnabled } = useSnap();
 	const { attachments, autoAttach, setAutoAttach } = useAttachments();
 	const { rippleEditingEnabled, setRippleEditingEnabled } = useRippleEditing();
@@ -117,7 +115,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId } = useMultiSelect();
-	const { assets } = useAssets();
+	const { assets, getProjectAssetById } = useProjectAssets();
 	const { fps } = useFps();
 	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
@@ -262,7 +260,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			const analysis = await analyzeVideoChangeForElement({
 				element: quickSplitCandidate,
 				fps,
-				timelineStore,
+				getProjectAssetById,
 				sensitivity: quickSplitSensitivity,
 				minSegmentSeconds: quickSplitMinSegmentSeconds,
 				mode: quickSplitMode,
@@ -312,7 +310,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		quickSplitMinSegmentSeconds,
 		quickSplitMode,
 		setElements,
-		timelineStore,
+		getProjectAssetById,
 	]);
 
 	const handleSplit = useCallback(() => {

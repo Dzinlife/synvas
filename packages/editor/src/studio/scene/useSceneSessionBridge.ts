@@ -43,7 +43,6 @@ const buildTimelineFromHistorySnapshot = (
 			previewAxisEnabled: state.previewAxisEnabled,
 			audio: cloneAudioSettings(state.audioSettings),
 		},
-		snapshot.assets,
 	);
 };
 

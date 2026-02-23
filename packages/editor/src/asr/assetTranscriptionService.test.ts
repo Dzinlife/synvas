@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import type { TimelineAsset } from "core/dsl/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTestEditorRuntime } from "@/editor/runtime/testUtils";
 import type { AsrClient } from "./AsrContext";
 import type { TranscriptSegment } from "./types";
 import { transcribeAssetById } from "./assetTranscriptionService";
@@ -25,13 +24,31 @@ import { resolveAssetMediaFile } from "./assetMediaFile";
 const mockedResolveAssetMediaFile = vi.mocked(resolveAssetMediaFile);
 const mockedReadAudioMetadata = vi.mocked(readAudioMetadata);
 const mockedReadVideoMetadata = vi.mocked(readVideoMetadata);
+const projectAssetsState = {
+	assets: [] as TimelineAsset[],
+};
 
-const runtime = createTestEditorRuntime("asr-transcription-service-test");
-const timelineStore = runtime.timelineStore;
-const initialState = timelineStore.getState();
+const getProjectAssetById = (assetId: string): TimelineAsset | null => {
+	return projectAssetsState.assets.find((asset) => asset.id === assetId) ?? null;
+};
+
+const updateProjectAssetMeta = (
+	assetId: string,
+	updater: (
+		prevMeta: TimelineAsset["meta"] | undefined,
+	) => TimelineAsset["meta"] | undefined,
+) => {
+	projectAssetsState.assets = projectAssetsState.assets.map((asset) => {
+		if (asset.id !== assetId) return asset;
+		return {
+			...asset,
+			meta: updater(asset.meta),
+		};
+	});
+};
 
 afterEach(() => {
-	timelineStore.setState(initialState, true);
+	projectAssetsState.assets = [];
 	mockedResolveAssetMediaFile.mockReset();
 	mockedReadAudioMetadata.mockReset();
 	mockedReadVideoMetadata.mockReset();
@@ -96,9 +113,7 @@ describe("assetTranscriptionService", () => {
 			width: 1920,
 			height: 1080,
 		});
-		timelineStore.setState({
-			assets: [createSource()],
-		});
+		projectAssetsState.assets = [createSource()];
 
 		const asrClient: AsrClient = {
 			ensureReady: vi.fn(async () => {}),
@@ -116,11 +131,12 @@ describe("assetTranscriptionService", () => {
 			asrClient,
 			signal: controller.signal,
 			language: "zh",
-			timelineStore,
+			getProjectAssetById,
+			updateProjectAssetMeta,
 		});
 		expect(result.status).toBe("done");
 		expect(result.changed).toBe(true);
-		const asr = timelineStore.getState().getAssetById("source-1")?.meta?.asr;
+		const asr = getProjectAssetById("source-1")?.meta?.asr;
 		expect(asr?.segments).toHaveLength(1);
 		expect(asr?.segments[0]?.text).toBe("你好");
 	});
@@ -138,9 +154,7 @@ describe("assetTranscriptionService", () => {
 			width: 1920,
 			height: 1080,
 		});
-		timelineStore.setState({
-			assets: [createSource({ withAsr: true })],
-		});
+		projectAssetsState.assets = [createSource({ withAsr: true })];
 
 		const asrClient: AsrClient = {
 			ensureReady: vi.fn(async ({ signal }) => {
@@ -160,11 +174,12 @@ describe("assetTranscriptionService", () => {
 			signal: controller.signal,
 			language: "zh",
 			force: true,
-			timelineStore,
+			getProjectAssetById,
+			updateProjectAssetMeta,
 		});
 		expect(result.status).toBe("canceled");
 		expect(result.changed).toBe(false);
-		const asr = timelineStore.getState().getAssetById("source-1")?.meta?.asr;
+		const asr = getProjectAssetById("source-1")?.meta?.asr;
 		expect(asr?.id).toBe("old-asr");
 		expect(asr?.segments[0]?.text).toBe("旧内容");
 	});
@@ -182,9 +197,7 @@ describe("assetTranscriptionService", () => {
 			width: 1920,
 			height: 1080,
 		});
-		timelineStore.setState({
-			assets: [createSource({ withAsr: true })],
-		});
+		projectAssetsState.assets = [createSource({ withAsr: true })];
 
 		const asrClient: AsrClient = {
 			ensureReady: vi.fn(async () => {}),
@@ -203,10 +216,11 @@ describe("assetTranscriptionService", () => {
 			signal: controller.signal,
 			language: "zh",
 			force: true,
-			timelineStore,
+			getProjectAssetById,
+			updateProjectAssetMeta,
 		});
 		expect(result.status).toBe("done");
-		const asr = timelineStore.getState().getAssetById("source-1")?.meta?.asr;
+		const asr = getProjectAssetById("source-1")?.meta?.asr;
 		expect(asr?.id).not.toBe("old-asr");
 		expect(asr?.segments[0]?.text).toBe("新内容");
 	});

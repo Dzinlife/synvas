@@ -1,4 +1,4 @@
-import type { TimelineAsset, TimelineElement } from "../dsl/types";
+import type { TimelineElement } from "../dsl/types";
 import { describe, expect, it } from "vitest";
 import { loadTimelineFromObject, saveTimelineToObject } from "./timelineLoader";
 
@@ -14,13 +14,6 @@ const createBaseTimeline = () => ({
 		rippleEditingEnabled: true,
 		previewAxisEnabled: true,
 	},
-	assets: [
-		{
-			id: "asset-video-1",
-			kind: "video" as const,
-			uri: "file:///clip.mp4",
-		},
-	],
 	elements: [
 		{
 			id: "clip-1",
@@ -42,11 +35,12 @@ const createBaseTimeline = () => ({
 	],
 });
 
-describe("timelineLoader asset schema", () => {
-	it("支持 assets + assetId 结构", () => {
-		const loaded = loadTimelineFromObject(createBaseTimeline());
-		expect(loaded.assets).toHaveLength(1);
-		expect(loaded.assets[0]?.id).toBe("asset-video-1");
+describe("timelineLoader asset reference", () => {
+	it("支持 assetId + 外部 assetIdSet 校验", () => {
+		const loaded = loadTimelineFromObject(
+			createBaseTimeline(),
+			new Set(["asset-video-1"]),
+		);
 		expect(loaded.elements[0]?.assetId).toBe("asset-video-1");
 	});
 
@@ -58,12 +52,18 @@ describe("timelineLoader asset schema", () => {
 		);
 	});
 
-	it("assetId 指向不存在的 asset 会校验失败", () => {
+	it("assetId 指向不存在 asset 时在 strict 模式下失败", () => {
 		const invalid = createBaseTimeline();
 		(invalid.elements[0] as { assetId?: string }).assetId = "missing-asset";
-		expect(() => loadTimelineFromObject(invalid)).toThrow(
-			'asset "missing-asset" not found',
-		);
+		expect(() =>
+			loadTimelineFromObject(invalid, new Set(["asset-video-1"])),
+		).toThrow('asset "missing-asset" not found');
+	});
+
+	it("assetId 在非 strict 模式允许保留外部引用", () => {
+		const timeline = createBaseTimeline();
+		(timeline.elements[0] as { assetId?: string }).assetId = "external-asset";
+		expect(() => loadTimelineFromObject(timeline)).not.toThrow();
 	});
 
 	it("媒体元素携带 props.uri 会校验失败", () => {
@@ -76,12 +76,7 @@ describe("timelineLoader asset schema", () => {
 		);
 	});
 
-	it("saveTimelineToObject 会保留 assetId 并移除媒体 props.uri", () => {
-		const asset: TimelineAsset = {
-			id: "asset-video-1",
-			kind: "video",
-			uri: "file:///clip.mp4",
-		};
+	it("saveTimelineToObject 会移除媒体 props.uri 并保留 assetId", () => {
 		const element: TimelineElement = {
 			id: "clip-1",
 			type: "VideoClip",
@@ -105,72 +100,9 @@ describe("timelineLoader asset schema", () => {
 			30,
 			{ width: 1920, height: 1080 },
 			[],
-			undefined,
-			[asset],
 		);
-		expect(saved.assets?.[0]?.id).toBe("asset-video-1");
 		expect(saved.elements[0]?.assetId).toBe("asset-video-1");
 		expect((saved.elements[0]?.props as { uri?: string }).uri).toBeUndefined();
-	});
-
-	it("支持在 asset.meta.asr 中保存转写数据", () => {
-		const timeline = createBaseTimeline();
-		(timeline.assets[0] as TimelineAsset).meta = {
-			asr: {
-				id: "transcript-1",
-				source: {
-					type: "asset",
-					assetId: "asset-video-1",
-					kind: "video",
-					uri: "file:///clip.mp4",
-					fileName: "clip.mp4",
-					duration: 2.5,
-				},
-				language: "zh",
-				model: "tiny",
-				createdAt: 1,
-				updatedAt: 2,
-				segments: [
-					{
-						id: "seg-1",
-						start: 0,
-						end: 1,
-						text: "你好",
-						words: [
-							{
-								text: "你好",
-								start: 0,
-								end: 1,
-							},
-						],
-					},
-				],
-			},
-		};
-		const loaded = loadTimelineFromObject(timeline);
-		expect(loaded.assets[0]?.meta?.asr?.id).toBe("transcript-1");
-	});
-
-	it("不兼容旧版 opfs-audio 转写结构", () => {
-		const timeline = createBaseTimeline();
-		(timeline.assets[0] as TimelineAsset).meta = {
-			asr: {
-				id: "transcript-1",
-				source: {
-					type: "opfs-audio",
-					uri: "opfs://projects/project-1/audios/voice.wav",
-					fileName: "voice.wav",
-					duration: 2.5,
-				},
-				language: "zh",
-				model: "tiny",
-				createdAt: 1,
-				updatedAt: 2,
-				segments: [],
-			},
-		} as unknown as TimelineAsset["meta"];
-		expect(() => loadTimelineFromObject(timeline)).toThrow(
-			"assets[0].meta.asr.source.type",
-		);
+		expect(Object.hasOwn(saved, "assets")).toBe(false);
 	});
 });

@@ -55,14 +55,6 @@ const createTimeline = (
 		},
 	},
 	tracks: [],
-	assets: [
-		{
-			id: `asset-${sceneId}`,
-			uri: `file:///asset-${sceneId}.png`,
-			kind: "image" as const,
-			name: `asset-${sceneId}`,
-		},
-	],
 	elements: Array.from({ length: elementCount }).map((_, index) => {
 		const start = index * 30;
 		const end = start + 30;
@@ -88,6 +80,20 @@ const createTimeline = (
 const createProject = (): StudioProject => ({
 	id: "project-1",
 	revision: 0,
+	assets: [
+		{
+			id: "asset-scene-1",
+			uri: "file:///asset-scene-1.png",
+			kind: "image",
+			name: "asset-scene-1",
+		},
+		{
+			id: "asset-scene-2",
+			uri: "file:///asset-scene-2.png",
+			kind: "image",
+			name: "asset-scene-2",
+		},
+	],
 	canvas: {
 		nodes: [
 			{
@@ -143,6 +149,7 @@ const createProject = (): StudioProject => ({
 	ui: {
 		activeSceneId: "scene-1",
 		focusedSceneId: null,
+		activeNodeId: "node-1",
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,

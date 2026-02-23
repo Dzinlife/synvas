@@ -74,7 +74,6 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 				const unsubscribe = runtime.timelineStore.subscribe(
 					(state) => [
 						state.elements,
-						state.assets,
 						state.tracks,
 						state.fps,
 						state.canvasSize,

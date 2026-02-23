@@ -1,5 +1,5 @@
 import type { TimelineJSON } from "core/editor/timelineLoader";
-import type { SceneDocument, SceneNode } from "core/studio/types";
+import type { CanvasNode, SceneDocument } from "core/studio/types";
 import { create } from "zustand";
 import type { TimelineStoreApi } from "@/editor/contexts/TimelineContext";
 import type { StudioRuntimeManager, TimelineRef } from "@/editor/runtime/types";
@@ -10,8 +10,8 @@ import {
 } from "@/studio/scene/timelineRefAdapter";
 import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 
-export type SceneNodeLayoutSnapshot = Pick<
-	SceneNode,
+export type CanvasNodeLayoutSnapshot = Pick<
+	CanvasNode,
 	"x" | "y" | "width" | "height" | "zIndex" | "hidden" | "locked"
 >;
 
@@ -28,16 +28,16 @@ export type StudioHistoryEntry =
 			focusSceneId: string | null;
 	  }
 	| {
-			kind: "canvas.scene-node-layout";
+			kind: "canvas.node-layout";
 			nodeId: string;
-			before: SceneNodeLayoutSnapshot;
-			after: SceneNodeLayoutSnapshot;
+			before: CanvasNodeLayoutSnapshot;
+			after: CanvasNodeLayoutSnapshot;
 			focusSceneId: string | null;
 	  }
 	| {
-			kind: "canvas.scene-create";
-			scene: SceneDocument;
-			node: SceneNode;
+			kind: "canvas.node-create";
+			node: CanvasNode;
+			scene?: SceneDocument;
 			focusSceneId: string | null;
 	  };
 
@@ -102,17 +102,25 @@ const applyEntry = (
 		}
 		return;
 	}
-	if (entry.kind === "canvas.scene-node-layout") {
+	if (entry.kind === "canvas.node-layout") {
 		const patch = mode === "undo" ? entry.before : entry.after;
-		projectStore.updateSceneNodeLayout(entry.nodeId, patch);
+		projectStore.updateCanvasNodeLayout(entry.nodeId, patch);
 		return;
 	}
-	if (entry.kind === "canvas.scene-create") {
-		if (mode === "undo") {
-			projectStore.removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+	if (entry.kind === "canvas.node-create") {
+		if (entry.node.type === "scene" && entry.scene) {
+			if (mode === "undo") {
+				projectStore.removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+				return;
+			}
+			projectStore.restoreSceneGraphForHistory(entry.scene, entry.node);
 			return;
 		}
-		projectStore.restoreSceneGraphForHistory(entry.scene, entry.node);
+		if (mode === "undo") {
+			projectStore.removeCanvasNodeForHistory(entry.node.id);
+			return;
+		}
+		projectStore.restoreCanvasNodeForHistory(entry.node);
 	}
 };
 

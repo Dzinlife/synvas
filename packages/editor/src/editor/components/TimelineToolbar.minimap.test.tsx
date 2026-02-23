@@ -57,9 +57,6 @@ vi.mock("../contexts/TimelineContext", () => {
 			rippleEditingEnabled: false,
 			setRippleEditingEnabled: noop,
 		}),
-		useAssets: () => ({
-			assets: [],
-		}),
 		useSnap: () => ({
 			snapEnabled: true,
 			setSnapEnabled: noop,
@@ -81,6 +78,13 @@ vi.mock("../contexts/TimelineContext", () => {
 		}),
 	};
 });
+
+vi.mock("@/projects/useProjectAssets", () => ({
+	useProjectAssets: () => ({
+		assets: [],
+		getProjectAssetById: () => null,
+	}),
+}));
 
 vi.mock("../runtime/EditorRuntimeProvider", () => ({
 	useTimelineStoreApi: () =>

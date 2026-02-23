@@ -1,6 +1,5 @@
 import type {
 	TimelineElement,
-	TimelineAsset,
 } from "core/dsl/types";
 import {
 	DEFAULT_TIMELINE_SETTINGS,
@@ -129,15 +128,6 @@ const cloneAudioSettings = (
 	};
 };
 
-const createAssetId = (): string => {
-	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-		return `asset-${crypto.randomUUID()}`;
-	}
-	return `asset-${Date.now().toString(36)}-${Math.random()
-		.toString(36)
-		.slice(2, 8)}`;
-};
-
 export interface TimelineStore {
 	fps: number;
 	timelineScale: number;
@@ -145,7 +135,6 @@ export interface TimelineStore {
 	previewTime: number | null; // hover 时的临时预览时间
 	previewAxisEnabled: boolean; // 预览轴是否启用
 	elements: TimelineElement[];
-	assets: TimelineAsset[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	historyPast: TimelineHistorySnapshot[];
@@ -193,12 +182,6 @@ export interface TimelineStore {
 			| ((prev: TimelineElement[]) => TimelineElement[]),
 		options?: { history?: boolean },
 	) => void;
-	setAssets: (
-		assets:
-			| TimelineAsset[]
-			| ((prev: TimelineAsset[]) => TimelineAsset[]),
-		options?: { history?: boolean },
-	) => void;
 	setTracks: (
 		tracks: TimelineTrack[] | ((prev: TimelineTrack[]) => TimelineTrack[]),
 	) => void;
@@ -224,7 +207,6 @@ export interface TimelineStore {
 	getDisplayTime: () => number; // 返回 previewTime ?? currentTime
 	getRenderTime: () => number;
 	getElements: () => TimelineElement[];
-	getAssets: () => TimelineAsset[];
 	getCanvasSize: () => { width: number; height: number };
 	play: () => void;
 	pause: () => void;
@@ -261,20 +243,6 @@ export interface TimelineStore {
 		},
 	) => void;
 	getElementById: (id: string) => TimelineElement | null;
-	getAssetById: (id: string) => TimelineAsset | null;
-	findAssetByUri: (uri: string) => TimelineAsset | null;
-	ensureAssetByUri: (params: {
-		uri: string;
-		kind: TimelineAsset["kind"];
-		name?: string;
-	}) => string;
-	updateAssetMeta: (
-		assetId: string,
-		updater: (
-			prev: TimelineAsset["meta"] | undefined,
-		) => TimelineAsset["meta"] | undefined,
-		options?: { history?: boolean },
-	) => void;
 	getRevision: () => number;
 	getCommandSnapshot: () => TimelineCommandSnapshot;
 	applyCommandSnapshot: (
@@ -290,7 +258,6 @@ export type TimelineStoreApi = Mutate<
 
 interface TimelineHistorySnapshot {
 	elements: TimelineElement[];
-	assets: TimelineAsset[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	rippleEditingEnabled: boolean;
@@ -308,7 +275,6 @@ const trimHistory = (
 
 const buildHistorySnapshot = (state: {
 	elements: TimelineElement[];
-	assets: TimelineAsset[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	rippleEditingEnabled: boolean;
@@ -316,7 +282,6 @@ const buildHistorySnapshot = (state: {
 	// 使用不可变快照复用元素/轨道引用，避免深拷贝占用内存
 	return {
 		elements: state.elements,
-		assets: state.assets,
 		tracks: state.tracks,
 		audioTrackStates: state.audioTrackStates,
 		rippleEditingEnabled: state.rippleEditingEnabled,
@@ -402,7 +367,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 			previewTime: null,
 			previewAxisEnabled: true,
 			elements: [],
-			assets: [],
 			tracks: [
 				{
 					id: MAIN_TRACK_ID,
@@ -447,68 +411,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 		revision: 0,
 		getElementById: (id: string) => {
 			return get().elements.find((element) => element.id === id) ?? null;
-		},
-		getAssetById: (id: string) => {
-			return get().assets.find((source) => source.id === id) ?? null;
-		},
-		findAssetByUri: (uri: string) => {
-			return get().assets.find((source) => source.uri === uri) ?? null;
-		},
-		ensureAssetByUri: ({ uri, kind, name }) => {
-			let resolvedId: string | null = null;
-			set((state) => {
-				const existed = state.assets.find((asset) => asset.uri === uri);
-				if (existed) {
-					resolvedId = existed.id;
-					return state;
-				}
-				const nextAsset: TimelineAsset = {
-					id: createAssetId(),
-					uri,
-					kind,
-					...(name ? { name } : {}),
-				};
-				resolvedId = nextAsset.id;
-				return {
-					assets: [...state.assets, nextAsset],
-				};
-			});
-			if (!resolvedId) {
-				throw new Error("failed to ensure asset");
-			}
-			return resolvedId;
-		},
-		updateAssetMeta: (assetId, updater, options) => {
-			set((state) => {
-				let didChange = false;
-				const nextAssets = state.assets.map((asset) => {
-					if (asset.id !== assetId) return asset;
-					const nextMeta = updater(asset.meta);
-					if (nextMeta === asset.meta) {
-						return asset;
-					}
-					didChange = true;
-					return {
-						...asset,
-						meta: nextMeta,
-					};
-				});
-				if (!didChange) return state;
-				if (options?.history === false) {
-					return {
-						assets: nextAssets,
-					};
-				}
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					assets: nextAssets,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
 		},
 
 		setFps: (fps: number) => {
@@ -653,33 +555,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 			});
 		},
 
-		setAssets: (
-			assets:
-				| TimelineAsset[]
-				| ((prev: TimelineAsset[]) => TimelineAsset[]),
-			options?: { history?: boolean },
-		) => {
-			set((state) => {
-				const nextSources =
-					typeof assets === "function" ? assets(state.assets) : assets;
-				if (state.assets === nextSources) return state;
-				if (options?.history === false) {
-					return {
-						assets: nextSources,
-					};
-				}
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					assets: nextSources,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
-
 		setTracks: (
 			tracks: TimelineTrack[] | ((prev: TimelineTrack[]) => TimelineTrack[]),
 		) => {
@@ -718,7 +593,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 				);
 				return {
 					elements: previous.elements,
-					assets: previous.assets,
 					tracks: previous.tracks,
 					audioTrackStates: previous.audioTrackStates,
 					rippleEditingEnabled: previous.rippleEditingEnabled,
@@ -750,7 +624,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 				);
 				return {
 					elements: next.elements,
-					assets: next.assets,
 					tracks: next.tracks,
 					audioTrackStates: next.audioTrackStates,
 					rippleEditingEnabled: next.rippleEditingEnabled,
@@ -1167,9 +1040,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 		getElements: () => {
 			return get().elements;
 		},
-		getAssets: () => {
-			return get().assets;
-		},
 
 		getCanvasSize: () => {
 			return get().canvasSize;
@@ -1342,7 +1212,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 				fps: state.fps,
 				currentTime: state.currentTime,
 				elements: state.elements,
-				assets: state.assets,
 				tracks: state.tracks,
 				audioTrackStates: state.audioTrackStates,
 				autoAttach: state.autoAttach,
@@ -1358,7 +1227,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 				const didChange =
 					state.currentTime !== nextCurrentTime ||
 					state.elements !== snapshot.elements ||
-					state.assets !== snapshot.assets ||
 					state.tracks !== snapshot.tracks ||
 					state.audioTrackStates !== snapshot.audioTrackStates ||
 					state.autoAttach !== snapshot.autoAttach ||
@@ -1373,7 +1241,6 @@ export const createTimelineStore = (): TimelineStoreApi => {
 				const nextStateBase = {
 					currentTime: nextCurrentTime,
 					elements: snapshot.elements,
-					assets: snapshot.assets,
 					tracks: snapshot.tracks,
 					audioTrackStates: snapshot.audioTrackStates,
 					autoAttach: snapshot.autoAttach,
@@ -1416,7 +1283,6 @@ interface TimelineRevisionDeps {
 	previewTime: number | null;
 	previewAxisEnabled: boolean;
 	elements: TimelineElement[];
-	assets: TimelineAsset[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	isPlaying: boolean;
@@ -1440,7 +1306,6 @@ const selectRevisionDeps = (state: TimelineStore): TimelineRevisionDeps => ({
 	previewTime: state.previewTime,
 	previewAxisEnabled: state.previewAxisEnabled,
 	elements: state.elements,
-	assets: state.assets,
 	tracks: state.tracks,
 	audioTrackStates: state.audioTrackStates,
 	isPlaying: state.isPlaying,
@@ -1468,7 +1333,6 @@ const isRevisionDepsEqual = (
 		prev.previewTime === next.previewTime &&
 		prev.previewAxisEnabled === next.previewAxisEnabled &&
 		prev.elements === next.elements &&
-		prev.assets === next.assets &&
 		prev.tracks === next.tracks &&
 		prev.audioTrackStates === next.audioTrackStates &&
 		prev.isPlaying === next.isPlaying &&
@@ -1604,24 +1468,6 @@ export const useElements = () => {
 	return {
 		elements,
 		setElements,
-	};
-};
-
-export const useAssets = () => {
-	const assets = useTimelineStore((state) => state.assets);
-	const setAssets = useTimelineStore((state) => state.setAssets);
-	const ensureAssetByUri = useTimelineStore((state) => state.ensureAssetByUri);
-	const findAssetByUri = useTimelineStore((state) => state.findAssetByUri);
-	const getAssetById = useTimelineStore((state) => state.getAssetById);
-	const updateAssetMeta = useTimelineStore((state) => state.updateAssetMeta);
-
-	return {
-		assets,
-		setAssets,
-		ensureAssetByUri,
-		findAssetByUri,
-		getAssetById,
-		updateAssetMeta,
 	};
 };
 
@@ -2257,7 +2103,6 @@ export const TimelineProvider = ({
 	children,
 	currentTime: initialCurrentTime,
 	elements: initialElements,
-	assets: initialSources,
 	tracks: initialTracks,
 	canvasSize: initialCanvasSize,
 	fps: initialFps,
@@ -2266,7 +2111,6 @@ export const TimelineProvider = ({
 	children: React.ReactNode;
 	currentTime?: number;
 	elements?: TimelineElement[];
-	assets?: TimelineAsset[];
 	tracks?: TimelineTrack[];
 	canvasSize?: { width: number; height: number };
 	fps?: number;
@@ -2298,7 +2142,6 @@ export const TimelineProvider = ({
 			timelineStore.setState({
 				currentTime: clampFrame(initialCurrentTime ?? 0),
 				elements,
-				assets: initialSources ?? [],
 				tracks,
 				audioTrackStates: {},
 				scrollLeft: 0,
@@ -2312,7 +2155,6 @@ export const TimelineProvider = ({
 		if (initialTracks) {
 			timelineStore.setState({
 				tracks: initialTracks,
-				...(initialSources ? { assets: initialSources } : {}),
 				audioTrackStates: {},
 				scrollLeft: 0,
 				...(settingsState ?? {}),
@@ -2322,7 +2164,6 @@ export const TimelineProvider = ({
 		}
 		if (settingsState) {
 			timelineStore.setState({
-				...(initialSources ? { assets: initialSources } : {}),
 				scrollLeft: 0,
 				...settingsState,
 			});
@@ -2336,26 +2177,24 @@ export const TimelineProvider = ({
 			const { tracks, elements } = reconcileTracks(initialElements, baseTracks);
 			timelineStore.setState({
 				elements,
-				assets: initialSources ?? [],
 				tracks,
 				audioTrackStates: {},
 				scrollLeft: 0,
 			});
 			timelineStore.getState().resetHistory();
 		}
-	}, [initialElements, initialSources, initialTracks, timelineStore]);
+	}, [initialElements, initialTracks, timelineStore]);
 
 	useEffect(() => {
 		if (!initialElements && initialTracks) {
 			timelineStore.setState({
 				tracks: initialTracks,
-				...(initialSources ? { assets: initialSources } : {}),
 				audioTrackStates: {},
 				scrollLeft: 0,
 			});
 			timelineStore.getState().resetHistory();
 		}
-	}, [initialElements, initialSources, initialTracks, timelineStore]);
+	}, [initialElements, initialTracks, timelineStore]);
 
 	useEffect(() => {
 		if (initialCurrentTime !== undefined) {

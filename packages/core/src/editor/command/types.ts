@@ -1,4 +1,4 @@
-import type { TimelineAsset, TimelineElement } from "../../dsl/types";
+import type { TimelineElement } from "../../dsl/types";
 import type { TimelineTrack } from "../timeline/types";
 import type { AudioTrackControlStateMap } from "../utils/audioTrackState";
 
@@ -55,7 +55,6 @@ export interface TimelineCommandSnapshot {
 	fps: number;
 	currentTime: number;
 	elements: TimelineElement[];
-	assets: TimelineAsset[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	autoAttach: boolean;

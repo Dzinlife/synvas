@@ -24,9 +24,9 @@ import {
 	useAttachments,
 	useFps,
 	useRippleEditing,
-	useAssets,
 	useTimelineStore,
 } from "./contexts/TimelineContext";
+import { useProjectAssets } from "@/projects/useProjectAssets";
 import {
 	type MaterialDndContext,
 	type MaterialDndItem,
@@ -165,18 +165,18 @@ const MATERIAL_PRESETS: Record<string, MaterialPreset> = {
 		height: 1080,
 		props: { uri: "/intro.mp4", reversed: false },
 	},
-		"audio-clip": {
-			type: "audio",
-			name: "示例音频",
-			uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
+	"audio-clip": {
+		type: "audio",
+		name: "示例音频",
+		uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
 		thumbnailUrl: buildSvgThumbnail("AUDIO", "#0f766e"),
 		width: 1920,
 		height: 200,
-			props: {
-				uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
-				reversed: false,
-			},
+		props: {
+			uri: "https://cdn.jsdelivr.net/gh/anars/blank-audio@master/5-seconds-of-silence.mp3",
+			reversed: false,
 		},
+	},
 	lottie: {
 		type: "image",
 		name: "Lottie 动画",
@@ -403,7 +403,7 @@ const MaterialLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
 	const currentTime = useTimelineStore((state) => state.currentTime);
-	const { ensureAssetByUri } = useAssets();
+	const { ensureProjectAssetByUri } = useProjectAssets();
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
@@ -492,7 +492,7 @@ const MaterialLibrary: React.FC = () => {
 					isAssetBackedElementType(item.elementType) &&
 					sourceUri &&
 					sourceKind
-						? ensureAssetByUri({
+						? ensureProjectAssetByUri({
 								uri: sourceUri,
 								kind: sourceKind,
 								name: item.name,
@@ -583,7 +583,7 @@ const MaterialLibrary: React.FC = () => {
 		},
 		[
 			setElements,
-			ensureAssetByUri,
+			ensureProjectAssetByUri,
 			rippleEditingEnabled,
 			attachments,
 			autoAttach,
@@ -626,7 +626,7 @@ const MaterialLibrary: React.FC = () => {
 					isAssetBackedElementType(item.elementType) &&
 					sourceUri &&
 					sourceKind
-						? ensureAssetByUri({
+						? ensureProjectAssetByUri({
 								uri: sourceUri,
 								kind: sourceKind,
 								name: item.name,
@@ -667,7 +667,7 @@ const MaterialLibrary: React.FC = () => {
 				return [...prev, newElement];
 			});
 		},
-		[setElements, currentTime, ensureAssetByUri, fps],
+		[setElements, currentTime, ensureProjectAssetByUri, fps],
 	);
 
 	return (

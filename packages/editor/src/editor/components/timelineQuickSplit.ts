@@ -1,8 +1,7 @@
-import type { TimelineElement } from "core/dsl/types";
+import type { TimelineAsset, TimelineElement } from "core/dsl/types";
 import { buildSplitElements } from "core/editor/command/split";
 import type { CanvasSink } from "mediabunny";
 import { acquireVideoAsset } from "@/dsl/assets/videoAsset";
-import type { TimelineStoreApi } from "@/editor/contexts/TimelineContext";
 import { framesToSeconds } from "@/utils/timecode";
 import { isTransitionElement, reconcileTransitions } from "../utils/transitions";
 
@@ -567,7 +566,7 @@ const calculateQuickSplitVideoTime = (options: {
 export const analyzeVideoChangeForElement = async (options: {
 	element: QuickSplitCandidate;
 	fps: number;
-	timelineStore: TimelineStoreApi;
+	getProjectAssetById: (assetId: string) => TimelineAsset | null;
 	sensitivity?: number;
 	minSegmentSeconds?: number;
 	mode?: QuickSplitMode;
@@ -643,7 +642,7 @@ export const analyzeVideoChangeForElement = async (options: {
 		throw new Error("无法创建帧分析上下文");
 	}
 
-	const source = options.timelineStore.getState().getAssetById(element.assetId ?? "");
+	const source = options.getProjectAssetById(element.assetId ?? "");
 	if (!source?.uri) {
 		throw new Error("视频源不存在或无效");
 	}

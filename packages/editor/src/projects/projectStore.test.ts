@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { StudioProject } from "core/studio/types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./projectDb", async () => {
 	const actual = await vi.importActual<typeof import("./projectDb")>("./projectDb");
@@ -19,6 +19,14 @@ import { useProjectStore } from "./projectStore";
 const createProject = (): StudioProject => ({
 	id: "project-1",
 	revision: 0,
+	assets: [
+		{
+			id: "asset-1",
+			uri: "file:///asset-1.png",
+			kind: "image",
+			name: "asset-1",
+		},
+	],
 	canvas: {
 		nodes: [
 			{
@@ -66,7 +74,6 @@ const createProject = (): StudioProject => ({
 					},
 				},
 				tracks: [],
-				assets: [],
 				elements: [],
 			},
 			posterFrame: 0,
@@ -77,6 +84,7 @@ const createProject = (): StudioProject => ({
 	ui: {
 		activeSceneId: "scene-1",
 		focusedSceneId: null,
+		activeNodeId: "node-1",
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,
@@ -97,17 +105,99 @@ beforeEach(() => {
 });
 
 describe("projectStore", () => {
-	it("createSceneNode 同时创建 scene 与 node", () => {
-		const sceneId = useProjectStore.getState().createSceneNode({ name: "New Scene" });
+	it("createCanvasNode(scene) 同时创建 scene 与 node", () => {
+		const nodeId = useProjectStore.getState().createCanvasNode({
+			type: "scene",
+			name: "New Scene",
+		});
 		const project = useProjectStore.getState().currentProject;
-		expect(sceneId).toBeTruthy();
-		expect(project?.scenes[sceneId]?.name).toBe("New Scene");
-		expect(project?.canvas.nodes.some((node) => node.sceneId === sceneId)).toBe(true);
+		const node = project?.canvas.nodes.find((item) => item.id === nodeId);
+		expect(node?.type).toBe("scene");
+		if (!node || node.type !== "scene") return;
+		expect(project?.scenes[node.sceneId]?.name).toBe("New Scene");
 	});
 
-	it("setFocusedScene 更新 focusedSceneId", () => {
-		useProjectStore.getState().setFocusedScene("scene-1");
-		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe("scene-1");
+	it("ensureProjectAssetByUri 会按 uri+kind 去重", () => {
+		const firstId = useProjectStore.getState().ensureProjectAssetByUri({
+			uri: "file:///same.wav",
+			kind: "audio",
+			name: "same.wav",
+		});
+		const secondId = useProjectStore.getState().ensureProjectAssetByUri({
+			uri: "file:///same.wav",
+			kind: "audio",
+			name: "same.wav",
+		});
+		expect(firstId).toBe(secondId);
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.assets.filter((asset) => asset.uri === "file:///same.wav")
+				.length,
+		).toBe(1);
+	});
+
+	it("updateProjectAssetMeta 可写入 asr 元数据", () => {
+		useProjectStore.getState().updateProjectAssetMeta("asset-1", (prev) => ({
+			...(prev ?? {}),
+			asr: {
+				id: "asr-1",
+				source: {
+					type: "asset",
+					assetId: "asset-1",
+					kind: "video",
+					uri: "file:///asset-1.png",
+					fileName: "asset-1.png",
+					duration: 1,
+				},
+				language: "zh",
+				model: "tiny",
+				createdAt: 1,
+				updatedAt: 1,
+				segments: [],
+			},
+		}));
+		const asset = useProjectStore.getState().getProjectAssetById("asset-1");
+		expect(asset?.meta?.asr?.id).toBe("asr-1");
+	});
+
+	it("createCanvasNode 支持 video/audio/image/text 四种类型", () => {
+		const activeSceneBefore =
+			useProjectStore.getState().currentProject?.ui.activeSceneId ?? null;
+		const videoId = useProjectStore.getState().createCanvasNode({
+			type: "video",
+			assetId: "asset-1",
+			name: "video",
+		});
+		const audioId = useProjectStore.getState().createCanvasNode({
+			type: "audio",
+			assetId: "asset-1",
+			name: "audio",
+		});
+		const imageId = useProjectStore.getState().createCanvasNode({
+			type: "image",
+			assetId: "asset-1",
+			name: "image",
+		});
+		const textId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			text: "hello",
+			name: "text",
+		});
+		const project = useProjectStore.getState().currentProject;
+		expect(project?.canvas.nodes.find((node) => node.id === videoId)?.type).toBe(
+			"video",
+		);
+		expect(project?.canvas.nodes.find((node) => node.id === audioId)?.type).toBe(
+			"audio",
+		);
+		expect(project?.canvas.nodes.find((node) => node.id === imageId)?.type).toBe(
+			"image",
+		);
+		expect(project?.canvas.nodes.find((node) => node.id === textId)?.type).toBe(
+			"text",
+		);
+		expect(project?.ui.activeSceneId).toBe(activeSceneBefore);
 	});
 
 	it("updateActiveSceneTimeline 回写 active scene", () => {
@@ -131,14 +221,6 @@ describe("projectStore", () => {
 					},
 				},
 			],
-			assets: [
-				{
-					id: "asset-1",
-					uri: "file:///asset-1.png",
-					kind: "image",
-					name: "asset-1",
-				},
-			],
 		};
 		useProjectStore.getState().updateActiveSceneTimeline(nextTimeline);
 		expect(
@@ -148,7 +230,9 @@ describe("projectStore", () => {
 	});
 
 	it("saveCurrentProject 可持久化当前项目", async () => {
-		await expect(useProjectStore.getState().saveCurrentProject()).resolves.toBeUndefined();
+		await expect(
+			useProjectStore.getState().saveCurrentProject(),
+		).resolves.toBeUndefined();
 		expect(useProjectStore.getState().currentProject?.revision).toBeGreaterThan(0);
 	});
 });

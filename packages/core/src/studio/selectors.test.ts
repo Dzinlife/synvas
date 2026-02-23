@@ -26,7 +26,6 @@ const createProject = (): StudioProject => ({
 				canvas: { width: 1920, height: 1080 },
 				settings: DEFAULT_TIMELINE_SETTINGS,
 				tracks: [],
-				assets: [],
 				elements: [
 					{
 						id: "element-1",
@@ -57,14 +56,15 @@ const createProject = (): StudioProject => ({
 				canvas: { width: 1920, height: 1080 },
 				settings: DEFAULT_TIMELINE_SETTINGS,
 				tracks: [],
-				assets: [],
 				elements: [],
 			},
 		},
 	},
+	assets: [],
 	ui: {
 		activeSceneId: "scene-1",
 		focusedSceneId: "scene-2",
+		activeNodeId: null,
 		camera: {
 			x: 0,
 			y: 0,

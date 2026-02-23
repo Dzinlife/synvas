@@ -70,7 +70,6 @@ describe("createScopedStudioRuntime", () => {
 
 	it("ensure/remove/get/list/setActiveEditTimeline 会委托到底层 runtimeManager", () => {
 		const runtimeManager = createRuntimeManager();
-		const scene1Ref = toSceneTimelineRef("scene-1");
 		const scopedRuntime = createScopedStudioRuntime({
 			runtimeManager,
 			activeSceneId: "scene-1",
