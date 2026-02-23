@@ -1,20 +1,8 @@
-import type { TimelineElement } from "core/dsl/types";
-import type { SceneNode, StudioProject } from "core/studio/types";
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-	Canvas,
-	Group,
-	Picture,
-	Rect,
-	type SkPicture,
-} from "react-skia-lite";
-import { buildSkiaFrameSnapshot } from "@/editor/preview/buildSkiaTree";
-import {
-	EditorRuntimeProvider,
-	useStudioRuntimeManager,
-} from "@/editor/runtime/EditorRuntimeProvider";
-import type { EditorRuntime, TimelineRuntime } from "@/editor/runtime/types";
-import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
+import type { CanvasNode, StudioProject } from "core/studio/types";
+import { useMemo } from "react";
+import { Canvas, Group, Rect } from "react-skia-lite";
+import { useStudioRuntimeManager } from "@/editor/runtime/EditorRuntimeProvider";
+import { getCanvasNodeDefinition } from "./node-system/registry";
 
 interface InfiniteSkiaCanvasProps {
 	width: number;
@@ -24,94 +12,12 @@ interface InfiniteSkiaCanvasProps {
 		y: number;
 		zoom: number;
 	};
-	nodes: SceneNode[];
+	nodes: CanvasNode[];
 	scenes: StudioProject["scenes"];
+	assets: StudioProject["assets"];
+	activeNodeId: string | null;
+	focusedSceneId: string | null;
 }
-
-interface SceneFrameEntry {
-	picture: SkPicture;
-	dispose: () => void;
-}
-
-const createScopedRuntime = (runtime: TimelineRuntime): EditorRuntime => ({
-	id: `${runtime.id}:infinite-scene-render`,
-	timelineStore: runtime.timelineStore,
-	modelRegistry: runtime.modelRegistry,
-});
-
-const sortByTrackIndex = (elements: TimelineElement[]): TimelineElement[] => {
-	return elements
-		.map((element, index) => ({
-			element,
-			index,
-			trackIndex: element.timeline.trackIndex ?? 0,
-		}))
-		.sort((left, right) => {
-			if (left.trackIndex !== right.trackIndex) {
-				return left.trackIndex - right.trackIndex;
-			}
-			return left.index - right.index;
-		})
-		.map((item) => item.element);
-};
-
-const getTrackIndexForElement = (element: TimelineElement): number => {
-	return element.timeline.trackIndex ?? 0;
-};
-
-const buildRenderSignature = (runtime: TimelineRuntime): unknown[] => {
-	const state = runtime.timelineStore.getState();
-	return [
-		state.currentTime,
-		state.previewTime,
-		state.isPlaying,
-		state.isExporting,
-		state.exportTime,
-		state.elements,
-		state.tracks,
-		state.canvasSize,
-		state.fps,
-	];
-};
-
-const buildScenePicture = async (
-	runtime: TimelineRuntime,
-	awaitReady: boolean,
-): Promise<SceneFrameEntry | null> => {
-	const state = runtime.timelineStore.getState();
-	if (state.canvasSize.width <= 0 || state.canvasSize.height <= 0) return null;
-
-	const snapshot = await buildSkiaFrameSnapshot(
-		{
-			elements: state.elements,
-			displayTime: state.getRenderTime(),
-			tracks: state.tracks,
-			getTrackIndexForElement,
-			sortByTrackIndex,
-			prepare: {
-				isExporting: false,
-				fps: state.fps,
-				canvasSize: state.canvasSize,
-				prepareTransitionPictures: true,
-				forcePrepareFrames: true,
-				awaitReady,
-				getModelStore: (id) => runtime.modelRegistry.get(id),
-			},
-		},
-		{
-			wrapRenderNode: (node) => (
-				<EditorRuntimeProvider runtime={createScopedRuntime(runtime)}>
-					{node}
-				</EditorRuntimeProvider>
-			),
-		},
-	);
-
-	return {
-		picture: snapshot.picture,
-		dispose: snapshot.dispose,
-	};
-};
 
 const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	width,
@@ -119,110 +25,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	camera,
 	nodes,
 	scenes,
+	assets,
+	activeNodeId,
+	focusedSceneId,
 }) => {
 	const runtimeManager = useStudioRuntimeManager();
-	const sceneIds = useMemo(
-		() => Array.from(new Set(nodes.map((node) => node.sceneId))),
-		[nodes],
-	);
-	const frameEntriesRef = useRef<Map<string, SceneFrameEntry>>(new Map());
-	const renderEpochRef = useRef<Map<string, number>>(new Map());
-	const queueRef = useRef<Map<string, Promise<void>>>(new Map());
-	const initializedSceneIdsRef = useRef<Set<string>>(new Set());
-	const [version, setVersion] = useState(0);
-	void version;
-
-	useEffect(() => {
-		return () => {
-			for (const entry of frameEntriesRef.current.values()) {
-				entry.dispose();
-			}
-			frameEntriesRef.current.clear();
-			renderEpochRef.current.clear();
-			queueRef.current.clear();
-			initializedSceneIdsRef.current.clear();
-		};
-	}, []);
-
-	useEffect(() => {
-		const subscriptions: Array<() => void> = [];
-		const expectedSceneIds = new Set(sceneIds);
-
-		const enqueueBuild = (sceneId: string, build: () => Promise<void>) => {
-			const current = queueRef.current.get(sceneId) ?? Promise.resolve();
-			const next = current.then(build, build);
-			queueRef.current.set(
-				sceneId,
-				next.then(
-					() => undefined,
-					() => undefined,
-				),
-			);
-		};
-
-		const renderScene = (sceneId: string, runtime: TimelineRuntime) => {
-			const nextEpoch = (renderEpochRef.current.get(sceneId) ?? 0) + 1;
-			renderEpochRef.current.set(sceneId, nextEpoch);
-			enqueueBuild(sceneId, async () => {
-				const targetEpoch = renderEpochRef.current.get(sceneId);
-				if (targetEpoch !== nextEpoch) return;
-				try {
-					// 每个 scene 仅首帧等待 ready，后续帧优先低延迟刷新。
-					const shouldAwaitReady = !initializedSceneIdsRef.current.has(sceneId);
-					const frameEntry = await buildScenePicture(runtime, shouldAwaitReady);
-					if (!frameEntry) return;
-					if (renderEpochRef.current.get(sceneId) !== nextEpoch) {
-						frameEntry.dispose();
-						return;
-					}
-					const previous = frameEntriesRef.current.get(sceneId);
-					frameEntriesRef.current.set(sceneId, frameEntry);
-					previous?.dispose();
-					initializedSceneIdsRef.current.add(sceneId);
-					setVersion((value) => value + 1);
-				} catch (error) {
-					// 画布销毁阶段或模型切换阶段可能抛出短暂错误，保持容错并等待下一次帧更新。
-					console.warn(
-						`[InfiniteSkiaCanvas] Failed to render scene ${sceneId}:`,
-						error,
-					);
-				}
-			});
-		};
-
-		for (const sceneId of sceneIds) {
-			const scene = scenes[sceneId];
-			if (!scene) continue;
-			const runtime = runtimeManager.ensureTimelineRuntime(
-				toSceneTimelineRef(sceneId),
-			);
-			const selector = () => buildRenderSignature(runtime);
-			subscriptions.push(
-				runtime.timelineStore.subscribe(
-					selector,
-					() => {
-						renderScene(sceneId, runtime);
-					},
-					{ fireImmediately: true },
-				),
-			);
-		}
-
-		for (const [sceneId, entry] of frameEntriesRef.current.entries()) {
-			if (expectedSceneIds.has(sceneId)) continue;
-			entry.dispose();
-			frameEntriesRef.current.delete(sceneId);
-			renderEpochRef.current.delete(sceneId);
-			queueRef.current.delete(sceneId);
-			initializedSceneIdsRef.current.delete(sceneId);
-		}
-
-		return () => {
-			for (const unsubscribe of subscriptions) {
-				unsubscribe();
-			}
-		};
-	}, [runtimeManager, sceneIds, scenes]);
+	const assetById = useMemo(() => {
+		return new Map(assets.map((asset) => [asset.id, asset]));
+	}, [assets]);
 
 	if (width <= 0 || height <= 0) return null;
 
@@ -232,7 +42,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			className="absolute inset-0 pointer-events-none"
 		>
 			<Canvas style={{ width, height }}>
-				{/* <Fill color="#111" /> */}
 				<Group
 					transform={[
 						{ translateX: camera.x * camera.zoom },
@@ -241,17 +50,20 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					]}
 				>
 					{nodes.map((node) => {
-						const scene = scenes[node.sceneId];
-						if (!scene) return null;
-						const entry = frameEntriesRef.current.get(node.sceneId);
-						const sourceWidth = Math.max(1, scene.timeline.canvas.width);
-						const sourceHeight = Math.max(1, scene.timeline.canvas.height);
-						const scaleX = node.width / sourceWidth;
-						const scaleY = node.height / sourceHeight;
+						const definition = getCanvasNodeDefinition(node.type);
+						const Renderer = definition.skiaRenderer;
+						const scene =
+							node.type === "scene" ? scenes[node.sceneId] ?? null : null;
+						const asset =
+							"assetId" in node ? assetById.get(node.assetId) ?? null : null;
+						const isFocused =
+							node.type === "scene" && node.sceneId === focusedSceneId;
+						const isActive = node.id === activeNodeId;
+						const isDimmed = Boolean(focusedSceneId) && !isFocused;
 
 						return (
 							<Group
-								key={`scene-skia-${node.id}`}
+								key={`canvas-node-skia-${node.id}`}
 								clip={{
 									x: node.x,
 									y: node.y,
@@ -263,21 +75,31 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 									transform={[
 										{ translateX: node.x },
 										{ translateY: node.y },
-										{ scaleX },
-										{ scaleY },
 									]}
+									opacity={isDimmed ? 0.35 : 1}
 								>
-									{entry ? (
-										<Picture picture={entry.picture} />
-									) : (
-										<Rect
-											x={0}
-											y={0}
-											width={sourceWidth}
-											height={sourceHeight}
-											color="#171717"
-										/>
-									)}
+									<Renderer
+										node={node}
+										scene={scene}
+										asset={asset}
+										isActive={isActive}
+										isFocused={isFocused}
+										isDimmed={isDimmed}
+										runtimeManager={runtimeManager}
+									/>
+									<Rect
+										x={0}
+										y={0}
+										width={Math.max(1, node.width)}
+										height={Math.max(1, node.height)}
+										style="stroke"
+										strokeWidth={isActive ? 2 : 1}
+										color={
+											isActive
+												? "rgba(251,146,60,1)"
+												: "rgba(255,255,255,0.2)"
+										}
+									/>
 								</Group>
 							</Group>
 						);

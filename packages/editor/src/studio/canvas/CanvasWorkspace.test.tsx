@@ -36,38 +36,21 @@ vi.mock("@/editor/MaterialLibrary", () => ({
 }));
 
 vi.mock("@/studio/canvas/node-system/registry", () => {
-	const SceneRenderer = ({ node, onTogglePreview }: { node: { id: string }; onTogglePreview: () => void }) => (
-		<div>
-			<div>scene-{node.id}</div>
-			<button
-				type="button"
-				data-testid={`scene-preview-toggle-${node.id}`}
-				onClick={(event) => {
-					event.stopPropagation();
-					onTogglePreview();
-				}}
-			>
-				preview
-			</button>
-		</div>
-	);
-	const GenericRenderer = ({ node }: { node: { id: string; type: string } }) => (
-		<div>{node.type}-{node.id}</div>
-	);
+	const GenericSkiaRenderer = () => null;
 	const createToolbar = (type: string) => () => <div data-testid={`node-toolbar-${type}`} />;
 	const definitions = {
 		scene: {
 			type: "scene",
 			title: "Scene",
 			create: () => ({ type: "scene" }),
-			renderer: SceneRenderer,
+			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("scene"),
 		},
 		video: {
 			type: "video",
 			title: "Video",
 			create: () => ({ type: "video" }),
-			renderer: GenericRenderer,
+			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("video"),
 			fromExternalFile: async (
 				file: File,
@@ -93,7 +76,7 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			type: "audio",
 			title: "Audio",
 			create: () => ({ type: "audio" }),
-			renderer: GenericRenderer,
+			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("audio"),
 			fromExternalFile: async (
 				file: File,
@@ -119,7 +102,7 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			type: "image",
 			title: "Image",
 			create: () => ({ type: "image" }),
-			renderer: GenericRenderer,
+			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("image"),
 			fromExternalFile: async (
 				file: File,
@@ -145,7 +128,7 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			type: "text",
 			title: "Text",
 			create: () => ({ type: "text", text: "新建文本", name: "Text" }),
-			renderer: GenericRenderer,
+			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("text"),
 		},
 	};
@@ -278,12 +261,26 @@ afterEach(() => {
 	cleanup();
 });
 
+const clickNodeAt = (clientX: number, clientY: number): void => {
+	const hitLayer = screen.getByTestId("canvas-node-hit-layer");
+	fireEvent.pointerDown(hitLayer, {
+		button: 0,
+		clientX,
+		clientY,
+	});
+	fireEvent.pointerUp(window, {
+		button: 0,
+		clientX,
+		clientY,
+	});
+};
+
 describe("CanvasWorkspace", () => {
 	it("active node 切换会更新顶部 toolbar", () => {
 		render(<CanvasWorkspace />);
 		expect(screen.getByTestId("node-toolbar-scene")).toBeTruthy();
 
-		fireEvent.click(screen.getByTestId("canvas-node-node-video-1"));
+		clickNodeAt(300, 160);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
 			"node-video-1",
 		);
@@ -293,13 +290,13 @@ describe("CanvasWorkspace", () => {
 	it("scene 节点可进入 focus，非 scene 仅选中不改 focus", () => {
 		render(<CanvasWorkspace />);
 
-		fireEvent.click(screen.getByTestId("canvas-node-node-video-1"));
+		clickNodeAt(300, 160);
 		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBeNull();
 		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
 			"scene-1",
 		);
 
-		fireEvent.click(screen.getByTestId("canvas-node-node-scene-1"));
+		clickNodeAt(80, 80);
 		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
 			"scene-1",
 		);
@@ -373,5 +370,54 @@ describe("CanvasWorkspace", () => {
 			"scene-1",
 		);
 		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBeNull();
+	});
+
+	it("重叠节点命中优先 zIndex 更高者", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-video-1",
+		);
+	});
+
+	it("locked 节点可选中但不可拖拽", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: project.canvas.nodes.map((node) =>
+							node.id === "node-video-1" ? { ...node, locked: true } : node,
+						),
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+		const hitLayer = screen.getByTestId("canvas-node-hit-layer");
+		fireEvent.pointerDown(hitLayer, {
+			button: 0,
+			clientX: 300,
+			clientY: 160,
+		});
+		fireEvent.pointerMove(window, {
+			clientX: 420,
+			clientY: 260,
+		});
+		fireEvent.pointerUp(window, {
+			button: 0,
+			clientX: 420,
+			clientY: 260,
+		});
+
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		expect(node?.x).toBe(240);
+		expect(node?.y).toBe(120);
+		expect(project?.ui.activeNodeId).toBe("node-video-1");
 	});
 });

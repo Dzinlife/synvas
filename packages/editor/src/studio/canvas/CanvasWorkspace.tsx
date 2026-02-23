@@ -19,8 +19,6 @@ import {
 	canvasNodeDefinitionList,
 	getCanvasNodeDefinition,
 } from "@/studio/canvas/node-system/registry";
-import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
-import { usePlaybackOwnerController } from "@/studio/scene/usePlaybackOwnerController";
 import {
 	resolveExternalVideoUri,
 } from "@/editor/utils/externalVideo";
@@ -97,20 +95,16 @@ const isSceneNode = (node: CanvasNode): node is SceneNode => {
 	return node.type === "scene";
 };
 
-const buildNodeStyle = (
+const isWorldPointInNode = (
 	node: CanvasNode,
-	camera: CameraState,
-): React.CSSProperties => {
-	const left = (node.x + camera.x) * camera.zoom;
-	const top = (node.y + camera.y) * camera.zoom;
-	const width = Math.max(1, node.width * camera.zoom);
-	const height = Math.max(1, node.height * camera.zoom);
-	return {
-		left,
-		top,
-		width,
-		height,
-	};
+	worldX: number,
+	worldY: number,
+): boolean => {
+	const left = Math.min(node.x, node.x + node.width);
+	const right = Math.max(node.x, node.x + node.width);
+	const top = Math.min(node.y, node.y + node.height);
+	const bottom = Math.max(node.y, node.y + node.height);
+	return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
 };
 
 const isCameraAlmostEqual = (
@@ -203,7 +197,6 @@ const CanvasWorkspace = () => {
 	const setActiveNode = useProjectStore((state) => state.setActiveNode);
 	const setCanvasCamera = useProjectStore((state) => state.setCanvasCamera);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
-	const { togglePlayback, isOwnerPlaying } = usePlaybackOwnerController();
 
 	const focusedSceneId = currentProject?.ui.focusedSceneId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
@@ -220,7 +213,6 @@ const CanvasWorkspace = () => {
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const prevFocusedSceneIdRef = useRef<string | null>(focusedSceneId);
 	const dragStateRef = useRef<DragState | null>(null);
-	const nodeAnchorRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
 	const sortedNodes = useMemo(() => {
 		if (!currentProject) return [];
@@ -266,11 +258,6 @@ const CanvasWorkspace = () => {
 			null
 		);
 	}, [activeNode, currentProject]);
-
-	const activeAnchorElement = useMemo(() => {
-		if (!activeNode) return null;
-		return nodeAnchorRef.current.get(activeNode.id) ?? null;
-	}, [activeNode, sortedNodes]);
 
 	const resolveWorldPoint = useCallback(
 		(clientX: number, clientY: number) => {
@@ -501,14 +488,65 @@ const CanvasWorkspace = () => {
 		};
 	}, [handleContainerWheel]);
 
-	const handleNodePointerDown = useCallback(
-		(node: CanvasNode, event: React.PointerEvent<HTMLDivElement>) => {
-			if (event.button !== 0) return;
+	const getTopHitNode = useCallback(
+		(worldX: number, worldY: number): CanvasNode | null => {
+			for (let index = sortedNodes.length - 1; index >= 0; index -= 1) {
+				const node = sortedNodes[index];
+				if (!node) continue;
+				const canInteractNode =
+					!isCanvasInteractionLocked ||
+					(node.type === "scene" && node.sceneId === focusedSceneId);
+				if (!canInteractNode) continue;
+				if (!isWorldPointInNode(node, worldX, worldY)) continue;
+				return node;
+			}
+			return null;
+		},
+		[focusedSceneId, isCanvasInteractionLocked, sortedNodes],
+	);
+
+	const handleNodeActivate = useCallback(
+		(node: CanvasNode) => {
 			const canInteractNode =
 				!isCanvasInteractionLocked ||
 				(node.type === "scene" && node.sceneId === focusedSceneId);
-			if (!canInteractNode || node.locked) return;
-			event.currentTarget.setPointerCapture(event.pointerId);
+			if (!canInteractNode) return;
+			setActiveNode(node.id);
+			if (node.type === "scene") {
+				setActiveScene(node.sceneId);
+				if (!focusedSceneId) {
+					setFocusedScene(node.sceneId);
+				}
+			}
+		},
+		[
+			focusedSceneId,
+			isCanvasInteractionLocked,
+			setActiveNode,
+			setActiveScene,
+			setFocusedScene,
+		],
+	);
+
+	const handleNodeHitLayerPointerDown = useCallback(
+		(event: React.PointerEvent<HTMLDivElement>) => {
+			if (event.button !== 0) return;
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			const node = getTopHitNode(world.x, world.y);
+			if (!node) {
+				if (!isCanvasInteractionLocked) {
+					setActiveNode(null);
+				}
+				return;
+			}
+			if (node.locked) {
+				handleNodeActivate(node);
+				return;
+			}
+			setActiveNode(node.id);
+			if (typeof event.currentTarget.setPointerCapture === "function") {
+				event.currentTarget.setPointerCapture(event.pointerId);
+			}
 			dragStateRef.current = {
 				nodeId: node.id,
 				startClientX: event.clientX,
@@ -519,7 +557,13 @@ const CanvasWorkspace = () => {
 				moved: false,
 			};
 		},
-		[focusedSceneId, isCanvasInteractionLocked],
+		[
+			getTopHitNode,
+			handleNodeActivate,
+			isCanvasInteractionLocked,
+			resolveWorldPoint,
+			setActiveNode,
+		],
 	);
 
 	useEffect(() => {
@@ -541,7 +585,17 @@ const CanvasWorkspace = () => {
 		const handlePointerUp = () => {
 			const dragState = dragStateRef.current;
 			dragStateRef.current = null;
-			if (!dragState || !dragState.moved) return;
+			if (!dragState) return;
+			if (!dragState.moved) {
+				const latestProject = useProjectStore.getState().currentProject;
+				if (!latestProject) return;
+				const node = latestProject.canvas.nodes.find(
+					(item) => item.id === dragState.nodeId,
+				);
+				if (!node) return;
+				handleNodeActivate(node);
+				return;
+			}
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			const node = latestProject.canvas.nodes.find(
@@ -567,46 +621,7 @@ const CanvasWorkspace = () => {
 			window.removeEventListener("pointerup", handlePointerUp);
 			window.removeEventListener("pointercancel", handlePointerUp);
 		};
-	}, [camera.zoom, pushHistory, updateCanvasNodeLayout]);
-
-	const handleNodeClick = useCallback(
-		(node: CanvasNode) => {
-			const canInteractNode =
-				!isCanvasInteractionLocked ||
-				(node.type === "scene" && node.sceneId === focusedSceneId);
-			if (!canInteractNode) return;
-			setActiveNode(node.id);
-			if (node.type === "scene") {
-				setActiveScene(node.sceneId);
-				if (!focusedSceneId) {
-					setFocusedScene(node.sceneId);
-				}
-			}
-		},
-		[
-			focusedSceneId,
-			isCanvasInteractionLocked,
-			setActiveNode,
-			setActiveScene,
-			setFocusedScene,
-		],
-	);
-
-	const handleCanvasPointerDown = useCallback(
-		(event: React.MouseEvent<HTMLDivElement>) => {
-			if (event.target !== event.currentTarget) return;
-			if (isCanvasInteractionLocked) return;
-			setActiveNode(null);
-		},
-		[isCanvasInteractionLocked, setActiveNode],
-	);
-
-	const handleToggleScenePreview = useCallback(
-		(sceneId: string) => {
-			togglePlayback(toSceneTimelineRef(sceneId));
-		},
-		[togglePlayback],
-	);
+	}, [camera.zoom, handleNodeActivate, pushHistory, updateCanvasNodeLayout]);
 
 	const handleCanvasContextMenu = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
@@ -776,7 +791,6 @@ const CanvasWorkspace = () => {
 			ref={containerRef}
 			data-testid="canvas-workspace"
 			className="relative h-full w-full overflow-hidden"
-			onMouseDown={handleCanvasPointerDown}
 			onContextMenu={handleCanvasContextMenu}
 			onDragOver={(event) => {
 				event.preventDefault();
@@ -798,82 +812,21 @@ const CanvasWorkspace = () => {
 				width={stageSize.width}
 				height={stageSize.height}
 				camera={camera}
-				nodes={sceneNodes}
+				nodes={sortedNodes}
 				scenes={currentProject.scenes}
+				assets={currentProject.assets}
+				activeNodeId={activeNodeId}
+				focusedSceneId={focusedSceneId}
 			/>
 
-			<div className="absolute inset-0 z-20">
-				{sortedNodes.map((node) => {
-					const definition = getCanvasNodeDefinition(node.type);
-					const Renderer = definition.renderer;
-					const scene =
-						node.type === "scene"
-							? currentProject.scenes[node.sceneId] ?? null
-							: null;
-					const asset =
-						"assetId" in node
-							? currentProject.assets.find((item) => item.id === node.assetId) ?? null
-							: null;
-					const isFocused = node.type === "scene" && node.sceneId === focusedSceneId;
-					const canInteractNode =
-						!isCanvasInteractionLocked ||
-						(node.type === "scene" && node.sceneId === focusedSceneId);
-					const sceneRef =
-						node.type === "scene" ? toSceneTimelineRef(node.sceneId) : null;
-					const isPreviewPlaying = sceneRef ? isOwnerPlaying(sceneRef) : false;
-					const isActive = node.id === activeNodeId;
-					return (
-						<div
-							key={node.id}
-							ref={(element) => {
-								if (element) {
-									nodeAnchorRef.current.set(node.id, element);
-									return;
-								}
-								nodeAnchorRef.current.delete(node.id);
-							}}
-							data-node-anchor={node.id}
-							data-testid={`canvas-node-${node.id}`}
-							className={`absolute overflow-hidden rounded-xl border transition-shadow ${
-								isActive
-									? "border-orange-400 shadow-[0_0_0_2px_rgba(251,146,60,0.35)]"
-									: "border-white/20"
-							}`}
-							style={{
-								...buildNodeStyle(node, camera),
-								pointerEvents: canInteractNode ? "auto" : "none",
-								opacity:
-									isCanvasInteractionLocked && !isFocused
-										? 0.35
-										: 1,
-							}}
-							onPointerDown={(event) => handleNodePointerDown(node, event)}
-							onClick={() => handleNodeClick(node)}
-						>
-							<Renderer
-								node={node}
-								scene={scene}
-								asset={asset}
-								isActive={isActive}
-								isFocused={isFocused}
-								isPreviewPlaying={isPreviewPlaying}
-								onTogglePreview={() => {
-									if (node.type !== "scene") return;
-									handleToggleScenePreview(node.sceneId);
-								}}
-							/>
-						</div>
-					);
-				})}
-			</div>
+			<div
+				data-testid="canvas-node-hit-layer"
+				className="absolute inset-0 z-20"
+				onPointerDown={handleNodeHitLayerPointerDown}
+			/>
 
 			{activeNode && ActiveNodeToolbar && (
-				<div
-					className="absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-3 py-2 backdrop-blur"
-					data-node-toolbar-anchor={
-						activeAnchorElement?.dataset.nodeAnchor ?? undefined
-					}
-				>
+				<div className="absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-3 py-2 backdrop-blur">
 					<ActiveNodeToolbar
 						node={activeNode}
 						scene={activeNodeScene}
