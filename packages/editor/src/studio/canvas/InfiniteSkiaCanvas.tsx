@@ -78,6 +78,7 @@ const buildRenderSignature = (runtime: TimelineRuntime): unknown[] => {
 
 const buildScenePicture = async (
 	runtime: TimelineRuntime,
+	awaitReady: boolean,
 ): Promise<SceneFrameEntry | null> => {
 	const state = runtime.timelineStore.getState();
 	if (state.canvasSize.width <= 0 || state.canvasSize.height <= 0) return null;
@@ -95,7 +96,7 @@ const buildScenePicture = async (
 				canvasSize: state.canvasSize,
 				prepareTransitionPictures: true,
 				forcePrepareFrames: true,
-				awaitReady: true,
+				awaitReady,
 				getModelStore: (id) => runtime.modelRegistry.get(id),
 			},
 		},
@@ -129,6 +130,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const frameEntriesRef = useRef<Map<string, SceneFrameEntry>>(new Map());
 	const renderEpochRef = useRef<Map<string, number>>(new Map());
 	const queueRef = useRef<Map<string, Promise<void>>>(new Map());
+	const initializedSceneIdsRef = useRef<Set<string>>(new Set());
 	const [version, setVersion] = useState(0);
 	void version;
 
@@ -140,6 +142,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			frameEntriesRef.current.clear();
 			renderEpochRef.current.clear();
 			queueRef.current.clear();
+			initializedSceneIdsRef.current.clear();
 		};
 	}, []);
 
@@ -166,7 +169,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				const targetEpoch = renderEpochRef.current.get(sceneId);
 				if (targetEpoch !== nextEpoch) return;
 				try {
-					const frameEntry = await buildScenePicture(runtime);
+					// 每个 scene 仅首帧等待 ready，后续帧优先低延迟刷新。
+					const shouldAwaitReady = !initializedSceneIdsRef.current.has(sceneId);
+					const frameEntry = await buildScenePicture(runtime, shouldAwaitReady);
 					if (!frameEntry) return;
 					if (renderEpochRef.current.get(sceneId) !== nextEpoch) {
 						frameEntry.dispose();
@@ -175,6 +180,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					const previous = frameEntriesRef.current.get(sceneId);
 					frameEntriesRef.current.set(sceneId, frameEntry);
 					previous?.dispose();
+					initializedSceneIdsRef.current.add(sceneId);
 					setVersion((value) => value + 1);
 				} catch (error) {
 					// 画布销毁阶段或模型切换阶段可能抛出短暂错误，保持容错并等待下一次帧更新。
@@ -210,6 +216,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			frameEntriesRef.current.delete(sceneId);
 			renderEpochRef.current.delete(sceneId);
 			queueRef.current.delete(sceneId);
+			initializedSceneIdsRef.current.delete(sceneId);
 		}
 
 		return () => {
