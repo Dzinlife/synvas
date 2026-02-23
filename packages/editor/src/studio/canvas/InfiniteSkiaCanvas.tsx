@@ -234,7 +234,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			className="absolute inset-0 pointer-events-none"
 		>
 			<Canvas style={{ width, height }}>
-				<Fill color="#111" />
+				{/* <Fill color="#111" /> */}
 				<Group
 					transform={[
 						{ translateX: camera.x * camera.zoom },

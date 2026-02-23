@@ -572,6 +572,20 @@ const CanvasWorkspace = () => {
 
 	return (
 		<div ref={containerRef} className="relative h-full w-full overflow-hidden">
+			<Stage
+				width={stageSize.width}
+				height={stageSize.height}
+				className="absolute left-0 top-0"
+			>
+				<Layer
+					x={camera.x * camera.zoom}
+					y={camera.y * camera.zoom}
+					scaleX={camera.zoom}
+					scaleY={camera.zoom}
+				>
+					{gridLines}
+				</Layer>
+			</Stage>
 			<InfiniteSkiaCanvas
 				width={stageSize.width}
 				height={stageSize.height}
@@ -632,7 +646,7 @@ const CanvasWorkspace = () => {
 					scaleX={camera.zoom}
 					scaleY={camera.zoom}
 				>
-					{gridLines}
+					{/* {gridLines} */}
 					{sortedNodes.map((node) => {
 						const scene = currentProject.scenes[node.sceneId];
 						const isActive = node.sceneId === activeSceneId;
