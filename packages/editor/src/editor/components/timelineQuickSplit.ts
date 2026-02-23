@@ -1,7 +1,7 @@
 import type { TimelineAsset, TimelineElement } from "core/dsl/types";
 import { buildSplitElements } from "core/editor/command/split";
 import type { CanvasSink } from "mediabunny";
-import { acquireVideoAsset } from "@/dsl/assets/videoAsset";
+import { acquireVideoAsset } from "@/assets/videoAsset";
 import { framesToSeconds } from "@/utils/timecode";
 import { isTransitionElement, reconcileTransitions } from "../utils/transitions";
 

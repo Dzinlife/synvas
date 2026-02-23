@@ -1,8 +1,8 @@
 import type { AudioBufferSink, Input } from "mediabunny";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
-import type { AssetHandle } from "@/dsl/assets/AssetStore";
-import { type AudioAsset, acquireAudioAsset } from "@/dsl/assets/audioAsset";
+import type { AssetHandle } from "@/assets/AssetStore";
+import { type AudioAsset, acquireAudioAsset } from "@/assets/audioAsset";
 import {
 	type AudioPlaybackController,
 	type AudioPlaybackMixInstruction,

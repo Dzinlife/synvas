@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 	makeImageFromNativeBuffer: vi.fn(),
 }));
 
-vi.mock("@/dsl/assets/videoAsset", () => ({
+vi.mock("@/assets/videoAsset", () => ({
 	acquireVideoAsset: mocks.acquireVideoAsset,
 }));
 

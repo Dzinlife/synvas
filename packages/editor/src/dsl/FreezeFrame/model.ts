@@ -2,8 +2,8 @@ import type { CanvasSink, WrappedCanvas } from "mediabunny";
 import { type SkImage, Skia } from "react-skia-lite";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
-import type { AssetHandle } from "@/dsl/assets/AssetStore";
-import { acquireVideoAsset, type VideoAsset } from "@/dsl/assets/videoAsset";
+import type { AssetHandle } from "@/assets/AssetStore";
+import { acquireVideoAsset, type VideoAsset } from "@/assets/videoAsset";
 import type { EditorRuntime } from "@/editor/runtime/types";
 import { framesToSeconds } from "@/utils/timecode";
 import type {

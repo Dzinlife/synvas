@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { AssetHandle } from "@/dsl/assets/AssetStore";
-import { acquireVideoAsset, type VideoAsset } from "@/dsl/assets/videoAsset";
+import type { AssetHandle } from "@/assets/AssetStore";
+import { acquireVideoAsset, type VideoAsset } from "@/assets/videoAsset";
 import { useFps, useTimelineScale, useTimelineStore } from "@/editor/contexts/TimelineContext";
 import { framesToSeconds } from "@/utils/timecode";
 import { getThumbnail, getVideoSize } from "../VideoClip/thumbnailCache";
