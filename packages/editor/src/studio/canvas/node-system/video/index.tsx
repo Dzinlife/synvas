@@ -1,39 +1,13 @@
 import type { VideoCanvasNode } from "core/studio/types";
-import { Rect } from "react-skia-lite";
 import {
 	getFallbackVideoMetadata,
 	isVideoFile,
 	readVideoMetadata,
 } from "@/editor/utils/externalVideo";
 import { registerCanvasNodeDefinition } from "../registryCore";
-import type {
-	CanvasNodeDefinition,
-	CanvasNodeSkiaRenderProps,
-	CanvasNodeToolbarProps,
-} from "../types";
-
-const VideoNodeSkiaRenderer: React.FC<
-	CanvasNodeSkiaRenderProps<VideoCanvasNode>
-> = ({ node }) => {
-	if (node.type !== "video") return null;
-	return (
-		<Rect
-			x={0}
-			y={0}
-			width={Math.max(1, node.width)}
-			height={Math.max(1, node.height)}
-			color="#082f49"
-		/>
-	);
-};
-
-const VideoNodeToolbar = ({ asset }: CanvasNodeToolbarProps<VideoCanvasNode>) => {
-	return (
-		<div className="text-xs text-white/90">
-			Video Source: {asset?.uri ?? "未绑定视频素材"}
-		</div>
-	);
-};
+import type { CanvasNodeDefinition } from "../types";
+import { VideoNodeSkiaRenderer } from "./renderer";
+import { VideoNodeToolbar } from "./toolbar";
 
 const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 	type: "video",

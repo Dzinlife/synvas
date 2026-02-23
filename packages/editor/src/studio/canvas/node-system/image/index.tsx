@@ -1,11 +1,8 @@
 import type { ImageCanvasNode } from "core/studio/types";
-import { Rect } from "react-skia-lite";
 import { registerCanvasNodeDefinition } from "../registryCore";
-import type {
-	CanvasNodeDefinition,
-	CanvasNodeSkiaRenderProps,
-	CanvasNodeToolbarProps,
-} from "../types";
+import type { CanvasNodeDefinition } from "../types";
+import { ImageNodeSkiaRenderer } from "./renderer";
+import { ImageNodeToolbar } from "./toolbar";
 
 const IMAGE_EXTENSIONS = new Set([
 	"png",
@@ -55,29 +52,6 @@ const readImageMetadata = async (
 		image.src = "";
 		URL.revokeObjectURL(url);
 	}
-};
-
-const ImageNodeSkiaRenderer: React.FC<
-	CanvasNodeSkiaRenderProps<ImageCanvasNode>
-> = ({ node }) => {
-	if (node.type !== "image") return null;
-	return (
-		<Rect
-			x={0}
-			y={0}
-			width={Math.max(1, node.width)}
-			height={Math.max(1, node.height)}
-			color="#312e81"
-		/>
-	);
-};
-
-const ImageNodeToolbar = ({ asset }: CanvasNodeToolbarProps<ImageCanvasNode>) => {
-	return (
-		<div className="text-xs text-white/90">
-			Image Source: {asset?.uri ?? "未绑定图片素材"}
-		</div>
-	);
 };
 
 const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
