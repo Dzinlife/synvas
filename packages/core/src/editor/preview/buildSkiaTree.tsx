@@ -53,6 +53,15 @@ const defaultIsTransitionElement = (element: TimelineElement): boolean =>
 	element.type === "Transition";
 const FILTER_ELEMENT_TYPE = "Filter";
 
+const waitForModelReady = async (
+	modelStore?: ComponentModelStore,
+): Promise<void> => {
+	if (!modelStore) return;
+	const waitForReady = modelStore.getState().waitForReady;
+	if (!waitForReady) return;
+	await waitForReady();
+};
+
 const resolveFiniteNumber = (value: unknown, fallback: number): number => {
 	if (typeof value !== "number" || !Number.isFinite(value)) {
 		return fallback;
@@ -254,6 +263,11 @@ const buildSkiaRenderStateWithScopeCore = async (
 		extra?: Partial<RendererPrepareFrameContext>,
 		force?: boolean,
 	): Promise<void> => {
+		const modelStore = getModelStore?.(target.id);
+		if (shouldAwaitReady) {
+			// awaitReady 语义优先等待模型就绪，避免首帧提前构图导致黑屏。
+			await waitForModelReady(modelStore);
+		}
 		// 预览态可通过 forcePrepareFrames 触发，确保截图前视频帧已准备
 		if (!isExporting && !forcePrepareFrames && !force) return;
 		const componentDef = deps.resolveComponent(target.component);
@@ -262,7 +276,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 			element: target,
 			displayTime,
 			fps,
-			modelStore: getModelStore?.(target.id),
+			modelStore,
 			getModelStore,
 			canvasSize,
 			...extra,
@@ -280,10 +294,14 @@ const buildSkiaRenderStateWithScopeCore = async (
 			canvasSize,
 		});
 		// 转场渲染或强制准备时，提前准备帧避免画面停在旧帧
-		const ready = shouldPrepare
-			? runPrepareRenderFrame(target, undefined, !isExporting)
-			: forcePrepareFrames
-				? runPrepareRenderFrame(target)
+		const shouldRunReadyPipeline =
+			shouldPrepare || forcePrepareFrames || shouldAwaitReady;
+		const ready = shouldRunReadyPipeline
+			? runPrepareRenderFrame(
+					target,
+					undefined,
+					shouldPrepare ? !isExporting : undefined,
+				)
 			: Promise.resolve();
 		return { node: content, ready };
 	};

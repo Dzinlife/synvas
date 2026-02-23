@@ -72,6 +72,9 @@ const deps: BuildSkiaDeps = {
 		if (componentId === "image") {
 			return { Renderer: PlainRenderer };
 		}
+		if (componentId === "audio-clip") {
+			return { Renderer: PlainRenderer };
+		}
 		if (componentId === "filter/test") {
 			return { Renderer: FilterRenderer };
 		}
@@ -145,6 +148,16 @@ const createElement = (
 	props: partial.props ?? {},
 	transition: partial.transition,
 });
+
+const createDeferred = () => {
+	let resolve!: () => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<void>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+};
 
 type AnyElement = React.ReactElement<Record<string, any>, any>;
 
@@ -369,6 +382,171 @@ describe("buildSkiaTree transform wrapper", () => {
 			(node) => node.type === PlainRenderer,
 		);
 		expect(plainNodes.length).toBe(1);
+	});
+
+	it("awaitReady 会等待 model.waitForReady 完成", async () => {
+		const element = createElement({
+			id: "ready-image",
+			type: "Image",
+			component: "image",
+		});
+		const deferred = createDeferred();
+		const waitForReady = vi.fn(() => deferred.promise);
+		const modelStore = {
+			getState: () => ({
+				waitForReady,
+			}),
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [element],
+				displayTime: 0,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					awaitReady: true,
+					getModelStore: (id) => (id === element.id ? (modelStore as any) : undefined),
+				},
+			},
+			deps,
+		);
+
+		let readyResolved = false;
+		void renderState.ready.then(() => {
+			readyResolved = true;
+		});
+		await Promise.resolve();
+
+		expect(waitForReady).toHaveBeenCalledTimes(1);
+		expect(readyResolved).toBe(false);
+
+		deferred.resolve();
+		await renderState.ready;
+		expect(readyResolved).toBe(true);
+	});
+
+	it("awaitReady 不会被缺失 waitForReady 的组件阻塞", async () => {
+		const element = createElement({
+			id: "audio-clip-1",
+			type: "AudioClip",
+			component: "audio-clip",
+		});
+		const modelStore = {
+			getState: () => ({}),
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [element],
+				displayTime: 0,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					awaitReady: true,
+					getModelStore: (id) => (id === element.id ? (modelStore as any) : undefined),
+				},
+			},
+			deps,
+		);
+
+		await expect(renderState.ready).resolves.toBeUndefined();
+	});
+
+	it("prepareRenderFrame 会在 waitForReady 之后执行", async () => {
+		const element = createElement({
+			id: "video-like-element",
+			type: "Image",
+			component: "image",
+		});
+		const deferred = createDeferred();
+		const waitForReady = vi.fn(() => deferred.promise);
+		const prepareRenderFrame = vi.fn(async () => undefined);
+		const modelStore = {
+			getState: () => ({
+				waitForReady,
+			}),
+		};
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			resolveComponent: (componentId) => {
+				if (componentId === "image") {
+					return {
+						Renderer: PlainRenderer,
+						prepareRenderFrame,
+					};
+				}
+				return deps.resolveComponent(componentId);
+			},
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [element],
+				displayTime: 0,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					forcePrepareFrames: true,
+					awaitReady: true,
+					getModelStore: (id) => (id === element.id ? (modelStore as any) : undefined),
+				},
+			},
+			localDeps,
+		);
+
+		await Promise.resolve();
+		expect(waitForReady).toHaveBeenCalledTimes(1);
+		expect(prepareRenderFrame).not.toHaveBeenCalled();
+
+		deferred.resolve();
+		await renderState.ready;
+		expect(prepareRenderFrame).toHaveBeenCalledTimes(1);
+	});
+
+	it("waitForReady 失败时 ready 会直接失败，不会挂起", async () => {
+		const element = createElement({
+			id: "ready-failed-element",
+			type: "Image",
+			component: "image",
+		});
+		const modelStore = {
+			getState: () => ({
+				waitForReady: () => Promise.reject(new Error("waitForReady failed")),
+			}),
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [element],
+				displayTime: 0,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					awaitReady: true,
+					getModelStore: (id) => (id === element.id ? (modelStore as any) : undefined),
+				},
+			},
+			deps,
+		);
+
+		await expect(renderState.ready).rejects.toThrow("waitForReady failed");
 	});
 
 	it("统一 dispose 会同时释放整帧 picture 与 transition pictures", async () => {
