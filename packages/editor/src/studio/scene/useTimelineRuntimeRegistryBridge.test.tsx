@@ -13,12 +13,20 @@ import type {
 	StudioRuntimeManager,
 } from "@/editor/runtime/types";
 import { useProjectStore } from "@/projects/projectStore";
+import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import { usePlaybackOwnerStore } from "./playbackOwnerStore";
 import { toSceneTimelineRef } from "./timelineRefAdapter";
+import { useSceneSessionBridge } from "./useSceneSessionBridge";
 import { useTimelineRuntimeRegistryBridge } from "./useTimelineRuntimeRegistryBridge";
 
 const BridgeMount = () => {
 	useTimelineRuntimeRegistryBridge();
+	return null;
+};
+
+const CombinedBridgeMount = () => {
+	useTimelineRuntimeRegistryBridge();
+	useSceneSessionBridge();
 	return null;
 };
 
@@ -162,13 +170,13 @@ beforeEach(() => {
 	}
 	studioRuntime.setActiveEditTimeline(null);
 	usePlaybackOwnerStore.getState().clearOwner();
+	useStudioHistoryStore.getState().clear();
 
 	useProjectStore.setState({
 		status: "ready",
 		projects: [],
 		currentProjectId: "project-1",
 		currentProject: createProject(),
-		currentProjectData: null,
 		focusedSceneDrafts: {},
 		error: null,
 	});
@@ -216,6 +224,45 @@ describe("useTimelineRuntimeRegistryBridge", () => {
 			useProjectStore.getState().currentProject?.scenes["scene-2"].timeline
 				.elements.length,
 		).toBe(1);
+	});
+
+	it("组合挂载时 runtime 变更会同时回写 project 并入全局历史", async () => {
+		render(<CombinedBridgeMount />, { wrapper });
+
+		await waitFor(() => {
+			expect(studioRuntime.listTimelineRuntimes()).toHaveLength(2);
+		});
+
+		act(() => {
+			const scene1Runtime = studioRuntime.getTimelineRuntime(
+				toSceneTimelineRef("scene-1"),
+			);
+			scene1Runtime?.timelineStore.getState().setElements((prev) => [
+				...prev,
+				{
+					id: "scene-1-element-extra",
+					type: "Image",
+					component: "image",
+					name: "Image extra",
+					assetId: "asset-scene-1",
+					props: {},
+					timeline: {
+						start: 60,
+						end: 90,
+						startTimecode: framesToTimecode(60, 30),
+						endTimecode: framesToTimecode(90, 30),
+						trackIndex: 0,
+						role: "clip",
+					},
+				},
+			]);
+		});
+
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline
+				.elements.length,
+		).toBe(2);
+		expect(useStudioHistoryStore.getState().past.length).toBeGreaterThan(0);
 	});
 
 	it("scene 增删时会维护 runtime 池", async () => {

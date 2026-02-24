@@ -108,7 +108,6 @@ beforeEach(() => {
 		projects: [],
 		currentProjectId: "project-1",
 		currentProject: createProject(),
-		currentProjectData: null,
 		focusedSceneDrafts: {},
 		error: null,
 	});
@@ -120,17 +119,17 @@ afterEach(() => {
 });
 
 describe("useSceneSessionBridge", () => {
-	it("active scene 会绑定 active runtime 并同步 timeline", async () => {
+	it("active scene 会绑定 active runtime", async () => {
 		render(<BridgeMount />, { wrapper });
 
 		await waitFor(() => {
 			const activeRuntime = studioRuntime.getActiveEditTimelineRuntime();
 			expect(activeRuntime?.ref.sceneId).toBe("scene-1");
-			expect(activeRuntime?.timelineStore.getState().elements.length).toBe(1);
+			expect(activeRuntime?.timelineStore.getState().elements.length).toBe(0);
 		});
 	});
 
-	it("active runtime 的历史变更会回写 scene 并进入全局历史", async () => {
+	it("active runtime 的历史变更会进入全局历史但不直接回写 scene", async () => {
 		render(<BridgeMount />, { wrapper });
 
 		await waitFor(() => {
@@ -165,6 +164,6 @@ describe("useSceneSessionBridge", () => {
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline
 				.elements.length,
-		).toBe(2);
+		).toBe(1);
 	});
 });

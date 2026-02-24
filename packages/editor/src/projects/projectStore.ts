@@ -1,10 +1,5 @@
-import {
-	loadTimelineFromObject,
-	type TimelineData,
-	type TimelineJSON,
-} from "core/editor/timelineLoader";
+import { type TimelineJSON } from "core/editor/timelineLoader";
 import type { TimelineAsset } from "core/dsl/types";
-import { selectTimelineForActiveScene } from "core/studio/selectors";
 import { parseStudioProject } from "core/studio/schema";
 import type {
 	CanvasNode,
@@ -98,7 +93,6 @@ interface ProjectStoreState {
 	projects: ProjectSummary[];
 	currentProjectId: string | null;
 	currentProject: StudioProject | null;
-	currentProjectData: TimelineData | null;
 	focusedSceneDrafts: Record<string, TimelineJSON>;
 	error: string | null;
 	initialize: () => Promise<void>;
@@ -219,12 +213,6 @@ const cloneTimelineJson = (timeline: TimelineJSON): TimelineJSON => {
 	return JSON.parse(JSON.stringify(timeline)) as TimelineJSON;
 };
 
-const buildProjectAssetIdSet = (
-	project: Pick<StudioProject, "assets">,
-): ReadonlySet<string> => {
-	return new Set(project.assets.map((asset) => asset.id));
-};
-
 const createDefaultTimeline = (): TimelineJSON => {
 	const project = buildEmptyProject(createProjectId());
 	const activeSceneId = project.ui.activeSceneId;
@@ -235,36 +223,6 @@ const createDefaultTimeline = (): TimelineJSON => {
 		throw new Error("Failed to create default timeline.");
 	}
 	return cloneTimelineJson(timeline);
-};
-
-const loadTimelineData = (
-	timeline: TimelineJSON,
-	project: Pick<StudioProject, "assets">,
-): TimelineData => {
-	const assetIdSet = buildProjectAssetIdSet(project);
-	try {
-		return loadTimelineFromObject(timeline, assetIdSet);
-	} catch (error) {
-		console.error("Failed to load timeline data:", error);
-		const fallbackProject = buildEmptyProject(createProjectId());
-		const fallbackSceneId = fallbackProject.ui.activeSceneId;
-		const fallbackTimeline =
-			(fallbackSceneId ? fallbackProject.scenes[fallbackSceneId]?.timeline : null) ??
-			Object.values(fallbackProject.scenes)[0]?.timeline;
-		if (!fallbackTimeline) {
-			throw new Error("Failed to build fallback timeline.");
-		}
-		return loadTimelineFromObject(
-			fallbackTimeline,
-			buildProjectAssetIdSet(fallbackProject),
-		);
-	}
-};
-
-const resolveTimelineData = (project: StudioProject): TimelineData | null => {
-	const selectedTimeline = selectTimelineForActiveScene(project);
-	if (!selectedTimeline) return null;
-	return loadTimelineData(selectedTimeline, project);
 };
 
 const formatError = (error: unknown): string => {
@@ -300,7 +258,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	projects: [],
 	currentProjectId: null,
 	currentProject: null,
-	currentProjectData: null,
 	focusedSceneDrafts: {},
 	error: null,
 	initialize: async () => {
@@ -329,7 +286,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					projects: [toSummary(record)],
 					currentProjectId: record.id,
 					currentProject: record.data,
-					currentProjectData: resolveTimelineData(record.data),
 					focusedSceneDrafts: {},
 					error: null,
 				});
@@ -352,7 +308,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				projects: sortedRecords.map(toSummary),
 				currentProjectId: currentId,
 				currentProject: currentRecord.data,
-				currentProjectData: resolveTimelineData(currentRecord.data),
 				focusedSceneDrafts: {},
 				error: null,
 			});
@@ -381,7 +336,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				projects: sortProjectSummaries([...get().projects, toSummary(record)]),
 				currentProjectId: record.id,
 				currentProject: record.data,
-				currentProjectData: resolveTimelineData(record.data),
 				focusedSceneDrafts: {},
 				error: null,
 			});
@@ -415,7 +369,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					projects: sortProjectSummaries([...projects, toSummary(record)]),
 					currentProjectId: record.id,
 					currentProject: record.data,
-					currentProjectData: resolveTimelineData(record.data),
 					error: null,
 				});
 				return;
@@ -447,7 +400,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			set({
 				projects: nextProjects,
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 				error: null,
 			});
 		} catch (error) {
@@ -471,7 +423,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			set({
 				currentProjectId: id,
 				currentProject: validRecord.data,
-				currentProjectData: resolveTimelineData(validRecord.data),
 				focusedSceneDrafts: {},
 				error: null,
 			});
@@ -636,7 +587,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 				error: null,
 			};
 		});
@@ -667,7 +617,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -734,7 +683,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 		if (!resolvedId) {
@@ -773,7 +721,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -795,7 +742,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			};
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -815,7 +761,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			};
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -853,7 +798,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -875,7 +819,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -927,7 +870,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -951,7 +893,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -988,7 +929,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},
@@ -1014,7 +954,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
-				currentProjectData: resolveTimelineData(nextProject),
 			};
 		});
 	},

@@ -50,9 +50,7 @@ const Editor = () => {
 	const runtimeManager = useEditorRuntime() as EditorRuntime &
 		StudioRuntimeManager;
 	const status = useProjectStore((state) => state.status);
-	const currentProjectData = useProjectStore(
-		(state) => state.currentProjectData,
-	);
+	const currentProject = useProjectStore((state) => state.currentProject);
 	const activeSceneId = useProjectStore(
 		(state) => state.currentProject?.ui.activeSceneId ?? null,
 	);
@@ -72,7 +70,7 @@ const Editor = () => {
 		[activeSceneId, runtimeManager],
 	);
 
-	if (status !== "ready" || !currentProjectData) {
+	if (status !== "ready" || !currentProject) {
 		return <div>Loading timeline...</div>;
 	}
 

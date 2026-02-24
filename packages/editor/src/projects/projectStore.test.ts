@@ -98,7 +98,6 @@ beforeEach(() => {
 		projects: [],
 		currentProjectId: project.id,
 		currentProject: project,
-		currentProjectData: null,
 		focusedSceneDrafts: {},
 		error: null,
 	});

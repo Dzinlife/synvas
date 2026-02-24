@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import type { TimelineJSON } from "core/editor/timelineLoader";
 import { useStudioRuntimeManager } from "@/editor/runtime/EditorRuntimeProvider";
 import { useProjectStore } from "@/projects/projectStore";
 import { usePlaybackOwnerStore } from "./playbackOwnerStore";
@@ -13,15 +14,10 @@ import {
 	snapshotTimelineFromStore,
 } from "./timelineSession";
 
-const toTimelineSignature = (value: unknown): string => {
-	return JSON.stringify(value);
-};
-
 type BridgeState = {
 	readonly subscriptions: Map<string, () => void>;
 	readonly writingRuntimeIds: Set<string>;
-	readonly runtimeSignatures: Map<string, string>;
-	readonly projectSignatures: Map<string, string>;
+	readonly projectTimelineRefs: Map<string, TimelineJSON>;
 };
 
 export const useTimelineRuntimeRegistryBridge = (): void => {
@@ -41,8 +37,7 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 	const bridgeStateRef = useRef<BridgeState>({
 		subscriptions: new Map(),
 		writingRuntimeIds: new Set(),
-		runtimeSignatures: new Map(),
-		projectSignatures: new Map(),
+		projectTimelineRefs: new Map(),
 	});
 
 	useEffect(() => {
@@ -52,8 +47,7 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 				unsubscribe();
 			}
 			bridgeState.subscriptions.clear();
-			bridgeState.runtimeSignatures.clear();
-			bridgeState.projectSignatures.clear();
+			bridgeState.projectTimelineRefs.clear();
 			bridgeState.writingRuntimeIds.clear();
 			for (const runtime of runtimeManager.listTimelineRuntimes()) {
 				runtimeManager.removeTimelineRuntime(runtime.ref);
@@ -72,29 +66,21 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 
 			if (!bridgeState.subscriptions.has(runtimeId)) {
 				const unsubscribe = runtime.timelineStore.subscribe(
-					(state) => [
-						state.elements,
-						state.tracks,
-						state.fps,
-						state.canvasSize,
-						state.snapEnabled,
-						state.autoAttach,
-						state.rippleEditingEnabled,
-						state.previewAxisEnabled,
-						state.audioSettings,
-					],
+					(state) => state.persistRevision,
 					() => {
 						if (bridgeState.writingRuntimeIds.has(runtimeId)) return;
-						const timeline = snapshotTimelineFromStore(runtime.timelineStore);
-						const runtimeSignature = toTimelineSignature(timeline);
-						const projectSignature =
-							bridgeState.projectSignatures.get(runtimeId);
-						bridgeState.runtimeSignatures.set(runtimeId, runtimeSignature);
-						if (projectSignature === runtimeSignature) return;
-						writeTimelineByRef(projectWriter, ref, timeline, {
-							recordHistory: false,
-						});
-						bridgeState.projectSignatures.set(runtimeId, runtimeSignature);
+						try {
+							const timeline = snapshotTimelineFromStore(runtime.timelineStore);
+							writeTimelineByRef(projectWriter, ref, timeline, {
+								recordHistory: false,
+							});
+							bridgeState.projectTimelineRefs.set(runtimeId, timeline);
+						} catch (error) {
+							console.error(
+								`Failed to write runtime timeline (${runtimeId}) to project:`,
+								error,
+							);
+						}
 					},
 				);
 				bridgeState.subscriptions.set(runtimeId, unsubscribe);
@@ -102,26 +88,21 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 
 			const timeline = readTimelineByRef(currentProject, ref);
 			if (!timeline) continue;
-			const projectSignature = toTimelineSignature(timeline);
-			bridgeState.projectSignatures.set(runtimeId, projectSignature);
-
-			const knownRuntimeSignature =
-				bridgeState.runtimeSignatures.get(runtimeId);
-			const runtimeSignature =
-				knownRuntimeSignature ??
-				toTimelineSignature(snapshotTimelineFromStore(runtime.timelineStore));
-			if (runtimeSignature === projectSignature) {
-				bridgeState.runtimeSignatures.set(runtimeId, runtimeSignature);
-				continue;
-			}
+			const knownProjectTimelineRef = bridgeState.projectTimelineRefs.get(runtimeId);
+			if (knownProjectTimelineRef === timeline) continue;
 
 			bridgeState.writingRuntimeIds.add(runtimeId);
 			try {
 				applyTimelineJsonToStore(timeline, runtime.timelineStore);
+				bridgeState.projectTimelineRefs.set(runtimeId, timeline);
+			} catch (error) {
+				console.error(
+					`Failed to apply project timeline (${runtimeId}) to runtime:`,
+					error,
+				);
 			} finally {
 				bridgeState.writingRuntimeIds.delete(runtimeId);
 			}
-			bridgeState.runtimeSignatures.set(runtimeId, projectSignature);
 		}
 
 		const ownerRuntimeId = usePlaybackOwnerStore.getState().ownerRuntimeId;
@@ -129,8 +110,7 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 			if (expectedRuntimeIds.has(runtime.id)) continue;
 			bridgeState.subscriptions.get(runtime.id)?.();
 			bridgeState.subscriptions.delete(runtime.id);
-			bridgeState.runtimeSignatures.delete(runtime.id);
-			bridgeState.projectSignatures.delete(runtime.id);
+			bridgeState.projectTimelineRefs.delete(runtime.id);
 			bridgeState.writingRuntimeIds.delete(runtime.id);
 			runtimeManager.removeTimelineRuntime(runtime.ref);
 		}

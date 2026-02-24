@@ -11,14 +11,9 @@ import {
 	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
 import {
-	applyTimelineJsonToStore,
 	snapshotTimelineFromStore,
 } from "@/studio/scene/timelineSession";
-import {
-	readTimelineByRef,
-	toSceneTimelineRef,
-	writeTimelineByRef,
-} from "./timelineRefAdapter";
+import { toSceneTimelineRef } from "./timelineRefAdapter";
 
 type TimelineHistorySnapshot = TimelineStore["historyPast"][number];
 
@@ -46,18 +41,10 @@ const buildTimelineFromHistorySnapshot = (
 	);
 };
 
-const isTimelineEqual = (a: TimelineJSON, b: TimelineJSON): boolean => {
-	return JSON.stringify(a) === JSON.stringify(b);
-};
-
 export const useSceneSessionBridge = (): void => {
 	const runtimeManager = useStudioRuntimeManager();
-	const currentProject = useProjectStore((state) => state.currentProject);
 	const activeSceneId = useProjectStore(
 		(state) => state.currentProject?.ui.activeSceneId ?? null,
-	);
-	const updateSceneTimeline = useProjectStore(
-		(state) => state.updateSceneTimeline,
 	);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 
@@ -69,19 +56,6 @@ export const useSceneSessionBridge = (): void => {
 	useEffect(() => {
 		runtimeManager.setActiveEditTimeline(activeTimelineRef);
 	}, [activeTimelineRef, runtimeManager]);
-
-	useEffect(() => {
-		if (!activeTimelineRef || !currentProject) return;
-		const timeline = readTimelineByRef(currentProject, activeTimelineRef);
-		if (!timeline) return;
-		const activeRuntime =
-			runtimeManager.ensureTimelineRuntime(activeTimelineRef);
-		const runtimeTimeline = snapshotTimelineFromStore(
-			activeRuntime.timelineStore,
-		);
-		if (isTimelineEqual(runtimeTimeline, timeline)) return;
-		applyTimelineJsonToStore(timeline, activeRuntime.timelineStore);
-	}, [activeTimelineRef, currentProject, runtimeManager]);
 
 	useEffect(() => {
 		if (!activeTimelineRef) return;
@@ -107,31 +81,10 @@ export const useSceneSessionBridge = (): void => {
 					timelineStore.getState(),
 				);
 				const afterTimeline = snapshotTimelineFromStore(timelineStore);
-				if (isTimelineEqual(beforeTimeline, afterTimeline)) {
-					return;
-				}
 
 				const projectState = useProjectStore.getState();
 				const currentProject = projectState.currentProject;
 				if (!currentProject) return;
-
-				const currentTimeline = readTimelineByRef(
-					currentProject,
-					activeTimelineRef,
-				);
-				if (
-					!currentTimeline ||
-					!isTimelineEqual(currentTimeline, afterTimeline)
-				) {
-					writeTimelineByRef(
-						{
-							updateSceneTimeline,
-						},
-						activeTimelineRef,
-						afterTimeline,
-						{ recordHistory: false },
-					);
-				}
 
 				const nextEntry: StudioHistoryEntry = {
 					kind: "scene.timeline",
@@ -144,5 +97,5 @@ export const useSceneSessionBridge = (): void => {
 				pushHistory(nextEntry);
 			},
 		);
-	}, [activeTimelineRef, pushHistory, runtimeManager, updateSceneTimeline]);
+	}, [activeTimelineRef, pushHistory, runtimeManager]);
 };

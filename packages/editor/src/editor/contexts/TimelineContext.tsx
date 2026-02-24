@@ -169,6 +169,8 @@ export interface TimelineStore {
 	timelineMaxScrollLeft: number;
 	// 时间线可视区域宽度（不含左侧轨道列）
 	timelineViewportWidth: number;
+	// 可持久化字段版本（用于 runtime->project 同步）
+	persistRevision: number;
 	// 版本号（用于命令计划重基线）
 	revision: number;
 	setFps: (fps: number) => void;
@@ -396,19 +398,20 @@ export const createTimelineStore = (): TimelineStoreApi => {
 			autoAttach: true,
 			// 主轨波纹编辑模式初始值
 			rippleEditingEnabled: false,
-		audioSettings: cloneAudioSettings(DEFAULT_TIMELINE_SETTINGS.audio),
-		// 拖拽目标指示状态初始值
-		activeDropTarget: null,
-		// 拖拽 Ghost 状态初始值
-		dragGhosts: [],
-		// 自动滚动状态初始值
-		autoScrollSpeed: 0,
-		autoScrollSpeedY: 0,
-		// 滚动位置初始值
-		scrollLeft: 0,
-		timelineMaxScrollLeft: 0,
-		timelineViewportWidth: 0,
-		revision: 0,
+			audioSettings: cloneAudioSettings(DEFAULT_TIMELINE_SETTINGS.audio),
+			// 拖拽目标指示状态初始值
+			activeDropTarget: null,
+			// 拖拽 Ghost 状态初始值
+			dragGhosts: [],
+			// 自动滚动状态初始值
+			autoScrollSpeed: 0,
+			autoScrollSpeedY: 0,
+			// 滚动位置初始值
+			scrollLeft: 0,
+			timelineMaxScrollLeft: 0,
+			timelineViewportWidth: 0,
+			persistRevision: 0,
+			revision: 0,
 		getElementById: (id: string) => {
 			return get().elements.find((element) => element.id === id) ?? null;
 		},
@@ -1265,6 +1268,15 @@ export const createTimelineStore = (): TimelineStoreApi => {
 		})),
 	);
 	timelineStore.subscribe(
+		selectPersistRevisionDeps,
+		() => {
+			timelineStore.setState((state) => ({
+				persistRevision: state.persistRevision + 1,
+			}));
+		},
+		{ equalityFn: isPersistRevisionDepsEqual },
+	);
+	timelineStore.subscribe(
 		selectRevisionDeps,
 		() => {
 			timelineStore.setState((state) => ({
@@ -1274,6 +1286,49 @@ export const createTimelineStore = (): TimelineStoreApi => {
 		{ equalityFn: isRevisionDepsEqual },
 	);
 	return timelineStore;
+};
+
+interface TimelinePersistRevisionDeps {
+	fps: number;
+	elements: TimelineElement[];
+	tracks: TimelineTrack[];
+	canvasSize: { width: number; height: number };
+	snapEnabled: boolean;
+	autoAttach: boolean;
+	rippleEditingEnabled: boolean;
+	previewAxisEnabled: boolean;
+	audioSettings: TimelineSettings["audio"];
+}
+
+const selectPersistRevisionDeps = (
+	state: TimelineStore,
+): TimelinePersistRevisionDeps => ({
+	fps: state.fps,
+	elements: state.elements,
+	tracks: state.tracks,
+	canvasSize: state.canvasSize,
+	snapEnabled: state.snapEnabled,
+	autoAttach: state.autoAttach,
+	rippleEditingEnabled: state.rippleEditingEnabled,
+	previewAxisEnabled: state.previewAxisEnabled,
+	audioSettings: state.audioSettings,
+});
+
+const isPersistRevisionDepsEqual = (
+	prev: TimelinePersistRevisionDeps,
+	next: TimelinePersistRevisionDeps,
+): boolean => {
+	return (
+		prev.fps === next.fps &&
+		prev.elements === next.elements &&
+		prev.tracks === next.tracks &&
+		prev.canvasSize === next.canvasSize &&
+		prev.snapEnabled === next.snapEnabled &&
+		prev.autoAttach === next.autoAttach &&
+		prev.rippleEditingEnabled === next.rippleEditingEnabled &&
+		prev.previewAxisEnabled === next.previewAxisEnabled &&
+		prev.audioSettings === next.audioSettings
+	);
 };
 
 interface TimelineRevisionDeps {
