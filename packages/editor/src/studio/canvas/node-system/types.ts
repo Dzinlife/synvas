@@ -19,8 +19,26 @@ export interface CanvasNodeToolbarProps<TNode extends CanvasNode = CanvasNode> {
 	scene: SceneDocument | null;
 	asset: TimelineAsset | null;
 	updateNode: (patch: Record<string, unknown>) => void;
-	setFocusedScene: (sceneId: string | null) => void;
+	setFocusedNode: (nodeId: string | null) => void;
 	setActiveScene: (sceneId: string | null) => void;
+}
+
+export type CanvasNodeDrawerTrigger = "focus" | "active";
+
+export interface CanvasNodeDrawerOptions {
+	trigger?: CanvasNodeDrawerTrigger;
+	resizable?: boolean;
+	defaultHeight?: number;
+	minHeight?: number;
+	maxHeightRatio?: number;
+}
+
+export interface CanvasNodeDrawerProps<TNode extends CanvasNode = CanvasNode> {
+	node: TNode;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+	onClose: () => void;
+	onHeightChange?: (height: number) => void;
 }
 
 export interface CanvasExternalFileContext {
@@ -45,6 +63,12 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	create: (input?: Record<string, unknown>) => CanvasNodeCreateInput;
 	skiaRenderer: React.FC<CanvasNodeSkiaRenderProps<TNode>>;
 	toolbar: React.FC<CanvasNodeToolbarProps<TNode>>;
+	drawer?: React.FC<CanvasNodeDrawerProps<TNode>>;
+	drawerOptions?: CanvasNodeDrawerOptions;
+	/**
+	 * @deprecated 请使用 drawerOptions.trigger。
+	 */
+	drawerTrigger?: CanvasNodeDrawerTrigger;
 	fromExternalFile?: (
 		file: File,
 		context: CanvasExternalFileContext,

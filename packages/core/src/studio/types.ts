@@ -79,7 +79,7 @@ export interface StudioProject {
 	assets: TimelineAsset[];
 	ui: {
 		activeSceneId: string | null;
-		focusedSceneId: string | null;
+		focusedNodeId: string | null;
 		activeNodeId: string | null;
 		camera: {
 			x: number;

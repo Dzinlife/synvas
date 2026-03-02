@@ -1,10 +1,8 @@
-import type { CanvasNode, SceneNode } from "core/studio/types";
+import type { TimelineAsset } from "core/dsl/types";
+import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import SceneTimelineDrawer, {
-	SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
-} from "@/editor/components/SceneTimelineDrawer";
 import TimelineContextMenu from "@/editor/components/TimelineContextMenu";
 import MaterialLibrary from "@/editor/MaterialLibrary";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
@@ -13,14 +11,22 @@ import {
 	type CanvasNodeLayoutSnapshot,
 	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
+import CanvasNodeDrawerShell, {
+	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
+	CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO,
+	CANVAS_NODE_DRAWER_MIN_HEIGHT,
+} from "@/studio/canvas/CanvasNodeDrawerShell";
 import { useProjectStore } from "@/projects/projectStore";
 import {
 	canvasNodeDefinitionList,
 	getCanvasNodeDefinition,
 } from "@/studio/canvas/node-system/registry";
-import {
-	resolveExternalVideoUri,
-} from "@/editor/utils/externalVideo";
+import type {
+	CanvasNodeDrawerOptions,
+	CanvasNodeDrawerProps,
+	CanvasNodeDrawerTrigger,
+} from "@/studio/canvas/node-system/types";
+import { resolveExternalVideoUri } from "@/editor/utils/externalVideo";
 import FocusSceneKonvaLayer from "./FocusSceneKonvaLayer";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 
@@ -60,6 +66,31 @@ interface DragState {
 }
 
 type FileWithPath = File & { path?: string };
+type AnyCanvasDrawer = React.FC<CanvasNodeDrawerProps<CanvasNode>>;
+
+interface ResolvedNodeDrawer {
+	Drawer: AnyCanvasDrawer;
+	node: CanvasNode;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+	trigger: CanvasNodeDrawerTrigger;
+	options: ResolvedCanvasDrawerOptions;
+}
+
+interface ResolvedNodeDrawerTarget {
+	Drawer: AnyCanvasDrawer;
+	node: CanvasNode;
+	trigger: CanvasNodeDrawerTrigger;
+	options: ResolvedCanvasDrawerOptions;
+}
+
+interface ResolvedCanvasDrawerOptions {
+	trigger: CanvasNodeDrawerTrigger;
+	resizable: boolean;
+	defaultHeight: number;
+	minHeight: number;
+	maxHeightRatio: number;
+}
 
 const clampZoom = (zoom: number): number => {
 	return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
@@ -88,10 +119,6 @@ const isLayoutEqual = (
 		before.hidden === after.hidden &&
 		before.locked === after.locked
 	);
-};
-
-const isSceneNode = (node: CanvasNode): node is SceneNode => {
-	return node.type === "scene";
 };
 
 const isWorldPointInNode = (
@@ -180,6 +207,27 @@ const resolveDroppedFiles = (dataTransfer: DataTransfer | null): File[] => {
 		.filter((file): file is File => Boolean(file));
 };
 
+const resolveDrawerTrigger = (
+	trigger: CanvasNodeDrawerTrigger | undefined,
+): CanvasNodeDrawerTrigger => {
+	return trigger ?? "focus";
+};
+
+const resolveDrawerOptions = (
+	options: CanvasNodeDrawerOptions | undefined,
+	deprecatedTrigger: CanvasNodeDrawerTrigger | undefined,
+): ResolvedCanvasDrawerOptions => {
+	const trigger = resolveDrawerTrigger(options?.trigger ?? deprecatedTrigger);
+	return {
+		trigger,
+		resizable: options?.resizable ?? false,
+		defaultHeight: options?.defaultHeight ?? CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
+		minHeight: options?.minHeight ?? CANVAS_NODE_DRAWER_MIN_HEIGHT,
+		maxHeightRatio:
+			options?.maxHeightRatio ?? CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO,
+	};
+};
+
 const CanvasWorkspace = () => {
 	const currentProject = useProjectStore((state) => state.currentProject);
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
@@ -191,26 +239,26 @@ const CanvasWorkspace = () => {
 	const ensureProjectAssetByUri = useProjectStore(
 		(state) => state.ensureProjectAssetByUri,
 	);
-	const setFocusedScene = useProjectStore((state) => state.setFocusedScene);
+	const setFocusedNode = useProjectStore((state) => state.setFocusedNode);
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
 	const setActiveNode = useProjectStore((state) => state.setActiveNode);
 	const setCanvasCamera = useProjectStore((state) => state.setCanvasCamera);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 
-	const focusedSceneId = currentProject?.ui.focusedSceneId ?? null;
+	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const camera = currentProject?.ui.camera ?? { x: 0, y: 0, zoom: 1 };
-	const isCanvasInteractionLocked = Boolean(focusedSceneId);
+	const isCanvasInteractionLocked = Boolean(focusedNodeId);
 	const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
-	const [focusTimelineDrawerHeight, setFocusTimelineDrawerHeight] = useState(
-		SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
+	const [visibleDrawerHeight, setVisibleDrawerHeight] = useState(
+		CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
 	);
 	const [contextMenuState, setContextMenuState] =
 		useState<CanvasContextMenuState>({ open: false });
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const preFocusCameraRef = useRef<CameraState | null>(null);
-	const prevFocusedSceneIdRef = useRef<string | null>(focusedSceneId);
+	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
 	const dragStateRef = useRef<DragState | null>(null);
 
 	const sortedNodes = useMemo(() => {
@@ -223,14 +271,12 @@ const CanvasWorkspace = () => {
 			});
 	}, [currentProject]);
 
-	const sceneNodes = useMemo(() => {
-		return sortedNodes.filter((node): node is SceneNode => isSceneNode(node));
-	}, [sortedNodes]);
-
 	const focusedNode = useMemo(() => {
-		if (!focusedSceneId) return null;
-		return sceneNodes.find((node) => node.sceneId === focusedSceneId) ?? null;
-	}, [focusedSceneId, sceneNodes]);
+		if (!focusedNodeId) return null;
+		return (
+			currentProject?.canvas.nodes.find((node) => node.id === focusedNodeId) ?? null
+		);
+	}, [currentProject, focusedNodeId]);
 
 	const activeNode = useMemo(() => {
 		if (!activeNodeId) return null;
@@ -257,6 +303,75 @@ const CanvasWorkspace = () => {
 			null
 		);
 	}, [activeNode, currentProject]);
+
+	const resolvedDrawerTarget = useMemo<ResolvedNodeDrawerTarget | null>(() => {
+		if (focusedNode) {
+			const definition = getCanvasNodeDefinition(focusedNode.type);
+			const options = resolveDrawerOptions(
+				definition.drawerOptions,
+				definition.drawerTrigger,
+			);
+			const trigger = options.trigger;
+			if (definition.drawer && trigger === "focus") {
+				return {
+					Drawer: definition.drawer as unknown as AnyCanvasDrawer,
+					node: focusedNode,
+					trigger,
+					options,
+				};
+			}
+		}
+		if (activeNode) {
+			const definition = getCanvasNodeDefinition(activeNode.type);
+			const options = resolveDrawerOptions(
+				definition.drawerOptions,
+				definition.drawerTrigger,
+			);
+			const trigger = options.trigger;
+			if (definition.drawer && trigger === "active") {
+				return {
+					Drawer: definition.drawer as unknown as AnyCanvasDrawer,
+					node: activeNode,
+					trigger,
+					options,
+				};
+			}
+		}
+		return null;
+	}, [activeNode, focusedNode]);
+
+	const resolvedDrawer = useMemo<ResolvedNodeDrawer | null>(() => {
+		if (!resolvedDrawerTarget) return null;
+		const node = resolvedDrawerTarget.node;
+		const scene =
+			node.type === "scene"
+				? currentProject?.scenes[node.sceneId] ?? null
+				: null;
+		const asset =
+			"assetId" in node
+				? currentProject?.assets.find((item) => item.id === node.assetId) ?? null
+				: null;
+		return {
+			...resolvedDrawerTarget,
+			scene,
+			asset,
+		};
+	}, [currentProject, resolvedDrawerTarget]);
+
+	const focusedSceneNode = useMemo((): SceneNode | null => {
+		if (!focusedNode || focusedNode.type !== "scene") return null;
+		return focusedNode;
+	}, [focusedNode]);
+
+	const drawerIdentity = resolvedDrawerTarget
+		? `${resolvedDrawerTarget.node.id}:${resolvedDrawerTarget.trigger}`
+		: null;
+	const drawerDefaultHeight =
+		resolvedDrawerTarget?.options.defaultHeight ??
+		CANVAS_NODE_DRAWER_DEFAULT_HEIGHT;
+
+	const focusOccupiedDrawerHeight =
+		focusedNodeId && resolvedDrawerTarget ? visibleDrawerHeight : 0;
 
 	const resolveWorldPoint = useCallback(
 		(clientX: number, clientY: number) => {
@@ -297,42 +412,47 @@ const CanvasWorkspace = () => {
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
-			if (!focusedSceneId) return;
+			if (!focusedNodeId) return;
 			event.preventDefault();
-			setFocusedScene(null);
+			setFocusedNode(null);
 		};
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [focusedSceneId, setFocusedScene]);
+	}, [focusedNodeId, setFocusedNode]);
 
 	useEffect(() => {
-		if (focusedSceneId) return;
-		setFocusTimelineDrawerHeight(SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT);
-	}, [focusedSceneId]);
+		if (focusedNodeId) return;
+		setVisibleDrawerHeight(CANVAS_NODE_DRAWER_DEFAULT_HEIGHT);
+	}, [focusedNodeId]);
 
 	useEffect(() => {
-		const prevFocusedSceneId = prevFocusedSceneIdRef.current;
-		if (!prevFocusedSceneId && focusedSceneId) {
+		if (!drawerIdentity) return;
+		setVisibleDrawerHeight(drawerDefaultHeight);
+	}, [drawerDefaultHeight, drawerIdentity]);
+
+	useEffect(() => {
+		const prevFocusedNodeId = prevFocusedNodeIdRef.current;
+		if (!prevFocusedNodeId && focusedNodeId) {
 			preFocusCameraRef.current = camera;
 		}
-		if (prevFocusedSceneId && !focusedSceneId) {
+		if (prevFocusedNodeId && !focusedNodeId) {
 			const previous = preFocusCameraRef.current;
 			preFocusCameraRef.current = null;
 			if (previous && !isCameraAlmostEqual(previous, camera)) {
 				setCanvasCamera(previous);
 			}
 		}
-		prevFocusedSceneIdRef.current = focusedSceneId;
-	}, [camera, focusedSceneId, setCanvasCamera]);
+		prevFocusedNodeIdRef.current = focusedNodeId;
+	}, [camera, focusedNodeId, setCanvasCamera]);
 
 	useEffect(() => {
-		if (!focusedSceneId) return;
+		if (!focusedNodeId) return;
 		if (!focusedNode) return;
 		if (stageSize.width <= 0 || stageSize.height <= 0) return;
 		const viewPadding = 80;
 		const visibleCanvasHeight = Math.max(
 			1,
-			stageSize.height - focusTimelineDrawerHeight,
+			stageSize.height - focusOccupiedDrawerHeight,
 		);
 		const availableWidth = Math.max(1, stageSize.width - viewPadding * 2);
 		const availableHeight = Math.max(1, visibleCanvasHeight - viewPadding * 2);
@@ -351,9 +471,9 @@ const CanvasWorkspace = () => {
 		setCanvasCamera(nextCamera);
 	}, [
 		camera,
-		focusTimelineDrawerHeight,
+		focusOccupiedDrawerHeight,
 		focusedNode,
-		focusedSceneId,
+		focusedNodeId,
 		setCanvasCamera,
 		stageSize.height,
 		stageSize.width,
@@ -370,7 +490,7 @@ const CanvasWorkspace = () => {
 			kind: "canvas.node-create",
 			node,
 			scene,
-			focusSceneId: latestProject.ui.focusedSceneId,
+			focusNodeId: latestProject.ui.focusedNodeId,
 		});
 	}, [createCanvasNode, pushHistory]);
 
@@ -397,14 +517,10 @@ const CanvasWorkspace = () => {
 		setCanvasCamera({ x: 0, y: 0, zoom: 1 });
 	}, [setCanvasCamera]);
 
-	const handleExitFocus = useCallback(() => {
-		setFocusedScene(null);
-	}, [setFocusedScene]);
-
 	const handleContainerWheel = useCallback(
 		(event: WheelEvent) => {
 			event.preventDefault();
-			if (focusedSceneId) return;
+			if (focusedNodeId) return;
 			if (event.ctrlKey || event.metaKey) {
 				const oldZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
 				const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
@@ -433,7 +549,7 @@ const CanvasWorkspace = () => {
 				zoom: camera.zoom,
 			});
 		},
-		[camera, focusedSceneId, setCanvasCamera],
+		[camera, focusedNodeId, setCanvasCamera],
 	);
 
 	useEffect(() => {
@@ -454,38 +570,27 @@ const CanvasWorkspace = () => {
 				const node = sortedNodes[index];
 				if (!node) continue;
 				const canInteractNode =
-					!isCanvasInteractionLocked ||
-					(node.type === "scene" && node.sceneId === focusedSceneId);
+					!isCanvasInteractionLocked || node.id === focusedNodeId;
 				if (!canInteractNode) continue;
 				if (!isWorldPointInNode(node, worldX, worldY)) continue;
 				return node;
 			}
 			return null;
 		},
-		[focusedSceneId, isCanvasInteractionLocked, sortedNodes],
+		[focusedNodeId, isCanvasInteractionLocked, sortedNodes],
 	);
 
 	const handleNodeActivate = useCallback(
 		(node: CanvasNode) => {
 			const canInteractNode =
-				!isCanvasInteractionLocked ||
-				(node.type === "scene" && node.sceneId === focusedSceneId);
+				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
 			setActiveNode(node.id);
 			if (node.type === "scene") {
 				setActiveScene(node.sceneId);
-				if (!focusedSceneId) {
-					setFocusedScene(node.sceneId);
-				}
 			}
 		},
-		[
-			focusedSceneId,
-			isCanvasInteractionLocked,
-			setActiveNode,
-			setActiveScene,
-			setFocusedScene,
-		],
+		[focusedNodeId, isCanvasInteractionLocked, setActiveNode, setActiveScene],
 	);
 
 	const handleNodeHitLayerPointerDown = useCallback(
@@ -524,6 +629,17 @@ const CanvasWorkspace = () => {
 			resolveWorldPoint,
 			setActiveNode,
 		],
+	);
+
+	const handleNodeHitLayerDoubleClick = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			if (event.button !== 0) return;
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			const node = getTopHitNode(world.x, world.y);
+			if (!node) return;
+			setFocusedNode(node.id);
+		},
+		[getTopHitNode, resolveWorldPoint, setFocusedNode],
 	);
 
 	useEffect(() => {
@@ -569,7 +685,7 @@ const CanvasWorkspace = () => {
 				nodeId: node.id,
 				before: dragState.before,
 				after,
-				focusSceneId: latestProject.ui.focusedSceneId,
+				focusNodeId: latestProject.ui.focusedNodeId,
 			});
 		};
 
@@ -618,7 +734,7 @@ const CanvasWorkspace = () => {
 			pushHistory({
 				kind: "canvas.node-create",
 				node,
-				focusSceneId: latestProject.ui.focusedSceneId,
+				focusNodeId: latestProject.ui.focusedNodeId,
 			});
 		},
 		[createCanvasNode, pushHistory],
@@ -705,7 +821,7 @@ const CanvasWorkspace = () => {
 				pushHistory({
 					kind: "canvas.node-create",
 					node,
-					focusSceneId: latestProject.ui.focusedSceneId,
+					focusNodeId: latestProject.ui.focusedNodeId,
 				});
 			}
 		},
@@ -720,6 +836,16 @@ const CanvasWorkspace = () => {
 		],
 	);
 
+	const handleCloseDrawer = useCallback(() => {
+		if (focusedNodeId) {
+			setFocusedNode(null);
+			return;
+		}
+		if (activeNodeId) {
+			setActiveNode(null);
+		}
+	}, [activeNodeId, focusedNodeId, setActiveNode, setFocusedNode]);
+
 	if (!currentProject) {
 		return (
 			<div className="flex h-full w-full items-center justify-center">Loading...</div>
@@ -731,7 +857,7 @@ const CanvasWorkspace = () => {
 	const gridOffsetY = (camera.y * camera.zoom) % gridSizePx;
 
 	const toolbarActions =
-		contextMenuState.open && !focusedSceneId
+		contextMenuState.open && !focusedNodeId
 			? [
 					{
 						key: "new-text-node",
@@ -745,6 +871,8 @@ const CanvasWorkspace = () => {
 					},
 			  ]
 			: [];
+
+	const DrawerComponent = resolvedDrawer?.Drawer;
 
 	return (
 		<div
@@ -776,13 +904,14 @@ const CanvasWorkspace = () => {
 				scenes={currentProject.scenes}
 				assets={currentProject.assets}
 				activeNodeId={activeNodeId}
-				focusedSceneId={focusedSceneId}
+				focusedNodeId={focusedNodeId}
 			/>
 
 			<div
 				data-testid="canvas-node-hit-layer"
 				className="absolute inset-0 z-20"
 				onPointerDown={handleNodeHitLayerPointerDown}
+				onDoubleClick={handleNodeHitLayerDoubleClick}
 			/>
 
 			{activeNode && ActiveNodeToolbar && (
@@ -794,13 +923,13 @@ const CanvasWorkspace = () => {
 						updateNode={(patch) => {
 							updateCanvasNode(activeNode.id, patch as never);
 						}}
-						setFocusedScene={setFocusedScene}
+						setFocusedNode={setFocusedNode}
 						setActiveScene={setActiveScene}
 					/>
 				</div>
 			)}
 
-			{!focusedSceneId && (
+			{!focusedNodeId && (
 				<div className="absolute left-4 top-4 z-30 flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur">
 					<button
 						type="button"
@@ -837,30 +966,43 @@ const CanvasWorkspace = () => {
 				</div>
 			)}
 
-			{focusedSceneId && focusedNode && (
+			{focusedSceneNode && (
 				<FocusSceneKonvaLayer
 					width={stageSize.width}
 					height={stageSize.height}
 					camera={camera}
-					focusedNode={focusedNode}
-					sceneId={focusedSceneId}
+					focusedNode={focusedSceneNode}
+					sceneId={focusedSceneNode.sceneId}
 				/>
 			)}
 
-			{focusedSceneId && (
-				<>
-					<div
-						data-testid="focus-material-library"
-						className="absolute left-4 top-4 z-50 max-h-[45vh] w-60 overflow-y-auto rounded-xl border border-white/10 bg-neutral-900/85 p-3 backdrop-blur-xl"
-					>
-						<div className="mb-2 text-xs font-medium text-white/80">素材库</div>
-						<MaterialLibrary />
-					</div>
-					<SceneTimelineDrawer
-						onExitFocus={handleExitFocus}
-						onHeightChange={setFocusTimelineDrawerHeight}
+			{focusedSceneNode && (
+				<div
+					data-testid="focus-material-library"
+					className="absolute left-4 top-4 z-50 max-h-[45vh] w-60 overflow-y-auto rounded-xl border border-white/10 bg-neutral-900/85 p-3 backdrop-blur-xl"
+				>
+					<div className="mb-2 text-xs font-medium text-white/80">素材库</div>
+					<MaterialLibrary />
+				</div>
+			)}
+
+			{resolvedDrawer && DrawerComponent && (
+				<CanvasNodeDrawerShell
+					key={drawerIdentity ?? undefined}
+					defaultHeight={resolvedDrawer.options.defaultHeight}
+					minHeight={resolvedDrawer.options.minHeight}
+					maxHeightRatio={resolvedDrawer.options.maxHeightRatio}
+					resizable={resolvedDrawer.options.resizable}
+					onHeightChange={setVisibleDrawerHeight}
+				>
+					<DrawerComponent
+						node={resolvedDrawer.node}
+						scene={resolvedDrawer.scene}
+						asset={resolvedDrawer.asset}
+						onClose={handleCloseDrawer}
+						onHeightChange={setVisibleDrawerHeight}
 					/>
-				</>
+				</CanvasNodeDrawerShell>
 			)}
 
 			<TimelineContextMenu

@@ -24,6 +24,7 @@ describe("SceneTimelineDrawer", () => {
 		render(<SceneTimelineDrawer onExitFocus={vi.fn()} />);
 		expect(screen.getByTestId("scene-playback-bar")).toBeTruthy();
 		expect(screen.getByTestId("timeline-editor")).toBeTruthy();
+		expect(screen.getByLabelText("调整时间线高度")).toBeTruthy();
 	});
 
 	it("退出回调可触发", () => {
@@ -31,5 +32,10 @@ describe("SceneTimelineDrawer", () => {
 		render(<SceneTimelineDrawer onExitFocus={onExitFocus} />);
 		fireEvent.click(screen.getAllByTestId("scene-playback-bar")[0]!);
 		expect(onExitFocus).toHaveBeenCalledTimes(1);
+	});
+
+	it("可通过配置关闭 resize", () => {
+		render(<SceneTimelineDrawer onExitFocus={vi.fn()} resizable={false} />);
+		expect(screen.queryByLabelText("调整时间线高度")).toBeNull();
 	});
 });

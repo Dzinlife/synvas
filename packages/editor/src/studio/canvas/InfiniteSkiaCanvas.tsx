@@ -16,7 +16,7 @@ interface InfiniteSkiaCanvasProps {
 	scenes: StudioProject["scenes"];
 	assets: StudioProject["assets"];
 	activeNodeId: string | null;
-	focusedSceneId: string | null;
+	focusedNodeId: string | null;
 }
 
 const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
@@ -27,7 +27,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	scenes,
 	assets,
 	activeNodeId,
-	focusedSceneId,
+	focusedNodeId,
 }) => {
 	const runtimeManager = useStudioRuntimeManager();
 	const assetById = useMemo(() => {
@@ -56,10 +56,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							node.type === "scene" ? scenes[node.sceneId] ?? null : null;
 						const asset =
 							"assetId" in node ? assetById.get(node.assetId) ?? null : null;
-						const isFocused =
-							node.type === "scene" && node.sceneId === focusedSceneId;
+						const isFocused = node.id === focusedNodeId;
 						const isActive = node.id === activeNodeId;
-						const isDimmed = Boolean(focusedSceneId) && !isFocused;
+						const isDimmed = Boolean(focusedNodeId) && !isFocused;
 
 						return (
 							<Group

@@ -29,7 +29,7 @@ interface ProjectDbSchema extends DBSchema {
 	};
 }
 
-const DB_NAME = "ai-nle-v2";
+const DB_NAME = "composa";
 const DB_VERSION = 1;
 const PROJECT_STORE = "projects";
 const META_STORE = "meta";
@@ -105,7 +105,7 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 		assets: [],
 		ui: {
 			activeSceneId: sceneId,
-			focusedSceneId: null,
+			focusedNodeId: null,
 			activeNodeId: nodeId,
 			camera: {
 				x: 0,

@@ -1,91 +1,62 @@
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import CanvasNodeDrawerShell, {
+	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
+	CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO,
+	CANVAS_NODE_DRAWER_MIN_HEIGHT,
+} from "@/studio/canvas/CanvasNodeDrawerShell";
 import TimelineEditor from "@/editor/TimelineEditor";
 import ScenePlaybackControlBar from "./ScenePlaybackControlBar";
 
-const MIN_HEIGHT = 240;
-export const SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT = 320;
+export const SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT =
+	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT;
+export const SCENE_TIMELINE_DRAWER_MIN_HEIGHT = CANVAS_NODE_DRAWER_MIN_HEIGHT;
+export const SCENE_TIMELINE_DRAWER_MAX_HEIGHT_RATIO =
+	CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO;
 
-interface SceneTimelineDrawerProps {
+interface SceneTimelineDrawerContentProps {
 	onExitFocus: () => void;
-	onHeightChange?: (height: number) => void;
 }
 
-const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
-	onExitFocus,
-	onHeightChange,
-}) => {
-	const [drawerHeight, setDrawerHeight] = useState(
-		SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
-	);
-	const draggingRef = useRef(false);
-	const startYRef = useRef(0);
-	const startHeightRef = useRef(0);
+interface SceneTimelineDrawerProps extends SceneTimelineDrawerContentProps {
+	onHeightChange?: (height: number) => void;
+	resizable?: boolean;
+	defaultHeight?: number;
+	minHeight?: number;
+	maxHeightRatio?: number;
+}
 
-	const handleMouseMove = useCallback((event: MouseEvent) => {
-		if (!draggingRef.current) return;
-		const deltaY = startYRef.current - event.clientY;
-		const maxHeight = Math.max(
-			MIN_HEIGHT,
-			Math.round(window.innerHeight * 0.65),
-		);
-		const nextHeight = Math.min(
-			maxHeight,
-			Math.max(MIN_HEIGHT, startHeightRef.current + deltaY),
-		);
-		setDrawerHeight(nextHeight);
-	}, []);
-
-	const stopResize = useCallback(() => {
-		draggingRef.current = false;
-		document.removeEventListener("mousemove", handleMouseMove);
-		document.removeEventListener("mouseup", stopResize);
-	}, [handleMouseMove]);
-
-	useEffect(() => {
-		return () => {
-			document.removeEventListener("mousemove", handleMouseMove);
-			document.removeEventListener("mouseup", stopResize);
-		};
-	}, [handleMouseMove, stopResize]);
-
-	useEffect(() => {
-		onHeightChange?.(drawerHeight);
-	}, [drawerHeight, onHeightChange]);
-
-	const handleResizeMouseDown = useCallback(
-		(event: React.MouseEvent) => {
-			event.preventDefault();
-			draggingRef.current = true;
-			startYRef.current = event.clientY;
-			startHeightRef.current = drawerHeight;
-			document.addEventListener("mousemove", handleMouseMove);
-			document.addEventListener("mouseup", stopResize);
-		},
-		[drawerHeight, handleMouseMove, stopResize],
-	);
-
-	return (
-		<div
-			data-testid="scene-timeline-drawer"
-			className="absolute inset-x-0 bottom-0 z-40 border-t border-neutral-800 bg-neutral-900"
-			style={{ height: drawerHeight }}
-		>
-			<button
-				type="button"
-				aria-label="调整时间线高度"
-				onMouseDown={handleResizeMouseDown}
-				className="absolute -top-2 left-0 h-4 w-full cursor-ns-resize"
-			>
-				<span className="mx-auto mt-1 block h-1 w-20 rounded-full bg-white/30" />
-			</button>
+export const SceneTimelineDrawerContent: React.FC<SceneTimelineDrawerContentProps> =
+	({ onExitFocus }) => {
+		return (
 			<div className="flex h-full min-h-0 flex-col">
 				<ScenePlaybackControlBar onExitFocus={onExitFocus} />
 				<div className="min-h-0 flex-1">
 					<TimelineEditor />
 				</div>
 			</div>
-		</div>
+		);
+	};
+
+const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
+	onExitFocus,
+	onHeightChange,
+	resizable = true,
+	defaultHeight = SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
+	minHeight = SCENE_TIMELINE_DRAWER_MIN_HEIGHT,
+	maxHeightRatio = SCENE_TIMELINE_DRAWER_MAX_HEIGHT_RATIO,
+}) => {
+	return (
+		<CanvasNodeDrawerShell
+			dataTestId="scene-timeline-drawer"
+			defaultHeight={defaultHeight}
+			minHeight={minHeight}
+			maxHeightRatio={maxHeightRatio}
+			resizable={resizable}
+			onHeightChange={onHeightChange}
+			resizeHandleLabel="调整时间线高度"
+		>
+			<SceneTimelineDrawerContent onExitFocus={onExitFocus} />
+		</CanvasNodeDrawerShell>
 	);
 };
 

@@ -89,7 +89,7 @@ const createProject = (): StudioProject => ({
 	},
 	ui: {
 		activeSceneId: "scene-1",
-		focusedSceneId: null,
+		focusedNodeId: null,
 		activeNodeId: null,
 		camera: { x: 0, y: 0, zoom: 1 },
 	},

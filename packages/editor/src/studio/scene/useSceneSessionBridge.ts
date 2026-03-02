@@ -92,7 +92,7 @@ export const useSceneSessionBridge = (): void => {
 					sceneId: activeTimelineRef.sceneId,
 					before: beforeTimeline,
 					after: afterTimeline,
-					focusSceneId: currentProject.ui.focusedSceneId,
+					focusNodeId: currentProject.ui.focusedNodeId,
 				};
 				pushHistory(nextEntry);
 			},

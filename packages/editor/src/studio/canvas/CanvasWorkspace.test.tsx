@@ -38,6 +38,16 @@ vi.mock("@/editor/MaterialLibrary", () => ({
 vi.mock("@/studio/canvas/node-system/registry", () => {
 	const GenericSkiaRenderer = () => null;
 	const createToolbar = (type: string) => () => <div data-testid={`node-toolbar-${type}`} />;
+	const SceneDrawer = ({ onClose }: { onClose: () => void }) => (
+		<button type="button" data-testid="scene-timeline-drawer" onClick={onClose}>
+			drawer
+		</button>
+	);
+	const VideoDrawer = ({ onClose }: { onClose: () => void }) => (
+		<button type="button" data-testid="video-node-drawer" onClick={onClose}>
+			drawer
+		</button>
+	);
 	const definitions = {
 		scene: {
 			type: "scene",
@@ -45,6 +55,14 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			create: () => ({ type: "scene" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("scene"),
+			drawer: SceneDrawer,
+			drawerOptions: {
+				trigger: "focus" as const,
+				resizable: true,
+				defaultHeight: 320,
+				minHeight: 240,
+				maxHeightRatio: 0.65,
+			},
 		},
 		video: {
 			type: "video",
@@ -52,6 +70,10 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			create: () => ({ type: "video" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("video"),
+			drawer: VideoDrawer,
+			drawerOptions: {
+				trigger: "active" as const,
+			},
 			fromExternalFile: async (
 				file: File,
 				context: {
@@ -236,7 +258,7 @@ const createProject = (): StudioProject => ({
 	},
 	ui: {
 		activeSceneId: "scene-1",
-		focusedSceneId: null,
+		focusedNodeId: null,
 		activeNodeId: "node-scene-1",
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
@@ -274,6 +296,15 @@ const clickNodeAt = (clientX: number, clientY: number): void => {
 	});
 };
 
+const doubleClickNodeAt = (clientX: number, clientY: number): void => {
+	const hitLayer = screen.getByTestId("canvas-node-hit-layer");
+	fireEvent.doubleClick(hitLayer, {
+		button: 0,
+		clientX,
+		clientY,
+	});
+};
+
 describe("CanvasWorkspace", () => {
 	it("active node 切换会更新顶部 toolbar", () => {
 		render(<CanvasWorkspace />);
@@ -286,20 +317,65 @@ describe("CanvasWorkspace", () => {
 		expect(screen.getByTestId("node-toolbar-video")).toBeTruthy();
 	});
 
-	it("scene 节点可进入 focus，非 scene 仅选中不改 focus", () => {
+	it("单击仅 active，双击 scene 才进入 focus", () => {
 		render(<CanvasWorkspace />);
 
 		clickNodeAt(300, 160);
-		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBeNull();
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
 		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
 			"scene-1",
 		);
+		expect(screen.getByTestId("video-node-drawer")).toBeTruthy();
+		expect(screen.queryByLabelText("调整 Drawer 高度")).toBeNull();
 
-		clickNodeAt(80, 80);
-		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
-			"scene-1",
+		doubleClickNodeAt(80, 80);
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBe(
+			"node-scene-1",
 		);
 		expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
+		expect(screen.getByTestId("scene-timeline-drawer")).toBeTruthy();
+		expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
+	});
+
+	it("双击非 scene 可进入 focus，且不渲染 scene focus layer", () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(300, 160);
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBe(
+			"node-video-1",
+		);
+		expect(screen.queryByTestId("focus-scene-konva-layer")).toBeNull();
+		expect(screen.getByTestId("video-node-drawer")).toBeTruthy();
+		expect(screen.queryByLabelText("调整 Drawer 高度")).toBeNull();
+	});
+
+	it("拖拽 drawer resize 时 camera 不会回退到无 drawer 视口", async () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		await waitFor(() => {
+			expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
+		});
+
+		const handle = screen.getByLabelText("调整 Drawer 高度");
+		const zoomSamples: number[] = [];
+		const unsubscribe = useProjectStore.subscribe((state) => {
+			const zoom = state.currentProject?.ui.camera.zoom;
+			if (typeof zoom !== "number") return;
+			zoomSamples.push(zoom);
+		});
+
+		fireEvent.mouseDown(handle, { clientY: 700 });
+		fireEvent.mouseMove(document, { clientY: 360 });
+		fireEvent.mouseMove(document, { clientY: 420 });
+		fireEvent.mouseMove(document, { clientY: 300 });
+		fireEvent.mouseUp(document);
+
+		await waitFor(() => {
+			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			expect(zoom).toBeLessThan(1);
+		});
+		unsubscribe();
+
+		expect(zoomSamples.some((zoom) => zoom > 1)).toBe(false);
 	});
 
 	it("右键菜单可在画布位置创建 text 节点", async () => {
@@ -368,7 +444,7 @@ describe("CanvasWorkspace", () => {
 		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
 			"scene-1",
 		);
-		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBeNull();
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
 	});
 
 	it("重叠节点命中优先 zIndex 更高者", () => {

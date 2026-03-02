@@ -83,7 +83,7 @@ const createProject = (): StudioProject => ({
 	},
 	ui: {
 		activeSceneId: "scene-1",
-		focusedSceneId: null,
+		focusedNodeId: null,
 		activeNodeId: "node-1",
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
@@ -114,6 +114,7 @@ describe("projectStore", () => {
 		expect(node?.type).toBe("scene");
 		if (!node || node.type !== "scene") return;
 		expect(project?.scenes[node.sceneId]?.name).toBe("New Scene");
+		expect(project?.ui.focusedNodeId).toBeNull();
 	});
 
 	it("ensureProjectAssetByUri 会按 uri+kind 去重", () => {
@@ -226,6 +227,36 @@ describe("projectStore", () => {
 			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline
 				.elements.length,
 		).toBe(1);
+	});
+
+	it("setFocusedNode(scene) 会同步 activeNode 与 activeScene", () => {
+		useProjectStore.getState().setFocusedNode("node-1");
+		const ui = useProjectStore.getState().currentProject?.ui;
+		expect(ui?.focusedNodeId).toBe("node-1");
+		expect(ui?.activeNodeId).toBe("node-1");
+		expect(ui?.activeSceneId).toBe("scene-1");
+	});
+
+	it("setFocusedNode(non-scene) 不改 activeScene", () => {
+		const videoId = useProjectStore.getState().createCanvasNode({
+			type: "video",
+			assetId: "asset-1",
+		});
+		useProjectStore.getState().setFocusedNode(videoId);
+		const ui = useProjectStore.getState().currentProject?.ui;
+		expect(ui?.focusedNodeId).toBe(videoId);
+		expect(ui?.activeNodeId).toBe(videoId);
+		expect(ui?.activeSceneId).toBe("scene-1");
+	});
+
+	it("删除 focused 节点时会清理 focusedNodeId", () => {
+		const videoId = useProjectStore.getState().createCanvasNode({
+			type: "video",
+			assetId: "asset-1",
+		});
+		useProjectStore.getState().setFocusedNode(videoId);
+		useProjectStore.getState().removeCanvasNodeForHistory(videoId);
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
 	});
 
 	it("saveCurrentProject 可持久化当前项目", async () => {

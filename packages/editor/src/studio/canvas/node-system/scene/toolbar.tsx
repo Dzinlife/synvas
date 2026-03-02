@@ -8,7 +8,7 @@ export const SceneNodeToolbar = ({
 	node,
 	scene,
 	setActiveScene,
-	setFocusedScene,
+	setFocusedNode,
 }: CanvasNodeToolbarProps<SceneNode>) => {
 	const { togglePlayback, isOwnerPlaying } = usePlaybackOwnerController();
 	const sceneRef = useMemo(() => toSceneTimelineRef(node.sceneId), [node.sceneId]);
@@ -18,22 +18,22 @@ export const SceneNodeToolbar = ({
 		<div className="flex items-center gap-3 text-xs text-white/90">
 			<div className="font-medium">{scene?.name ?? node.name}</div>
 			<div className="text-white/60">{node.sceneId}</div>
-				<button
-					type="button"
-					className="rounded bg-white/10 px-2 py-1 hover:bg-white/20"
-					onClick={() => {
-						setActiveScene(node.sceneId);
-						togglePlayback(sceneRef);
-					}}
-				>
-					{isPlaying ? "暂停 Scene" : "播放 Scene"}
-				</button>
-				<button
-					type="button"
-					className="rounded bg-white/10 px-2 py-1 hover:bg-white/20"
-					onClick={() => {
+			<button
+				type="button"
+				className="rounded bg-white/10 px-2 py-1 hover:bg-white/20"
+				onClick={() => {
 					setActiveScene(node.sceneId);
-					setFocusedScene(node.sceneId);
+					togglePlayback(sceneRef);
+				}}
+			>
+				{isPlaying ? "暂停 Scene" : "播放 Scene"}
+			</button>
+			<button
+				type="button"
+				className="rounded bg-white/10 px-2 py-1 hover:bg-white/20"
+				onClick={() => {
+					setActiveScene(node.sceneId);
+					setFocusedNode(node.id);
 				}}
 			>
 				聚焦 Scene
@@ -42,7 +42,7 @@ export const SceneNodeToolbar = ({
 				type="button"
 				className="rounded bg-white/10 px-2 py-1 hover:bg-white/20"
 				onClick={() => {
-					setFocusedScene(null);
+					setFocusedNode(null);
 				}}
 			>
 				退出聚焦

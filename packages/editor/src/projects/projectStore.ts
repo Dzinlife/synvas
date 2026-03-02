@@ -114,7 +114,7 @@ interface ProjectStoreState {
 			prev: TimelineAsset["meta"] | undefined,
 		) => TimelineAsset["meta"] | undefined,
 	) => void;
-	setFocusedScene: (sceneId: string | null) => void;
+	setFocusedNode: (nodeId: string | null) => void;
 	setActiveScene: (sceneId: string | null) => void;
 	setCanvasCamera: (camera: CameraState) => void;
 	updateSceneTimeline: (
@@ -443,7 +443,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 
 			let nextScenes = project.scenes;
 			let nextActiveSceneId = project.ui.activeSceneId;
-			let nextFocusedSceneId = project.ui.focusedSceneId;
+			const nextFocusedNodeId = project.ui.focusedNodeId;
 			let node: CanvasNode;
 
 			switch (input.type) {
@@ -464,9 +464,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						},
 					};
 					nextActiveSceneId = sceneId;
-					if (!nextFocusedSceneId) {
-						nextFocusedSceneId = sceneId;
-					}
 					node = {
 						id: nodeId,
 						type: "scene",
@@ -581,7 +578,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				ui: {
 					...project.ui,
 					activeSceneId: nextActiveSceneId,
-					focusedSceneId: nextFocusedSceneId,
+					focusedNodeId: nextFocusedNodeId,
 					activeNodeId: node.id,
 				},
 			});
@@ -724,20 +721,35 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			};
 		});
 	},
-	setFocusedScene: (sceneId) => {
+	setFocusedNode: (nodeId) => {
 		set((state) => {
 			if (!state.currentProject) return state;
-			if (sceneId && !state.currentProject.scenes[sceneId]) return state;
-			const focusedNode = findSceneNodeBySceneId(state.currentProject, sceneId);
+			if (!nodeId) {
+				const nextProject = {
+					...state.currentProject,
+					ui: {
+						...state.currentProject.ui,
+						focusedNodeId: null,
+					},
+				};
+				return {
+					currentProject: nextProject,
+				};
+			}
+			const focusedNode = state.currentProject.canvas.nodes.find(
+				(node) => node.id === nodeId,
+			);
+			if (!focusedNode) return state;
 			const nextProject = {
 				...state.currentProject,
 				ui: {
 					...state.currentProject.ui,
-					focusedSceneId: sceneId,
-					activeSceneId: sceneId ?? state.currentProject.ui.activeSceneId,
-					activeNodeId:
-						focusedNode?.id ??
-						(sceneId ? state.currentProject.ui.activeNodeId : null),
+					focusedNodeId: nodeId,
+					activeNodeId: nodeId,
+					activeSceneId:
+						focusedNode.type === "scene"
+							? focusedNode.sceneId
+							: state.currentProject.ui.activeSceneId,
 				},
 			};
 			return {
@@ -837,13 +849,18 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	},
 	flushFocusedSceneDraft: () => {
 		const { currentProject, focusedSceneDrafts } = get();
-		const focusedSceneId = currentProject?.ui.focusedSceneId;
-		if (!focusedSceneId) return;
-		const draft = focusedSceneDrafts[focusedSceneId];
+		const focusedNodeId = currentProject?.ui.focusedNodeId;
+		if (!focusedNodeId) return;
+		const focusedNode = currentProject?.canvas.nodes.find(
+			(node) => node.id === focusedNodeId,
+		);
+		if (!focusedNode || focusedNode.type !== "scene") return;
+		const sceneId = focusedNode.sceneId;
+		const draft = focusedSceneDrafts[sceneId];
 		if (!draft) return;
-		get().updateSceneTimeline(focusedSceneId, draft, { recordHistory: false });
+		get().updateSceneTimeline(sceneId, draft, { recordHistory: false });
 		set((state) => {
-			const { [focusedSceneId]: _removed, ...rest } = state.focusedSceneDrafts;
+			const { [sceneId]: _removed, ...rest } = state.focusedSceneDrafts;
 			return { focusedSceneDrafts: rest };
 		});
 	},
@@ -866,6 +883,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						currentProject.ui.activeNodeId === nodeId
 							? null
 							: currentProject.ui.activeNodeId,
+					focusedNodeId:
+						currentProject.ui.focusedNodeId === nodeId
+							? null
+							: currentProject.ui.focusedNodeId,
 				},
 			});
 			return {
@@ -917,10 +938,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						currentProject.ui.activeSceneId === sceneId
 							? fallbackSceneId
 							: currentProject.ui.activeSceneId,
-					focusedSceneId:
-						currentProject.ui.focusedSceneId === sceneId
+					focusedNodeId:
+						currentProject.ui.focusedNodeId === nodeId
 							? null
-							: currentProject.ui.focusedSceneId,
+							: currentProject.ui.focusedNodeId,
 					activeNodeId:
 						currentProject.ui.activeNodeId === nodeId
 							? null

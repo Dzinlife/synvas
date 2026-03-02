@@ -88,7 +88,7 @@ const studioProjectSchema = z.object({
 	assets: z.array(z.unknown()),
 	ui: z.object({
 		activeSceneId: nonEmptyStringSchema.nullable(),
-		focusedSceneId: nonEmptyStringSchema.nullable(),
+		focusedNodeId: nonEmptyStringSchema.nullable(),
 		activeNodeId: nonEmptyStringSchema.nullable(),
 		camera: z.object({
 			x: finiteNumberSchema,

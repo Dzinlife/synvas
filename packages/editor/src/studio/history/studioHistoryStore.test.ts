@@ -80,6 +80,21 @@ const createProject = (): StudioProject => ({
 				createdAt: 1,
 				updatedAt: 1,
 			},
+			{
+				id: "node-2",
+				type: "scene",
+				sceneId: "scene-2",
+				name: "Scene 2",
+				x: 200,
+				y: 120,
+				width: 960,
+				height: 540,
+				zIndex: 1,
+				locked: false,
+				hidden: false,
+				createdAt: 1,
+				updatedAt: 1,
+			},
 		],
 	},
 	scenes: {
@@ -102,7 +117,7 @@ const createProject = (): StudioProject => ({
 	},
 	ui: {
 		activeSceneId: "scene-1",
-		focusedSceneId: "scene-1",
+		focusedNodeId: "node-1",
 		activeNodeId: "node-1",
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
@@ -132,12 +147,12 @@ describe("studioHistoryStore", () => {
 			sceneId: "scene-2",
 			before,
 			after,
-			focusSceneId: "scene-2",
+			focusNodeId: "node-2",
 		});
 
 		useStudioHistoryStore.getState().undo();
-		expect(useProjectStore.getState().currentProject?.ui.focusedSceneId).toBe(
-			"scene-2",
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBe(
+			"node-2",
 		);
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-2"].timeline
@@ -179,7 +194,7 @@ describe("studioHistoryStore", () => {
 			kind: "canvas.node-create",
 			scene,
 			node,
-			focusSceneId: null,
+			focusNodeId: null,
 		});
 
 		useProjectStore.getState().restoreSceneGraphForHistory(scene, node);

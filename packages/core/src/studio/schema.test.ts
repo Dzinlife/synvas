@@ -122,7 +122,7 @@ const createValidProject = () => ({
 	},
 	ui: {
 		activeSceneId: "scene-1",
-		focusedSceneId: null,
+		focusedNodeId: null,
 		activeNodeId: "node-1",
 		camera: {
 			x: 0,
@@ -142,6 +142,15 @@ describe("studio schema", () => {
 	it("缺失 ui.camera 时应报错", () => {
 		const invalid = createValidProject();
 		delete (invalid.ui as { camera?: unknown }).camera;
+		expect(() => parseStudioProject(invalid)).toThrow();
+	});
+
+	it("使用 focusedSceneId 旧字段时应报错", () => {
+		const invalid = createValidProject() as {
+			ui: Record<string, unknown>;
+		};
+		delete invalid.ui.focusedNodeId;
+		invalid.ui.focusedSceneId = null;
 		expect(() => parseStudioProject(invalid)).toThrow();
 	});
 

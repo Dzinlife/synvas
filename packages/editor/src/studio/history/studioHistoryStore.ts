@@ -25,20 +25,20 @@ export type StudioHistoryEntry =
 			sceneId?: string;
 			before: TimelineJSON;
 			after: TimelineJSON;
-			focusSceneId: string | null;
+			focusNodeId: string | null;
 	  }
 	| {
 			kind: "canvas.node-layout";
 			nodeId: string;
 			before: CanvasNodeLayoutSnapshot;
 			after: CanvasNodeLayoutSnapshot;
-			focusSceneId: string | null;
+			focusNodeId: string | null;
 	  }
 	| {
 			kind: "canvas.node-create";
 			node: CanvasNode;
 			scene?: SceneDocument;
-			focusSceneId: string | null;
+			focusNodeId: string | null;
 	  };
 
 interface StudioHistoryState {
@@ -74,8 +74,8 @@ const applyEntry = (
 	options?: HistoryApplyOptions,
 ): void => {
 	const projectStore = useProjectStore.getState();
-	const nextFocusSceneId = entry.focusSceneId;
-	projectStore.setFocusedScene(nextFocusSceneId);
+	const nextFocusNodeId = entry.focusNodeId;
+	projectStore.setFocusedNode(nextFocusNodeId);
 	if (entry.kind === "scene.timeline") {
 		const timelineRef = resolveTimelineRef(entry);
 		if (!timelineRef) return;
@@ -91,11 +91,15 @@ const applyEntry = (
 			return;
 		}
 
-		const focusedSceneId =
-			useProjectStore.getState().currentProject?.ui.focusedSceneId;
+		const currentProject = useProjectStore.getState().currentProject;
+		const focusedNodeId = currentProject?.ui.focusedNodeId;
+		const focusedNode =
+			currentProject?.canvas.nodes.find((node) => node.id === focusedNodeId) ??
+			null;
 		if (
 			timelineRef.kind === "scene" &&
-			focusedSceneId === timelineRef.sceneId &&
+			focusedNode?.type === "scene" &&
+			focusedNode.sceneId === timelineRef.sceneId &&
 			options?.timelineStore
 		) {
 			applyTimelineJsonToStore(timeline, options.timelineStore);

@@ -86,7 +86,7 @@ describe("SceneNodeToolbar playback", () => {
 				asset={null}
 				updateNode={vi.fn()}
 				setActiveScene={vi.fn()}
-				setFocusedScene={vi.fn()}
+				setFocusedNode={vi.fn()}
 			/>,
 			{ wrapper },
 		);
@@ -112,7 +112,7 @@ describe("SceneNodeToolbar playback", () => {
 					asset={null}
 					updateNode={vi.fn()}
 					setActiveScene={vi.fn()}
-					setFocusedScene={vi.fn()}
+					setFocusedNode={vi.fn()}
 				/>
 				<SceneNodeToolbar
 					node={createSceneNode("scene-2")}
@@ -120,7 +120,7 @@ describe("SceneNodeToolbar playback", () => {
 					asset={null}
 					updateNode={vi.fn()}
 					setActiveScene={vi.fn()}
-					setFocusedScene={vi.fn()}
+					setFocusedNode={vi.fn()}
 				/>
 			</>,
 			{ wrapper },
