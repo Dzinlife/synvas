@@ -63,6 +63,7 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	create: (input?: Record<string, unknown>) => CanvasNodeCreateInput;
 	skiaRenderer: React.FC<CanvasNodeSkiaRenderProps<TNode>>;
 	toolbar: React.FC<CanvasNodeToolbarProps<TNode>>;
+	focusable?: boolean;
 	drawer?: React.FC<CanvasNodeDrawerProps<TNode>>;
 	drawerOptions?: CanvasNodeDrawerOptions;
 	/**

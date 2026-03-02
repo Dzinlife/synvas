@@ -21,6 +21,7 @@ import {
 	canvasNodeDefinitionList,
 	getCanvasNodeDefinition,
 } from "@/studio/canvas/node-system/registry";
+import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import type {
 	CanvasNodeDrawerOptions,
 	CanvasNodeDrawerProps,
@@ -38,6 +39,7 @@ const DROP_GRID_COLUMNS = 4;
 const DROP_GRID_OFFSET_X = 48;
 const DROP_GRID_OFFSET_Y = 40;
 const FILE_PREFIX = "file://";
+const FOCUS_VIEW_PADDING = 80;
 
 interface CameraState {
 	x: number;
@@ -92,8 +94,42 @@ interface ResolvedCanvasDrawerOptions {
 	maxHeightRatio: number;
 }
 
+interface NodeFitCameraInput {
+	node: CanvasNode;
+	stageWidth: number;
+	stageHeight: number;
+	drawerOccupiedHeight: number;
+}
+
 const clampZoom = (zoom: number): number => {
 	return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+};
+
+const buildNodeFitCamera = ({
+	node,
+	stageWidth,
+	stageHeight,
+	drawerOccupiedHeight,
+}: NodeFitCameraInput): CameraState => {
+	const safeNodeWidth = Math.max(1, Math.abs(node.width));
+	const safeNodeHeight = Math.max(1, Math.abs(node.height));
+	const visibleCanvasHeight = Math.max(1, stageHeight - drawerOccupiedHeight);
+	const availableWidth = Math.max(1, stageWidth - FOCUS_VIEW_PADDING * 2);
+	const availableHeight = Math.max(
+		1,
+		visibleCanvasHeight - FOCUS_VIEW_PADDING * 2,
+	);
+	const zoomX = availableWidth / safeNodeWidth;
+	const zoomY = availableHeight / safeNodeHeight;
+	const nextZoom = clampZoom(Math.min(zoomX, zoomY));
+	const safeZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
+	const worldCenterX = node.x + node.width / 2;
+	const worldCenterY = node.y + node.height / 2;
+	return {
+		x: stageWidth / 2 / safeZoom - worldCenterX,
+		y: visibleCanvasHeight / 2 / safeZoom - worldCenterY,
+		zoom: nextZoom,
+	};
 };
 
 const pickLayout = (node: CanvasNode): CanvasNodeLayoutSnapshot => ({
@@ -449,24 +485,12 @@ const CanvasWorkspace = () => {
 		if (!focusedNodeId) return;
 		if (!focusedNode) return;
 		if (stageSize.width <= 0 || stageSize.height <= 0) return;
-		const viewPadding = 80;
-		const visibleCanvasHeight = Math.max(
-			1,
-			stageSize.height - focusOccupiedDrawerHeight,
-		);
-		const availableWidth = Math.max(1, stageSize.width - viewPadding * 2);
-		const availableHeight = Math.max(1, visibleCanvasHeight - viewPadding * 2);
-		const zoomX = availableWidth / focusedNode.width;
-		const zoomY = availableHeight / focusedNode.height;
-		const nextZoom = clampZoom(Math.min(zoomX, zoomY));
-		const safeZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
-		const worldCenterX = focusedNode.x + focusedNode.width / 2;
-		const worldCenterY = focusedNode.y + focusedNode.height / 2;
-		const nextCamera = {
-			x: stageSize.width / 2 / safeZoom - worldCenterX,
-			y: visibleCanvasHeight / 2 / safeZoom - worldCenterY,
-			zoom: nextZoom,
-		};
+		const nextCamera = buildNodeFitCamera({
+			node: focusedNode,
+			stageWidth: stageSize.width,
+			stageHeight: stageSize.height,
+			drawerOccupiedHeight: focusOccupiedDrawerHeight,
+		});
 		if (isCameraAlmostEqual(camera, nextCamera)) return;
 		setCanvasCamera(nextCamera);
 	}, [
@@ -637,9 +661,38 @@ const CanvasWorkspace = () => {
 			const world = resolveWorldPoint(event.clientX, event.clientY);
 			const node = getTopHitNode(world.x, world.y);
 			if (!node) return;
-			setFocusedNode(node.id);
+			if (isCanvasNodeFocusable(node, getCanvasNodeDefinition)) {
+				setFocusedNode(node.id);
+				return;
+			}
+			const container = containerRef.current;
+			const stageWidth =
+				stageSize.width > 0
+					? stageSize.width
+					: container?.getBoundingClientRect().width ?? 0;
+			const stageHeight =
+				stageSize.height > 0
+					? stageSize.height
+					: container?.getBoundingClientRect().height ?? 0;
+			if (stageWidth <= 0 || stageHeight <= 0) return;
+			const nextCamera = buildNodeFitCamera({
+				node,
+				stageWidth,
+				stageHeight,
+				drawerOccupiedHeight: 0,
+			});
+			if (isCameraAlmostEqual(camera, nextCamera)) return;
+			setCanvasCamera(nextCamera);
 		},
-		[getTopHitNode, resolveWorldPoint, setFocusedNode],
+		[
+			camera,
+			getTopHitNode,
+			resolveWorldPoint,
+			setCanvasCamera,
+			setFocusedNode,
+			stageSize.height,
+			stageSize.width,
+		],
 	);
 
 	useEffect(() => {

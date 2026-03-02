@@ -55,6 +55,7 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			create: () => ({ type: "scene" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("scene"),
+			focusable: true,
 			drawer: SceneDrawer,
 			drawerOptions: {
 				trigger: "focus" as const,
@@ -337,15 +338,38 @@ describe("CanvasWorkspace", () => {
 		expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
 	});
 
-	it("双击非 scene 可进入 focus，且不渲染 scene focus layer", () => {
+	it("双击非 focusable 节点仅调整 camera，不进入 focus", () => {
+		render(<CanvasWorkspace />);
+		const beforeCamera = useProjectStore.getState().currentProject?.ui.camera;
+		doubleClickNodeAt(300, 160);
+		const afterCamera = useProjectStore.getState().currentProject?.ui.camera;
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+		expect(screen.queryByTestId("focus-scene-konva-layer")).toBeNull();
+		expect(afterCamera).toBeTruthy();
+		expect(beforeCamera).toBeTruthy();
+		if (!afterCamera || !beforeCamera) return;
+		expect(
+			afterCamera.zoom !== beforeCamera.zoom ||
+				afterCamera.x !== beforeCamera.x ||
+				afterCamera.y !== beforeCamera.y,
+		).toBe(true);
+	});
+
+	it("双击非 focusable 节点后仍可滚动画布", () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(300, 160);
-		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBe(
-			"node-video-1",
-		);
-		expect(screen.queryByTestId("focus-scene-konva-layer")).toBeNull();
-		expect(screen.getByTestId("video-node-drawer")).toBeTruthy();
-		expect(screen.queryByLabelText("调整 Drawer 高度")).toBeNull();
+		const workspace = screen.getByTestId("canvas-workspace");
+		const beforeCamera = useProjectStore.getState().currentProject?.ui.camera;
+		fireEvent.wheel(workspace, {
+			deltaX: 120,
+			deltaY: 80,
+		});
+		const afterCamera = useProjectStore.getState().currentProject?.ui.camera;
+		expect(beforeCamera).toBeTruthy();
+		expect(afterCamera).toBeTruthy();
+		if (!beforeCamera || !afterCamera) return;
+		expect(afterCamera.x).not.toBe(beforeCamera.x);
+		expect(afterCamera.y).not.toBe(beforeCamera.y);
 	});
 
 	it("拖拽 drawer resize 时 camera 不会回退到无 drawer 视口", async () => {

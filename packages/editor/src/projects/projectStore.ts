@@ -8,6 +8,7 @@ import type {
 	StudioProject,
 } from "core/studio/types";
 import { create } from "zustand";
+import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import {
 	buildAutoProjectName,
 	buildEmptyProject,
@@ -253,6 +254,22 @@ const withProjectRevision = (project: StudioProject): StudioProject => {
 	};
 };
 
+const normalizeProjectFocusState = (project: StudioProject): StudioProject => {
+	const focusedNodeId = project.ui.focusedNodeId;
+	if (!focusedNodeId) return project;
+	const focusedNode = project.canvas.nodes.find((node) => node.id === focusedNodeId);
+	if (focusedNode && isCanvasNodeFocusable(focusedNode)) {
+		return project;
+	}
+	return {
+		...project,
+		ui: {
+			...project.ui,
+			focusedNodeId: null,
+		},
+	};
+};
+
 export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	status: "idle",
 	projects: [],
@@ -307,7 +324,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				status: "ready",
 				projects: sortedRecords.map(toSummary),
 				currentProjectId: currentId,
-				currentProject: currentRecord.data,
+				currentProject: normalizeProjectFocusState(currentRecord.data),
 				focusedSceneDrafts: {},
 				error: null,
 			});
@@ -422,7 +439,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			await setCurrentProjectId(id);
 			set({
 				currentProjectId: id,
-				currentProject: validRecord.data,
+				currentProject: normalizeProjectFocusState(validRecord.data),
 				focusedSceneDrafts: {},
 				error: null,
 			});
@@ -740,6 +757,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				(node) => node.id === nodeId,
 			);
 			if (!focusedNode) return state;
+			if (!isCanvasNodeFocusable(focusedNode)) return state;
 			const nextProject = {
 				...state.currentProject,
 				ui: {

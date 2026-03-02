@@ -1,6 +1,12 @@
 import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { StudioProject } from "core/studio/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	getAllProjects,
+	getCurrentProjectId,
+	getProject,
+	type ProjectRecord,
+} from "./projectDb";
 
 vi.mock("./projectDb", async () => {
 	const actual = await vi.importActual<typeof import("./projectDb")>("./projectDb");
@@ -91,7 +97,33 @@ const createProject = (): StudioProject => ({
 	updatedAt: 1,
 });
 
+const createProjectWithFocusedVideo = (): StudioProject => {
+	const project = createProject();
+	const videoId = "node-video-1";
+	project.canvas.nodes.push({
+		id: videoId,
+		type: "video",
+		assetId: "asset-1",
+		name: "Video 1",
+		x: 320,
+		y: 180,
+		width: 640,
+		height: 360,
+		zIndex: 1,
+		locked: false,
+		hidden: false,
+		createdAt: 2,
+		updatedAt: 2,
+	});
+	project.ui.focusedNodeId = videoId;
+	project.ui.activeNodeId = videoId;
+	return project;
+};
+
 beforeEach(() => {
+	vi.mocked(getAllProjects).mockResolvedValue([]);
+	vi.mocked(getCurrentProjectId).mockResolvedValue(null);
+	vi.mocked(getProject).mockResolvedValue(undefined);
 	const project = createProject();
 	useProjectStore.setState({
 		status: "ready",
@@ -237,25 +269,66 @@ describe("projectStore", () => {
 		expect(ui?.activeSceneId).toBe("scene-1");
 	});
 
-	it("setFocusedNode(non-scene) 不改 activeScene", () => {
+	it("setFocusedNode(non-focusable) 会忽略 focus 写入", () => {
 		const videoId = useProjectStore.getState().createCanvasNode({
 			type: "video",
 			assetId: "asset-1",
 		});
+		useProjectStore.getState().setActiveNode("node-1");
 		useProjectStore.getState().setFocusedNode(videoId);
 		const ui = useProjectStore.getState().currentProject?.ui;
-		expect(ui?.focusedNodeId).toBe(videoId);
-		expect(ui?.activeNodeId).toBe(videoId);
+		expect(ui?.focusedNodeId).toBeNull();
+		expect(ui?.activeNodeId).toBe("node-1");
 		expect(ui?.activeSceneId).toBe("scene-1");
 	});
 
 	it("删除 focused 节点时会清理 focusedNodeId", () => {
-		const videoId = useProjectStore.getState().createCanvasNode({
-			type: "video",
-			assetId: "asset-1",
+		useProjectStore.getState().setFocusedNode("node-1");
+		useProjectStore.getState().removeCanvasNodeForHistory("node-1");
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+	});
+
+	it("initialize 会清理 non-focusable 节点的 focusedNodeId", async () => {
+		const project = createProjectWithFocusedVideo();
+		const record: ProjectRecord = {
+			id: project.id,
+			name: "project",
+			data: project,
+			createdAt: 1,
+			updatedAt: 2,
+		};
+		vi.mocked(getAllProjects).mockResolvedValue([record]);
+		vi.mocked(getCurrentProjectId).mockResolvedValue(project.id);
+		useProjectStore.setState({
+			status: "idle",
+			projects: [],
+			currentProjectId: null,
+			currentProject: null,
+			focusedSceneDrafts: {},
+			error: null,
 		});
-		useProjectStore.getState().setFocusedNode(videoId);
-		useProjectStore.getState().removeCanvasNodeForHistory(videoId);
+
+		await useProjectStore.getState().initialize();
+
+		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+	});
+
+	it("switchProject 会清理 non-focusable 节点的 focusedNodeId", async () => {
+		const project = createProjectWithFocusedVideo();
+		const record: ProjectRecord = {
+			id: "project-2",
+			name: "project-2",
+			data: {
+				...project,
+				id: "project-2",
+			},
+			createdAt: 1,
+			updatedAt: 2,
+		};
+		vi.mocked(getProject).mockResolvedValue(record);
+
+		await useProjectStore.getState().switchProject("project-2");
+
 		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
 	});
 

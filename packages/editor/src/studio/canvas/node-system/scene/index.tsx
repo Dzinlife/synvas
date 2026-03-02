@@ -11,6 +11,7 @@ const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
 	create: () => ({ type: "scene" }),
 	skiaRenderer: SceneNodeSkiaRenderer,
 	toolbar: SceneNodeToolbar,
+	focusable: true,
 	drawer: SceneNodeDrawer,
 	drawerOptions: {
 		trigger: "active",
