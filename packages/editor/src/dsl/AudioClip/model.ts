@@ -8,7 +8,7 @@ import {
 	type AudioPlaybackMixInstruction,
 	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
-} from "@/editor/audio/audioPlayback";
+} from "@/audio/playback";
 import { getAudioPlaybackSessionKey } from "@/editor/playback/clipContinuityIndex";
 import type { EditorRuntime } from "@/editor/runtime/types";
 import { isTimelineTrackAudible } from "@/editor/utils/trackAudibility";

@@ -26,7 +26,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { createStore, type Mutate, type StoreApi } from "zustand/vanilla";
 import { useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import { clampFrame } from "@/utils/timecode";
-import { getAudioContext } from "../audio/audioEngine";
+import { getAudioContext } from "@/audio/engine";
 import type {
 	DropTarget,
 	ExtendedDropTarget,

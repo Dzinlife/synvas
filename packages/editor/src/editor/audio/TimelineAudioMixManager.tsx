@@ -13,7 +13,7 @@ import {
 	type AudioMixTarget,
 	runTimelineAudioMixFrame,
 } from "./TimelineAudioMixRunner";
-import { setPreviewAudioDspSettings } from "./audioEngine";
+import { setPreviewAudioDspSettings } from "@/audio/engine";
 import type { AudioMixInstruction } from "./transitionAudioMix";
 
 const invokeApplyAudioMix = (

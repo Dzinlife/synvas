@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	__resetAudioPlaybackRuntimeForTests,
 	createAudioPlaybackController,
-} from "./audioPlayback";
+} from "@/audio/playback";
 
 const mocks = vi.hoisted(() => {
 	const fakeGain = () => ({
@@ -64,7 +64,7 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
-vi.mock("@/editor/audio/audioEngine", () => ({
+vi.mock("@/audio/engine", () => ({
 	createClipGain: mocks.createClipGain,
 	ensureAudioContext: mocks.ensureAudioContext,
 	getAudioContext: mocks.getAudioContext,

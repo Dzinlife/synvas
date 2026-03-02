@@ -4,7 +4,7 @@ import {
 	getPreviewLoudnessSnapshot,
 	type PreviewLoudnessSnapshot,
 	subscribePreviewLoudness,
-} from "../audio/audioEngine";
+} from "@/audio/engine";
 
 const METER_MIN_DB = -60;
 const METER_MAX_DB = 0;

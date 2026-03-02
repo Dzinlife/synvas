@@ -2,7 +2,7 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { TimelineElement } from "core/dsl/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as audioEngine from "../audio/audioEngine";
+import * as audioEngine from "@/audio/engine";
 import { TimelineProvider } from "./TimelineContext";
 import {
 	createRuntimeProviderWrapper,

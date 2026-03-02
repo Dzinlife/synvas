@@ -6,8 +6,8 @@ import {
 	getPreviewLoudnessSnapshot,
 	setPreviewAudioDspSettings,
 	subscribePreviewLoudness,
-} from "./audioEngine";
-import { PREVIEW_DSP_WORKLET_PROCESSOR_NAME } from "./previewDspConstants";
+} from "@/audio/engine";
+import { PREVIEW_DSP_WORKLET_PROCESSOR_NAME } from "@/audio/previewDspConstants";
 
 type FakeGainNode = {
 	gain: { value: number };

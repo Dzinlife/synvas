@@ -4,48 +4,23 @@ import {
 	createClipGain,
 	ensureAudioContext,
 	getAudioContext,
-} from "@/editor/audio/audioEngine";
+} from "@/audio/engine";
+import type {
+	AudioPlaybackController,
+	AudioPlaybackDeps,
+	AudioPlaybackRange,
+	AudioPlaybackStepInput,
+} from "@/audio/types";
 import { framesToSeconds } from "@/utils/timecode";
 
-type AudioPlaybackState = {
-	isLoading?: boolean;
-	hasError?: boolean;
-	uri?: string;
-	audioSink: AudioBufferSink | null;
-	audioDuration: number;
-};
-
-type AudioPlaybackDeps = {
-	getTimeline: () => TimelineMeta | undefined;
-	getFps: () => number;
-	getState: () => AudioPlaybackState;
-	isPlaybackEnabled?: () => boolean;
-	getRuntimeKey?: () => string;
-	getSeekEpoch?: () => number;
-};
-
-export type AudioPlaybackRange = {
-	start: number;
-	end: number;
-};
-
-export type AudioPlaybackMixInstruction = {
-	timelineTimeSeconds: number;
-	gain?: number;
-	activeWindow?: AudioPlaybackRange;
-	sourceTime?: number;
-	sourceRange?: AudioPlaybackRange;
-	reversed?: boolean;
-};
-
-export type AudioPlaybackStepInput = number | AudioPlaybackMixInstruction;
-
-export type AudioPlaybackController = {
-	stepPlayback: (input: AudioPlaybackStepInput) => Promise<void>;
-	setGain: (gain: number) => void;
-	stopPlayback: () => void;
-	dispose: () => void;
-};
+export type {
+	AudioPlaybackController,
+	AudioPlaybackDeps,
+	AudioPlaybackMixInstruction,
+	AudioPlaybackRange,
+	AudioPlaybackState,
+	AudioPlaybackStepInput,
+} from "@/audio/types";
 
 const DEFAULT_FPS = 30;
 const PLAYBACK_BACK_JUMP_FRAMES = 3;

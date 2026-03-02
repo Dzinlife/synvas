@@ -3,7 +3,10 @@ import {
 	type ExportAudioDspSettings,
 	resolveExportAudioDspSettings,
 } from "core/editor/audio/dsp/types";
+import type { PreviewLoudnessSnapshot } from "@/audio/types";
 import { PREVIEW_DSP_WORKLET_PROCESSOR_NAME } from "./previewDspConstants";
+
+export type { PreviewLoudnessSnapshot } from "@/audio/types";
 
 const PREVIEW_DSP_WORKLET_MODULE_URL = new URL(
 	"./previewDspWorklet.ts",
@@ -15,14 +18,6 @@ let masterGain: GainNode | null = null;
 let previewDspNode: AudioWorkletNode | null = null;
 let previewDspNodeInitPromise: Promise<void> | null = null;
 let directDestinationConnected = false;
-
-export type PreviewLoudnessSnapshot = {
-	leftRms: number;
-	rightRms: number;
-	leftPeak: number;
-	rightPeak: number;
-	updatedAtMs: number;
-};
 
 type PreviewMeterMessage = {
 	type: "meter";
