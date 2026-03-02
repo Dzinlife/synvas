@@ -1,5 +1,4 @@
 import type { CanvasNode, SceneNode } from "core/studio/types";
-import type Konva from "konva";
 import { Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -402,49 +401,10 @@ const CanvasWorkspace = () => {
 		setFocusedScene(null);
 	}, [setFocusedScene]);
 
-	const handleStageWheel = useCallback(
-		(event: Konva.KonvaEventObject<WheelEvent>) => {
-			if (event.evt.cancelable) {
-				event.evt.preventDefault();
-			}
-			const nativeEvent = event.evt;
-			if (nativeEvent.ctrlKey || nativeEvent.metaKey) {
-				const stage = event.target.getStage();
-				if (!stage) return;
-				const pointer = stage.getPointerPosition();
-				if (!pointer) return;
-				const oldZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-				const zoomDelta = nativeEvent.deltaY > 0 ? 0.92 : 1.08;
-				const nextZoom = clampZoom(oldZoom * zoomDelta);
-				const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
-				const worldPoint = {
-					x: pointer.x / oldZoom - camera.x,
-					y: pointer.y / oldZoom - camera.y,
-				};
-				setCanvasCamera({
-					x: pointer.x / safeNextZoom - worldPoint.x,
-					y: pointer.y / safeNextZoom - worldPoint.y,
-					zoom: nextZoom,
-				});
-				return;
-			}
-			const deltaX = nativeEvent.shiftKey
-				? nativeEvent.deltaY
-				: nativeEvent.deltaX;
-			const deltaY = nativeEvent.shiftKey ? 0 : nativeEvent.deltaY;
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-			setCanvasCamera({
-				x: camera.x - deltaX / safeZoom,
-				y: camera.y - deltaY / safeZoom,
-				zoom: camera.zoom,
-			});
-		},
-		[camera, setCanvasCamera],
-	);
-
 	const handleContainerWheel = useCallback(
 		(event: WheelEvent) => {
 			event.preventDefault();
+			if (focusedSceneId) return;
 			if (event.ctrlKey || event.metaKey) {
 				const oldZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
 				const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
@@ -473,7 +433,7 @@ const CanvasWorkspace = () => {
 				zoom: camera.zoom,
 			});
 		},
-		[camera, setCanvasCamera],
+		[camera, focusedSceneId, setCanvasCamera],
 	);
 
 	useEffect(() => {
@@ -884,7 +844,6 @@ const CanvasWorkspace = () => {
 					camera={camera}
 					focusedNode={focusedNode}
 					sceneId={focusedSceneId}
-					onWheel={handleStageWheel}
 				/>
 			)}
 

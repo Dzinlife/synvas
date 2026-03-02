@@ -33,7 +33,6 @@ interface FocusSceneKonvaLayerProps {
 	};
 	focusedNode: SceneNode;
 	sceneId: string;
-	onWheel: (event: Konva.KonvaEventObject<WheelEvent>) => void;
 }
 
 interface FocusSceneKonvaLayerInnerProps {
@@ -45,7 +44,6 @@ interface FocusSceneKonvaLayerInnerProps {
 		zoom: number;
 	};
 	focusedNode: SceneNode;
-	onWheel: (event: Konva.KonvaEventObject<WheelEvent>) => void;
 }
 
 const SCALE_EPSILON = 1e-6;
@@ -61,7 +59,6 @@ const FocusSceneKonvaLayerInner: React.FC<FocusSceneKonvaLayerInnerProps> = ({
 	height,
 	camera,
 	focusedNode,
-	onWheel,
 }) => {
 	const timelineStore = useTimelineStoreApi();
 	const canvasSize = useTimelineStore((state) => state.canvasSize);
@@ -293,7 +290,6 @@ const FocusSceneKonvaLayerInner: React.FC<FocusSceneKonvaLayerInnerProps> = ({
 				ref={stageRef}
 				width={width}
 				height={height}
-				onWheel={onWheel}
 				onClick={handleStageClick}
 				onMouseDown={handleStageMouseDown}
 				onMouseMove={handleStageMouseMove}
