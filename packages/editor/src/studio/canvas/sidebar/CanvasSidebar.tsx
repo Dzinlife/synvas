@@ -14,6 +14,7 @@ interface CanvasSidebarProps {
 	activeTab: CanvasSidebarTab;
 	onTabChange: (tab: CanvasSidebarTab) => void;
 	onNodeSelect: (node: CanvasNode) => void;
+	onCollapse?: () => void;
 }
 
 const NODE_TYPE_LABEL: Record<CanvasNode["type"], string> = {
@@ -110,6 +111,7 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 	activeTab,
 	onTabChange,
 	onNodeSelect,
+	onCollapse,
 }) => {
 	const showTabs = mode === "focus";
 	const nodeTabDisabled = mode === "focus" && activeTab === "nodes";
@@ -120,60 +122,68 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 	}, [showTabs, visibleTab]);
 
 	return (
-		<div className="pointer-events-none absolute bottom-4 left-4 top-4 z-50">
-			<div
-				data-testid="canvas-sidebar"
-				className="pointer-events-auto flex h-full w-72 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
-			>
+		<div
+			data-testid="canvas-sidebar"
+			className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
+		>
+			<div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+				<div className="text-xs font-medium text-white/90">{title}</div>
+				{onCollapse && (
+					<button
+						type="button"
+						aria-label="收起侧边栏"
+						onClick={onCollapse}
+						className="rounded bg-white/10 px-2 py-1 text-[11px] text-white/90 hover:bg-white/20"
+					>
+						收起
+					</button>
+				)}
+			</div>
+			{showTabs && (
 				<div className="border-b border-white/10 px-3 py-2">
-					<div className="text-xs font-medium text-white/90">{title}</div>
+					<div className="flex rounded-md bg-black/30 p-1">
+						<button
+							type="button"
+							data-testid="canvas-sidebar-tab-nodes"
+							onClick={() => onTabChange("nodes")}
+							className={cn(
+								"h-7 flex-1 rounded px-2 text-xs",
+								activeTab === "nodes"
+									? "bg-white/15 text-white"
+									: "text-neutral-300 hover:text-white",
+							)}
+						>
+							Node
+						</button>
+						<button
+							type="button"
+							data-testid="canvas-sidebar-tab-dsl"
+							onClick={() => onTabChange("dsl")}
+							className={cn(
+								"h-7 flex-1 rounded px-2 text-xs",
+								activeTab === "dsl"
+									? "bg-white/15 text-white"
+									: "text-neutral-300 hover:text-white",
+							)}
+						>
+							DSL
+						</button>
+					</div>
 				</div>
-				{showTabs && (
-					<div className="border-b border-white/10 px-3 py-2">
-						<div className="flex rounded-md bg-black/30 p-1">
-							<button
-								type="button"
-								data-testid="canvas-sidebar-tab-nodes"
-								onClick={() => onTabChange("nodes")}
-								className={cn(
-									"h-7 flex-1 rounded px-2 text-xs",
-									activeTab === "nodes"
-										? "bg-white/15 text-white"
-										: "text-neutral-300 hover:text-white",
-								)}
-							>
-								Node
-							</button>
-							<button
-								type="button"
-								data-testid="canvas-sidebar-tab-dsl"
-								onClick={() => onTabChange("dsl")}
-								className={cn(
-									"h-7 flex-1 rounded px-2 text-xs",
-									activeTab === "dsl"
-										? "bg-white/15 text-white"
-										: "text-neutral-300 hover:text-white",
-								)}
-							>
-								DSL
-							</button>
-						</div>
+			)}
+			<div className="min-h-0 flex-1 p-3">
+				{visibleTab === "nodes" ? (
+					<NodeList
+						nodes={nodes}
+						activeNodeId={activeNodeId}
+						disabled={nodeTabDisabled}
+						onNodeSelect={onNodeSelect}
+					/>
+				) : (
+					<div className="min-h-0 h-full overflow-y-auto">
+						<CanvasDslLibrary />
 					</div>
 				)}
-				<div className="min-h-0 flex-1 p-3">
-					{visibleTab === "nodes" ? (
-						<NodeList
-							nodes={nodes}
-							activeNodeId={activeNodeId}
-							disabled={nodeTabDisabled}
-							onNodeSelect={onNodeSelect}
-						/>
-					) : (
-						<div className="min-h-0 h-full overflow-y-auto">
-							<CanvasDslLibrary />
-						</div>
-					)}
-				</div>
 			</div>
 		</div>
 	);

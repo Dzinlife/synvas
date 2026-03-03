@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+	act,
 	cleanup,
 	fireEvent,
 	render,
@@ -12,6 +13,7 @@ import { useProjectStore } from "@/projects/projectStore";
 import CanvasWorkspace from "./CanvasWorkspace";
 
 const togglePlaybackMock = vi.fn();
+const infiniteSkiaCanvasPropsMock = vi.fn();
 
 vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 	usePlaybackOwnerController: () => ({
@@ -21,7 +23,10 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 }));
 
 vi.mock("./InfiniteSkiaCanvas", () => ({
-	default: () => <div data-testid="infinite-skia-canvas" />,
+	default: (props: { width: number; height: number }) => {
+		infiniteSkiaCanvasPropsMock(props);
+		return <div data-testid="infinite-skia-canvas" />;
+	},
 }));
 
 vi.mock("./FocusSceneKonvaLayer", () => ({
@@ -378,6 +383,7 @@ const createProject = (): StudioProject => ({
 
 beforeEach(() => {
 	togglePlaybackMock.mockReset();
+	infiniteSkiaCanvasPropsMock.mockReset();
 	useProjectStore.setState({
 		status: "ready",
 		projects: [],
@@ -432,6 +438,124 @@ describe("CanvasWorkspace", () => {
 			"node-scene-1",
 		]);
 		expect(screen.getByText("隐藏")).toBeTruthy();
+	});
+
+	it("overlay 布局不改变画布渲染尺寸", () => {
+		render(<CanvasWorkspace />);
+		const firstProps = infiniteSkiaCanvasPropsMock.mock.calls.at(-1)?.[0] as
+			| { width: number; height: number }
+			| undefined;
+		expect(firstProps?.width).toBe(1200);
+		expect(firstProps?.height).toBe(800);
+
+		doubleClickNodeAt(80, 80);
+		const secondProps = infiniteSkiaCanvasPropsMock.mock.calls.at(-1)?.[0] as
+			| { width: number; height: number }
+			| undefined;
+		expect(secondProps?.width).toBe(1200);
+		expect(secondProps?.height).toBe(800);
+	});
+
+	it("右侧面板展示 active node 元数据并在无 active 时隐藏", () => {
+		render(<CanvasWorkspace />);
+		const panel = screen.getByTestId("canvas-active-node-meta-panel");
+		expect(panel.textContent).toContain("Scene 1");
+		expect(panel.textContent).toContain("node-scene-1");
+
+		clickNodeAt(1120, 700);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBeNull();
+		expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
+	});
+
+	it("在右侧面板滚轮不会触发画布 camera 平移", () => {
+		render(<CanvasWorkspace />);
+		const before = useProjectStore.getState().currentProject?.ui.camera;
+		const panel = screen.getByTestId("canvas-active-node-meta-panel");
+		fireEvent.wheel(panel, {
+			deltaY: 120,
+		});
+		const after = useProjectStore.getState().currentProject?.ui.camera;
+		expect(before).toBeTruthy();
+		expect(after).toBeTruthy();
+		if (!before || !after) return;
+		expect(after.x).toBe(before.x);
+		expect(after.y).toBe(before.y);
+		expect(after.zoom).toBe(before.zoom);
+	});
+
+	it("左侧栏收起后 drawer 应占满左侧区域", async () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		await waitFor(() => {
+			expect(screen.getByTestId("canvas-overlay-drawer")).toBeTruthy();
+		});
+		const drawer = screen.getByTestId("canvas-overlay-drawer");
+		expect(drawer.style.left).toBe("312px");
+
+		fireEvent.click(screen.getByLabelText("收起侧边栏"));
+		await waitFor(() => {
+			expect(screen.getByTestId("canvas-overlay-drawer").style.left).toBe("12px");
+		});
+		expect(screen.getByTestId("canvas-sidebar-expand-button")).toBeTruthy();
+	});
+
+	it("右侧面板会根据 drawer 高度让出底部区域", async () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		await waitFor(() => {
+			expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
+			expect(screen.getByTestId("canvas-overlay-right-panel")).toBeTruthy();
+		});
+		const panel = screen.getByTestId("canvas-overlay-right-panel");
+		const beforeHeight = Number.parseFloat(panel.style.height);
+		expect(beforeHeight).toBeGreaterThan(0);
+
+		const handle = screen.getByLabelText("调整 Drawer 高度");
+		fireEvent.mouseDown(handle, { clientY: 700 });
+		fireEvent.mouseMove(document, { clientY: 360 });
+		fireEvent.mouseUp(document);
+
+		await waitFor(() => {
+			const afterHeight = Number.parseFloat(
+				screen.getByTestId("canvas-overlay-right-panel").style.height,
+			);
+			expect(afterHeight).toBeLessThan(beforeHeight);
+		});
+	});
+
+	it("focus camera 会在左侧栏收起后扩大可视缩放", async () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		await waitFor(() => {
+			expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
+		});
+		const beforeZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+		fireEvent.click(screen.getByLabelText("收起侧边栏"));
+		await waitFor(() => {
+			const afterZoom =
+				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			expect(afterZoom).toBeGreaterThan(beforeZoom);
+		});
+	});
+
+	it("focus camera 会在右侧面板隐藏后扩大可视缩放", async () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		await waitFor(() => {
+			expect(screen.getByTestId("canvas-active-node-meta-panel")).toBeTruthy();
+		});
+		const beforeZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+		act(() => {
+			useProjectStore.getState().setActiveNode(null);
+		});
+		await waitFor(() => {
+			expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
+		});
+		await waitFor(() => {
+			const afterZoom =
+				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			expect(afterZoom).toBeGreaterThan(beforeZoom);
+		});
 	});
 
 	it("active node 切换会更新顶部 toolbar", () => {
@@ -490,7 +614,7 @@ describe("CanvasWorkspace", () => {
 		expect(after.x).not.toBe(before.x);
 	});
 
-	it("点击 viewport 内节点不会触发 camera 平移", () => {
+	it("点击被面板遮挡的节点会触发 camera 平移进入安全区", () => {
 		render(<CanvasWorkspace />);
 		const before = useProjectStore.getState().currentProject?.ui.camera;
 		clickSidebarNode("node-video-1");
@@ -499,8 +623,7 @@ describe("CanvasWorkspace", () => {
 		expect(after).toBeTruthy();
 		if (!before || !after) return;
 		expect(after.zoom).toBe(before.zoom);
-		expect(after.x).toBe(before.x);
-		expect(after.y).toBe(before.y);
+		expect(after.x !== before.x || after.y !== before.y).toBe(true);
 	});
 
 	it("Focus 模式默认 DSL tab，Node tab 仅占位禁用", () => {

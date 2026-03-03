@@ -1,6 +1,6 @@
 import type { TimelineAsset } from "core/dsl/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
-import { Plus, Search, SearchX } from "lucide-react";
+import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
@@ -30,6 +30,13 @@ import {
 	type CanvasNodeLayoutSnapshot,
 	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
+import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
+import {
+	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
+	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
+	type CameraSafeInsets,
+	resolveCanvasOverlayLayout,
+} from "./canvasOverlayLayout";
 import FocusSceneKonvaLayer from "./FocusSceneKonvaLayer";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 
@@ -101,7 +108,7 @@ interface NodeFitCameraInput {
 	node: CanvasNode;
 	stageWidth: number;
 	stageHeight: number;
-	drawerOccupiedHeight: number;
+	safeInsets: CameraSafeInsets;
 }
 
 interface NodePanCameraInput {
@@ -109,37 +116,67 @@ interface NodePanCameraInput {
 	camera: CameraState;
 	stageWidth: number;
 	stageHeight: number;
-	drawerOccupiedHeight: number;
+	safeInsets: CameraSafeInsets;
 	paddingPx: number;
+}
+
+interface SafeViewportRect {
+	left: number;
+	top: number;
+	right: number;
+	bottom: number;
+	width: number;
+	height: number;
 }
 
 const clampZoom = (zoom: number): number => {
 	return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
 };
 
+const resolveSafeViewportRect = (
+	stageWidth: number,
+	stageHeight: number,
+	safeInsets: CameraSafeInsets,
+): SafeViewportRect => {
+	const safeLeft = Math.max(0, safeInsets.left);
+	const safeTop = Math.max(0, safeInsets.top);
+	const safeRight = Math.max(safeLeft + 1, stageWidth - Math.max(0, safeInsets.right));
+	const safeBottom = Math.max(
+		safeTop + 1,
+		stageHeight - Math.max(0, safeInsets.bottom),
+	);
+	return {
+		left: safeLeft,
+		top: safeTop,
+		right: safeRight,
+		bottom: safeBottom,
+		width: Math.max(1, safeRight - safeLeft),
+		height: Math.max(1, safeBottom - safeTop),
+	};
+};
+
 const buildNodeFitCamera = ({
 	node,
 	stageWidth,
 	stageHeight,
-	drawerOccupiedHeight,
+	safeInsets,
 }: NodeFitCameraInput): CameraState => {
 	const safeNodeWidth = Math.max(1, Math.abs(node.width));
 	const safeNodeHeight = Math.max(1, Math.abs(node.height));
-	const visibleCanvasHeight = Math.max(1, stageHeight - drawerOccupiedHeight);
-	const availableWidth = Math.max(1, stageWidth - FOCUS_VIEW_PADDING * 2);
-	const availableHeight = Math.max(
-		1,
-		visibleCanvasHeight - FOCUS_VIEW_PADDING * 2,
-	);
+	const viewport = resolveSafeViewportRect(stageWidth, stageHeight, safeInsets);
+	const availableWidth = Math.max(1, viewport.width - FOCUS_VIEW_PADDING * 2);
+	const availableHeight = Math.max(1, viewport.height - FOCUS_VIEW_PADDING * 2);
 	const zoomX = availableWidth / safeNodeWidth;
 	const zoomY = availableHeight / safeNodeHeight;
 	const nextZoom = clampZoom(Math.min(zoomX, zoomY));
 	const safeZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
 	const worldCenterX = node.x + node.width / 2;
 	const worldCenterY = node.y + node.height / 2;
+	const viewportCenterX = viewport.left + viewport.width / 2;
+	const viewportCenterY = viewport.top + viewport.height / 2;
 	return {
-		x: stageWidth / 2 / safeZoom - worldCenterX,
-		y: visibleCanvasHeight / 2 / safeZoom - worldCenterY,
+		x: viewportCenterX / safeZoom - worldCenterX,
+		y: viewportCenterY / safeZoom - worldCenterY,
 		zoom: nextZoom,
 	};
 };
@@ -149,11 +186,11 @@ const buildNodePanCamera = ({
 	camera,
 	stageWidth,
 	stageHeight,
-	drawerOccupiedHeight,
+	safeInsets,
 	paddingPx,
 }: NodePanCameraInput): CameraState => {
 	const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-	const visibleHeight = Math.max(1, stageHeight - drawerOccupiedHeight);
+	const viewport = resolveSafeViewportRect(stageWidth, stageHeight, safeInsets);
 	const nodeLeft = Math.min(node.x, node.x + node.width);
 	const nodeRight = Math.max(node.x, node.x + node.width);
 	const nodeTop = Math.min(node.y, node.y + node.height);
@@ -162,10 +199,16 @@ const buildNodePanCamera = ({
 	const stageRight = (nodeRight + camera.x) * safeZoom;
 	const stageTop = (nodeTop + camera.y) * safeZoom;
 	const stageBottom = (nodeBottom + camera.y) * safeZoom;
-	const viewportLeft = paddingPx;
-	const viewportRight = Math.max(viewportLeft + 1, stageWidth - paddingPx);
-	const viewportTop = paddingPx;
-	const viewportBottom = Math.max(viewportTop + 1, visibleHeight - paddingPx);
+	const viewportLeft = viewport.left + paddingPx;
+	const viewportRight = Math.max(
+		viewportLeft + 1,
+		viewport.right - paddingPx,
+	);
+	const viewportTop = viewport.top + paddingPx;
+	const viewportBottom = Math.max(
+		viewportTop + 1,
+		viewport.bottom - paddingPx,
+	);
 	const viewportWidth = viewportRight - viewportLeft;
 	const viewportHeight = viewportBottom - viewportTop;
 
@@ -349,6 +392,11 @@ const resolveDrawerOptions = (
 	};
 };
 
+const isOverlayWheelTarget = (target: EventTarget | null): boolean => {
+	if (!(target instanceof Element)) return false;
+	return Boolean(target.closest('[data-canvas-overlay-ui="true"]'));
+};
+
 const CanvasWorkspace = () => {
 	const currentProject = useProjectStore((state) => state.currentProject);
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
@@ -496,6 +544,7 @@ const CanvasWorkspace = () => {
 	}, [focusedNode]);
 	const sidebarMode = focusedSceneNode ? "focus" : "canvas";
 	const [sidebarTab, setSidebarTab] = useState<CanvasSidebarTab>("nodes");
+	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 
 	useEffect(() => {
 		setSidebarTab(focusedNodeId ? "dsl" : "nodes");
@@ -507,12 +556,32 @@ const CanvasWorkspace = () => {
 	const drawerDefaultHeight =
 		resolvedDrawerTarget?.options.defaultHeight ??
 		CANVAS_NODE_DRAWER_DEFAULT_HEIGHT;
-
-	const focusOccupiedDrawerHeight =
-		focusedNodeId && resolvedDrawerTarget ? visibleDrawerHeight : 0;
-	const sidebarOccupiedDrawerHeight = resolvedDrawerTarget
-		? visibleDrawerHeight
-		: 0;
+	const drawerVisible = Boolean(resolvedDrawerTarget);
+	const rightPanelVisible = Boolean(activeNode);
+	const overlayLayout = useMemo(() => {
+		return resolveCanvasOverlayLayout({
+			containerWidth: stageSize.width,
+			containerHeight: stageSize.height,
+			sidebarExpanded,
+			drawerVisible,
+			drawerHeight: visibleDrawerHeight,
+			rightPanelVisible,
+			sidebarWidthPx: CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
+			rightPanelWidthPx: CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
+		});
+	}, [
+		drawerVisible,
+		rightPanelVisible,
+		sidebarExpanded,
+		stageSize.height,
+		stageSize.width,
+		visibleDrawerHeight,
+	]);
+	const cameraSafeInsets = overlayLayout.cameraSafeInsets;
+	const rightPanelShouldRender =
+		rightPanelVisible &&
+		overlayLayout.rightPanelRect.width > 0 &&
+		overlayLayout.rightPanelRect.height > 0;
 
 	const resolveWorldPoint = useCallback(
 		(clientX: number, clientY: number) => {
@@ -594,13 +663,13 @@ const CanvasWorkspace = () => {
 			node: focusedNode,
 			stageWidth: stageSize.width,
 			stageHeight: stageSize.height,
-			drawerOccupiedHeight: focusOccupiedDrawerHeight,
+			safeInsets: cameraSafeInsets,
 		});
 		if (isCameraAlmostEqual(camera, nextCamera)) return;
 		setCanvasCamera(nextCamera);
 	}, [
 		camera,
-		focusOccupiedDrawerHeight,
+		cameraSafeInsets,
 		focusedNode,
 		focusedNodeId,
 		setCanvasCamera,
@@ -648,6 +717,7 @@ const CanvasWorkspace = () => {
 
 	const handleContainerWheel = useCallback(
 		(event: WheelEvent) => {
+			if (isOverlayWheelTarget(event.target)) return;
 			event.preventDefault();
 			if (focusedNodeId) return;
 			if (event.ctrlKey || event.metaKey) {
@@ -732,7 +802,7 @@ const CanvasWorkspace = () => {
 				camera,
 				stageWidth: stageSize.width,
 				stageHeight: stageSize.height,
-				drawerOccupiedHeight: sidebarOccupiedDrawerHeight,
+				safeInsets: cameraSafeInsets,
 				paddingPx: SIDEBAR_VIEW_PADDING_PX,
 			});
 			if (isCameraAlmostEqual(camera, nextCamera)) return;
@@ -740,10 +810,10 @@ const CanvasWorkspace = () => {
 		},
 		[
 			camera,
+			cameraSafeInsets,
 			handleNodeActivate,
 			setCanvasCamera,
 			sidebarMode,
-			sidebarOccupiedDrawerHeight,
 			stageSize.height,
 			stageSize.width,
 		],
@@ -807,20 +877,21 @@ const CanvasWorkspace = () => {
 					? stageSize.height
 					: (container?.getBoundingClientRect().height ?? 0);
 			if (stageWidth <= 0 || stageHeight <= 0) return;
-			const nextCamera = buildNodeFitCamera({
-				node,
-				stageWidth,
-				stageHeight,
-				drawerOccupiedHeight: 0,
-			});
-			if (isCameraAlmostEqual(camera, nextCamera)) return;
-			setCanvasCamera(nextCamera);
-		},
-		[
-			camera,
-			getTopHitNode,
-			resolveWorldPoint,
-			setCanvasCamera,
+				const nextCamera = buildNodeFitCamera({
+					node,
+					stageWidth,
+					stageHeight,
+					safeInsets: cameraSafeInsets,
+				});
+				if (isCameraAlmostEqual(camera, nextCamera)) return;
+				setCanvasCamera(nextCamera);
+			},
+			[
+				camera,
+				cameraSafeInsets,
+				getTopHitNode,
+				resolveWorldPoint,
+				setCanvasCamera,
 			setFocusedNode,
 			stageSize.height,
 			stageSize.width,
@@ -1060,9 +1131,20 @@ const CanvasWorkspace = () => {
 						},
 					},
 				]
-			: [];
+				: [];
 
 	const DrawerComponent = resolvedDrawer?.Drawer;
+	const toolbarLeftOffset = sidebarExpanded
+		? overlayLayout.cameraSafeInsets.left + 4
+		: 56;
+	const toolbarTopOffset = overlayLayout.cameraSafeInsets.top + 4;
+	const expandButtonOffsetX = overlayLayout.sidebarRect.x + 4;
+	const expandButtonOffsetY = overlayLayout.sidebarRect.y + 4;
+	const drawerBottomOffset = Math.max(
+		0,
+		stageSize.height -
+			(overlayLayout.drawerRect.y + overlayLayout.drawerRect.height),
+	);
 
 	return (
 		<div
@@ -1123,82 +1205,151 @@ const CanvasWorkspace = () => {
 				</div>
 			)}
 
-			{!focusedNodeId && (
-				<div className="absolute left-4 top-4 z-30 flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur">
-					<button
-						type="button"
-						onClick={handleCreateScene}
-						className="flex items-center gap-1 rounded bg-white/10 px-2 py-1 hover:bg-white/20"
+				{!focusedNodeId && (
+					<div
+						className="absolute z-30 flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur"
+						style={{ left: toolbarLeftOffset, top: toolbarTopOffset }}
 					>
-						<Plus className="size-3" />
-						<span>新建 Scene</span>
-					</button>
-					<button
-						type="button"
-						onClick={() => handleZoomByStep(1.1)}
-						className="rounded bg-white/10 p-1 hover:bg-white/20"
-						aria-label="放大"
-					>
-						<Search className="size-3" />
-					</button>
-					<button
-						type="button"
-						onClick={() => handleZoomByStep(0.9)}
-						className="rounded bg-white/10 p-1 hover:bg-white/20"
-						aria-label="缩小"
-					>
-						<SearchX className="size-3" />
-					</button>
-					<button
-						type="button"
-						onClick={handleResetView}
-						className="rounded bg-white/10 px-2 py-1 hover:bg-white/20"
-					>
-						重置视图
-					</button>
-					<span className="text-white/70">
-						{Math.round(camera.zoom * 100)}%
-					</span>
-				</div>
-			)}
+						<button
+							type="button"
+							onClick={handleCreateScene}
+							className="flex items-center gap-1 rounded bg-white/10 px-2 py-1 hover:bg-white/20"
+						>
+							<Plus className="size-3" />
+							<span>新建 Scene</span>
+						</button>
+						<button
+							type="button"
+							onClick={() => handleZoomByStep(1.1)}
+							className="rounded bg-white/10 p-1 hover:bg-white/20"
+							aria-label="放大"
+						>
+							<Search className="size-3" />
+						</button>
+						<button
+							type="button"
+							onClick={() => handleZoomByStep(0.9)}
+							className="rounded bg-white/10 p-1 hover:bg-white/20"
+							aria-label="缩小"
+						>
+							<SearchX className="size-3" />
+						</button>
+						<button
+							type="button"
+							onClick={handleResetView}
+							className="rounded bg-white/10 px-2 py-1 hover:bg-white/20"
+						>
+							重置视图
+						</button>
+						<span className="text-white/70">
+							{Math.round(camera.zoom * 100)}%
+						</span>
+					</div>
+				)}
 
-			<CanvasSidebar
-				mode={sidebarMode}
-				nodes={sidebarNodes}
-				activeNodeId={activeNodeId}
-				activeTab={sidebarTab}
-				onTabChange={setSidebarTab}
-				onNodeSelect={handleSidebarNodeSelect}
-			/>
+				{sidebarExpanded ? (
+					<div
+						data-testid="canvas-overlay-sidebar"
+						className="pointer-events-none absolute z-50"
+						style={{
+							left: overlayLayout.sidebarRect.x,
+							top: overlayLayout.sidebarRect.y,
+							width: overlayLayout.sidebarRect.width,
+							height: overlayLayout.sidebarRect.height,
+						}}
+					>
+						<div
+							className="pointer-events-auto h-full w-full"
+							data-canvas-overlay-ui="true"
+						>
+							<CanvasSidebar
+								mode={sidebarMode}
+								nodes={sidebarNodes}
+								activeNodeId={activeNodeId}
+								activeTab={sidebarTab}
+								onTabChange={setSidebarTab}
+								onNodeSelect={handleSidebarNodeSelect}
+								onCollapse={() => setSidebarExpanded(false)}
+							/>
+						</div>
+					</div>
+				) : (
+					<button
+						type="button"
+						data-testid="canvas-sidebar-expand-button"
+						aria-label="展开侧边栏"
+						onClick={() => setSidebarExpanded(true)}
+						className="absolute z-50 inline-flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-xs text-white ring-1 ring-white/20 hover:bg-black/70"
+						style={{ left: expandButtonOffsetX, top: expandButtonOffsetY }}
+					>
+						<PanelLeftOpen className="size-3" />
+						侧栏
+					</button>
+				)}
 
-			{focusedSceneNode && (
-				<FocusSceneKonvaLayer
-					width={stageSize.width}
-					height={stageSize.height}
-					camera={camera}
-					focusedNode={focusedSceneNode}
-					sceneId={focusedSceneNode.sceneId}
-				/>
-			)}
+				{rightPanelShouldRender && activeNode && (
+					<div
+						data-testid="canvas-overlay-right-panel"
+						className="pointer-events-none absolute z-50"
+						style={{
+							left: overlayLayout.rightPanelRect.x,
+							top: overlayLayout.rightPanelRect.y,
+							width: overlayLayout.rightPanelRect.width,
+							height: overlayLayout.rightPanelRect.height,
+						}}
+					>
+						<div
+							className="pointer-events-auto h-full w-full"
+							data-canvas-overlay-ui="true"
+						>
+							<CanvasActiveNodeMetaPanel
+								node={activeNode}
+								scene={activeNodeScene}
+								asset={activeNodeAsset}
+							/>
+						</div>
+					</div>
+				)}
 
-			{resolvedDrawer && DrawerComponent && (
-				<CanvasNodeDrawerShell
-					key={drawerIdentity ?? undefined}
-					defaultHeight={resolvedDrawer.options.defaultHeight}
-					minHeight={resolvedDrawer.options.minHeight}
-					maxHeightRatio={resolvedDrawer.options.maxHeightRatio}
-					resizable={resolvedDrawer.options.resizable}
-					onHeightChange={setVisibleDrawerHeight}
-				>
-					<DrawerComponent
-						node={resolvedDrawer.node}
-						scene={resolvedDrawer.scene}
-						asset={resolvedDrawer.asset}
-						onClose={handleCloseDrawer}
-						onHeightChange={setVisibleDrawerHeight}
+				{focusedSceneNode && (
+					<FocusSceneKonvaLayer
+						width={stageSize.width}
+						height={stageSize.height}
+						camera={camera}
+						focusedNode={focusedSceneNode}
+						sceneId={focusedSceneNode.sceneId}
 					/>
-				</CanvasNodeDrawerShell>
-			)}
+				)}
+
+				{resolvedDrawer && DrawerComponent && (
+					<div
+						data-testid="canvas-overlay-drawer"
+						className="absolute z-40 pointer-events-auto"
+						data-canvas-overlay-ui="true"
+						style={{
+							left: overlayLayout.drawerRect.x,
+							bottom: drawerBottomOffset,
+							width: overlayLayout.drawerRect.width,
+						}}
+					>
+						<CanvasNodeDrawerShell
+							key={drawerIdentity ?? undefined}
+							defaultHeight={resolvedDrawer.options.defaultHeight}
+							minHeight={resolvedDrawer.options.minHeight}
+							maxHeightRatio={resolvedDrawer.options.maxHeightRatio}
+							resizable={resolvedDrawer.options.resizable}
+							onHeightChange={setVisibleDrawerHeight}
+						>
+							<DrawerComponent
+								node={resolvedDrawer.node}
+								scene={resolvedDrawer.scene}
+								asset={resolvedDrawer.asset}
+								onClose={handleCloseDrawer}
+								onHeightChange={setVisibleDrawerHeight}
+							/>
+						</CanvasNodeDrawerShell>
+					</div>
+				)}
 
 			<TimelineContextMenu
 				open={contextMenuState.open}

@@ -30,7 +30,10 @@ const getClampedHeight = (
 			: CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO;
 	const viewportHeight =
 		typeof window !== "undefined" ? window.innerHeight : 1080;
-	const maxHeight = Math.max(safeMinHeight, Math.round(viewportHeight * safeRatio));
+	const maxHeight = Math.max(
+		safeMinHeight,
+		Math.round(viewportHeight * safeRatio),
+	);
 	const safeHeight = Number.isFinite(height)
 		? Math.round(height)
 		: CANVAS_NODE_DRAWER_DEFAULT_HEIGHT;
@@ -106,7 +109,7 @@ const CanvasNodeDrawerShell: React.FC<CanvasNodeDrawerShellProps> = ({
 	return (
 		<div
 			data-testid={dataTestId}
-			className="absolute inset-x-0 bottom-0 z-40 border-t border-neutral-800 bg-neutral-900"
+			className="absolute inset-x-0 bottom-0 z-40"
 			style={{ height: drawerHeight }}
 		>
 			{resizable && (
@@ -119,7 +122,9 @@ const CanvasNodeDrawerShell: React.FC<CanvasNodeDrawerShellProps> = ({
 					<span className="mx-auto mt-1 block h-1 w-20 rounded-full bg-white/30" />
 				</button>
 			)}
-			<div className="h-full min-h-0">{children}</div>
+			<div className="h-full min-h-0 rounded-xl border border-white/10 bg-neutral-900/90 shadow-2xl backdrop-blur-xl overflow-hidden">
+				{children}
+			</div>
 		</div>
 	);
 };
