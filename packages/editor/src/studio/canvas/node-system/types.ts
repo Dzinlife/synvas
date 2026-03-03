@@ -1,5 +1,5 @@
 import type { TimelineAsset } from "core/dsl/types";
-import type { CanvasNode, SceneDocument } from "core/studio/types";
+import type { CanvasNode, SceneDocument, StudioProject } from "core/studio/types";
 import type React from "react";
 import type { StudioRuntimeManager } from "@/editor/runtime/types";
 import type { CanvasNodeCreateInput } from "@/projects/projectStore";
@@ -41,6 +41,29 @@ export interface CanvasNodeDrawerProps<TNode extends CanvasNode = CanvasNode> {
 	onHeightChange?: (height: number) => void;
 }
 
+export interface CanvasNodeContextMenuAction {
+	key: string;
+	label: string;
+	disabled?: boolean;
+	danger?: boolean;
+	onSelect: () => void;
+	children?: CanvasNodeContextMenuAction[];
+}
+
+export interface CanvasNodeContextMenuSceneOption {
+	sceneId: string;
+	label: string;
+}
+
+export interface CanvasNodeContextMenuContext<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	node: TNode;
+	project: StudioProject;
+	sceneOptions: CanvasNodeContextMenuSceneOption[];
+	onInsertNodeToScene: (sceneId: string) => void;
+}
+
 export interface CanvasExternalFileContext {
 	projectId: string;
 	fps: number;
@@ -70,6 +93,9 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	 * @deprecated 请使用 drawerOptions.trigger。
 	 */
 	drawerTrigger?: CanvasNodeDrawerTrigger;
+	contextMenu?: (
+		context: CanvasNodeContextMenuContext<TNode>,
+	) => CanvasNodeContextMenuAction[];
 	fromExternalFile?: (
 		file: File,
 		context: CanvasExternalFileContext,

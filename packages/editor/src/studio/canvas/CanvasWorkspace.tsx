@@ -1,11 +1,20 @@
-import type { TimelineAsset } from "core/dsl/types";
+import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
+import type { TimelineAsset, TimelineElement } from "core/dsl/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
-import TimelineContextMenu from "@/editor/components/TimelineContextMenu";
+import { createTransformMeta } from "@/dsl/transform";
+import TimelineContextMenu, {
+	type TimelineContextMenuAction,
+} from "@/editor/components/TimelineContextMenu";
+import { findAttachments } from "@/editor/utils/attachments";
 import { resolveExternalVideoUri } from "@/editor/utils/externalVideo";
+import { finalizeTimelineElements } from "@/editor/utils/mainTrackMagnet";
+import { buildTimelineMeta } from "@/editor/utils/timelineTime";
+import { EditorRuntimeContext } from "@/editor/runtime/EditorRuntimeProvider";
+import type { StudioRuntimeManager } from "@/editor/runtime/types";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
 import CanvasNodeDrawerShell, {
@@ -19,6 +28,7 @@ import {
 	getCanvasNodeDefinition,
 } from "@/studio/canvas/node-system/registry";
 import type {
+	CanvasNodeContextMenuAction,
 	CanvasNodeDrawerOptions,
 	CanvasNodeDrawerProps,
 	CanvasNodeDrawerTrigger,
@@ -30,6 +40,8 @@ import {
 	type CanvasNodeLayoutSnapshot,
 	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
+import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
+import { secondsToFrames } from "@/utils/timecode";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
 import {
 	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
@@ -61,10 +73,18 @@ type CanvasContextMenuState =
 	| { open: false }
 	| {
 			open: true;
+			scope: "canvas";
 			x: number;
 			y: number;
 			worldX: number;
 			worldY: number;
+	  }
+	| {
+			open: true;
+			scope: "node";
+			x: number;
+			y: number;
+			actions: TimelineContextMenuAction[];
 	  };
 
 interface DragState {
@@ -397,6 +417,21 @@ const isOverlayWheelTarget = (target: EventTarget | null): boolean => {
 	return Boolean(target.closest('[data-canvas-overlay-ui="true"]'));
 };
 
+const toTimelineContextMenuActions = (
+	actions: CanvasNodeContextMenuAction[],
+): TimelineContextMenuAction[] => {
+	return actions.map((action) => ({
+		key: action.key,
+		label: action.label,
+		disabled: action.disabled,
+		danger: action.danger,
+		onSelect: action.onSelect,
+		children: action.children
+			? toTimelineContextMenuActions(action.children)
+			: undefined,
+	}));
+};
+
 const CanvasWorkspace = () => {
 	const currentProject = useProjectStore((state) => state.currentProject);
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
@@ -408,11 +443,23 @@ const CanvasWorkspace = () => {
 	const ensureProjectAssetByUri = useProjectStore(
 		(state) => state.ensureProjectAssetByUri,
 	);
+	const updateSceneTimeline = useProjectStore((state) => state.updateSceneTimeline);
 	const setFocusedNode = useProjectStore((state) => state.setFocusedNode);
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
 	const setActiveNode = useProjectStore((state) => state.setActiveNode);
 	const setCanvasCamera = useProjectStore((state) => state.setCanvasCamera);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
+	const runtime = useContext(EditorRuntimeContext);
+	const runtimeManager = useMemo<StudioRuntimeManager | null>(() => {
+		const manager = runtime as Partial<StudioRuntimeManager> | null;
+		if (
+			!manager?.getTimelineRuntime ||
+			!manager.listTimelineRuntimes
+		) {
+			return null;
+		}
+		return manager as StudioRuntimeManager;
+	}, [runtime]);
 
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
@@ -482,6 +529,122 @@ const CanvasWorkspace = () => {
 			null
 		);
 	}, [activeNode, currentProject]);
+
+	const contextMenuSceneOptions = useMemo(() => {
+		if (!currentProject) return [];
+		const toSceneOption = (sceneId: string) => {
+			const scene = currentProject.scenes[sceneId];
+			if (!scene) return null;
+			return {
+				sceneId,
+				label: scene.name?.trim() ? scene.name : sceneId,
+			};
+		};
+		if (runtimeManager) {
+			const runtimeSceneOptions: Array<{ sceneId: string; label: string }> = [];
+			const seen = new Set<string>();
+			for (const timelineRuntime of runtimeManager.listTimelineRuntimes()) {
+				const sceneId = timelineRuntime.ref.sceneId;
+				if (seen.has(sceneId)) continue;
+				seen.add(sceneId);
+				const option = toSceneOption(sceneId);
+				if (option) runtimeSceneOptions.push(option);
+			}
+			if (runtimeSceneOptions.length > 0) {
+				return runtimeSceneOptions;
+			}
+		}
+		return Object.keys(currentProject.scenes)
+			.map((sceneId) => toSceneOption(sceneId))
+			.filter((scene): scene is { sceneId: string; label: string } =>
+				Boolean(scene),
+			);
+	}, [currentProject, runtimeManager]);
+
+	const insertImageNodeToScene = useCallback(
+		(node: CanvasNode, sceneId: string) => {
+			if (node.type !== "image") return;
+			if (!node.assetId) return;
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const targetScene = latestProject.scenes[sceneId];
+			if (!targetScene) return;
+
+			const appendImageElement = (
+				elements: TimelineElement[],
+				fps: number,
+				rippleEditingEnabled: boolean,
+				autoAttach: boolean,
+			): TimelineElement[] => {
+				const start = resolveTimelineEndFrame(elements);
+				const duration = Math.max(1, secondsToFrames(5, fps));
+				const nextElement: TimelineElement = {
+					id: `element-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+					type: "Image",
+					component: "image",
+					name: node.name,
+					assetId: node.assetId,
+					props: {},
+					transform: createTransformMeta({
+						width: Math.max(1, Math.abs(node.width)),
+						height: Math.max(1, Math.abs(node.height)),
+						positionX: 0,
+						positionY: 0,
+					}),
+					timeline: buildTimelineMeta(
+						{
+							start,
+							end: start + duration,
+							trackIndex: 0,
+							role: "clip",
+						},
+						fps,
+					),
+					render: {
+						zIndex: 0,
+						visible: true,
+						opacity: 1,
+					},
+				};
+				return finalizeTimelineElements([...elements, nextElement], {
+					rippleEditingEnabled,
+					attachments: autoAttach ? findAttachments(elements) : undefined,
+					autoAttach,
+					fps,
+				});
+			};
+
+			if (runtimeManager) {
+				const timelineRuntime = runtimeManager.getTimelineRuntime(
+					toSceneTimelineRef(sceneId),
+				);
+				if (timelineRuntime) {
+					const timelineState = timelineRuntime.timelineStore.getState();
+					timelineState.setElements((prev) => {
+						return appendImageElement(
+							prev,
+							timelineState.fps,
+							timelineState.rippleEditingEnabled,
+							timelineState.autoAttach,
+						);
+					});
+					return;
+				}
+			}
+
+			const nextElements = appendImageElement(
+				targetScene.timeline.elements,
+				targetScene.timeline.fps,
+				targetScene.timeline.settings.rippleEditingEnabled,
+				targetScene.timeline.settings.autoAttach,
+			);
+			updateSceneTimeline(sceneId, {
+				...targetScene.timeline,
+				elements: nextElements,
+			});
+		},
+		[runtimeManager, updateSceneTimeline],
+	);
 
 	const resolvedDrawerTarget = useMemo<ResolvedNodeDrawerTarget | null>(() => {
 		if (focusedNode) {
@@ -956,25 +1119,84 @@ const CanvasWorkspace = () => {
 		};
 	}, [camera.zoom, handleNodeActivate, pushHistory, updateCanvasNodeLayout]);
 
-	const handleCanvasContextMenu = useCallback(
-		(event: React.MouseEvent<HTMLDivElement>) => {
-			event.preventDefault();
-			if (isCanvasInteractionLocked) return;
-			const world = resolveWorldPoint(event.clientX, event.clientY);
+	const openCanvasContextMenuAt = useCallback(
+		(clientX: number, clientY: number) => {
+			const world = resolveWorldPoint(clientX, clientY);
 			setContextMenuState({
 				open: true,
-				x: event.clientX,
-				y: event.clientY,
+				scope: "canvas",
+				x: clientX,
+				y: clientY,
 				worldX: world.x,
 				worldY: world.y,
 			});
 		},
-		[isCanvasInteractionLocked, resolveWorldPoint],
+		[resolveWorldPoint],
+	);
+
+	const handleCanvasContextMenu = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			event.preventDefault();
+			if (isCanvasInteractionLocked) return;
+			openCanvasContextMenuAt(event.clientX, event.clientY);
+		},
+		[isCanvasInteractionLocked, openCanvasContextMenuAt],
 	);
 
 	const closeContextMenu = useCallback(() => {
 		setContextMenuState({ open: false });
 	}, []);
+
+	const handleNodeHitLayerContextMenu = useCallback(
+		(event: React.MouseEvent<HTMLButtonElement>) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (isCanvasInteractionLocked) return;
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			const node = getTopHitNode(world.x, world.y);
+			if (!node) {
+				openCanvasContextMenuAt(event.clientX, event.clientY);
+				return;
+			}
+			if (!currentProject) {
+				openCanvasContextMenuAt(event.clientX, event.clientY);
+				return;
+			}
+			const definition = getCanvasNodeDefinition(node.type);
+			if (!definition.contextMenu) {
+				openCanvasContextMenuAt(event.clientX, event.clientY);
+				return;
+			}
+			const nodeActions = definition.contextMenu({
+				node,
+				project: currentProject,
+				sceneOptions: contextMenuSceneOptions,
+				onInsertNodeToScene: (sceneId) => {
+					insertImageNodeToScene(node, sceneId);
+				},
+			});
+			if (nodeActions.length === 0) {
+				openCanvasContextMenuAt(event.clientX, event.clientY);
+				return;
+			}
+			setContextMenuState({
+				open: true,
+				scope: "node",
+				x: event.clientX,
+				y: event.clientY,
+				actions: toTimelineContextMenuActions(nodeActions),
+			});
+		},
+		[
+			contextMenuSceneOptions,
+			currentProject,
+			getTopHitNode,
+			insertImageNodeToScene,
+			isCanvasInteractionLocked,
+			openCanvasContextMenuAt,
+			resolveWorldPoint,
+		],
+	);
 
 	const handleCreateTextNodeAt = useCallback(
 		(worldX: number, worldY: number) => {
@@ -1117,21 +1339,25 @@ const CanvasWorkspace = () => {
 	const gridOffsetX = (camera.x * camera.zoom) % gridSizePx;
 	const gridOffsetY = (camera.y * camera.zoom) % gridSizePx;
 
-	const toolbarActions =
-		contextMenuState.open && !focusedNodeId
-			? [
-					{
-						key: "new-text-node",
-						label: "新建文本节点",
-						onSelect: () => {
-							handleCreateTextNodeAt(
-								contextMenuState.worldX,
-								contextMenuState.worldY,
-							);
-						},
-					},
-				]
-				: [];
+	const contextMenuActions = useMemo<TimelineContextMenuAction[]>(() => {
+		if (!contextMenuState.open) return [];
+		if (contextMenuState.scope === "node") {
+			return contextMenuState.actions;
+		}
+		if (focusedNodeId) return [];
+		return [
+			{
+				key: "new-text-node",
+				label: "新建文本节点",
+				onSelect: () => {
+					handleCreateTextNodeAt(
+						contextMenuState.worldX,
+						contextMenuState.worldY,
+					);
+				},
+			},
+		];
+	}, [contextMenuState, focusedNodeId, handleCreateTextNodeAt]);
 
 	const DrawerComponent = resolvedDrawer?.Drawer;
 	const toolbarLeftOffset = sidebarExpanded
@@ -1187,7 +1413,7 @@ const CanvasWorkspace = () => {
 				className="absolute inset-0 z-20 border-0 bg-transparent p-0"
 				onPointerDown={handleNodeHitLayerPointerDown}
 				onDoubleClick={handleNodeHitLayerDoubleClick}
-				onContextMenu={(event) => event.preventDefault()}
+				onContextMenu={handleNodeHitLayerContextMenu}
 			/>
 
 			{activeNode && ActiveNodeToolbar && (
@@ -1355,7 +1581,7 @@ const CanvasWorkspace = () => {
 				open={contextMenuState.open}
 				x={contextMenuState.open ? contextMenuState.x : 0}
 				y={contextMenuState.open ? contextMenuState.y : 0}
-				actions={toolbarActions}
+				actions={contextMenuActions}
 				onClose={closeContextMenu}
 			/>
 		</div>

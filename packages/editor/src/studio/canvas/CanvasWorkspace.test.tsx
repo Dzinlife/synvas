@@ -156,6 +156,30 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			create: () => ({ type: "image" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("image"),
+			contextMenu: (context: {
+				node: { assetId: string };
+				sceneOptions: Array<{ sceneId: string; label: string }>;
+				onInsertNodeToScene: (sceneId: string) => void;
+			}) => {
+				const canInsert = Boolean(context.node.assetId);
+				const sceneActions = context.sceneOptions.map((scene) => ({
+					key: `insert:${scene.sceneId}`,
+					label: scene.label,
+					disabled: !canInsert,
+					onSelect: () => {
+						context.onInsertNodeToScene(scene.sceneId);
+					},
+				}));
+				return [
+					{
+						key: "insert-scene",
+						label: "插入到 Scene",
+						disabled: !canInsert || sceneActions.length === 0,
+						onSelect: () => {},
+						children: sceneActions,
+					},
+				];
+			},
 			fromExternalFile: async (
 				file: File,
 				context: {
@@ -287,6 +311,21 @@ const createProject = (): StudioProject => ({
 				updatedAt: 2,
 			},
 			{
+				id: "node-image-1",
+				type: "image",
+				assetId: "asset-scene",
+				name: "Image 1",
+				x: 680,
+				y: 320,
+				width: 260,
+				height: 160,
+				zIndex: 2,
+				locked: false,
+				hidden: false,
+				createdAt: 3,
+				updatedAt: 3,
+			},
+			{
 				id: "node-image-hidden",
 				type: "image",
 				assetId: "asset-scene",
@@ -412,6 +451,14 @@ const clickNodeAt = (clientX: number, clientY: number): void => {
 	});
 };
 
+const rightClickNodeAt = (clientX: number, clientY: number): void => {
+	const hitLayer = screen.getByTestId("canvas-node-hit-layer");
+	fireEvent.contextMenu(hitLayer, {
+		clientX,
+		clientY,
+	});
+};
+
 const doubleClickNodeAt = (clientX: number, clientY: number): void => {
 	const hitLayer = screen.getByTestId("canvas-node-hit-layer");
 	fireEvent.doubleClick(hitLayer, {
@@ -432,6 +479,7 @@ describe("CanvasWorkspace", () => {
 		const order = nodeItems.map((item) => item.getAttribute("data-node-id"));
 		expect(order).toEqual([
 			"node-image-hidden",
+			"node-image-1",
 			"node-video-offscreen",
 			"node-scene-2",
 			"node-video-1",
@@ -731,6 +779,40 @@ describe("CanvasWorkspace", () => {
 			expect(textNode?.x).toBe(420);
 			expect(textNode?.y).toBe(260);
 		});
+	});
+
+	it("右键 image 节点可通过二级菜单插入到目标 scene timeline", async () => {
+		render(<CanvasWorkspace />);
+		const beforeUi = useProjectStore.getState().currentProject?.ui;
+
+		rightClickNodeAt(720, 360);
+		fireEvent.mouseEnter(screen.getByRole("menuitem", { name: /插入到 Scene/ }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Scene 2" }));
+
+		const project = useProjectStore.getState().currentProject;
+		const inserted =
+			project?.scenes["scene-2"]?.timeline.elements.find(
+				(element) => element.type === "Image" && element.component === "image",
+			) ?? null;
+		expect(inserted).toBeTruthy();
+		if (!inserted) return;
+		expect(inserted.assetId).toBe("asset-scene");
+		expect(inserted.timeline.start).toBe(0);
+		expect(inserted.timeline.end).toBe(150);
+		expect(inserted.timeline.trackIndex).toBe(0);
+		expect(inserted.timeline.role).toBe("clip");
+		expect(inserted.transform?.position.x).toBe(0);
+		expect(inserted.transform?.position.y).toBe(0);
+
+		const afterUi = project?.ui;
+		expect(afterUi).toEqual(beforeUi);
+	});
+
+	it("右键非 image 节点会回退到画布菜单", () => {
+		render(<CanvasWorkspace />);
+		rightClickNodeAt(300, 160);
+		expect(screen.getByRole("menuitem", { name: "新建文本节点" })).toBeTruthy();
+		expect(screen.queryByRole("menuitem", { name: "插入到 Scene" })).toBeNull();
 	});
 
 	it("外部文件 drop 可创建多类型节点并按 4 列网格偏移", async () => {

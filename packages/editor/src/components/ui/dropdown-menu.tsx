@@ -1,9 +1,12 @@
 import { Menu, Menu as MenuPrimitive } from "@base-ui/react/menu";
-
 import { cn } from "@/lib/utils";
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
 	return <MenuPrimitive.Root {...props} />;
+}
+
+function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
+	return <MenuPrimitive.Portal {...props} />;
 }
 
 function DropdownMenuTrigger({
@@ -127,6 +130,194 @@ function DropdownMenuItem({ className, ...props }: MenuPrimitive.Item.Props) {
 	);
 }
 
+function DropdownMenuContextContent({
+	className,
+	positionerClassName,
+	side = "bottom",
+	align = "start",
+	alignOffset = 0,
+	sideOffset = 0,
+	anchor,
+	positionMethod,
+	collisionPadding,
+	collisionAvoidance,
+	disableAnchorTracking,
+	sticky,
+	children,
+	...props
+}: MenuPrimitive.Popup.Props &
+	Pick<
+		MenuPrimitive.Positioner.Props,
+		"side" | "align" | "alignOffset" | "sideOffset"
+	> &
+	Partial<
+		Pick<
+			MenuPrimitive.Positioner.Props,
+			| "anchor"
+			| "positionMethod"
+			| "collisionPadding"
+			| "collisionAvoidance"
+			| "disableAnchorTracking"
+			| "sticky"
+		>
+	> & {
+		positionerClassName?: string;
+	}) {
+	return (
+		<MenuPrimitive.Positioner
+			className={cn("outline-none z-[2100]", positionerClassName)}
+			side={side}
+			align={align}
+			alignOffset={alignOffset}
+			sideOffset={sideOffset}
+			anchor={anchor}
+			positionMethod={positionMethod}
+			collisionPadding={collisionPadding}
+			collisionAvoidance={collisionAvoidance}
+			disableAnchorTracking={disableAnchorTracking}
+			sticky={sticky}
+		>
+			<MenuPrimitive.Popup
+				className={cn(
+					"min-w-35 rounded-md border border-white/10 bg-neutral-900/95 p-1 text-sm shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-xl",
+					className,
+				)}
+				{...props}
+			>
+				{children}
+			</MenuPrimitive.Popup>
+		</MenuPrimitive.Positioner>
+	);
+}
+
+function DropdownMenuContextItem({
+	className,
+	danger = false,
+	...props
+}: MenuPrimitive.Item.Props & {
+	danger?: boolean;
+}) {
+	return (
+		<MenuPrimitive.Item
+			className={cn(
+				"flex h-8.5 w-full select-none items-center rounded px-2.5 text-left text-neutral-100 outline-none transition-colors data-disabled:cursor-not-allowed data-disabled:text-neutral-500 data-highlighted:bg-white/10",
+				{
+					"text-red-300 data-highlighted:bg-red-500/20": danger,
+				},
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
+function DropdownMenuContextSubmenu({
+	...props
+}: MenuPrimitive.SubmenuRoot.Props) {
+	return <MenuPrimitive.SubmenuRoot {...props} />;
+}
+
+function DropdownMenuContextSubmenuTrigger({
+	className,
+	danger = false,
+	children,
+	indicator,
+	openOnHover = true,
+	delay = 0,
+	closeDelay = 150,
+	...props
+}: MenuPrimitive.SubmenuTrigger.Props & {
+	danger?: boolean;
+	indicator?: React.ReactNode;
+}) {
+	return (
+		<MenuPrimitive.SubmenuTrigger
+			className={cn(
+				"flex h-8.5 w-full select-none items-center justify-between rounded px-2.5 text-left text-neutral-100 outline-none transition-colors data-disabled:cursor-not-allowed data-disabled:text-neutral-500 data-highlighted:bg-white/10 data-popup-open:bg-white/10",
+				{
+					"text-red-300 data-highlighted:bg-red-500/20 data-popup-open:bg-red-500/20":
+						danger,
+				},
+				className,
+			)}
+			openOnHover={openOnHover}
+			delay={delay}
+			closeDelay={closeDelay}
+			{...props}
+		>
+			<span>{children}</span>
+			{indicator ?? (
+				<span className="text-xs text-white/60">
+					<svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+						<path
+							d="M3.5 9L7.5 5L3.5 1"
+							stroke="currentcolor"
+							strokeWidth="1.5"
+						></path>
+					</svg>
+				</span>
+			)}
+		</MenuPrimitive.SubmenuTrigger>
+	);
+}
+
+function DropdownMenuContextSubmenuContent({
+	className,
+	positionerClassName,
+	side = "right",
+	align = "center",
+	alignOffset = 0,
+	sideOffset = -2,
+	positionMethod,
+	collisionPadding,
+	collisionAvoidance,
+	disableAnchorTracking,
+	sticky,
+	children,
+	...props
+}: MenuPrimitive.Popup.Props &
+	Pick<
+		MenuPrimitive.Positioner.Props,
+		"side" | "align" | "alignOffset" | "sideOffset"
+	> &
+	Partial<
+		Pick<
+			MenuPrimitive.Positioner.Props,
+			| "positionMethod"
+			| "collisionPadding"
+			| "collisionAvoidance"
+			| "disableAnchorTracking"
+			| "sticky"
+		>
+	> & {
+		positionerClassName?: string;
+	}) {
+	return (
+		<MenuPrimitive.Positioner
+			className={cn("outline-none z-[2101]", positionerClassName)}
+			side={side}
+			align={align}
+			alignOffset={alignOffset}
+			sideOffset={sideOffset}
+			positionMethod={positionMethod}
+			collisionPadding={collisionPadding}
+			collisionAvoidance={collisionAvoidance}
+			disableAnchorTracking={disableAnchorTracking}
+			sticky={sticky}
+		>
+			<MenuPrimitive.Popup
+				className={cn(
+					"min-w-45 rounded-md border border-white/10 bg-neutral-900/95 p-1 text-sm shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-xl",
+					className,
+				)}
+				{...props}
+			>
+				{children}
+			</MenuPrimitive.Popup>
+		</MenuPrimitive.Positioner>
+	);
+}
+
 function DropdownMenuGroup({ ...props }: MenuPrimitive.Group.Props) {
 	return <MenuPrimitive.Group {...props} />;
 }
@@ -157,10 +348,16 @@ function DropdownMenuSeparator({
 
 export {
 	DropdownMenu,
+	DropdownMenuContextContent,
+	DropdownMenuContextItem,
+	DropdownMenuContextSubmenu,
+	DropdownMenuContextSubmenuContent,
+	DropdownMenuContextSubmenuTrigger,
 	DropdownMenuContent,
 	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
+	DropdownMenuPortal,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 };

@@ -60,6 +60,26 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 	create: () => ({ type: "image" }),
 	skiaRenderer: ImageNodeSkiaRenderer,
 	toolbar: ImageNodeToolbar,
+	contextMenu: ({ node, sceneOptions, onInsertNodeToScene }) => {
+		const canInsert = Boolean(node.assetId);
+		const sceneActions = sceneOptions.map((scene) => ({
+			key: `insert-image-to-scene:${scene.sceneId}`,
+			label: scene.label,
+			disabled: !canInsert,
+			onSelect: () => {
+				onInsertNodeToScene(scene.sceneId);
+			},
+		}));
+		return [
+			{
+				key: "insert-image-to-scene",
+				label: "插入到 Scene",
+				disabled: !canInsert || sceneActions.length === 0,
+				onSelect: () => {},
+				children: sceneActions,
+			},
+		];
+	},
 	fromExternalFile: async (file, context) => {
 		if (!isImageFile(file)) return null;
 		const metadata = await readImageMetadata(file).catch(() => ({

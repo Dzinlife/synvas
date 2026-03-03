@@ -1,7 +1,14 @@
 import type React from "react";
-import { useEffect, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
-import { cn } from "@/lib/utils";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+	DropdownMenu,
+	DropdownMenuContextContent,
+	DropdownMenuContextItem,
+	DropdownMenuContextSubmenu,
+	DropdownMenuContextSubmenuContent,
+	DropdownMenuContextSubmenuTrigger,
+	DropdownMenuPortal,
+} from "@/components/ui/dropdown-menu";
 
 export interface TimelineContextMenuAction {
 	key: string;
@@ -9,6 +16,7 @@ export interface TimelineContextMenuAction {
 	disabled?: boolean;
 	danger?: boolean;
 	onSelect: () => void;
+	children?: TimelineContextMenuAction[];
 }
 
 interface TimelineContextMenuProps {
@@ -19,10 +27,22 @@ interface TimelineContextMenuProps {
 	onClose: () => void;
 }
 
-const MENU_WIDTH = 140;
-const MENU_ITEM_HEIGHT = 34;
-const MENU_PADDING = 6;
-const SCREEN_PADDING = 8;
+const MENU_COLLISION_PADDING = 8;
+const SUBMENU_SIDE_OFFSET = -2;
+
+const createVirtualAnchorRect = (x: number, y: number): DOMRect => {
+	return {
+		x,
+		y,
+		width: 0,
+		height: 0,
+		top: y,
+		right: x,
+		bottom: y,
+		left: x,
+		toJSON: () => ({}),
+	};
+};
 
 const TimelineContextMenu: React.FC<TimelineContextMenuProps> = ({
 	open,
@@ -31,103 +51,141 @@ const TimelineContextMenu: React.FC<TimelineContextMenuProps> = ({
 	actions,
 	onClose,
 }) => {
-	const menuRef = useRef<HTMLDivElement>(null);
+	const closeRequestedRef = useRef(false);
+	const anchor = useMemo(() => {
+		return {
+			getBoundingClientRect: () => createVirtualAnchorRect(x, y),
+		};
+	}, [x, y]);
+
+	useEffect(() => {
+		if (!open) {
+			closeRequestedRef.current = false;
+		}
+	}, [open]);
+
+	const requestClose = useCallback(() => {
+		if (closeRequestedRef.current) return;
+		closeRequestedRef.current = true;
+		onClose();
+	}, [onClose]);
 
 	useEffect(() => {
 		if (!open) return;
+		const isInsideMenu = (target: EventTarget | null): boolean => {
+			if (!(target instanceof Element)) return false;
+			return Boolean(
+				target.closest('[data-timeline-context-menu-popup="true"]'),
+			);
+		};
 
 		const handlePointerDown = (event: PointerEvent) => {
-			const target = event.target;
-			if (!(target instanceof Node)) return;
-			if (menuRef.current?.contains(target)) return;
-			onClose();
+			if (isInsideMenu(event.target)) return;
+			requestClose();
+		};
+
+		const handleContextMenu = (event: MouseEvent) => {
+			if (isInsideMenu(event.target)) return;
+			requestClose();
 		};
 
 		const handleEscape = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
-			onClose();
+			requestClose();
 		};
 
 		const handleWindowChange = () => {
-			onClose();
+			requestClose();
 		};
-
 		window.addEventListener("pointerdown", handlePointerDown, true);
-		window.addEventListener("contextmenu", handlePointerDown, true);
+		window.addEventListener("contextmenu", handleContextMenu, true);
 		window.addEventListener("keydown", handleEscape);
 		window.addEventListener("wheel", handleWindowChange, true);
 		window.addEventListener("scroll", handleWindowChange, true);
 		window.addEventListener("resize", handleWindowChange);
-
 		return () => {
 			window.removeEventListener("pointerdown", handlePointerDown, true);
-			window.removeEventListener("contextmenu", handlePointerDown, true);
+			window.removeEventListener("contextmenu", handleContextMenu, true);
 			window.removeEventListener("keydown", handleEscape);
 			window.removeEventListener("wheel", handleWindowChange, true);
 			window.removeEventListener("scroll", handleWindowChange, true);
 			window.removeEventListener("resize", handleWindowChange);
 		};
-	}, [open, onClose]);
+	}, [open, requestClose]);
 
-	const position = useMemo(() => {
-		if (typeof window === "undefined") {
-			return { left: x, top: y };
+	const renderAction = (action: TimelineContextMenuAction): React.ReactNode => {
+		const hasChildren = (action.children?.length ?? 0) > 0;
+		if (hasChildren) {
+			return (
+				<DropdownMenuContextSubmenu key={action.key}>
+					<DropdownMenuContextSubmenuTrigger
+						disabled={action.disabled}
+						danger={action.danger}
+						openOnHover
+						delay={0}
+						closeDelay={150}
+					>
+						{action.label}
+					</DropdownMenuContextSubmenuTrigger>
+					<DropdownMenuPortal>
+						<DropdownMenuContextSubmenuContent
+							side="right"
+							align="center"
+							sideOffset={SUBMENU_SIDE_OFFSET}
+							positionMethod="fixed"
+							collisionPadding={MENU_COLLISION_PADDING}
+							collisionAvoidance={{
+								side: "flip",
+								align: "shift",
+								fallbackAxisSide: "none",
+							}}
+							data-timeline-context-menu-popup="true"
+						>
+							{action.children?.map((child) => renderAction(child))}
+						</DropdownMenuContextSubmenuContent>
+					</DropdownMenuPortal>
+				</DropdownMenuContextSubmenu>
+			);
 		}
-		const estimatedHeight =
-			actions.length * MENU_ITEM_HEIGHT + MENU_PADDING * 2;
-		const maxLeft = Math.max(
-			SCREEN_PADDING,
-			window.innerWidth - MENU_WIDTH - SCREEN_PADDING,
+		return (
+			<DropdownMenuContextItem
+				key={action.key}
+				disabled={action.disabled}
+				danger={action.danger}
+				onClick={() => {
+					action.onSelect();
+					requestClose();
+				}}
+			>
+				{action.label}
+			</DropdownMenuContextItem>
 		);
-		const maxTop = Math.max(
-			SCREEN_PADDING,
-			window.innerHeight - estimatedHeight - SCREEN_PADDING,
-		);
-		return {
-			left: Math.max(SCREEN_PADDING, Math.min(x, maxLeft)),
-			top: Math.max(SCREEN_PADDING, Math.min(y, maxTop)),
-		};
-	}, [actions.length, x, y]);
+	};
 
-	if (!open || actions.length === 0 || typeof document === "undefined") {
+	if (!open || actions.length === 0) {
 		return null;
 	}
 
-	return createPortal(
-		<div
-			ref={menuRef}
-			className="fixed z-[1000] min-w-35 rounded-md border border-white/10 bg-neutral-900/95 p-1 text-sm shadow-[0_10px_30px_rgba(0,0,0,0.45)] backdrop-blur-xl"
-			style={{ left: position.left, top: position.top }}
-			role="menu"
-		>
-			{actions.map((action) => {
-				return (
-					<button
-						type="button"
-						key={action.key}
-						role="menuitem"
-						disabled={action.disabled}
-						className={cn(
-							"flex h-8.5 w-full items-center rounded px-2.5 text-left text-neutral-100 transition-colors",
-							{
-								"cursor-pointer hover:bg-white/10": !action.disabled,
-								"cursor-not-allowed text-neutral-500": action.disabled,
-								"text-red-300 hover:bg-red-500/20":
-									action.danger && !action.disabled,
-							},
-						)}
-						onClick={() => {
-							if (action.disabled) return;
-							action.onSelect();
-							onClose();
-						}}
-					>
-						{action.label}
-					</button>
-				);
-			})}
-		</div>,
-		document.body,
+	return (
+		<DropdownMenu open={open} modal={false}>
+			<DropdownMenuPortal>
+				<DropdownMenuContextContent
+					anchor={anchor}
+					side="bottom"
+					align="start"
+					positionMethod="fixed"
+					collisionPadding={MENU_COLLISION_PADDING}
+					collisionAvoidance={{
+						side: "flip",
+						align: "shift",
+						fallbackAxisSide: "none",
+					}}
+					data-timeline-context-menu-popup="true"
+				>
+					{actions.map((action) => renderAction(action))}
+				</DropdownMenuContextContent>
+			</DropdownMenuPortal>
+		</DropdownMenu>
 	);
 };
 
