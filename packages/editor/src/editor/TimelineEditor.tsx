@@ -10,8 +10,8 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useModelRegistry, useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import TimeIndicatorCanvas from "@/editor/components/TimeIndicatorCanvas";
+import { useModelRegistry, useTimelineStoreApi } from "@/editor/runtime/EditorRuntimeProvider";
 import { cn } from "@/lib/utils";
 import { useProjectAssets } from "@/projects/useProjectAssets";
 import { clampFrame } from "@/utils/timecode";
@@ -57,17 +57,17 @@ import {
 	pasteTimelineClipboardPayload,
 	type TimelineClipboardPayload,
 } from "./utils/timelineClipboard";
+import { resolveElementSourceUri } from "./utils/source";
 import { getPixelsPerFrame } from "./utils/timelineScale";
 import { updateElementTime } from "./utils/timelineTime";
-import { resolveElementSourceUri } from "./utils/source";
-import {
-	buildTrackLayout,
-	getTrackHeightByRole,
-} from "./utils/trackAssignment";
 import {
 	MAX_TIMELINE_SCALE,
 	MIN_TIMELINE_SCALE,
 } from "./utils/timelineZoom";
+import {
+	buildTrackLayout,
+	getTrackHeightByRole,
+} from "./utils/trackAssignment";
 import { reconcileTransitions } from "./utils/transitions";
 import {
 	detachVideoClipAudio,
@@ -106,6 +106,9 @@ const LOCKED_TRACK_OVERLAY_STYLE: React.CSSProperties = {
 		"linear-gradient(135deg, rgba(255, 255, 255, 0.16) 25%, rgba(255, 255, 255, 0) 25%, rgba(255, 255, 255, 0) 50%, rgba(255, 255, 255, 0.16) 50%, rgba(255, 255, 255, 0.16) 75%, rgba(255, 255, 255, 0) 75%, rgba(255, 255, 255, 0))",
 	backgroundSize: "6px 6px",
 };
+
+const PLAYHEAD_FOLLOW_MANUAL_DEBOUNCE_MS = 300;
+const AUTO_FOLLOW_SCROLL_MATCH_EPSILON = 0.5;
 
 const applyOffsetDelta = (
 	element: TimelineElementType,
@@ -330,6 +333,9 @@ const TimelineEditor = () => {
 	const pendingPreviewTimeRef = useRef<number | null>(null);
 	const currentTimeRafRef = useRef<number | null>(null);
 	const pendingCurrentTimeRef = useRef<number | null>(null);
+	const manualScrollSuppressUntilRef = useRef(0);
+	const pendingAutoFollowScrollLeftRef = useRef<number | null>(null);
+	const lastObservedScrollLeftRef = useRef<number | null>(null);
 
 	// 左侧列宽度状态
 	const [leftColumnWidth] = useState(172); // 默认 44 * 4 = 176px (w-44)
@@ -946,6 +952,77 @@ const TimelineEditor = () => {
 	useEffect(() => {
 		scrollLeftRef.current = scrollLeft;
 	}, [scrollLeft]);
+
+	// 播放停止时重置自动跟随状态，避免下一次播放继承抑制窗口
+	useEffect(() => {
+		if (isPlaying) return;
+		manualScrollSuppressUntilRef.current = 0;
+		pendingAutoFollowScrollLeftRef.current = null;
+	}, [isPlaying]);
+
+	// 识别滚动来源：命中自动跟随预期值则忽略，其余都视为手动滚动并触发 debounce
+	useEffect(() => {
+		const previousScrollLeft = lastObservedScrollLeftRef.current;
+		lastObservedScrollLeftRef.current = scrollLeft;
+		if (previousScrollLeft === null || previousScrollLeft === scrollLeft) {
+			return;
+		}
+		if (!isPlaying) return;
+
+		const pendingScrollLeft = pendingAutoFollowScrollLeftRef.current;
+		if (
+			pendingScrollLeft !== null &&
+			Math.abs(scrollLeft - pendingScrollLeft) <=
+				AUTO_FOLLOW_SCROLL_MATCH_EPSILON
+		) {
+			pendingAutoFollowScrollLeftRef.current = null;
+			return;
+		}
+
+		manualScrollSuppressUntilRef.current =
+			Date.now() + PLAYHEAD_FOLLOW_MANUAL_DEBOUNCE_MS;
+	}, [isPlaying, scrollLeft]);
+
+	// 播放时播放头不在可视范围内才跳转，让播放头回到内容区左侧
+	useEffect(() => {
+		if (!isPlaying) return;
+		if (Date.now() < manualScrollSuppressUntilRef.current) return;
+
+		const safeRatio = Number.isFinite(ratio) ? ratio : 0;
+		const visibleWidth = Number.isFinite(rulerWidth) ? Math.max(0, rulerWidth) : 0;
+		if (safeRatio <= 0 || visibleWidth <= 0) return;
+
+		const playheadX = timelinePaddingLeft + currentTime * safeRatio - scrollLeft;
+		const isPlayheadOutOfView = playheadX < 0 || playheadX > visibleWidth;
+		if (!Number.isFinite(playheadX) || !isPlayheadOutOfView) {
+			return;
+		}
+
+		const maxScrollLeft = Number.isFinite(timelineMaxScrollLeft)
+			? Math.max(0, timelineMaxScrollLeft)
+			: 0;
+		const targetScrollLeft = Math.min(
+			Math.max(0, currentTime * safeRatio + timelinePaddingLeft),
+			maxScrollLeft,
+		);
+		if (
+			Math.abs(targetScrollLeft - scrollLeft) <= AUTO_FOLLOW_SCROLL_MATCH_EPSILON
+		) {
+			return;
+		}
+
+		pendingAutoFollowScrollLeftRef.current = targetScrollLeft;
+		setScrollLeft(targetScrollLeft);
+	}, [
+		currentTime,
+		isPlaying,
+		ratio,
+		rulerWidth,
+		scrollLeft,
+		setScrollLeft,
+		timelineMaxScrollLeft,
+		timelinePaddingLeft,
+	]);
 
 	// 使用原生事件监听器来正确处理滚动，防止触发窗口滚动
 	useEffect(() => {
