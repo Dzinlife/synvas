@@ -1,12 +1,12 @@
 /**
- * 素材库组件
- * 用于展示可拖拽的素材（图片、视频等）
+ * Focus Scene 的 DSL 组件库
+ * 用于展示可拖拽的 DSL 组件（图片、视频、滤镜、转场等）
  */
 
 import type {
 	ElementType,
-	TimelineElement,
 	TimelineAsset,
+	TimelineElement,
 	TrackRole,
 } from "core/dsl/types";
 import { isAssetBackedElementType } from "core/dsl/types";
@@ -16,35 +16,35 @@ import { useCallback } from "react";
 import { componentRegistry } from "@/dsl/model/componentRegistry";
 import { createTransformMeta } from "@/dsl/transform";
 import {
-	clampFrame,
-	framesToTimecode,
-	secondsToFrames,
-} from "@/utils/timecode";
-import {
 	useAttachments,
 	useFps,
 	useRippleEditing,
 	useTimelineStore,
-} from "./contexts/TimelineContext";
-import { useProjectAssets } from "@/projects/useProjectAssets";
+} from "@/editor/contexts/TimelineContext";
 import {
 	type MaterialDndContext,
 	type MaterialDndItem,
 	useMaterialDnd,
 	useMaterialDndContext,
-} from "./drag/materialDnd";
-import { finalizeTimelineElements } from "./utils/mainTrackMagnet";
-import { buildTimelineMeta } from "./utils/timelineTime";
+} from "@/editor/drag/materialDnd";
+import { finalizeTimelineElements } from "@/editor/utils/mainTrackMagnet";
+import { buildTimelineMeta } from "@/editor/utils/timelineTime";
 import {
 	findAvailableTrack,
 	getElementRole,
 	getStoredTrackAssignments,
 	getTrackCount,
-} from "./utils/trackAssignment";
+} from "@/editor/utils/trackAssignment";
 import {
 	getTransitionDurationParts,
 	isTransitionElement,
-} from "./utils/transitions";
+} from "@/editor/utils/transitions";
+import { useProjectAssets } from "@/projects/useProjectAssets";
+import {
+	clampFrame,
+	framesToTimecode,
+	secondsToFrames,
+} from "@/utils/timecode";
 
 // ============================================================================
 // 类型定义
@@ -399,7 +399,7 @@ const resolveTransitionDrop = (
 // 素材库面板组件
 // ============================================================================
 
-const MaterialLibrary: React.FC = () => {
+const CanvasDslLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
 	const currentTime = useTimelineStore((state) => state.currentTime);
@@ -489,9 +489,7 @@ const MaterialLibrary: React.FC = () => {
 					typeof nextProps.uri === "string" ? nextProps.uri : null;
 				const sourceKind = resolveSourceKindByElementType(item.elementType);
 				const assetId =
-					isAssetBackedElementType(item.elementType) &&
-					sourceUri &&
-					sourceKind
+					isAssetBackedElementType(item.elementType) && sourceUri && sourceKind
 						? ensureProjectAssetByUri({
 								uri: sourceUri,
 								kind: sourceKind,
@@ -623,9 +621,7 @@ const MaterialLibrary: React.FC = () => {
 					typeof nextProps.uri === "string" ? nextProps.uri : null;
 				const sourceKind = resolveSourceKindByElementType(item.elementType);
 				const assetId =
-					isAssetBackedElementType(item.elementType) &&
-					sourceUri &&
-					sourceKind
+					isAssetBackedElementType(item.elementType) && sourceUri && sourceKind
 						? ensureProjectAssetByUri({
 								uri: sourceUri,
 								kind: sourceKind,
@@ -685,5 +681,5 @@ const MaterialLibrary: React.FC = () => {
 	);
 };
 
-export default MaterialLibrary;
+export default CanvasDslLibrary;
 export type { MaterialItem };

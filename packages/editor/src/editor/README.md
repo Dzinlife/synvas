@@ -1,13 +1,13 @@
 # Editor 模块
 
-编辑器核心模块，组合时间线、预览画布、素材库和元素设置面板。
+编辑器核心模块，组合时间线、预览画布、全局侧边栏和元素设置面板。
 
 ## 主要能力
 
 - 多轨时间线编辑：拖拽、裁剪、缩放与滚动。
 - 预览画布：Skia 渲染 + Konva 交互（选中、变换、框选、缩放/平移）。
 - 视图布局：上半区 `Preview/Canvas` 切换，下半区 `TimelineEditor` 常驻。
-- 拖拽体系：素材库、Timeline、Canvas 之间互拖，包含自动滚动与落点提示。
+- 拖拽体系：全局侧边栏 DSL 组件、Timeline、Canvas 之间互拖，包含自动滚动与落点提示。
 - 轨道策略：自动轨道分配、吸附、联动、主轨波纹编辑。
 - 时间线数据：JSON 校验/加载/保存，支持时间码同步。
 
@@ -59,10 +59,9 @@ editor/
 ├── TimelineEditor.tsx    # 时间线主视图
 ├── PreviewEditor.tsx     # 预览画布主视图
 ├── ViewportHost.tsx      # 预览/画布切换 + 常驻时间线容器
-├── MaterialLibrary.tsx   # 素材库面板
 ├── index.tsx             # 组合入口
 ├── timeline.json         # 示例时间线数据（assetId 模型）
-└── ../studio/canvas/     # Canvas 工作区与资产池
+└── ../studio/canvas/     # Canvas 工作区、节点导航与 DSL 侧边栏
 ```
 
 ## 核心组件
@@ -79,14 +78,10 @@ editor/
 - Konva 负责选择框、变换控件、辅助线渲染。
 - 支持缩放/平移、框选、多选与拖拽变换。
 
-### MaterialLibrary.tsx
-
-- 素材卡片可拖拽到时间线或预览画布。
-- 支持直接拖拽到 Canvas 工作区形成资产引用。
-
 ### CanvasWorkspace.tsx
 
-- 维护 Canvas 资产引用列表（不持久化 graph 节点结构）。
+- 提供全局侧边栏：大画布模式用于 Node 导航，Focus Scene 模式提供 Node/DSL 双 tab。
+- DSL tab 的组件卡片可拖拽到时间线或预览画布。
 - 支持与 Timeline 双向拖拽（timeline -> canvas / canvas -> timeline）。
 
 ### ElementSettingsPanel.tsx

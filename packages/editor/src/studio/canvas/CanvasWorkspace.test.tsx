@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import type { StudioProject } from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
@@ -25,19 +31,25 @@ vi.mock("./FocusSceneKonvaLayer", () => ({
 vi.mock("@/editor/components/SceneTimelineDrawer", () => ({
 	SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT: 320,
 	default: ({ onExitFocus }: { onExitFocus: () => void }) => (
-		<button type="button" data-testid="scene-timeline-drawer" onClick={onExitFocus}>
+		<button
+			type="button"
+			data-testid="scene-timeline-drawer"
+			onClick={onExitFocus}
+		>
 			drawer
 		</button>
 	),
 }));
 
-vi.mock("@/editor/MaterialLibrary", () => ({
-	default: () => <div data-testid="material-library-content" />,
+vi.mock("@/studio/canvas/sidebar/CanvasDslLibrary", () => ({
+	default: () => <div data-testid="canvas-dsl-library" />,
 }));
 
 vi.mock("@/studio/canvas/node-system/registry", () => {
 	const GenericSkiaRenderer = () => null;
-	const createToolbar = (type: string) => () => <div data-testid={`node-toolbar-${type}`} />;
+	const createToolbar = (type: string) => () => (
+		<div data-testid={`node-toolbar-${type}`} />
+	);
 	const SceneDrawer = ({ onClose }: { onClose: () => void }) => (
 		<button type="button" data-testid="scene-timeline-drawer" onClick={onClose}>
 			drawer
@@ -92,7 +104,13 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					kind: "video",
 					name: file.name,
 				});
-				return { type: "video", assetId, name: file.name, width: 200, height: 120 };
+				return {
+					type: "video",
+					assetId,
+					name: file.name,
+					width: 200,
+					height: 120,
+				};
 			},
 		},
 		audio: {
@@ -118,7 +136,13 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					kind: "audio",
 					name: file.name,
 				});
-				return { type: "audio", assetId, name: file.name, width: 180, height: 80 };
+				return {
+					type: "audio",
+					assetId,
+					name: file.name,
+					width: 180,
+					height: 80,
+				};
 			},
 		},
 		image: {
@@ -144,7 +168,13 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					kind: "image",
 					name: file.name,
 				});
-				return { type: "image", assetId, name: file.name, width: 240, height: 140 };
+				return {
+					type: "image",
+					assetId,
+					name: file.name,
+					width: 240,
+					height: 140,
+				};
 			},
 		},
 		text: {
@@ -157,7 +187,8 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 	};
 	return {
 		canvasNodeDefinitionList: Object.values(definitions),
-		getCanvasNodeDefinition: (type: keyof typeof definitions) => definitions[type],
+		getCanvasNodeDefinition: (type: keyof typeof definitions) =>
+			definitions[type],
 	};
 });
 
@@ -220,6 +251,51 @@ const createProject = (): StudioProject => ({
 				createdAt: 1,
 				updatedAt: 1,
 			},
+			{
+				id: "node-scene-2",
+				type: "scene",
+				sceneId: "scene-2",
+				name: "Scene 2",
+				x: 1600,
+				y: 80,
+				width: 960,
+				height: 540,
+				zIndex: 1,
+				locked: false,
+				hidden: false,
+				createdAt: 2,
+				updatedAt: 2,
+			},
+			{
+				id: "node-video-offscreen",
+				type: "video",
+				assetId: "asset-scene",
+				name: "Offscreen Video",
+				x: 2200,
+				y: 160,
+				width: 320,
+				height: 180,
+				zIndex: 2,
+				locked: false,
+				hidden: false,
+				createdAt: 2,
+				updatedAt: 2,
+			},
+			{
+				id: "node-image-hidden",
+				type: "image",
+				assetId: "asset-scene",
+				name: "Hidden Image",
+				x: -260,
+				y: 40,
+				width: 320,
+				height: 180,
+				zIndex: 3,
+				locked: false,
+				hidden: true,
+				createdAt: 3,
+				updatedAt: 3,
+			},
 		],
 	},
 	scenes: {
@@ -229,6 +305,39 @@ const createProject = (): StudioProject => ({
 			posterFrame: 0,
 			createdAt: 1,
 			updatedAt: 1,
+			timeline: {
+				fps: 30,
+				canvas: { width: 1920, height: 1080 },
+				settings: {
+					snapEnabled: true,
+					autoAttach: true,
+					rippleEditingEnabled: false,
+					previewAxisEnabled: true,
+					audio: {
+						exportSampleRate: 48000,
+						exportBlockSize: 512,
+						masterGainDb: 0,
+						compressor: {
+							enabled: true,
+							thresholdDb: -12,
+							ratio: 4,
+							kneeDb: 6,
+							attackMs: 10,
+							releaseMs: 80,
+							makeupGainDb: 0,
+						},
+					},
+				},
+				tracks: [],
+				elements: [],
+			},
+		},
+		"scene-2": {
+			id: "scene-2",
+			name: "Scene 2",
+			posterFrame: 0,
+			createdAt: 2,
+			updatedAt: 2,
 			timeline: {
 				fps: 30,
 				canvas: { width: 1920, height: 1080 },
@@ -306,7 +415,25 @@ const doubleClickNodeAt = (clientX: number, clientY: number): void => {
 	});
 };
 
+const clickSidebarNode = (nodeId: string): void => {
+	fireEvent.click(screen.getByTestId(`canvas-sidebar-node-item-${nodeId}`));
+};
+
 describe("CanvasWorkspace", () => {
+	it("全局侧边栏展示所有节点并按 zIndex/createdAt 排序", () => {
+		render(<CanvasWorkspace />);
+		const nodeItems = screen.getAllByTestId(/canvas-sidebar-node-item-/);
+		const order = nodeItems.map((item) => item.getAttribute("data-node-id"));
+		expect(order).toEqual([
+			"node-image-hidden",
+			"node-video-offscreen",
+			"node-scene-2",
+			"node-video-1",
+			"node-scene-1",
+		]);
+		expect(screen.getByText("隐藏")).toBeTruthy();
+	});
+
 	it("active node 切换会更新顶部 toolbar", () => {
 		render(<CanvasWorkspace />);
 		expect(screen.getByTestId("node-toolbar-scene")).toBeTruthy();
@@ -322,7 +449,9 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 
 		clickNodeAt(300, 160);
-		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.focusedNodeId,
+		).toBeNull();
 		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
 			"scene-1",
 		);
@@ -338,12 +467,71 @@ describe("CanvasWorkspace", () => {
 		expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
 	});
 
+	it("点击侧边栏 scene 节点会同步 activeScene", () => {
+		render(<CanvasWorkspace />);
+		clickSidebarNode("node-scene-2");
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-scene-2",
+		);
+		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
+			"scene-2",
+		);
+	});
+
+	it("点击 viewport 外节点只平移 camera，不改变 zoom", () => {
+		render(<CanvasWorkspace />);
+		const before = useProjectStore.getState().currentProject?.ui.camera;
+		clickSidebarNode("node-video-offscreen");
+		const after = useProjectStore.getState().currentProject?.ui.camera;
+		expect(before).toBeTruthy();
+		expect(after).toBeTruthy();
+		if (!before || !after) return;
+		expect(after.zoom).toBe(before.zoom);
+		expect(after.x).not.toBe(before.x);
+	});
+
+	it("点击 viewport 内节点不会触发 camera 平移", () => {
+		render(<CanvasWorkspace />);
+		const before = useProjectStore.getState().currentProject?.ui.camera;
+		clickSidebarNode("node-video-1");
+		const after = useProjectStore.getState().currentProject?.ui.camera;
+		expect(before).toBeTruthy();
+		expect(after).toBeTruthy();
+		if (!before || !after) return;
+		expect(after.zoom).toBe(before.zoom);
+		expect(after.x).toBe(before.x);
+		expect(after.y).toBe(before.y);
+	});
+
+	it("Focus 模式默认 DSL tab，Node tab 仅占位禁用", () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		expect(screen.getByTestId("canvas-sidebar-tab-dsl")).toBeTruthy();
+		expect(screen.getByTestId("canvas-dsl-library")).toBeTruthy();
+
+		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-nodes"));
+		expect(screen.getByText("拖拽 node asset 到时间线（待实现）")).toBeTruthy();
+		const beforeUi = useProjectStore.getState().currentProject?.ui;
+		const nodeButton = screen.getByTestId(
+			"canvas-sidebar-node-item-node-video-1",
+		);
+		expect(nodeButton.getAttribute("disabled")).not.toBeNull();
+		fireEvent.click(nodeButton);
+		const afterUi = useProjectStore.getState().currentProject?.ui;
+		expect(beforeUi).toBeTruthy();
+		expect(afterUi).toBeTruthy();
+		expect(afterUi?.activeNodeId).toBe(beforeUi?.activeNodeId);
+		expect(afterUi?.camera).toEqual(beforeUi?.camera);
+	});
+
 	it("双击非 focusable 节点仅调整 camera，不进入 focus", () => {
 		render(<CanvasWorkspace />);
 		const beforeCamera = useProjectStore.getState().currentProject?.ui.camera;
 		doubleClickNodeAt(300, 160);
 		const afterCamera = useProjectStore.getState().currentProject?.ui.camera;
-		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.focusedNodeId,
+		).toBeNull();
 		expect(screen.queryByTestId("focus-scene-konva-layer")).toBeNull();
 		expect(afterCamera).toBeTruthy();
 		expect(beforeCamera).toBeTruthy();
@@ -394,7 +582,8 @@ describe("CanvasWorkspace", () => {
 		fireEvent.mouseUp(document);
 
 		await waitFor(() => {
-			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			const zoom =
+				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 			expect(zoom).toBeLessThan(1);
 		});
 		unsubscribe();
@@ -453,10 +642,14 @@ describe("CanvasWorkspace", () => {
 
 		const project = useProjectStore.getState().currentProject;
 		const newVideo = project?.canvas.nodes.find(
-			(node) => node.type === "video" && node.id !== "node-video-1",
+			(node) => node.type === "video" && node.name === "drop-video.mp4",
 		);
-		const newAudio = project?.canvas.nodes.find((node) => node.type === "audio");
-		const newImage = project?.canvas.nodes.find((node) => node.type === "image");
+		const newAudio = project?.canvas.nodes.find(
+			(node) => node.type === "audio" && node.name === "drop-audio.mp3",
+		);
+		const newImage = project?.canvas.nodes.find(
+			(node) => node.type === "image" && node.name === "drop-image.png",
+		);
 		expect(newVideo).toBeTruthy();
 		expect(newAudio).toBeTruthy();
 		expect(newImage).toBeTruthy();
@@ -468,7 +661,9 @@ describe("CanvasWorkspace", () => {
 		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
 			"scene-1",
 		);
-		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.focusedNodeId,
+		).toBeNull();
 	});
 
 	it("重叠节点命中优先 zIndex 更高者", () => {
@@ -514,7 +709,9 @@ describe("CanvasWorkspace", () => {
 		});
 
 		const project = useProjectStore.getState().currentProject;
-		const node = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
 		expect(node?.x).toBe(240);
 		expect(node?.y).toBe(120);
 		expect(project?.ui.activeNodeId).toBe("node-video-1");
