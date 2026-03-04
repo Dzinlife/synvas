@@ -1,9 +1,9 @@
 import { lazy, Suspense, useMemo } from "react";
-import Header from "@/components/Header";
-import { createEditorRuntime } from "@/editor/runtime/createEditorRuntime";
-import { EditorRuntimeProvider } from "@/editor/runtime/EditorRuntimeProvider";
+import Header from "../components/Header";
+import { createEditorRuntime } from "../scene-editor/runtime/createEditorRuntime";
+import { EditorRuntimeProvider } from "../scene-editor/runtime/EditorRuntimeProvider";
 
-const Editor = lazy(() => import("@/editor/index"));
+const Editor = lazy(() => import("../scene-editor/index"));
 
 export default function EditorApp() {
 	const runtime = useMemo(() => createEditorRuntime(), []);

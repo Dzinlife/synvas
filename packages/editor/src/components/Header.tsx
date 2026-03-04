@@ -12,7 +12,7 @@ import {
 import {
 	useStudioRuntimeManager,
 	useTimelineStoreApi,
-} from "@/editor/runtime/EditorRuntimeProvider";
+} from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 

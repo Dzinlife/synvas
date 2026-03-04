@@ -1,4 +1,4 @@
-import { TimelineElement } from "../../dsl/types";
+import { TimelineElement } from "../../element/types";
 
 /**
  * 层叠关联关系

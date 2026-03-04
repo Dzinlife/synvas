@@ -1,4 +1,4 @@
-import type { TimelineAsset } from "core/dsl/types";
+import type { TimelineAsset } from "core/element/types";
 import { useProjectStore } from "./projectStore";
 
 const EMPTY_ASSETS: TimelineAsset[] = [];

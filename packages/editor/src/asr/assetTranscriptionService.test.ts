@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { TimelineAsset } from "core/dsl/types";
+import type { TimelineAsset } from "core/element/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AsrClient } from "./AsrContext";
 import type { TranscriptSegment } from "./types";
@@ -13,11 +13,11 @@ vi.mock("./opfsAudio", () => ({
 	readAudioMetadata: vi.fn(),
 }));
 
-vi.mock("@/editor/utils/externalVideo", () => ({
+vi.mock("@/scene-editor/utils/externalVideo", () => ({
 	readVideoMetadata: vi.fn(),
 }));
 
-import { readVideoMetadata } from "@/editor/utils/externalVideo";
+import { readVideoMetadata } from "@/scene-editor/utils/externalVideo";
 import { readAudioMetadata } from "./opfsAudio";
 import { resolveAssetMediaFile } from "./assetMediaFile";
 

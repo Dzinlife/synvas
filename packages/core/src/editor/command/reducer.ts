@@ -1,4 +1,4 @@
-import type { TimelineElement } from "../../dsl/types";
+import type { TimelineElement } from "../../element/types";
 import { buildSplitElements } from "./split";
 import { applyMoveCommand, type CommandRoleOptions } from "./move";
 import type {

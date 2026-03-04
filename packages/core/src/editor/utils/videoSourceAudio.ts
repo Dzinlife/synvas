@@ -1,4 +1,4 @@
-import type { TimelineElement } from "../../dsl/types";
+import type { TimelineElement } from "../../element/types";
 
 export const isVideoSourceAudioMuted = (
 	element: TimelineElement | undefined | null,

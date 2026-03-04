@@ -1,4 +1,4 @@
-import type { TimelineMeta } from "../../dsl/types";
+import type { TimelineMeta } from "../../element/types";
 import { framesToSeconds } from "../../utils/timecode";
 import type { ActiveTransitionFrameState } from "../preview/transitionFrameState";
 

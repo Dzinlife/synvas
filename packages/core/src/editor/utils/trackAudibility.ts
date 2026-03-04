@@ -1,4 +1,4 @@
-import type { TimelineMeta } from "../../dsl/types";
+import type { TimelineMeta } from "../../element/types";
 import type { TimelineTrack } from "../timeline/types";
 import {
 	type AudioTrackControlStateMap,

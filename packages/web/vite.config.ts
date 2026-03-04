@@ -14,9 +14,7 @@ import viteTsConfigPaths from "vite-tsconfig-paths";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(({ command, mode }) => {
-	const isDev = command === "serve" || mode === "development";
-
+export default defineConfig(() => {
 	return {
 		plugins: [
 			// WASM 支持插件必须在最前面（用于 canvaskit-wasm）

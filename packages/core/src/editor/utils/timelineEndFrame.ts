@@ -1,4 +1,4 @@
-import type { TimelineElement } from "../../dsl/types";
+import type { TimelineElement } from "../../element/types";
 
 export const resolveTimelineEndFrame = (elements: TimelineElement[]): number => {
 	return Math.max(

@@ -1,7 +1,7 @@
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import { useMemo } from "react";
 import { Canvas, Group, Rect } from "react-skia-lite";
-import { useStudioRuntimeManager } from "@/editor/runtime/EditorRuntimeProvider";
+import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { getCanvasNodeDefinition } from "./node-system/registry";
 
 interface InfiniteSkiaCanvasProps {

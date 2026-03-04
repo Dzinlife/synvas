@@ -1,4 +1,4 @@
-import type { ClipMeta, TimelineElement } from "../../dsl/types";
+import type { ClipMeta, TimelineElement } from "../../element/types";
 
 export const CLIP_GAIN_DB_MIN = -48;
 export const CLIP_GAIN_DB_MAX = 12;

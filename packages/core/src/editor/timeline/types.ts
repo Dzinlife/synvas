@@ -2,7 +2,7 @@
  * 时间线拖拽系统类型定义
  */
 
-import { TimelineElement, TrackRole } from "../../dsl/types";
+import { TimelineElement, TrackRole } from "../../element/types";
 
 // ============================================================================
 // 轨道系统类型

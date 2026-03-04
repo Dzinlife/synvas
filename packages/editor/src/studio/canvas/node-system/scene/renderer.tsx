@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/dsl/types";
+import type { TimelineElement } from "core/element/types";
 import {
 	toDisplayTimeFromFrameIndex,
 	toFrameIndex,
@@ -8,9 +8,9 @@ import { schedulePrecompileTask } from "core/editor/preview/framePrecompileSched
 import type { SceneNode } from "core/studio/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Picture, Rect, type SkPicture } from "react-skia-lite";
-import { buildSkiaFrameSnapshot } from "@/editor/preview/buildSkiaTree";
-import { EditorRuntimeProvider } from "@/editor/runtime/EditorRuntimeProvider";
-import type { EditorRuntime, TimelineRuntime } from "@/editor/runtime/types";
+import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
+import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type { EditorRuntime, TimelineRuntime } from "@/scene-editor/runtime/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import type { CanvasNodeSkiaRenderProps } from "../types";
 

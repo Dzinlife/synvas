@@ -6,8 +6,8 @@ import type {
 	TrackRole,
 	TransformMeta,
 	TransitionMeta,
-} from "../dsl/types";
-import { ELEMENT_TYPE_VALUES, isAssetBackedElementType } from "../dsl/types";
+} from "../element/types";
+import { ELEMENT_TYPE_VALUES, isAssetBackedElementType } from "../element/types";
 import { framesToTimecode, timecodeToFrames } from "../utils/timecode";
 import {
 	DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,

@@ -1,5 +1,5 @@
 import { type TimelineJSON } from "core/editor/timelineLoader";
-import type { TimelineAsset } from "core/dsl/types";
+import type { TimelineAsset } from "core/element/types";
 import { parseStudioProject } from "core/studio/schema";
 import type {
 	CanvasNode,

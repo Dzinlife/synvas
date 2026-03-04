@@ -3,7 +3,7 @@ import {
 	useActiveTimelineRuntime,
 	useStudioRuntimeManager,
 	useTimelineStoreApi,
-} from "@/editor/runtime/EditorRuntimeProvider";
+} from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import { usePlaybackOwnerController } from "@/studio/scene/usePlaybackOwnerController";
 

@@ -1,4 +1,4 @@
-import { TimelineElement, TimelineMeta, TrackRole } from "../../dsl/types";
+import { TimelineElement, TimelineMeta, TrackRole } from "../../element/types";
 import { clampFrame, framesToTimecode } from "../../utils/timecode";
 
 export function updateTimelineRange(

@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { getOwner, releaseOwner, requestOwner } from "@/audio/owner";
-import { useStudioRuntimeManager } from "@/editor/runtime/EditorRuntimeProvider";
-import type { StudioRuntimeManager, TimelineRef } from "@/editor/runtime/types";
+import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type { StudioRuntimeManager, TimelineRef } from "@/scene-editor/runtime/types";
 import { usePlaybackOwnerStore } from "./playbackOwnerStore";
 import {
 	buildTimelineRuntimeIdFromRef,

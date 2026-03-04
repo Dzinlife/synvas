@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import type { TimelineAsset } from "core/dsl/types";
+import type { TimelineAsset } from "core/element/types";
 import type { ImageCanvasNode } from "core/studio/types";
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

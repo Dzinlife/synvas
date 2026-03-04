@@ -9,7 +9,7 @@ import {
 	StreamTarget,
 } from "mediabunny";
 import { JsiSkSurface } from "react-skia-lite";
-import type { TimelineElement } from "../dsl/types";
+import type { TimelineElement } from "../element/types";
 import { resolveTimelineElementClipGainLinear } from "./audio/clipGain";
 import { renderMixedAudioForExport } from "./audio/dsp/exportRenderer";
 import type { PartialExportAudioDspSettings } from "./audio/dsp/types";

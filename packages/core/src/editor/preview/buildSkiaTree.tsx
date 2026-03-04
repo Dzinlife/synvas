@@ -1,11 +1,11 @@
 import React from "react";
 import { Fill, Group, Skia, type SkPicture } from "react-skia-lite";
-import { transformPositionToCanvasPoint } from "../../dsl/position";
+import { transformPositionToCanvasPoint } from "../../element/position";
 import type {
 	ComponentModelStore,
 	RendererPrepareFrameContext,
-} from "../../dsl/model/types";
-import type { TimelineElement } from "../../dsl/types";
+} from "../../element/model/types";
+import type { TimelineElement } from "../../element/types";
 import type { TimelineTrack } from "../timeline/types";
 import {
 	type ActiveTransitionFrameState,

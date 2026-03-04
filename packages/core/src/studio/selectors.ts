@@ -1,4 +1,4 @@
-import type { TimelineElement } from "../dsl/types";
+import type { TimelineElement } from "../element/types";
 import type { CanvasNode, SceneDocument, StudioProject } from "./types";
 
 export const selectActiveSceneId = (project: StudioProject): string | null =>

@@ -1,8 +1,8 @@
 import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { CanvasNode, SceneDocument } from "core/studio/types";
 import { create } from "zustand";
-import type { TimelineStoreApi } from "@/editor/contexts/TimelineContext";
-import type { StudioRuntimeManager, TimelineRef } from "@/editor/runtime/types";
+import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
+import type { StudioRuntimeManager, TimelineRef } from "@/scene-editor/runtime/types";
 import { useProjectStore } from "@/projects/projectStore";
 import {
 	toSceneTimelineRef,

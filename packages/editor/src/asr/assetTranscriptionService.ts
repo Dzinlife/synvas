@@ -1,5 +1,5 @@
-import type { TimelineAsset } from "core/dsl/types";
-import { readVideoMetadata } from "@/editor/utils/externalVideo";
+import type { TimelineAsset } from "core/element/types";
+import { readVideoMetadata } from "@/scene-editor/utils/externalVideo";
 import type { AsrClient } from "./AsrContext";
 import { resolveAssetMediaFile } from "./assetMediaFile";
 import { readAudioMetadata } from "./opfsAudio";

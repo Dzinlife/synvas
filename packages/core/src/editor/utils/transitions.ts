@@ -1,4 +1,4 @@
-import { TimelineElement } from "../../dsl/types";
+import { TimelineElement } from "../../element/types";
 import { updateElementTime } from "./timelineTime";
 import {
 	getElementRole,

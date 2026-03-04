@@ -1,4 +1,4 @@
-import type { TimelineAsset } from "core/dsl/types";
+import type { TimelineAsset } from "core/element/types";
 import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
 
 const OPFS_PREFIX = "opfs://";

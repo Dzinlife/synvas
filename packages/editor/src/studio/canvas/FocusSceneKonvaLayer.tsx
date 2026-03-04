@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/dsl/types";
+import type { TimelineElement } from "core/element/types";
 import type { SceneNode } from "core/studio/types";
 import type Konva from "konva";
 import type React from "react";
@@ -10,17 +10,17 @@ import {
 	Stage,
 	Transformer,
 } from "react-konva";
-import { transformMetaToRenderLayout } from "@/dsl/layout";
-import { useTimelineStore, useTracks } from "@/editor/contexts/TimelineContext";
-import { buildKonvaTree } from "@/editor/preview/buildSkiaTree";
-import { LabelLayer } from "@/editor/preview/LabelLayer";
-import { usePreviewInteractions } from "@/editor/preview/usePreviewInteractions";
+import { transformMetaToRenderLayout } from "@/element/layout";
+import { useTimelineStore, useTracks } from "@/scene-editor/contexts/TimelineContext";
+import { buildKonvaTree } from "@/scene-editor/preview/buildSkiaTree";
+import { LabelLayer } from "@/scene-editor/preview/LabelLayer";
+import { usePreviewInteractions } from "@/scene-editor/preview/usePreviewInteractions";
 import {
 	EditorRuntimeProvider,
 	useStudioRuntimeManager,
 	useTimelineStoreApi,
-} from "@/editor/runtime/EditorRuntimeProvider";
-import type { EditorRuntime, TimelineRuntime } from "@/editor/runtime/types";
+} from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type { EditorRuntime, TimelineRuntime } from "@/scene-editor/runtime/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 
 interface FocusSceneKonvaLayerProps {

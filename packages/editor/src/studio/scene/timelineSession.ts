@@ -6,8 +6,8 @@ import {
 import type {
 	TimelineStore,
 	TimelineStoreApi,
-} from "@/editor/contexts/TimelineContext";
-import { reconcileTracks } from "@/editor/utils/trackState";
+} from "@/scene-editor/contexts/TimelineContext";
+import { reconcileTracks } from "@/scene-editor/utils/trackState";
 import { clampFrame } from "@/utils/timecode";
 
 const cloneAudioSettings = (audio: TimelineStore["audioSettings"]) => ({

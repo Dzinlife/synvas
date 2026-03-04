@@ -1,4 +1,4 @@
-import type { TimelineAsset } from "../dsl/types";
+import type { TimelineAsset } from "../element/types";
 import type { TimelineJSON } from "../editor/timelineLoader";
 
 export type CanvasNodeType = "scene" | "video" | "audio" | "text" | "image";

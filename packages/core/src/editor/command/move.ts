@@ -1,4 +1,4 @@
-import type { TrackRole } from "../../dsl/types";
+import type { TrackRole } from "../../element/types";
 import type { DropTarget, TimelineTrack } from "../timeline/types";
 import { findAttachments } from "../utils/attachments";
 import {

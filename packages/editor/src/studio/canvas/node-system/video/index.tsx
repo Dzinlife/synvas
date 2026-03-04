@@ -3,7 +3,7 @@ import {
 	getFallbackVideoMetadata,
 	isVideoFile,
 	readVideoMetadata,
-} from "@/editor/utils/externalVideo";
+} from "@/scene-editor/utils/externalVideo";
 import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
 import { VideoNodeSkiaRenderer } from "./renderer";

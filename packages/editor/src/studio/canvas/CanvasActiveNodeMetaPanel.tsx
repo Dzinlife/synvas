@@ -1,4 +1,4 @@
-import type { TimelineAsset } from "core/dsl/types";
+import type { TimelineAsset } from "core/element/types";
 import type { CanvasNode, SceneDocument } from "core/studio/types";
 import type React from "react";
 import { useMemo } from "react";

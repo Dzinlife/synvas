@@ -1,7 +1,7 @@
-import type { TimelineAsset } from "core/dsl/types";
+import type { TimelineAsset } from "core/element/types";
 import type { CanvasNode, SceneDocument, StudioProject } from "core/studio/types";
 import type React from "react";
-import type { StudioRuntimeManager } from "@/editor/runtime/types";
+import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { CanvasNodeCreateInput } from "@/projects/projectStore";
 
 export interface CanvasNodeSkiaRenderProps<TNode extends CanvasNode = CanvasNode> {

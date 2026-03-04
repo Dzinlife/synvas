@@ -1,6 +1,6 @@
 import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { StudioProject } from "core/studio/types";
-import type { TimelineRef, TimelineRuntimeId } from "@/editor/runtime/types";
+import type { TimelineRef, TimelineRuntimeId } from "@/scene-editor/runtime/types";
 
 interface TimelineWriteOptions {
 	recordHistory?: boolean;

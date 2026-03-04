@@ -7,11 +7,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createEditorRuntimeWrapper,
 	createTestEditorRuntime,
-} from "@/editor/runtime/testUtils";
+} from "@/scene-editor/runtime/testUtils";
 import type {
 	EditorRuntime,
 	StudioRuntimeManager,
-} from "@/editor/runtime/types";
+} from "@/scene-editor/runtime/types";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import { usePlaybackOwnerStore } from "./playbackOwnerStore";

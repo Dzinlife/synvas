@@ -2,10 +2,10 @@ import type { CanvasNode } from "core/studio/types";
 import type React from "react";
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import CanvasDslLibrary from "./CanvasDslLibrary";
+import CanvasElementLibrary from "./CanvasElementLibrary";
 
 export type CanvasSidebarMode = "canvas" | "focus";
-export type CanvasSidebarTab = "nodes" | "dsl";
+export type CanvasSidebarTab = "nodes" | "element";
 
 interface CanvasSidebarProps {
 	mode: CanvasSidebarMode;
@@ -118,7 +118,7 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 	const visibleTab = showTabs ? activeTab : "nodes";
 	const title = useMemo(() => {
 		if (!showTabs) return "Node 导航";
-		return visibleTab === "dsl" ? "DSL 组件" : "Node 导航";
+		return visibleTab === "element" ? "元素组件" : "Node 导航";
 	}, [showTabs, visibleTab]);
 
 	return (
@@ -157,16 +157,16 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 						</button>
 						<button
 							type="button"
-							data-testid="canvas-sidebar-tab-dsl"
-							onClick={() => onTabChange("dsl")}
+							data-testid="canvas-sidebar-tab-element"
+							onClick={() => onTabChange("element")}
 							className={cn(
 								"h-7 flex-1 rounded px-2 text-xs",
-								activeTab === "dsl"
+								activeTab === "element"
 									? "bg-white/15 text-white"
 									: "text-neutral-300 hover:text-white",
 							)}
 						>
-							DSL
+							Element
 						</button>
 					</div>
 				</div>
@@ -181,7 +181,7 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 					/>
 				) : (
 					<div className="min-h-0 h-full overflow-y-auto">
-						<CanvasDslLibrary />
+						<CanvasElementLibrary />
 					</div>
 				)}
 			</div>

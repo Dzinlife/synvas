@@ -33,7 +33,7 @@ vi.mock("./FocusSceneKonvaLayer", () => ({
 	default: () => <div data-testid="focus-scene-konva-layer" />,
 }));
 
-vi.mock("@/editor/components/SceneTimelineDrawer", () => ({
+vi.mock("@/scene-editor/components/SceneTimelineDrawer", () => ({
 	SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT: 320,
 	default: ({ onExitFocus }: { onExitFocus: () => void }) => (
 		<button
@@ -46,8 +46,8 @@ vi.mock("@/editor/components/SceneTimelineDrawer", () => ({
 	),
 }));
 
-vi.mock("@/studio/canvas/sidebar/CanvasDslLibrary", () => ({
-	default: () => <div data-testid="canvas-dsl-library" />,
+vi.mock("@/studio/canvas/sidebar/CanvasElementLibrary", () => ({
+	default: () => <div data-testid="canvas-element-library" />,
 }));
 
 vi.mock("@/studio/canvas/node-system/registry", () => {
@@ -674,11 +674,11 @@ describe("CanvasWorkspace", () => {
 		expect(after.x !== before.x || after.y !== before.y).toBe(true);
 	});
 
-	it("Focus 模式默认 DSL tab，Node tab 仅占位禁用", () => {
+	it("Focus 模式默认 元素 tab，Node tab 仅占位禁用", () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(80, 80);
-		expect(screen.getByTestId("canvas-sidebar-tab-dsl")).toBeTruthy();
-		expect(screen.getByTestId("canvas-dsl-library")).toBeTruthy();
+		expect(screen.getByTestId("canvas-sidebar-tab-element")).toBeTruthy();
+		expect(screen.getByTestId("canvas-element-library")).toBeTruthy();
 
 		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-nodes"));
 		expect(screen.getByText("拖拽 node asset 到时间线（待实现）")).toBeTruthy();

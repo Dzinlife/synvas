@@ -1,20 +1,20 @@
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import type { TimelineAsset, TimelineElement } from "core/dsl/types";
+import type { TimelineAsset, TimelineElement } from "core/element/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
-import { createTransformMeta } from "@/dsl/transform";
+import { createTransformMeta } from "@/element/transform";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
-} from "@/editor/components/TimelineContextMenu";
-import { findAttachments } from "@/editor/utils/attachments";
-import { resolveExternalVideoUri } from "@/editor/utils/externalVideo";
-import { finalizeTimelineElements } from "@/editor/utils/mainTrackMagnet";
-import { buildTimelineMeta } from "@/editor/utils/timelineTime";
-import { EditorRuntimeContext } from "@/editor/runtime/EditorRuntimeProvider";
-import type { StudioRuntimeManager } from "@/editor/runtime/types";
+} from "@/scene-editor/components/TimelineContextMenu";
+import { findAttachments } from "@/scene-editor/utils/attachments";
+import { resolveExternalVideoUri } from "@/scene-editor/utils/externalVideo";
+import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
+import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
+import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
 import CanvasNodeDrawerShell, {
@@ -710,7 +710,7 @@ const CanvasWorkspace = () => {
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 
 	useEffect(() => {
-		setSidebarTab(focusedNodeId ? "dsl" : "nodes");
+		setSidebarTab(focusedNodeId ? "element" : "nodes");
 	}, [focusedNodeId]);
 
 	const drawerIdentity = resolvedDrawerTarget

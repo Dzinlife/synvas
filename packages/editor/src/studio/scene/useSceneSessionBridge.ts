@@ -3,8 +3,8 @@ import {
 	type TimelineJSON,
 } from "core/editor/timelineLoader";
 import { useEffect, useMemo } from "react";
-import type { TimelineStore } from "@/editor/contexts/TimelineContext";
-import { useStudioRuntimeManager } from "@/editor/runtime/EditorRuntimeProvider";
+import type { TimelineStore } from "@/scene-editor/contexts/TimelineContext";
+import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { useProjectStore } from "@/projects/projectStore";
 import {
 	type StudioHistoryEntry,

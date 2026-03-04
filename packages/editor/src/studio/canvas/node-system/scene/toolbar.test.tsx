@@ -6,11 +6,11 @@ import { __resetAudioOwnerForTests, getOwner } from "@/audio/owner";
 import {
 	createRuntimeProviderWrapper,
 	createTestEditorRuntime,
-} from "@/editor/runtime/testUtils";
+} from "@/scene-editor/runtime/testUtils";
 import type {
 	EditorRuntime,
 	StudioRuntimeManager,
-} from "@/editor/runtime/types";
+} from "@/scene-editor/runtime/types";
 import { usePlaybackOwnerStore } from "@/studio/scene/playbackOwnerStore";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { SceneNodeToolbar } from "./toolbar";

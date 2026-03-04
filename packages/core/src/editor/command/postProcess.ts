@@ -1,4 +1,4 @@
-import type { TimelineElement } from "../../dsl/types";
+import type { TimelineElement } from "../../element/types";
 import { findAttachments } from "../utils/attachments";
 import type { AudioTrackControlStateMap } from "../utils/audioTrackState";
 import { finalizeTimelineElements } from "../utils/mainTrackMagnet";

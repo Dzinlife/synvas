@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TimelineRef, TimelineRuntimeId } from "@/editor/runtime/types";
+import type { TimelineRef, TimelineRuntimeId } from "@/scene-editor/runtime/types";
 import { buildTimelineRuntimeIdFromRef } from "./timelineRefAdapter";
 
 interface PlaybackOwnerState {

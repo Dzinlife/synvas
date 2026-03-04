@@ -1,4 +1,4 @@
-import type { TimelineElement, TrackRole } from "../../dsl/types";
+import type { TimelineElement, TrackRole } from "../../element/types";
 import type { DropTarget, TimelineTrack } from "../timeline/types";
 
 /**

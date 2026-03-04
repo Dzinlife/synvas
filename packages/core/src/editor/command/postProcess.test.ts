@@ -1,4 +1,4 @@
-import type { TimelineElement } from "../../dsl/types";
+import type { TimelineElement } from "../../element/types";
 import { describe, expect, it } from "vitest";
 import { executePlanOnSnapshot, postProcessSnapshot } from "./postProcess";
 import type { ParsedCommand, TimelineCommandSnapshot } from "./types";

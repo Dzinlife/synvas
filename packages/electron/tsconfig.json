@@ -22,7 +22,7 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
+      "@/*": ["./src/*", "../editor/src/*"],
       "@ai-nle/editor/*": ["../editor/src/*"],
       "core": ["../core/src/index.ts"],
       "core/*": ["../core/src/*"]

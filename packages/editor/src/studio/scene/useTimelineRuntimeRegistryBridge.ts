@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { TimelineJSON } from "core/editor/timelineLoader";
-import { useStudioRuntimeManager } from "@/editor/runtime/EditorRuntimeProvider";
+import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { useProjectStore } from "@/projects/projectStore";
 import { usePlaybackOwnerStore } from "./playbackOwnerStore";
 import {
