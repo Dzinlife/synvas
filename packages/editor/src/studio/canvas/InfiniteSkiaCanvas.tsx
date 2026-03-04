@@ -44,9 +44,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			<Canvas style={{ width, height }}>
 				<Group
 					transform={[
-						{ translateX: camera.x * camera.zoom },
-						{ translateY: camera.y * camera.zoom },
 						{ scale: camera.zoom },
+						{ translateX: camera.x },
+						{ translateY: camera.y },
 					]}
 				>
 					{nodes.map((node) => {

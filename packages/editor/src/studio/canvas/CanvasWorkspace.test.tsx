@@ -14,6 +14,10 @@ import CanvasWorkspace from "./CanvasWorkspace";
 
 const togglePlaybackMock = vi.fn();
 const infiniteSkiaCanvasPropsMock = vi.fn();
+const rafTimers = new Map<number, ReturnType<typeof setTimeout>>();
+let rafCounter = 1;
+let nativeRequestAnimationFrame: typeof window.requestAnimationFrame;
+let nativeCancelAnimationFrame: typeof window.cancelAnimationFrame;
 
 vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 	usePlaybackOwnerController: () => ({
@@ -423,6 +427,26 @@ const createProject = (): StudioProject => ({
 beforeEach(() => {
 	togglePlaybackMock.mockReset();
 	infiniteSkiaCanvasPropsMock.mockReset();
+	nativeRequestAnimationFrame = window.requestAnimationFrame;
+	nativeCancelAnimationFrame = window.cancelAnimationFrame;
+	rafTimers.clear();
+	rafCounter = 1;
+	window.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+		const rafId = rafCounter;
+		rafCounter += 1;
+		const timer = setTimeout(() => {
+			rafTimers.delete(rafId);
+			callback(performance.now());
+		}, 16);
+		rafTimers.set(rafId, timer);
+		return rafId;
+	};
+	window.cancelAnimationFrame = (rafId: number): void => {
+		const timer = rafTimers.get(rafId);
+		if (!timer) return;
+		clearTimeout(timer);
+		rafTimers.delete(rafId);
+	};
 	useProjectStore.setState({
 		status: "ready",
 		projects: [],
@@ -434,6 +458,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	for (const timer of rafTimers.values()) {
+		clearTimeout(timer);
+	}
+	rafTimers.clear();
+	window.requestAnimationFrame = nativeRequestAnimationFrame;
+	window.cancelAnimationFrame = nativeCancelAnimationFrame;
 	cleanup();
 });
 
@@ -577,13 +607,28 @@ describe("CanvasWorkspace", () => {
 		await waitFor(() => {
 			expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
 		});
+		await waitFor(() => {
+			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 1;
+			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
+		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
 		const beforeZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 		fireEvent.click(screen.getByLabelText("收起侧边栏"));
 		await waitFor(() => {
-			const afterZoom =
-				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
-			expect(afterZoom).toBeGreaterThan(beforeZoom);
+			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+		const afterZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
 	it("focus camera 会在右侧面板隐藏后扩大可视缩放", async () => {
@@ -591,6 +636,15 @@ describe("CanvasWorkspace", () => {
 		doubleClickNodeAt(80, 80);
 		await waitFor(() => {
 			expect(screen.getByTestId("canvas-active-node-meta-panel")).toBeTruthy();
+		});
+		await waitFor(() => {
+			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 1;
+			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
+		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
 		});
 		const beforeZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 		act(() => {
@@ -600,10 +654,16 @@ describe("CanvasWorkspace", () => {
 			expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
 		});
 		await waitFor(() => {
-			const afterZoom =
-				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
-			expect(afterZoom).toBeGreaterThan(beforeZoom);
+			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+		const afterZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
 	it("active node 切换会更新顶部 toolbar", () => {
@@ -650,28 +710,40 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
-	it("点击 viewport 外节点只平移 camera，不改变 zoom", () => {
+	it("点击 viewport 外节点只平移 camera，不改变 zoom", async () => {
 		render(<CanvasWorkspace />);
 		const before = useProjectStore.getState().currentProject?.ui.camera;
 		clickSidebarNode("node-video-offscreen");
-		const after = useProjectStore.getState().currentProject?.ui.camera;
+		const immediate = useProjectStore.getState().currentProject?.ui.camera;
 		expect(before).toBeTruthy();
-		expect(after).toBeTruthy();
-		if (!before || !after) return;
-		expect(after.zoom).toBe(before.zoom);
-		expect(after.x).not.toBe(before.x);
+		expect(immediate).toBeTruthy();
+		if (!before || !immediate) return;
+		expect(immediate).toEqual(before);
+		await waitFor(() => {
+			const after = useProjectStore.getState().currentProject?.ui.camera;
+			expect(after).toBeTruthy();
+			if (!after) return;
+			expect(after.zoom).toBe(before.zoom);
+			expect(after.x).not.toBe(before.x);
+		});
 	});
 
-	it("点击被面板遮挡的节点会触发 camera 平移进入安全区", () => {
+	it("点击被面板遮挡的节点会触发 camera 平移进入安全区", async () => {
 		render(<CanvasWorkspace />);
 		const before = useProjectStore.getState().currentProject?.ui.camera;
 		clickSidebarNode("node-video-1");
-		const after = useProjectStore.getState().currentProject?.ui.camera;
+		const immediate = useProjectStore.getState().currentProject?.ui.camera;
 		expect(before).toBeTruthy();
-		expect(after).toBeTruthy();
-		if (!before || !after) return;
-		expect(after.zoom).toBe(before.zoom);
-		expect(after.x !== before.x || after.y !== before.y).toBe(true);
+		expect(immediate).toBeTruthy();
+		if (!before || !immediate) return;
+		expect(immediate).toEqual(before);
+		await waitFor(() => {
+			const after = useProjectStore.getState().currentProject?.ui.camera;
+			expect(after).toBeTruthy();
+			if (!after) return;
+			expect(after.zoom).toBe(before.zoom);
+			expect(after.x !== before.x || after.y !== before.y).toBe(true);
+		});
 	});
 
 	it("Focus 模式默认 元素 tab，Node tab 仅占位禁用", () => {
@@ -695,23 +767,29 @@ describe("CanvasWorkspace", () => {
 		expect(afterUi?.camera).toEqual(beforeUi?.camera);
 	});
 
-	it("双击非 focusable 节点仅调整 camera，不进入 focus", () => {
+	it("双击非 focusable 节点仅调整 camera，不进入 focus", async () => {
 		render(<CanvasWorkspace />);
 		const beforeCamera = useProjectStore.getState().currentProject?.ui.camera;
 		doubleClickNodeAt(300, 160);
-		const afterCamera = useProjectStore.getState().currentProject?.ui.camera;
+		const immediateCamera = useProjectStore.getState().currentProject?.ui.camera;
 		expect(
 			useProjectStore.getState().currentProject?.ui.focusedNodeId,
 		).toBeNull();
 		expect(screen.queryByTestId("focus-scene-konva-layer")).toBeNull();
-		expect(afterCamera).toBeTruthy();
+		expect(immediateCamera).toBeTruthy();
 		expect(beforeCamera).toBeTruthy();
-		if (!afterCamera || !beforeCamera) return;
-		expect(
-			afterCamera.zoom !== beforeCamera.zoom ||
-				afterCamera.x !== beforeCamera.x ||
-				afterCamera.y !== beforeCamera.y,
-		).toBe(true);
+		if (!immediateCamera || !beforeCamera) return;
+		expect(immediateCamera).toEqual(beforeCamera);
+		await waitFor(() => {
+			const afterCamera = useProjectStore.getState().currentProject?.ui.camera;
+			expect(afterCamera).toBeTruthy();
+			if (!afterCamera) return;
+			expect(
+				afterCamera.zoom !== beforeCamera.zoom ||
+					afterCamera.x !== beforeCamera.x ||
+					afterCamera.y !== beforeCamera.y,
+			).toBe(true);
+		});
 	});
 
 	it("双击非 focusable 节点后仍可滚动画布", () => {
@@ -731,12 +809,45 @@ describe("CanvasWorkspace", () => {
 		expect(afterCamera.y).not.toBe(beforeCamera.y);
 	});
 
+	it("instant camera 更新可打断 smooth 动画", async () => {
+		render(<CanvasWorkspace />);
+		const workspace = screen.getByTestId("canvas-workspace");
+		clickSidebarNode("node-video-offscreen");
+		const beforeWheel = useProjectStore.getState().currentProject?.ui.camera;
+		fireEvent.wheel(workspace, {
+			deltaX: 120,
+			deltaY: 80,
+		});
+		const afterWheel = useProjectStore.getState().currentProject?.ui.camera;
+		expect(beforeWheel).toBeTruthy();
+		expect(afterWheel).toBeTruthy();
+		if (!beforeWheel || !afterWheel) return;
+		expect(
+			afterWheel.x !== beforeWheel.x || afterWheel.y !== beforeWheel.y,
+		).toBe(true);
+
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+		const settled = useProjectStore.getState().currentProject?.ui.camera;
+		expect(settled).toEqual(afterWheel);
+	});
+
 	it("拖拽 drawer resize 时 camera 不会回退到无 drawer 视口", async () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(80, 80);
 		await waitFor(() => {
 			expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
 		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+		const beforeResizeZoom =
+			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 
 		const handle = screen.getByLabelText("调整 Drawer 高度");
 		const zoomSamples: number[] = [];
@@ -753,13 +864,12 @@ describe("CanvasWorkspace", () => {
 		fireEvent.mouseUp(document);
 
 		await waitFor(() => {
-			const zoom =
-				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
-			expect(zoom).toBeLessThan(1);
+			expect(zoomSamples.length).toBeGreaterThan(0);
 		});
 		unsubscribe();
 
-		expect(zoomSamples.some((zoom) => zoom > 1)).toBe(false);
+		const maxSample = Math.max(beforeResizeZoom, ...zoomSamples);
+		expect(maxSample).toBeLessThanOrEqual(beforeResizeZoom + 0.02);
 	});
 
 	it("右键菜单可在画布位置创建 text 节点", async () => {

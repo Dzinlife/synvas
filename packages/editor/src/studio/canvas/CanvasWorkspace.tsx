@@ -3,7 +3,15 @@ import type { TimelineAsset, TimelineElement } from "core/element/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useContext,
+	useEffect,
+	useEffectEvent,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
 import { createTransformMeta } from "@/element/transform";
 import TimelineContextMenu, {
@@ -62,12 +70,25 @@ const DROP_GRID_OFFSET_Y = 40;
 const FILE_PREFIX = "file://";
 const FOCUS_VIEW_PADDING = 80;
 const SIDEBAR_VIEW_PADDING_PX = 24;
+const CAMERA_SMOOTH_DURATION_MS = 220;
 
 interface CameraState {
 	x: number;
 	y: number;
 	zoom: number;
 }
+
+type CameraTransitionMode = "smooth" | "instant";
+
+interface ApplyCameraOptions {
+	transition?: CameraTransitionMode;
+}
+
+const DEFAULT_CAMERA: CameraState = {
+	x: 0,
+	y: 0,
+	zoom: 1,
+};
 
 type CanvasContextMenuState =
 	| { open: false }
@@ -328,6 +349,30 @@ const isCameraAlmostEqual = (
 	);
 };
 
+const easeOutCubic = (value: number): number => {
+	return 1 - (1 - value) ** 3;
+};
+
+const lerp = (from: number, to: number, progress: number): number => {
+	return from + (to - from) * progress;
+};
+
+const lerpCamera = (
+	from: CameraState,
+	to: CameraState,
+	progress: number,
+): CameraState => {
+	const nextZoom = lerp(from.zoom, to.zoom, progress);
+	const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
+	const nextTranslateX = lerp(from.x * from.zoom, to.x * to.zoom, progress);
+	const nextTranslateY = lerp(from.y * from.zoom, to.y * to.zoom, progress);
+	return {
+		x: nextTranslateX / safeNextZoom,
+		y: nextTranslateY / safeNextZoom,
+		zoom: nextZoom,
+	};
+};
+
 const isElectronEnv = (): boolean => {
 	return typeof window !== "undefined" && "aiNleElectron" in window;
 };
@@ -464,7 +509,7 @@ const CanvasWorkspace = () => {
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
-	const camera = currentProject?.ui.camera ?? { x: 0, y: 0, zoom: 1 };
+	const camera = currentProject?.ui.camera ?? DEFAULT_CAMERA;
 	const isCanvasInteractionLocked = Boolean(focusedNodeId);
 	const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
 	const [visibleDrawerHeight, setVisibleDrawerHeight] = useState(
@@ -476,6 +521,66 @@ const CanvasWorkspace = () => {
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
 	const dragStateRef = useRef<DragState | null>(null);
+	const cameraAnimationFrameRef = useRef<number | null>(null);
+	const cameraAnimationTokenRef = useRef(0);
+
+	const getCamera = useEffectEvent((): CameraState => {
+		return currentProject?.ui.camera ?? DEFAULT_CAMERA;
+	});
+
+	const stopCameraAnimation = useEffectEvent(() => {
+		if (
+			typeof window !== "undefined" &&
+			typeof window.cancelAnimationFrame === "function" &&
+			cameraAnimationFrameRef.current !== null
+		) {
+			window.cancelAnimationFrame(cameraAnimationFrameRef.current);
+		}
+		cameraAnimationFrameRef.current = null;
+		cameraAnimationTokenRef.current += 1;
+	});
+
+	const applyCamera = useEffectEvent(
+		(nextCamera: CameraState, options?: ApplyCameraOptions) => {
+			const transition = options?.transition ?? "smooth";
+			const currentCamera = getCamera();
+			if (isCameraAlmostEqual(currentCamera, nextCamera)) {
+				stopCameraAnimation();
+				return;
+			}
+			if (
+				transition === "instant" ||
+				typeof window === "undefined" ||
+				typeof window.requestAnimationFrame !== "function"
+			) {
+				stopCameraAnimation();
+				setCanvasCamera(nextCamera);
+				return;
+			}
+			stopCameraAnimation();
+			const fromCamera = currentCamera;
+			const token = cameraAnimationTokenRef.current;
+			const startedAt =
+				typeof performance !== "undefined" ? performance.now() : Date.now();
+			const animate = (timestamp: number) => {
+				if (cameraAnimationTokenRef.current !== token) return;
+				const elapsed = timestamp - startedAt;
+				const progress = Math.max(
+					0,
+					Math.min(1, elapsed / CAMERA_SMOOTH_DURATION_MS),
+				);
+				const easedProgress = easeOutCubic(progress);
+				setCanvasCamera(lerpCamera(fromCamera, nextCamera, easedProgress));
+				if (progress >= 1) {
+					cameraAnimationFrameRef.current = null;
+					setCanvasCamera(nextCamera);
+					return;
+				}
+				cameraAnimationFrameRef.current = window.requestAnimationFrame(animate);
+			};
+			cameraAnimationFrameRef.current = window.requestAnimationFrame(animate);
+		},
+	);
 
 	const sidebarNodes = useMemo(() => {
 		if (!currentProject) return [];
@@ -804,19 +909,34 @@ const CanvasWorkspace = () => {
 	}, [drawerDefaultHeight, drawerIdentity]);
 
 	useEffect(() => {
+		return () => {
+			if (
+				typeof window !== "undefined" &&
+				typeof window.cancelAnimationFrame === "function" &&
+				cameraAnimationFrameRef.current !== null
+			) {
+				window.cancelAnimationFrame(cameraAnimationFrameRef.current);
+			}
+			cameraAnimationFrameRef.current = null;
+			cameraAnimationTokenRef.current += 1;
+		};
+	}, []);
+
+	useEffect(() => {
 		const prevFocusedNodeId = prevFocusedNodeIdRef.current;
+		const currentCamera = getCamera();
 		if (!prevFocusedNodeId && focusedNodeId) {
-			preFocusCameraRef.current = camera;
+			preFocusCameraRef.current = currentCamera;
 		}
 		if (prevFocusedNodeId && !focusedNodeId) {
 			const previous = preFocusCameraRef.current;
 			preFocusCameraRef.current = null;
-			if (previous && !isCameraAlmostEqual(previous, camera)) {
-				setCanvasCamera(previous);
+			if (previous && !isCameraAlmostEqual(previous, currentCamera)) {
+				applyCamera(previous);
 			}
 		}
 		prevFocusedNodeIdRef.current = focusedNodeId;
-	}, [camera, focusedNodeId, setCanvasCamera]);
+	}, [focusedNodeId]);
 
 	useEffect(() => {
 		if (!focusedNodeId) return;
@@ -828,14 +948,13 @@ const CanvasWorkspace = () => {
 			stageHeight: stageSize.height,
 			safeInsets: cameraSafeInsets,
 		});
-		if (isCameraAlmostEqual(camera, nextCamera)) return;
-		setCanvasCamera(nextCamera);
+		const currentCamera = getCamera();
+		if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+		applyCamera(nextCamera);
 	}, [
-		camera,
 		cameraSafeInsets,
 		focusedNode,
 		focusedNodeId,
-		setCanvasCamera,
 		stageSize.height,
 		stageSize.width,
 	]);
@@ -857,34 +976,39 @@ const CanvasWorkspace = () => {
 
 	const handleZoomByStep = useCallback(
 		(multiplier: number) => {
-			const nextZoom = clampZoom(camera.zoom * multiplier);
-			if (nextZoom === camera.zoom) return;
-			const safeCurrentZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const currentCamera = getCamera();
+			const nextZoom = clampZoom(currentCamera.zoom * multiplier);
+			if (nextZoom === currentCamera.zoom) return;
+			const safeCurrentZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
 			const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
 			const anchorX = stageSize.width > 0 ? stageSize.width / 2 : 0;
 			const anchorY = stageSize.height > 0 ? stageSize.height / 2 : 0;
-			const anchorWorldX = anchorX / safeCurrentZoom - camera.x;
-			const anchorWorldY = anchorY / safeCurrentZoom - camera.y;
-			setCanvasCamera({
-				x: anchorX / safeNextZoom - anchorWorldX,
-				y: anchorY / safeNextZoom - anchorWorldY,
-				zoom: nextZoom,
-			});
+			const anchorWorldX = anchorX / safeCurrentZoom - currentCamera.x;
+			const anchorWorldY = anchorY / safeCurrentZoom - currentCamera.y;
+			applyCamera(
+				{
+					x: anchorX / safeNextZoom - anchorWorldX,
+					y: anchorY / safeNextZoom - anchorWorldY,
+					zoom: nextZoom,
+				},
+				{ transition: "instant" },
+			);
 		},
-		[camera, setCanvasCamera, stageSize.height, stageSize.width],
+		[applyCamera, getCamera, stageSize.height, stageSize.width],
 	);
 
 	const handleResetView = useCallback(() => {
-		setCanvasCamera({ x: 0, y: 0, zoom: 1 });
-	}, [setCanvasCamera]);
+		applyCamera(DEFAULT_CAMERA);
+	}, [applyCamera]);
 
 	const handleContainerWheel = useCallback(
 		(event: WheelEvent) => {
 			if (isOverlayWheelTarget(event.target)) return;
 			event.preventDefault();
 			if (focusedNodeId) return;
+			const currentCamera = getCamera();
 			if (event.ctrlKey || event.metaKey) {
-				const oldZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+				const oldZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
 				const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
 				const nextZoom = clampZoom(oldZoom * zoomDelta);
 				const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
@@ -894,24 +1018,30 @@ const CanvasWorkspace = () => {
 				const pointerX = event.clientX - rect.left;
 				const pointerY = event.clientY - rect.top;
 				const worldPoint = {
-					x: pointerX / oldZoom - camera.x,
-					y: pointerY / oldZoom - camera.y,
+					x: pointerX / oldZoom - currentCamera.x,
+					y: pointerY / oldZoom - currentCamera.y,
 				};
-				setCanvasCamera({
-					x: pointerX / safeNextZoom - worldPoint.x,
-					y: pointerY / safeNextZoom - worldPoint.y,
-					zoom: nextZoom,
-				});
+				applyCamera(
+					{
+						x: pointerX / safeNextZoom - worldPoint.x,
+						y: pointerY / safeNextZoom - worldPoint.y,
+						zoom: nextZoom,
+					},
+					{ transition: "instant" },
+				);
 				return;
 			}
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-			setCanvasCamera({
-				x: camera.x - event.deltaX / safeZoom,
-				y: camera.y - event.deltaY / safeZoom,
-				zoom: camera.zoom,
-			});
+			const safeZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
+			applyCamera(
+				{
+					x: currentCamera.x - event.deltaX / safeZoom,
+					y: currentCamera.y - event.deltaY / safeZoom,
+					zoom: currentCamera.zoom,
+				},
+				{ transition: "instant" },
+			);
 		},
-		[camera, focusedNodeId, setCanvasCamera],
+		[applyCamera, focusedNodeId, getCamera],
 	);
 
 	useEffect(() => {
@@ -960,22 +1090,23 @@ const CanvasWorkspace = () => {
 			handleNodeActivate(node);
 			if (sidebarMode !== "canvas") return;
 			if (stageSize.width <= 0 || stageSize.height <= 0) return;
+			const currentCamera = getCamera();
 			const nextCamera = buildNodePanCamera({
 				node,
-				camera,
+				camera: currentCamera,
 				stageWidth: stageSize.width,
 				stageHeight: stageSize.height,
 				safeInsets: cameraSafeInsets,
 				paddingPx: SIDEBAR_VIEW_PADDING_PX,
 			});
-			if (isCameraAlmostEqual(camera, nextCamera)) return;
-			setCanvasCamera(nextCamera);
+			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+			applyCamera(nextCamera);
 		},
 		[
-			camera,
+			applyCamera,
 			cameraSafeInsets,
+			getCamera,
 			handleNodeActivate,
-			setCanvasCamera,
 			sidebarMode,
 			stageSize.height,
 			stageSize.width,
@@ -1040,21 +1171,22 @@ const CanvasWorkspace = () => {
 					? stageSize.height
 					: (container?.getBoundingClientRect().height ?? 0);
 			if (stageWidth <= 0 || stageHeight <= 0) return;
-				const nextCamera = buildNodeFitCamera({
-					node,
-					stageWidth,
-					stageHeight,
-					safeInsets: cameraSafeInsets,
-				});
-				if (isCameraAlmostEqual(camera, nextCamera)) return;
-				setCanvasCamera(nextCamera);
-			},
-			[
-				camera,
-				cameraSafeInsets,
-				getTopHitNode,
-				resolveWorldPoint,
-				setCanvasCamera,
+			const nextCamera = buildNodeFitCamera({
+				node,
+				stageWidth,
+				stageHeight,
+				safeInsets: cameraSafeInsets,
+			});
+			const currentCamera = getCamera();
+			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+			applyCamera(nextCamera);
+		},
+		[
+			applyCamera,
+			cameraSafeInsets,
+			getCamera,
+			getTopHitNode,
+			resolveWorldPoint,
 			setFocusedNode,
 			stageSize.height,
 			stageSize.width,
