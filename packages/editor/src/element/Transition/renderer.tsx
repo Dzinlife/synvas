@@ -85,6 +85,10 @@ const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 		typeof progress === "number" && Number.isFinite(progress)
 			? clampProgress(progress)
 			: computedProgress;
+	const boundaryProgress =
+		transitionDuration > 0
+			? clampProgress((boundary - start) / transitionDuration)
+			: 0;
 
 	const shaderSource = useMemo(() => {
 		try {
@@ -163,7 +167,7 @@ const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 	}, [paintBundle]);
 
 	const renderHardCut = () => {
-		return <Group>{currentTimeFrames < boundary ? fromNode : toNode}</Group>;
+		return <Group>{safeProgress < boundaryProgress ? fromNode : toNode}</Group>;
 	};
 
 	if (paintBundle && preRollPicture && afterRollPicture) {

@@ -87,6 +87,7 @@ const TransitionRenderer: React.FC<{
 	id: string;
 	fromNode?: React.ReactNode;
 	toNode?: React.ReactNode;
+	progress?: number;
 }> = ({ id, fromNode, toNode }) => {
 	return (
 		<div data-testid={`transition-${id}`}>
@@ -384,6 +385,7 @@ describe("buildSkiaTree transform wrapper", () => {
 		expect(filterNode).toBeTruthy();
 
 		if (!isElement(transitionNode)) return;
+		expect(transitionNode.props.progress).toBeCloseTo((20 - 15) / 30, 6);
 		const fromTransforms = collectElements(
 			transitionNode.props.fromNode,
 			(candidate) => Boolean(candidate.props.matrix),
@@ -394,6 +396,208 @@ describe("buildSkiaTree transform wrapper", () => {
 		);
 		expect(fromTransforms.length).toBeGreaterThan(0);
 		expect(toTransforms.length).toBeGreaterThan(0);
+	});
+
+	it("Transition 输入包含 Composition 时会构建 Composition 画面", async () => {
+		const composition = createElement({
+			id: "composition-1",
+			type: "Composition",
+			component: "composition",
+			props: { sceneId: "scene-2" },
+			timeline: {
+				start: 0,
+				end: 30,
+				startTimecode: "00:00:00:00",
+				endTimecode: "00:00:01:00",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+		});
+		const clipB = createElement({
+			id: "clip-b",
+			type: "Image",
+			component: "image",
+			timeline: {
+				start: 30,
+				end: 60,
+				startTimecode: "00:00:01:00",
+				endTimecode: "00:00:02:00",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+		});
+		const transition = createElement({
+			id: "transition-1",
+			type: "Transition",
+			component: "transition/test",
+			timeline: {
+				start: 15,
+				end: 45,
+				startTimecode: "00:00:00:15",
+				endTimecode: "00:00:01:15",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+			transition: {
+				duration: 30,
+				boundry: 30,
+				fromId: "composition-1",
+				toId: "clip-b",
+			},
+		});
+		const childClip = createElement({
+			id: "child-clip-1",
+			type: "Image",
+			component: "image",
+		});
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToPicture: vi.fn(async () => ({ dispose: vi.fn() }) as any),
+			resolveCompositionTimeline: (sceneId) => {
+				if (sceneId !== "scene-2") return null;
+				return {
+					sceneId,
+					elements: [childClip],
+					tracks,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+				};
+			},
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [composition, clipB, transition],
+				displayTime: 20,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+			},
+			localDeps,
+		);
+
+		const renderedChildren = renderState.children.slice(1).filter(Boolean);
+		const transitionNode = renderedChildren.find(
+			(node) => isElement(node) && node.type === TransitionRenderer,
+		);
+		expect(transitionNode).toBeTruthy();
+		if (!isElement(transitionNode)) return;
+		expect(transitionNode.props.fromNode).toBeTruthy();
+		const compositionPictureNodes = collectElements(
+			transitionNode.props.fromNode,
+			(node) => "picture" in node.props,
+		);
+		expect(compositionPictureNodes.length).toBeGreaterThan(0);
+		renderState.dispose?.();
+	});
+
+	it("Composition 子场景的 Transition progress 跟随子场景 displayTime", async () => {
+		const composition = createElement({
+			id: "composition-child-transition",
+			type: "Composition",
+			component: "composition",
+			props: { sceneId: "scene-with-transition" },
+		});
+		const childClipA = createElement({
+			id: "child-clip-a",
+			type: "Image",
+			component: "image",
+			timeline: {
+				start: 0,
+				end: 15,
+				startTimecode: "00:00:00:00",
+				endTimecode: "00:00:00:15",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+		});
+		const childClipB = createElement({
+			id: "child-clip-b",
+			type: "Image",
+			component: "image",
+			timeline: {
+				start: 15,
+				end: 30,
+				startTimecode: "00:00:00:15",
+				endTimecode: "00:00:01:00",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+		});
+		const childTransition = createElement({
+			id: "child-transition",
+			type: "Transition",
+			component: "transition/test",
+			timeline: {
+				start: 0,
+				end: 30,
+				startTimecode: "00:00:00:00",
+				endTimecode: "00:00:01:00",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+			transition: {
+				duration: 30,
+				boundry: 15,
+				fromId: "child-clip-a",
+				toId: "child-clip-b",
+			},
+		});
+		const capturedProgress: number[] = [];
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToPicture: vi.fn(async (node) => {
+				const transitionNodes = collectElements(
+					node,
+					(candidate) => candidate.type === TransitionRenderer,
+				);
+				for (const transitionNode of transitionNodes) {
+					const value = transitionNode.props.progress;
+					if (typeof value === "number" && Number.isFinite(value)) {
+						capturedProgress.push(value);
+					}
+				}
+				return { dispose: vi.fn() } as any;
+			}),
+			resolveCompositionTimeline: (sceneId) => {
+				if (sceneId !== "scene-with-transition") return null;
+				return {
+					sceneId,
+					elements: [childClipA, childClipB, childTransition],
+					tracks,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+				};
+			},
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [composition],
+				displayTime: 10,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					compositionPath: ["scene-root"],
+				},
+			},
+			localDeps,
+		);
+
+		expect(capturedProgress.some((value) => Math.abs(value - 10 / 30) < 1e-9)).toBe(
+			true,
+		);
+		renderState.dispose?.();
 	});
 
 	it("render.visible=false 的元素不会进入渲染结果", async () => {

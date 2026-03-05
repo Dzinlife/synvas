@@ -314,6 +314,9 @@ const buildSkiaRenderStateWithScopeCore = async (
 		getTrackIndexForElement,
 		isTransitionElement,
 	});
+	const activeTransitionById = new Map(
+		transitionFrameState.activeTransitions.map((item) => [item.id, item] as const),
+	);
 	const activeTransitionIds = new Set(
 		transitionFrameState.activeTransitions.map((item) => item.id),
 	);
@@ -542,14 +545,19 @@ const buildSkiaRenderStateWithScopeCore = async (
 		if (isTransitionElement(fromElement) || isTransitionElement(toElement)) {
 			return { node: null, ready: Promise.resolve() };
 		}
-		const fromPlan = buildPlainElementPlan(
-			fromElement,
-			canRenderTransitionPictures,
-		);
-		const toPlan = buildPlainElementPlan(
-			toElement,
-			canRenderTransitionPictures,
-		);
+		const buildTransitionInputPlan = async (
+			target: TimelineElement,
+		): Promise<RenderPlan> => {
+			// Composition 的 Renderer 为空，转场输入必须走 Composition 专用构图分支。
+			if (target.type === COMPOSITION_ELEMENT_TYPE) {
+				return buildElementPlan(target);
+			}
+			return buildPlainElementPlan(target, canRenderTransitionPictures);
+		};
+		const [fromPlan, toPlan] = await Promise.all([
+			buildTransitionInputPlan(fromElement),
+			buildTransitionInputPlan(toElement),
+		]);
 		const elementReady = Promise.all([fromPlan.ready, toPlan.ready]);
 		let fromPicture: SkPicture | null = null;
 		let toPicture: SkPicture | null = null;
@@ -569,6 +577,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 			scope.addDisposable(toRendered);
 		}
 		const TransitionRenderer = transitionDef.Renderer;
+		const activeTransition = activeTransitionById.get(element.id);
 		const transitionNode = (
 			<TransitionRenderer
 				key={element.id}
@@ -578,6 +587,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 				toNode={toPlan.node}
 				fromPicture={fromPicture}
 				toPicture={toPicture}
+				progress={activeTransition?.progress}
 			/>
 		);
 		const node = wrapElementNode({
