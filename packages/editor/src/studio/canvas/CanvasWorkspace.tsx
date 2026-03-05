@@ -12,6 +12,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import type { SkiaPointerEvent } from "react-skia-lite";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
 import { createTransformMeta } from "@/element/transform";
 import TimelineContextMenu, {
@@ -521,6 +522,7 @@ const CanvasWorkspace = () => {
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
 	const dragStateRef = useRef<DragState | null>(null);
+	const suppressNodeClickIdRef = useRef<string | null>(null);
 	const cameraAnimationFrameRef = useRef<number | null>(null);
 	const cameraAnimationTokenRef = useRef(0);
 
@@ -1085,6 +1087,83 @@ const CanvasWorkspace = () => {
 		[focusedNodeId, isCanvasInteractionLocked, setActiveNode, setActiveScene],
 	);
 
+	const handleSkiaNodePointerDown = useCallback(
+		(node: CanvasNode, event: SkiaPointerEvent) => {
+			if (event.button !== 0) return;
+			suppressNodeClickIdRef.current = null;
+			const canInteractNode =
+				!isCanvasInteractionLocked || node.id === focusedNodeId;
+			if (!canInteractNode) return;
+			if (node.locked) {
+				handleNodeActivate(node);
+				return;
+			}
+			setActiveNode(node.id);
+			dragStateRef.current = {
+				nodeId: node.id,
+				startClientX: event.clientX,
+				startClientY: event.clientY,
+				startNodeX: node.x,
+				startNodeY: node.y,
+				before: pickLayout(node),
+				moved: false,
+			};
+		},
+		[focusedNodeId, handleNodeActivate, isCanvasInteractionLocked, setActiveNode],
+	);
+
+	const handleSkiaNodeClick = useCallback(
+		(node: CanvasNode) => {
+			if (suppressNodeClickIdRef.current === node.id) {
+				suppressNodeClickIdRef.current = null;
+				return;
+			}
+			handleNodeActivate(node);
+		},
+		[handleNodeActivate],
+	);
+
+	const handleSkiaNodeDoubleClick = useCallback(
+		(node: CanvasNode) => {
+			const canInteractNode =
+				!isCanvasInteractionLocked || node.id === focusedNodeId;
+			if (!canInteractNode) return;
+			if (isCanvasNodeFocusable(node, getCanvasNodeDefinition)) {
+				setFocusedNode(node.id);
+				return;
+			}
+			const container = containerRef.current;
+			const stageWidth =
+				stageSize.width > 0
+					? stageSize.width
+					: (container?.getBoundingClientRect().width ?? 0);
+			const stageHeight =
+				stageSize.height > 0
+					? stageSize.height
+					: (container?.getBoundingClientRect().height ?? 0);
+			if (stageWidth <= 0 || stageHeight <= 0) return;
+			const nextCamera = buildNodeFitCamera({
+				node,
+				stageWidth,
+				stageHeight,
+				safeInsets: cameraSafeInsets,
+			});
+			const currentCamera = getCamera();
+			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+			applyCamera(nextCamera);
+		},
+		[
+			applyCamera,
+			cameraSafeInsets,
+			focusedNodeId,
+			getCamera,
+			isCanvasInteractionLocked,
+			setFocusedNode,
+			stageSize.height,
+			stageSize.width,
+		],
+	);
+
 	const handleSidebarNodeSelect = useCallback(
 		(node: CanvasNode) => {
 			handleNodeActivate(node);
@@ -1215,15 +1294,9 @@ const CanvasWorkspace = () => {
 			dragStateRef.current = null;
 			if (!dragState) return;
 			if (!dragState.moved) {
-				const latestProject = useProjectStore.getState().currentProject;
-				if (!latestProject) return;
-				const node = latestProject.canvas.nodes.find(
-					(item) => item.id === dragState.nodeId,
-				);
-				if (!node) return;
-				handleNodeActivate(node);
 				return;
 			}
+			suppressNodeClickIdRef.current = dragState.nodeId;
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			const node = latestProject.canvas.nodes.find(
@@ -1249,7 +1322,7 @@ const CanvasWorkspace = () => {
 			window.removeEventListener("pointerup", handlePointerUp);
 			window.removeEventListener("pointercancel", handlePointerUp);
 		};
-	}, [camera.zoom, handleNodeActivate, pushHistory, updateCanvasNodeLayout]);
+	}, [camera.zoom, pushHistory, updateCanvasNodeLayout]);
 
 	const openCanvasContextMenuAt = useCallback(
 		(clientX: number, clientY: number) => {
@@ -1536,6 +1609,9 @@ const CanvasWorkspace = () => {
 				assets={currentProject.assets}
 				activeNodeId={activeNodeId}
 				focusedNodeId={focusedNodeId}
+				onNodePointerDown={handleSkiaNodePointerDown}
+				onNodeClick={handleSkiaNodeClick}
+				onNodeDoubleClick={handleSkiaNodeDoubleClick}
 			/>
 
 			<button

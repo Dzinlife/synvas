@@ -8,6 +8,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import type { SkiaPointerEventType } from "../dom/types";
 import { Platform } from "../Platform";
 import type {
 	LayoutChangeEvent,
@@ -19,6 +20,7 @@ import type {
 } from "../react-native-types";
 import { Skia } from "../skia";
 import type { SkImage, SkRect, SkSize } from "../skia/types";
+import { SkiaPointerEventManager } from "../sksg/PointerEvents";
 import { SkiaSGRoot } from "../sksg/Reconciler";
 import SkiaPictureViewNativeComponent from "../specs/SkiaPictureViewNativeComponent";
 import { SkiaViewApi } from "../views/api";
@@ -68,6 +70,11 @@ export interface CanvasProps extends Omit<ViewProps, "onLayout"> {
 	pd?: number;
 }
 
+type CanvasPointerEvent = Parameters<
+	NonNullable<ViewProps["onPointerDown"]>
+>[0];
+type CanvasMouseEvent = Parameters<NonNullable<ViewProps["onClick"]>>[0];
+
 export const Canvas = ({
 	debug,
 	opaque,
@@ -91,6 +98,9 @@ export const Canvas = ({
 
 	// Root
 	const root = useMemo(() => new SkiaSGRoot(Skia, nativeId), [nativeId]);
+	const pointerEventManager = useMemo(() => {
+		return new SkiaPointerEventManager(() => root.sg.children);
+	}, [root]);
 
 	// Render effects
 	useLayoutEffect(() => {
@@ -102,6 +112,12 @@ export const Canvas = ({
 			root.unmount();
 		};
 	}, [root]);
+
+	useEffect(() => {
+		return () => {
+			pointerEventManager.reset();
+		};
+	}, [pointerEventManager]);
 
 	// Component methods
 	useImperativeHandle(
@@ -145,6 +161,114 @@ export const Canvas = ({
 		},
 		[onLayout, onSize],
 	);
+
+	const {
+		onPointerDown,
+		onPointerMove,
+		onPointerUp,
+		onPointerCancel,
+		onPointerLeave,
+		onClick,
+		onDoubleClick,
+		...restViewProps
+	} = viewProps;
+
+	const dispatchPointerEvent = useCallback(
+		(
+			type: SkiaPointerEventType,
+			event: CanvasPointerEvent | CanvasMouseEvent,
+		) => {
+			if (Platform.OS !== "web") {
+				return;
+			}
+			const domEvent = event as unknown as {
+				nativeEvent: PointerEvent | MouseEvent;
+				currentTarget: EventTarget & HTMLElement;
+			};
+			const hostElement = domEvent.currentTarget as HTMLElement;
+			const pointerId =
+				"pointerId" in domEvent.nativeEvent
+					? domEvent.nativeEvent.pointerId
+					: 1;
+			if (type === "pointerdown") {
+				hostElement.setPointerCapture?.(pointerId);
+			} else if (
+				(type === "pointerup" || type === "pointercancel") &&
+				hostElement.hasPointerCapture?.(pointerId)
+			) {
+				hostElement.releasePointerCapture?.(pointerId);
+			}
+			pointerEventManager.dispatch(type, domEvent.nativeEvent, hostElement);
+		},
+		[pointerEventManager],
+	);
+
+	const onCanvasPointerDown = useCallback<
+		NonNullable<ViewProps["onPointerDown"]>
+	>(
+		(event) => {
+			dispatchPointerEvent("pointerdown", event);
+			onPointerDown?.(event);
+		},
+		[dispatchPointerEvent, onPointerDown],
+	);
+
+	const onCanvasPointerMove = useCallback<
+		NonNullable<ViewProps["onPointerMove"]>
+	>(
+		(event) => {
+			dispatchPointerEvent("pointermove", event);
+			onPointerMove?.(event);
+		},
+		[dispatchPointerEvent, onPointerMove],
+	);
+
+	const onCanvasPointerUp = useCallback<NonNullable<ViewProps["onPointerUp"]>>(
+		(event) => {
+			dispatchPointerEvent("pointerup", event);
+			onPointerUp?.(event);
+		},
+		[dispatchPointerEvent, onPointerUp],
+	);
+
+	const onCanvasPointerCancel = useCallback<
+		NonNullable<ViewProps["onPointerCancel"]>
+	>(
+		(event) => {
+			dispatchPointerEvent("pointercancel", event);
+			onPointerCancel?.(event);
+		},
+		[dispatchPointerEvent, onPointerCancel],
+	);
+
+	const onCanvasPointerLeave = useCallback<
+		NonNullable<ViewProps["onPointerLeave"]>
+	>(
+		(event) => {
+			dispatchPointerEvent("pointerleave", event);
+			onPointerLeave?.(event);
+		},
+		[dispatchPointerEvent, onPointerLeave],
+	);
+
+	const onCanvasClick = useCallback<NonNullable<ViewProps["onClick"]>>(
+		(event) => {
+			dispatchPointerEvent("click", event);
+			onClick?.(event);
+		},
+		[dispatchPointerEvent, onClick],
+	);
+
+	const onCanvasDoubleClick = useCallback<
+		NonNullable<ViewProps["onDoubleClick"]>
+	>(
+		(event) => {
+			dispatchPointerEvent("doubleclick", event);
+			onDoubleClick?.(event);
+		},
+		[dispatchPointerEvent, onDoubleClick],
+	);
+
 	return (
 		<SkiaPictureViewNativeComponent
 			pd={pd}
@@ -158,7 +282,14 @@ export const Canvas = ({
 			onLayout={
 				Platform.OS === "web" && (onSize || onLayout) ? onLayoutWeb : onLayout
 			}
-			{...viewProps}
+			onPointerDown={onCanvasPointerDown}
+			onPointerMove={onCanvasPointerMove}
+			onPointerUp={onCanvasPointerUp}
+			onPointerCancel={onCanvasPointerCancel}
+			onPointerLeave={onCanvasPointerLeave}
+			onClick={onCanvasClick}
+			onDoubleClick={onCanvasDoubleClick}
+			{...restViewProps}
 		/>
 	);
 };

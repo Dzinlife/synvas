@@ -1,4 +1,9 @@
-import type { CSSProperties, RefObject } from "react";
+import type {
+	CSSProperties,
+	MouseEventHandler,
+	PointerEventHandler,
+	RefObject,
+} from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type {
 	LayoutChangeEvent,
@@ -95,12 +100,53 @@ const useElementLayout = (ref: RefObject<Div>, onLayout: OnLayout) => {
 	}, [observer, ref]);
 };
 
-const View = (({ children, onLayout, style: rawStyle }: ViewProps) => {
+const toPointerHandler = (
+	handler: unknown,
+): PointerEventHandler<HTMLDivElement> | undefined => {
+	if (typeof handler !== "function") {
+		return undefined;
+	}
+	return handler as PointerEventHandler<HTMLDivElement>;
+};
+
+const toMouseHandler = (
+	handler: unknown,
+): MouseEventHandler<HTMLDivElement> | undefined => {
+	if (typeof handler !== "function") {
+		return undefined;
+	}
+	return handler as MouseEventHandler<HTMLDivElement>;
+};
+
+const resolvePointerEventsStyle = (
+	pointerEvents: ViewProps["pointerEvents"],
+): CSSProperties["pointerEvents"] | undefined => {
+	if (pointerEvents === "none" || pointerEvents === "auto") {
+		return pointerEvents;
+	}
+	return undefined;
+};
+
+const View = (({
+	children,
+	onLayout,
+	style: rawStyle,
+	pointerEvents,
+	onPointerDown,
+	onPointerMove,
+	onPointerUp,
+	onPointerCancel,
+	onPointerEnter,
+	onPointerLeave,
+	onClick,
+	onDoubleClick,
+}: ViewProps) => {
 	const style = useMemo(() => (rawStyle ?? {}) as CSSProperties, [rawStyle]);
 	const ref = useRef<Div>(null);
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	useElementLayout(ref as any, onLayout);
 	const cssStyles = useMemo(() => {
+		const pointerEventsStyle = resolvePointerEventsStyle(pointerEvents);
 		return {
 			alignItems: "stretch" as const,
 			backgroundColor: "transparent" as const,
@@ -119,11 +165,23 @@ const View = (({ children, onLayout, style: rawStyle }: ViewProps) => {
 			textDecoration: "none" as const,
 			zIndex: 0,
 			...style,
+			...(pointerEventsStyle ? { pointerEvents: pointerEventsStyle } : {}),
 		};
-	}, [style]);
+	}, [pointerEvents, style]);
 
 	return (
-		<div ref={ref} style={cssStyles}>
+		<div
+			ref={ref}
+			style={cssStyles}
+			onPointerDown={toPointerHandler(onPointerDown)}
+			onPointerMove={toPointerHandler(onPointerMove)}
+			onPointerUp={toPointerHandler(onPointerUp)}
+			onPointerCancel={toPointerHandler(onPointerCancel)}
+			onPointerEnter={toPointerHandler(onPointerEnter)}
+			onPointerLeave={toPointerHandler(onPointerLeave)}
+			onClick={toMouseHandler(onClick)}
+			onDoubleClick={toMouseHandler(onDoubleClick)}
+		>
 			{children}
 		</div>
 	);

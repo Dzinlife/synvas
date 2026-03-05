@@ -13,6 +13,13 @@ import type { GestureResponderHandlers } from "../../../types/public/ReactNative
 import type { Touchable } from "../Touchable/Touchable";
 import type { StyleProp } from "./StyleSheet";
 import type { ViewStyle } from "./StyleSheetTypes";
+import type {
+	BlurEvent,
+	FocusEvent,
+	LayoutChangeEvent,
+	MouseEvent,
+	PointerEvents,
+} from "./CoreEventTypes";
 
 export type {
 	BlurEvent,
@@ -178,6 +185,8 @@ export interface ViewProps
 	 * {nativeEvent: { layout: {x, y, width, height}}}.
 	 */
 	onLayout?: ((event: LayoutChangeEvent) => void) | undefined;
+	onClick?: ((event: MouseEvent) => void) | undefined;
+	onDoubleClick?: ((event: MouseEvent) => void) | undefined;
 
 	/**
 	 *
