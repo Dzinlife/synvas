@@ -1,15 +1,19 @@
-import type { TimelineElement } from "core/element/types";
 import {
 	type ExportElementAudioSource,
 	exportTimelineAsVideoCore,
 } from "core/editor/exportVideo";
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import { createElement } from "react";
+import type { TimelineElement } from "core/element/types";
+import { createElement, type ComponentType, type ReactNode } from "react";
 import type { ModelRegistryClass } from "@/element/model/registry";
-import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
-import type { EditorRuntime } from "@/scene-editor/runtime/types";
 import { getAudioPlaybackSessionKey } from "@/scene-editor/playback/clipContinuityIndex";
 import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
+import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type {
+	EditorRuntime,
+	StudioRuntimeManager,
+} from "@/scene-editor/runtime/types";
+import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 
 const waitForStaticModelsReady = async (
 	elements: TimelineElement[],
@@ -32,6 +36,19 @@ type ExportAudioModelInternal = {
 	audioSink?: ExportElementAudioSource["audioSink"];
 	audioDuration?: number;
 };
+
+type RuntimeProviderComponent = ComponentType<{
+	runtime: EditorRuntime;
+	children?: ReactNode;
+}>;
+
+const createScopedRuntime = (
+	runtime: Pick<EditorRuntime, "id" | "timelineStore" | "modelRegistry">,
+): EditorRuntime => ({
+	id: runtime.id,
+	timelineStore: runtime.timelineStore,
+	modelRegistry: runtime.modelRegistry,
+});
 
 const getExportAudioSourceByElementId = (
 	elementId: string,
@@ -90,16 +107,59 @@ export const exportTimelineAsVideo = async (options: {
 	timelineState.setExportTime(startFrame);
 
 	try {
+		const runtimeManager = options.runtime as Partial<StudioRuntimeManager>;
+		const rootSceneId =
+			runtimeManager.getActiveEditTimelineRef?.()?.sceneId ?? null;
 		const buildFrameSnapshot = (
 			args: Parameters<typeof buildSkiaFrameSnapshot>[0],
-		) =>
-			buildSkiaFrameSnapshot(args, {
-				wrapRenderNode: (node) =>
-					createElement(EditorRuntimeProvider, {
-						runtime: options.runtime,
-						children: node,
-					}),
-			});
+		) => {
+			const prepare = args.prepare;
+			const RuntimeProvider = EditorRuntimeProvider as RuntimeProviderComponent;
+			return buildSkiaFrameSnapshot(
+				{
+					...args,
+					prepare: {
+						isExporting: prepare?.isExporting ?? true,
+						fps: prepare?.fps ?? fps,
+						canvasSize: prepare?.canvasSize ?? timelineState.canvasSize,
+						getModelStore: prepare?.getModelStore,
+						prepareTransitionPictures: prepare?.prepareTransitionPictures,
+						forcePrepareFrames: prepare?.forcePrepareFrames,
+						awaitReady: prepare?.awaitReady,
+						maxCompositionDepth: prepare?.maxCompositionDepth,
+						compositionPath: rootSceneId ? [rootSceneId] : [],
+					},
+				},
+				{
+					wrapRenderNode: (node) =>
+						createElement(RuntimeProvider, { runtime: options.runtime }, node),
+					resolveCompositionTimeline: (sceneId) => {
+						if (!runtimeManager.getTimelineRuntime) return null;
+						const childRuntime = runtimeManager.getTimelineRuntime(
+							toSceneTimelineRef(sceneId),
+						);
+						if (!childRuntime) return null;
+						const childState = childRuntime.timelineStore.getState();
+							return {
+								sceneId,
+								elements: childState.elements,
+								tracks: childState.tracks,
+								fps: childState.fps,
+								canvasSize: childState.canvasSize,
+								getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
+								wrapRenderNode: (node) =>
+									createElement(
+										RuntimeProvider,
+										{
+											runtime: createScopedRuntime(childRuntime),
+										},
+										node,
+									),
+							};
+						},
+					},
+				);
+		};
 		await exportTimelineAsVideoCore({
 			elements,
 			tracks,

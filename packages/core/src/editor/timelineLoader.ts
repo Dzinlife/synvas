@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type {
+	CompositionProps,
 	RenderMeta,
 	TimelineElement,
 	TimelineMeta,
@@ -7,7 +8,10 @@ import type {
 	TransformMeta,
 	TransitionMeta,
 } from "../element/types";
-import { ELEMENT_TYPE_VALUES, isAssetBackedElementType } from "../element/types";
+import {
+	ELEMENT_TYPE_VALUES,
+	isAssetBackedElementType,
+} from "../element/types";
 import { framesToTimecode, timecodeToFrames } from "../utils/timecode";
 import {
 	DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,
@@ -174,6 +178,10 @@ const transitionMetaSchema = z.object({
 	boundry: z.number().int().nonnegative(),
 	fromId: nonEmptyStringSchema,
 	toId: nonEmptyStringSchema,
+});
+
+const compositionPropsSchema: z.ZodType<CompositionProps> = z.object({
+	sceneId: nonEmptyStringSchema,
 });
 
 const renderMetaSchema = z.object({
@@ -385,10 +393,13 @@ function validateElement(
 	const render = validateRender(element.render ?? {}, `${path}.render`);
 
 	// props 可以是任意对象
-	const props = (element.props ?? {}) as TimelineElement["props"];
+	let props = (element.props ?? {}) as TimelineElement["props"];
 	const mediaProps = props as { uri?: unknown };
 	if (isAssetBackedElementType(type) && mediaProps.uri !== undefined) {
 		throw new Error(`${path}.props.uri: must use assetId instead`);
+	}
+	if (type === "Composition") {
+		props = validateCompositionProps(props, `${path}.props`);
 	}
 
 	if (isAssetBackedElementType(type)) {
@@ -658,6 +669,16 @@ function validateTransition(
 		? transitionSchemaWithTimeline
 		: transitionSchemaWithTimeline.optional();
 	return parseWithSchema(schema, transition, path);
+}
+
+/**
+ * 验证 composition 属性
+ */
+function validateCompositionProps(
+	props: unknown,
+	path: string,
+): CompositionProps {
+	return parseWithSchema(compositionPropsSchema, props, path);
 }
 
 /**

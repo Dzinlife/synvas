@@ -131,6 +131,7 @@ export const ELEMENT_TYPE_VALUES = [
 	"VideoClip",
 	"FreezeFrame",
 	"AudioClip",
+	"Composition",
 	"Transition",
 	"Filter",
 	"Lottie",
@@ -195,6 +196,10 @@ export interface TransitionMeta {
 	boundry: number;
 	fromId: string;
 	toId: string;
+}
+
+export interface CompositionProps {
+	sceneId: string;
 }
 
 /**

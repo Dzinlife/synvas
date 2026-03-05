@@ -1,18 +1,18 @@
 import React from "react";
-import { Fill, Group, Skia, type SkPicture } from "react-skia-lite";
-import { transformPositionToCanvasPoint } from "../../element/position";
+import { Fill, Group, Picture, Skia, type SkPicture } from "react-skia-lite";
 import type {
 	ComponentModelStore,
 	RendererPrepareFrameContext,
 } from "../../element/model/types";
+import { transformPositionToCanvasPoint } from "../../element/position";
 import type { TimelineElement } from "../../element/types";
 import type { TimelineTrack } from "../timeline/types";
+import { createDisposeScope, type DisposeScope } from "./disposeScope";
 import {
 	type ActiveTransitionFrameState,
 	resolveTransitionFrameState as resolveTransitionFrameStateCore,
 	type TransitionFrameState,
 } from "./transitionFrameState";
-import { createDisposeScope, type DisposeScope } from "./disposeScope";
 
 type RenderPlan = {
 	node: React.ReactNode | null;
@@ -27,6 +27,8 @@ type RenderPrepareOptions = {
 	prepareTransitionPictures?: boolean;
 	forcePrepareFrames?: boolean;
 	awaitReady?: boolean;
+	compositionPath?: string[];
+	maxCompositionDepth?: number;
 };
 
 type ResolvedComponent = {
@@ -34,6 +36,16 @@ type ResolvedComponent = {
 	prepareRenderFrame?: (
 		context: RendererPrepareFrameContext,
 	) => Promise<void> | void;
+};
+
+type ResolvedCompositionTimeline = {
+	sceneId: string;
+	elements: TimelineElement[];
+	tracks: TimelineTrack[];
+	fps: number;
+	canvasSize: { width: number; height: number };
+	getModelStore?: (id: string) => ComponentModelStore | undefined;
+	wrapRenderNode?: (node: React.ReactNode) => React.ReactNode;
 };
 
 export type { ActiveTransitionFrameState, TransitionFrameState };
@@ -47,11 +59,16 @@ export type BuildSkiaDeps = {
 		size: { width: number; height: number },
 	) => SkPicture | null | Promise<SkPicture | null>;
 	isTransitionElement?: (element: TimelineElement) => boolean;
+	resolveCompositionTimeline?: (
+		sceneId: string,
+	) => ResolvedCompositionTimeline | null | Promise<ResolvedCompositionTimeline | null>;
 };
 
 const defaultIsTransitionElement = (element: TimelineElement): boolean =>
 	element.type === "Transition";
 const FILTER_ELEMENT_TYPE = "Filter";
+const COMPOSITION_ELEMENT_TYPE = "Composition";
+const DEFAULT_MAX_COMPOSITION_DEPTH = 16;
 
 const waitForModelReady = async (
 	modelStore?: ComponentModelStore,
@@ -79,6 +96,22 @@ const resolveElementVisible = (element: TimelineElement): boolean =>
 
 const resolveElementOpacity = (element: TimelineElement): number =>
 	clamp01(resolveFiniteNumber(element.render?.opacity, 1));
+
+const resolveSafeFps = (value: number, fallback = 30): number => {
+	const rounded = Math.round(value);
+	if (!Number.isFinite(rounded) || rounded <= 0) {
+		return Math.max(1, Math.round(fallback));
+	}
+	return rounded;
+};
+
+const resolveCompositionSceneId = (element: TimelineElement): string | null => {
+	if (element.type !== COMPOSITION_ELEMENT_TYPE) return null;
+	const sceneId = (element.props as { sceneId?: unknown } | undefined)?.sceneId;
+	if (typeof sceneId !== "string") return null;
+	const trimmed = sceneId.trim();
+	return trimmed.length > 0 ? trimmed : null;
+};
 
 const wrapWithTransform = (
 	node: NonNullable<React.ReactNode>,
@@ -216,6 +249,16 @@ const buildSkiaRenderStateWithScopeCore = async (
 	const fps = prepare?.fps ?? 0;
 	const canvasSize = prepare?.canvasSize;
 	const getModelStore = prepare?.getModelStore;
+	const compositionPath = prepare?.compositionPath ?? [];
+	const maxCompositionDepth = Math.max(
+		1,
+		Math.round(
+			resolveFiniteNumber(
+				prepare?.maxCompositionDepth,
+				DEFAULT_MAX_COMPOSITION_DEPTH,
+			),
+		),
+	);
 	const shouldAwaitReady = isExporting || (prepare?.awaitReady ?? false);
 	const shouldPrepareTransitionPictures =
 		(prepare?.prepareTransitionPictures ?? false) || isExporting;
@@ -309,7 +352,128 @@ const buildSkiaRenderStateWithScopeCore = async (
 	const buildElementPlan = async (
 		element: TimelineElement,
 	): Promise<RenderPlan> => {
-		// TODO: 后续接入 Composition 递归渲染时，在这里为子时间线创建 child scope 并并入当前 scope。
+		if (element.type === COMPOSITION_ELEMENT_TYPE) {
+			const sceneId = resolveCompositionSceneId(element);
+			if (!sceneId) {
+				console.warn(
+					`[PreviewEditor] Composition "${element.id}" missing props.sceneId`,
+				);
+				return { node: null, ready: Promise.resolve() };
+			}
+			if (compositionPath.includes(sceneId)) {
+				console.warn(
+					`[PreviewEditor] Skip recursive Composition "${element.id}" -> "${sceneId}"`,
+				);
+				return { node: null, ready: Promise.resolve() };
+			}
+			if (compositionPath.length >= maxCompositionDepth) {
+				console.warn(
+					`[PreviewEditor] Skip Composition "${element.id}" because max depth (${maxCompositionDepth}) is reached`,
+				);
+				return { node: null, ready: Promise.resolve() };
+			}
+			if (!deps.resolveCompositionTimeline) {
+				return { node: null, ready: Promise.resolve() };
+			}
+				try {
+					const compositionTimeline =
+						await deps.resolveCompositionTimeline(sceneId);
+					if (!compositionTimeline) {
+						return { node: null, ready: Promise.resolve() };
+					}
+					const compositionDeps: BuildSkiaDeps =
+						typeof compositionTimeline.wrapRenderNode === "function"
+							? {
+									...deps,
+									renderNodeToPicture: (node, size) =>
+										deps.renderNodeToPicture(
+											compositionTimeline.wrapRenderNode?.(node) ?? node,
+											size,
+										),
+								}
+							: deps;
+					const parentFps = resolveSafeFps(fps);
+					const childFps = resolveSafeFps(compositionTimeline.fps, parentFps);
+				const compositionStart = resolveFiniteNumber(element.timeline.start, 0);
+				const localFrames = Math.max(0, displayTime - compositionStart);
+				const localSeconds = localFrames / parentFps;
+				const childDisplayTime = Math.max(
+					0,
+					Math.round(localSeconds * childFps),
+				);
+					const childSnapshot = await buildSkiaFrameSnapshotCore(
+					{
+						elements: compositionTimeline.elements,
+						displayTime: childDisplayTime,
+						tracks: compositionTimeline.tracks,
+						getTrackIndexForElement,
+						sortByTrackIndex,
+						prepare: {
+							isExporting,
+							fps: childFps,
+							canvasSize: compositionTimeline.canvasSize,
+							getModelStore: compositionTimeline.getModelStore,
+							prepareTransitionPictures: shouldPrepareTransitionPictures,
+							forcePrepareFrames,
+							awaitReady: shouldAwaitReady,
+							compositionPath: [...compositionPath, sceneId],
+							maxCompositionDepth,
+						},
+						},
+						compositionDeps,
+					);
+				scope.add(() => childSnapshot.dispose?.());
+
+				const childCanvasWidth = Math.max(
+					1,
+					resolveFiniteNumber(compositionTimeline.canvasSize.width, 1),
+				);
+				const childCanvasHeight = Math.max(
+					1,
+					resolveFiniteNumber(compositionTimeline.canvasSize.height, 1),
+				);
+				const targetWidth = Math.max(
+					1,
+					resolveFiniteNumber(
+						element.transform?.baseSize.width,
+						childCanvasWidth,
+					),
+				);
+				const targetHeight = Math.max(
+					1,
+					resolveFiniteNumber(
+						element.transform?.baseSize.height,
+						childCanvasHeight,
+					),
+				);
+				const matrix = Skia.Matrix();
+				matrix.scale(
+					targetWidth / childCanvasWidth,
+					targetHeight / childCanvasHeight,
+				);
+				const compositionNode = (
+					<Group matrix={matrix} key={element.id}>
+						<Picture picture={childSnapshot.picture} />
+					</Group>
+				);
+				const node = wrapElementNode({
+					target: element,
+					node: compositionNode,
+					isTransitionElement,
+					canvasSize,
+				});
+				return {
+					node,
+					ready: childSnapshot.ready,
+				};
+			} catch (error) {
+				console.warn(
+					`[PreviewEditor] Skip Composition "${element.id}" due to render error`,
+					error,
+				);
+				return { node: null, ready: Promise.resolve() };
+			}
+		}
 		if (!isTransitionElement(element)) {
 			return buildPlainElementPlan(element, isExporting);
 		}
@@ -452,9 +616,14 @@ export const buildSkiaFrameSnapshotCore = async (
 		await renderState.ready;
 		const canvasSize = args.prepare?.canvasSize;
 		if (!canvasSize || canvasSize.width <= 0 || canvasSize.height <= 0) {
-			throw new Error("Failed to build skia frame snapshot: invalid canvas size");
+			throw new Error(
+				"Failed to build skia frame snapshot: invalid canvas size",
+			);
 		}
-		const picture = await deps.renderNodeToPicture(renderState.children, canvasSize);
+		const picture = await deps.renderNodeToPicture(
+			renderState.children,
+			canvasSize,
+		);
 		if (!picture) {
 			throw new Error("Failed to build skia frame snapshot: picture is null");
 		}

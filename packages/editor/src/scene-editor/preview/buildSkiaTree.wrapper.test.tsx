@@ -1,22 +1,34 @@
-import React from "react";
-import type { TimelineElement, TransformMeta } from "core/element/types";
-import type { TimelineTrack } from "core/editor/timeline/types";
 import {
+	type BuildSkiaDeps,
 	buildSkiaFrameSnapshotCore,
 	buildSkiaRenderStateCore,
-	type BuildSkiaDeps,
 } from "core/editor/preview/buildSkiaTree";
+import type { TimelineTrack } from "core/editor/timeline/types";
+import type { TimelineElement, TransformMeta } from "core/element/types";
+import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("react-skia-lite", async () => {
 	const ReactModule = await import("react");
 	const Group = (props: Record<string, unknown>) => {
 		const { children, ...rest } = props;
-		return ReactModule.createElement("group", rest, children as React.ReactNode);
+		return ReactModule.createElement(
+			"group",
+			rest,
+			children as React.ReactNode,
+		);
 	};
 	const Fill = (props: Record<string, unknown>) => {
 		const { children, ...rest } = props;
 		return ReactModule.createElement("fill", rest, children as React.ReactNode);
+	};
+	const Picture = (props: Record<string, unknown>) => {
+		const { children, ...rest } = props;
+		return ReactModule.createElement(
+			"picture",
+			rest,
+			children as React.ReactNode,
+		);
 	};
 	const Skia = {
 		Matrix: () => {
@@ -42,6 +54,7 @@ vi.mock("react-skia-lite", async () => {
 	return {
 		Group,
 		Fill,
+		Picture,
 		Skia,
 	};
 });
@@ -88,8 +101,22 @@ const deps: BuildSkiaDeps = {
 };
 
 const tracks: TimelineTrack[] = [
-	{ id: "main", role: "clip", hidden: false, locked: false, muted: false, solo: false },
-	{ id: "track-1", role: "effect", hidden: false, locked: false, muted: false, solo: false },
+	{
+		id: "main",
+		role: "clip",
+		hidden: false,
+		locked: false,
+		muted: false,
+		solo: false,
+	},
+	{
+		id: "track-1",
+		role: "effect",
+		hidden: false,
+		locked: false,
+		muted: false,
+		solo: false,
+	},
 ];
 
 const getTrackIndexForElement = (element: TimelineElement) =>
@@ -111,7 +138,9 @@ const sortByTrackIndex = (elements: TimelineElement[]) => {
 		.map((item) => item.element);
 };
 
-const createTransform = (partial: Partial<TransformMeta> = {}): TransformMeta => ({
+const createTransform = (
+	partial: Partial<TransformMeta> = {},
+): TransformMeta => ({
 	baseSize: { width: 200, height: 100 },
 	position: { x: 100, y: 60, space: "canvas" },
 	anchor: { x: 0.5, y: 0.5, space: "normalized" },
@@ -230,9 +259,8 @@ describe("buildSkiaTree transform wrapper", () => {
 		if (!isElement(contentNode)) return;
 		expect(contentNode.props.opacity).toBeCloseTo(0.4);
 
-		const transformGroups = collectElements(
-			contentNode,
-			(candidate) => Boolean(candidate.props.matrix),
+		const transformGroups = collectElements(contentNode, (candidate) =>
+			Boolean(candidate.props.matrix),
 		);
 		expect(transformGroups.length).toBeGreaterThanOrEqual(1);
 
@@ -384,6 +412,120 @@ describe("buildSkiaTree transform wrapper", () => {
 		expect(plainNodes.length).toBe(1);
 	});
 
+	it("Composition 会递归构建子 scene picture 并进入当前帧", async () => {
+		const composition = createElement({
+			id: "composition-1",
+			type: "Composition",
+			component: "composition",
+			props: { sceneId: "scene-2" },
+			transform: createTransform({
+				baseSize: { width: 1920, height: 1080 },
+			}),
+		});
+		const childClip = createElement({
+			id: "child-clip-1",
+			type: "Image",
+			component: "image",
+		});
+		const childWrapSpy = vi.fn((node: React.ReactNode) => node);
+		const childPictureDispose = vi.fn();
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToPicture: vi.fn(async () => {
+				return { dispose: childPictureDispose } as any;
+			}),
+			resolveCompositionTimeline: (sceneId) => {
+				if (sceneId !== "scene-2") return null;
+					return {
+						sceneId,
+						elements: [childClip],
+						tracks,
+						fps: 30,
+						canvasSize: { width: 1920, height: 1080 },
+						wrapRenderNode: childWrapSpy,
+					};
+				},
+			};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [composition],
+				displayTime: 10,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					compositionPath: ["scene-1"],
+				},
+			},
+			localDeps,
+		);
+
+		const pictureNodes = collectElements(
+			renderState.children,
+			(node) => "picture" in node.props,
+		);
+		expect(pictureNodes.length).toBeGreaterThan(0);
+		expect(pictureNodes[0]?.props.picture).toBeTruthy();
+		expect(childWrapSpy).toHaveBeenCalled();
+
+		renderState.dispose?.();
+		expect(childPictureDispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("Composition 循环引用会被跳过，避免递归死循环", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const composition = createElement({
+			id: "composition-root",
+			type: "Composition",
+			component: "composition",
+			props: { sceneId: "scene-2" },
+		});
+		const nestedCycle = createElement({
+			id: "composition-cycle",
+			type: "Composition",
+			component: "composition",
+			props: { sceneId: "scene-1" },
+		});
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToPicture: vi.fn(async () => ({ dispose: vi.fn() }) as any),
+			resolveCompositionTimeline: (sceneId) => {
+				if (sceneId !== "scene-2") return null;
+				return {
+					sceneId,
+					elements: [nestedCycle],
+					tracks,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+				};
+			},
+		};
+
+		await buildSkiaRenderStateCore(
+			{
+				elements: [composition],
+				displayTime: 10,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					compositionPath: ["scene-1"],
+				},
+			},
+			localDeps,
+		);
+
+		expect(warnSpy).toHaveBeenCalled();
+		warnSpy.mockRestore();
+	});
+
 	it("awaitReady 会等待 model.waitForReady 完成", async () => {
 		const element = createElement({
 			id: "ready-image",
@@ -410,7 +552,8 @@ describe("buildSkiaTree transform wrapper", () => {
 					fps: 30,
 					canvasSize: { width: 1920, height: 1080 },
 					awaitReady: true,
-					getModelStore: (id) => (id === element.id ? (modelStore as any) : undefined),
+					getModelStore: (id) =>
+						id === element.id ? (modelStore as any) : undefined,
 				},
 			},
 			deps,
@@ -452,7 +595,8 @@ describe("buildSkiaTree transform wrapper", () => {
 					fps: 30,
 					canvasSize: { width: 1920, height: 1080 },
 					awaitReady: true,
-					getModelStore: (id) => (id === element.id ? (modelStore as any) : undefined),
+					getModelStore: (id) =>
+						id === element.id ? (modelStore as any) : undefined,
 				},
 			},
 			deps,
@@ -501,7 +645,8 @@ describe("buildSkiaTree transform wrapper", () => {
 					canvasSize: { width: 1920, height: 1080 },
 					forcePrepareFrames: true,
 					awaitReady: true,
-					getModelStore: (id) => (id === element.id ? (modelStore as any) : undefined),
+					getModelStore: (id) =>
+						id === element.id ? (modelStore as any) : undefined,
 				},
 			},
 			localDeps,
@@ -540,7 +685,8 @@ describe("buildSkiaTree transform wrapper", () => {
 					fps: 30,
 					canvasSize: { width: 1920, height: 1080 },
 					awaitReady: true,
-					getModelStore: (id) => (id === element.id ? (modelStore as any) : undefined),
+					getModelStore: (id) =>
+						id === element.id ? (modelStore as any) : undefined,
 				},
 			},
 			deps,

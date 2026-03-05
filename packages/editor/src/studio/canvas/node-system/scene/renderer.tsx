@@ -1,16 +1,19 @@
-import type { TimelineElement } from "core/element/types";
 import {
 	toDisplayTimeFromFrameIndex,
 	toFrameIndex,
 } from "core/editor/preview/framePrecompileBuffer";
 import { createFramePrecompileController } from "core/editor/preview/framePrecompileController";
 import { schedulePrecompileTask } from "core/editor/preview/framePrecompileScheduler";
+import type { TimelineElement } from "core/element/types";
 import type { SceneNode } from "core/studio/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Picture, Rect, type SkPicture } from "react-skia-lite";
 import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
 import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
-import type { EditorRuntime, TimelineRuntime } from "@/scene-editor/runtime/types";
+import type {
+	EditorRuntime,
+	TimelineRuntime,
+} from "@/scene-editor/runtime/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import type { CanvasNodeSkiaRenderProps } from "../types";
 
@@ -152,6 +155,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 								forcePrepareFrames: true,
 								awaitReady: true,
 								getModelStore: (id) => runtime.modelRegistry.get(id),
+								compositionPath: [node.sceneId],
 							},
 						},
 						{
@@ -160,6 +164,29 @@ export const SceneNodeSkiaRenderer: React.FC<
 									{renderNode}
 								</EditorRuntimeProvider>
 							),
+							resolveCompositionTimeline: (sceneId) => {
+								const childRuntime = runtimeManager.getTimelineRuntime(
+									toSceneTimelineRef(sceneId),
+								);
+								if (!childRuntime) return null;
+								const childState = childRuntime.timelineStore.getState();
+								return {
+									sceneId,
+									elements: childState.elements,
+									tracks: childState.tracks,
+									fps: childState.fps,
+									canvasSize: childState.canvasSize,
+									getModelStore: (id: string) =>
+										childRuntime.modelRegistry.get(id),
+									wrapRenderNode: (childNode) => (
+										<EditorRuntimeProvider
+											runtime={createScopedRuntime(childRuntime)}
+										>
+											{childNode}
+										</EditorRuntimeProvider>
+									),
+								};
+							},
 						},
 					);
 				return useQueue ? enqueueBuild(build) : build();
@@ -260,7 +287,14 @@ export const SceneNodeSkiaRenderer: React.FC<
 					renderFallback();
 				});
 		},
-		[enqueueBuild, node.sceneId, renderFallback, runtime, scene],
+		[
+			enqueueBuild,
+			node.sceneId,
+			renderFallback,
+			runtime,
+			runtimeManager,
+			scene,
+		],
 	);
 
 	useEffect(() => {

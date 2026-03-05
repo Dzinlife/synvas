@@ -10,16 +10,17 @@ import { useTimelineRuntimeRegistryBridge } from "@/studio/scene/useTimelineRunt
 import { useStudioHotkeys } from "@/studio/useStudioHotkeys";
 import PreviewProvider from "./contexts/PreviewProvider";
 import { TimelineProvider } from "./contexts/TimelineContext";
+import { createScopedStudioRuntime } from "./runtime/createScopedStudioRuntime";
 import {
 	EditorRuntimeProvider,
 	useEditorRuntime,
 } from "./runtime/EditorRuntimeProvider";
-import { createScopedStudioRuntime } from "./runtime/createScopedStudioRuntime";
 import type { EditorRuntime, StudioRuntimeManager } from "./runtime/types";
 import ViewportHost from "./ViewportHost";
 
 // 导入所有组件以触发注册
 import "@/element/AudioClip";
+import "@/element/Composition";
 import "@/element/VideoClip";
 import "@/element/ColorFilterLayer";
 import "@/element/FreezeFrame";

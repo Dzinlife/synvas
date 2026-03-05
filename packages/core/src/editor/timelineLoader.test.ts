@@ -1,8 +1,23 @@
-import type { TimelineElement } from "../element/types";
 import { describe, expect, it } from "vitest";
+import type { TimelineElement } from "../element/types";
 import { loadTimelineFromObject, saveTimelineToObject } from "./timelineLoader";
 
-const createBaseTimeline = () => ({
+type TimelineFixture = {
+	fps: number;
+	canvas: {
+		width: number;
+		height: number;
+	};
+	settings: {
+		snapEnabled: boolean;
+		autoAttach: boolean;
+		rippleEditingEnabled: boolean;
+		previewAxisEnabled: boolean;
+	};
+	elements: Array<Record<string, unknown>>;
+};
+
+const createBaseTimeline = (): TimelineFixture => ({
 	fps: 30,
 	canvas: {
 		width: 1920,
@@ -104,5 +119,56 @@ describe("timelineLoader asset reference", () => {
 		expect(saved.elements[0]?.assetId).toBe("asset-video-1");
 		expect((saved.elements[0]?.props as { uri?: string }).uri).toBeUndefined();
 		expect(Object.hasOwn(saved, "assets")).toBe(false);
+	});
+
+	it("Composition 缺少 props.sceneId 会校验失败", () => {
+		const timeline = createBaseTimeline();
+		timeline.elements = [
+			{
+				id: "composition-1",
+				type: "Composition",
+				component: "composition",
+				name: "composition-1",
+				timeline: {
+					start: 0,
+					end: 30,
+					startTimecode: "00:00:00:00",
+					endTimecode: "00:00:01:00",
+					trackIndex: 0,
+				},
+				props: {},
+			},
+		];
+
+		expect(() => loadTimelineFromObject(timeline)).toThrow(
+			"elements[0].props.sceneId",
+		);
+	});
+
+	it("Composition 携带合法 props.sceneId 时可正常加载", () => {
+		const timeline = createBaseTimeline();
+		timeline.elements = [
+			{
+				id: "composition-1",
+				type: "Composition",
+				component: "composition",
+				name: "composition-1",
+				timeline: {
+					start: 0,
+					end: 30,
+					startTimecode: "00:00:00:00",
+					endTimecode: "00:00:01:00",
+					trackIndex: 0,
+				},
+				props: {
+					sceneId: "scene-2",
+				},
+			},
+		];
+
+		const loaded = loadTimelineFromObject(timeline);
+		expect((loaded.elements[0]?.props as { sceneId?: string }).sceneId).toBe(
+			"scene-2",
+		);
 	});
 });

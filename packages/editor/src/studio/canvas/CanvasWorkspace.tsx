@@ -10,17 +10,17 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { writeAudioToOpfs } from "@/asr/opfsAudio";
 import { createTransformMeta } from "@/element/transform";
+import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
+import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
+import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { findAttachments } from "@/scene-editor/utils/attachments";
 import { resolveExternalVideoUri } from "@/scene-editor/utils/externalVideo";
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
-import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
-import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
-import { writeAudioToOpfs } from "@/asr/opfsAudio";
-import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
-import { useProjectStore } from "@/projects/projectStore";
 import { CANVAS_NODE_DRAWER_DEFAULT_HEIGHT } from "@/studio/canvas/CanvasNodeDrawerShell";
 import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import {
@@ -37,6 +37,7 @@ import {
 	type CanvasNodeLayoutSnapshot,
 	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
+import { wouldCreateSceneCompositionCycle } from "@/studio/scene/sceneComposition";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { secondsToFrames } from "@/utils/timecode";
 import CanvasWorkspaceOverlay, {
@@ -48,33 +49,33 @@ import {
 	resolveCanvasOverlayLayout,
 } from "./canvasOverlayLayout";
 import {
+	buildNodeFitCamera,
+	buildNodePanCamera,
+	CAMERA_ZOOM_EPSILON,
 	type CameraState,
+	clampZoom,
 	DEFAULT_CAMERA,
 	DROP_GRID_COLUMNS,
 	DROP_GRID_OFFSET_X,
 	DROP_GRID_OFFSET_Y,
-	SIDEBAR_VIEW_PADDING_PX,
-	buildNodeFitCamera,
-	buildNodePanCamera,
-	clampZoom,
 	isCameraAlmostEqual,
+	isCanvasSurfaceTarget,
 	isLayoutEqual,
 	isOverlayWheelTarget,
-	isCanvasSurfaceTarget,
 	isWorldPointInNode,
 	pickLayout,
+	type ResolvedCanvasDrawerOptions,
 	resolveDrawerOptions,
 	resolveDroppedFiles,
 	resolveExternalFileUri,
+	SIDEBAR_VIEW_PADDING_PX,
 	toTimelineContextMenuActions,
-	type ResolvedCanvasDrawerOptions,
-	CAMERA_ZOOM_EPSILON,
 } from "./canvasWorkspaceUtils";
-import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import type {
 	CanvasNodeDragEvent,
 	CanvasNodeResizeAnchor,
 } from "./InfiniteSkiaCanvas";
+import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { useCanvasCameraController } from "./useCanvasCameraController";
 
 type CanvasContextMenuState =
@@ -268,10 +269,8 @@ const CanvasWorkspace = () => {
 			);
 	}, [currentProject, runtimeManager]);
 
-	const insertImageNodeToScene = useCallback(
+	const insertNodeToScene = useCallback(
 		(node: CanvasNode, sceneId: string) => {
-			if (node.type !== "image") return;
-			if (!node.assetId) return;
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			const targetScene = latestProject.scenes[sceneId];
@@ -283,6 +282,7 @@ const CanvasWorkspace = () => {
 				rippleEditingEnabled: boolean,
 				autoAttach: boolean,
 			): TimelineElement[] => {
+				if (node.type !== "image" || !node.assetId) return elements;
 				const start = resolveTimelineEndFrame(elements);
 				const duration = Math.max(1, secondsToFrames(5, fps));
 				const nextElement: TimelineElement = {
@@ -321,6 +321,117 @@ const CanvasWorkspace = () => {
 				});
 			};
 
+			const appendCompositionElement = (
+				elements: TimelineElement[],
+				fps: number,
+				rippleEditingEnabled: boolean,
+				autoAttach: boolean,
+			): TimelineElement[] => {
+				if (node.type !== "scene") return elements;
+				const sourceScene = latestProject.scenes[node.sceneId];
+				if (!sourceScene) return elements;
+				if (
+					wouldCreateSceneCompositionCycle(
+						latestProject,
+						sceneId,
+						sourceScene.id,
+					)
+				) {
+					return elements;
+				}
+				const sourceRuntime = runtimeManager?.getTimelineRuntime(
+					toSceneTimelineRef(sourceScene.id),
+				);
+				const sourceTimelineState = sourceRuntime?.timelineStore.getState();
+				const sourceElements =
+					sourceTimelineState?.elements ?? sourceScene.timeline.elements;
+				const sourceFps = Math.max(
+					1,
+					Math.round(
+						sourceTimelineState?.fps ?? sourceScene.timeline.fps ?? fps,
+					),
+				);
+				const sourceCanvasSize =
+					sourceTimelineState?.canvasSize ?? sourceScene.timeline.canvas;
+				const sourceDuration = resolveTimelineEndFrame(sourceElements);
+				const durationBySource = Math.max(
+					1,
+					Math.round((sourceDuration / sourceFps) * fps),
+				);
+				const fallbackDuration = Math.max(1, secondsToFrames(5, fps));
+				const duration =
+					sourceDuration > 0 ? durationBySource : fallbackDuration;
+				const start = resolveTimelineEndFrame(elements);
+				const width = Math.max(
+					1,
+					Math.round(sourceCanvasSize.width || Math.abs(node.width) || 1),
+				);
+				const height = Math.max(
+					1,
+					Math.round(sourceCanvasSize.height || Math.abs(node.height) || 1),
+				);
+				const nextElement: TimelineElement = {
+					id: `element-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+					type: "Composition",
+					component: "composition",
+					name: sourceScene.name?.trim() || node.name || "Composition",
+					props: {
+						sceneId: sourceScene.id,
+					},
+					transform: createTransformMeta({
+						width,
+						height,
+						positionX: 0,
+						positionY: 0,
+					}),
+					timeline: buildTimelineMeta(
+						{
+							start,
+							end: start + duration,
+							trackIndex: 0,
+							role: "clip",
+						},
+						fps,
+					),
+					render: {
+						zIndex: 0,
+						visible: true,
+						opacity: 1,
+					},
+				};
+				return finalizeTimelineElements([...elements, nextElement], {
+					rippleEditingEnabled,
+					attachments: autoAttach ? findAttachments(elements) : undefined,
+					autoAttach,
+					fps,
+				});
+			};
+
+			const appendElement = (
+				elements: TimelineElement[],
+				fps: number,
+				rippleEditingEnabled: boolean,
+				autoAttach: boolean,
+			): TimelineElement[] => {
+				if (node.type === "image") {
+					return appendImageElement(
+						elements,
+						fps,
+						rippleEditingEnabled,
+						autoAttach,
+					);
+				}
+				if (node.type === "scene") {
+					return appendCompositionElement(
+						elements,
+						fps,
+						rippleEditingEnabled,
+						autoAttach,
+					);
+				}
+				return elements;
+			};
+
 			if (runtimeManager) {
 				const timelineRuntime = runtimeManager.getTimelineRuntime(
 					toSceneTimelineRef(sceneId),
@@ -328,7 +439,7 @@ const CanvasWorkspace = () => {
 				if (timelineRuntime) {
 					const timelineState = timelineRuntime.timelineStore.getState();
 					timelineState.setElements((prev) => {
-						return appendImageElement(
+						return appendElement(
 							prev,
 							timelineState.fps,
 							timelineState.rippleEditingEnabled,
@@ -339,12 +450,13 @@ const CanvasWorkspace = () => {
 				}
 			}
 
-			const nextElements = appendImageElement(
+			const nextElements = appendElement(
 				targetScene.timeline.elements,
 				targetScene.timeline.fps,
 				targetScene.timeline.settings.rippleEditingEnabled,
 				targetScene.timeline.settings.autoAttach,
 			);
+			if (nextElements === targetScene.timeline.elements) return;
 			updateSceneTimeline(sceneId, {
 				...targetScene.timeline,
 				elements: nextElements,
@@ -694,7 +806,9 @@ const CanvasWorkspace = () => {
 			const fallbackAspectRatio = resolvePositiveNumber(
 				node.width / Math.max(node.height, CAMERA_ZOOM_EPSILON),
 			);
-			const requestedAspectRatio = resolvePositiveNumber(constraints.aspectRatio);
+			const requestedAspectRatio = resolvePositiveNumber(
+				constraints.aspectRatio,
+			);
 			const lockAspectRatio =
 				constraints.lockAspectRatio === true &&
 				(requestedAspectRatio !== null || fallbackAspectRatio !== null);
@@ -714,7 +828,11 @@ const CanvasWorkspace = () => {
 	);
 
 	const handleSkiaNodeResizeStart = useCallback(
-		(node: CanvasNode, anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
+		(
+			node: CanvasNode,
+			anchor: CanvasNodeResizeAnchor,
+			event: CanvasNodeDragEvent,
+		) => {
 			if (event.button !== 0) return;
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
@@ -733,10 +851,8 @@ const CanvasWorkspace = () => {
 				startNodeY: node.y,
 				startNodeWidth: node.width,
 				startNodeHeight: node.height,
-				fixedCornerX:
-					anchor === "bottom-right" ? node.x : node.x + node.width,
-				fixedCornerY:
-					anchor === "bottom-right" ? node.y : node.y + node.height,
+				fixedCornerX: anchor === "bottom-right" ? node.x : node.x + node.width,
+				fixedCornerY: anchor === "bottom-right" ? node.y : node.y + node.height,
 				before: pickLayout(node),
 				moved: false,
 				constraints: resolveNodeResizeConstraints(node),
@@ -752,7 +868,11 @@ const CanvasWorkspace = () => {
 	);
 
 	const handleSkiaNodeResize = useCallback(
-		(node: CanvasNode, anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
+		(
+			node: CanvasNode,
+			anchor: CanvasNodeResizeAnchor,
+			event: CanvasNodeDragEvent,
+		) => {
 			const resizeSession = nodeResizeSessionRef.current;
 			if (!resizeSession) return;
 			if (resizeSession.nodeId !== node.id) return;
@@ -1062,7 +1182,7 @@ const CanvasWorkspace = () => {
 				project: currentProject,
 				sceneOptions: contextMenuSceneOptions,
 				onInsertNodeToScene: (sceneId) => {
-					insertImageNodeToScene(node, sceneId);
+					insertNodeToScene(node, sceneId);
 				},
 			});
 			if (nodeActions.length === 0) return false;
@@ -1078,7 +1198,7 @@ const CanvasWorkspace = () => {
 		[
 			contextMenuSceneOptions,
 			currentProject,
-			insertImageNodeToScene,
+			insertNodeToScene,
 			setContextMenuState,
 		],
 	);

@@ -1,4 +1,5 @@
 import type { SceneNode } from "core/studio/types";
+import { wouldCreateSceneCompositionCycle } from "@/studio/scene/sceneComposition";
 import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
 import { SceneNodeDrawer } from "./drawer";
@@ -37,6 +38,30 @@ const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
 		defaultHeight: 320,
 		minHeight: 240,
 		maxHeightRatio: 0.75,
+	},
+	contextMenu: ({ node, project, sceneOptions, onInsertNodeToScene }) => {
+		const sceneActions = sceneOptions.map((scene) => {
+			const disabled =
+				scene.sceneId === node.sceneId ||
+				wouldCreateSceneCompositionCycle(project, scene.sceneId, node.sceneId);
+			return {
+				key: `insert-scene-to-scene:${scene.sceneId}`,
+				label: scene.label,
+				disabled,
+				onSelect: () => {
+					onInsertNodeToScene(scene.sceneId);
+				},
+			};
+		});
+		return [
+			{
+				key: "insert-scene-to-scene",
+				label: "插入到其他 Scene",
+				disabled: sceneActions.length === 0,
+				onSelect: () => {},
+				children: sceneActions,
+			},
+		];
 	},
 };
 

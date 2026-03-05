@@ -1,10 +1,10 @@
-import type { RendererPrepareFrameContext } from "core/element/model/types";
 import {
 	type BuildSkiaDeps,
 	buildSkiaFrameSnapshotCore,
 	buildSkiaRenderStateCore,
 	buildSkiaTreeCore,
 } from "core/editor/preview/buildSkiaTree";
+import type { RendererPrepareFrameContext } from "core/element/model/types";
 import type { ReactNode } from "react";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { renderNodeToPicture } from "@/element/Transition/picture";
@@ -13,9 +13,12 @@ import { isTransitionElement } from "@/scene-editor/utils/transitions";
 type BuildSkiaOverrides = {
 	renderNodeToPicture?: BuildSkiaDeps["renderNodeToPicture"];
 	wrapRenderNode?: (node: ReactNode) => ReactNode;
+	resolveCompositionTimeline?: BuildSkiaDeps["resolveCompositionTimeline"];
 };
 
-const createBuildSkiaDeps = (overrides?: BuildSkiaOverrides): BuildSkiaDeps => ({
+const createBuildSkiaDeps = (
+	overrides?: BuildSkiaOverrides,
+): BuildSkiaDeps => ({
 	resolveComponent: (componentId) => componentRegistry.get(componentId),
 	listComponentIds: () => componentRegistry.getComponentIds(),
 	renderNodeToPicture: (node, size) => {
@@ -26,6 +29,7 @@ const createBuildSkiaDeps = (overrides?: BuildSkiaOverrides): BuildSkiaDeps => (
 		return render(wrappedNode, size);
 	},
 	isTransitionElement,
+	resolveCompositionTimeline: overrides?.resolveCompositionTimeline,
 });
 
 export const buildSkiaRenderState = async (
@@ -67,8 +71,7 @@ export const buildKonvaTree = (
 	});
 	return sortByTrackIndex(
 		visibleElements.filter(
-			(element) =>
-				!isTransitionElement(element) && element.type !== "Filter",
+			(element) => !isTransitionElement(element) && element.type !== "Filter",
 		),
 	);
 };

@@ -1,10 +1,10 @@
-import type { TimelineElement } from "core/element/types";
 import {
 	toDisplayTimeFromFrameIndex,
 	toFrameIndex,
 } from "core/editor/preview/framePrecompileBuffer";
 import { createFramePrecompileController } from "core/editor/preview/framePrecompileController";
 import { schedulePrecompileTask } from "core/editor/preview/framePrecompileScheduler";
+import type { TimelineElement } from "core/element/types";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
@@ -17,10 +17,13 @@ import {
 import { useTimelineStore } from "@/scene-editor/contexts/TimelineContext";
 import {
 	EditorRuntimeContext,
+	useEditorRuntime,
 	useModelRegistry,
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { TimelineTrack } from "@/scene-editor/timeline/types";
+import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { buildSkiaFrameSnapshot } from "./buildSkiaTree";
 
 interface SkiaPreviewCanvasProps {
@@ -49,8 +52,23 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	canvasRef,
 }) => {
 	const RuntimeContextBridge = useContextBridge(EditorRuntimeContext);
+	const runtime = useEditorRuntime();
 	const timelineStore = useTimelineStoreApi();
 	const modelRegistry = useModelRegistry();
+	const runtimeManager = useMemo<StudioRuntimeManager | null>(() => {
+		const manager = runtime as Partial<StudioRuntimeManager>;
+		if (
+			!manager.ensureTimelineRuntime ||
+			!manager.getTimelineRuntime ||
+			!manager.getActiveEditTimelineRuntime
+		) {
+			return null;
+		}
+		return manager as StudioRuntimeManager;
+	}, [runtime]);
+	const rootSceneId = useMemo(() => {
+		return runtimeManager?.getActiveEditTimelineRuntime()?.ref.sceneId ?? null;
+	}, [runtimeManager]);
 	const internalCanvasRef = useRef<CanvasRef>(null);
 	const targetCanvasRef = canvasRef ?? internalCanvasRef;
 	const renderTokenRef = useRef(0);
@@ -86,15 +104,18 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 		frameControllerRef.current.invalidateAll();
 	}, []);
 
-	const enqueueBuild = useCallback(<T,>(build: () => Promise<T>): Promise<T> => {
-		const pending = buildQueueRef.current;
-		const next = pending.then(build, build);
-		buildQueueRef.current = next.then(
-			() => undefined,
-			() => undefined,
-		);
-		return next;
-	}, []);
+	const enqueueBuild = useCallback(
+		<T,>(build: () => Promise<T>): Promise<T> => {
+			const pending = buildQueueRef.current;
+			const next = pending.then(build, build);
+			buildQueueRef.current = next.then(
+				() => undefined,
+				() => undefined,
+			);
+			return next;
+		},
+		[],
+	);
 
 	const renderBlackFrame = useCallback(() => {
 		const root = targetCanvasRef.current?.getRoot();
@@ -127,28 +148,60 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 								displayTime,
 							);
 				const build = () =>
-					buildSkiaFrameSnapshot({
-						elements,
-						displayTime: targetDisplayTime,
-						tracks,
-						getTrackIndexForElement,
-						sortByTrackIndex,
-						prepare: {
-							isExporting: false,
-							// 预览态也要带上 fps，保证帧时间换算一致
-							fps: normalizedFps,
-							canvasSize: { width: canvasWidth, height: canvasHeight },
-							prepareTransitionPictures: true,
-							forcePrepareFrames: true,
-							awaitReady: true,
-							// 提供模型索引，供预览态准备帧使用
-							getModelStore: (id) => modelRegistry.get(id),
+					buildSkiaFrameSnapshot(
+						{
+							elements,
+							displayTime: targetDisplayTime,
+							tracks,
+							getTrackIndexForElement,
+							sortByTrackIndex,
+							prepare: {
+								isExporting: false,
+								// 预览态也要带上 fps，保证帧时间换算一致
+								fps: normalizedFps,
+								canvasSize: { width: canvasWidth, height: canvasHeight },
+								prepareTransitionPictures: true,
+								forcePrepareFrames: true,
+								awaitReady: true,
+								// 提供模型索引，供预览态准备帧使用
+								getModelStore: (id) => modelRegistry.get(id),
+								compositionPath: rootSceneId ? [rootSceneId] : [],
+							},
 						},
-					}, {
-						wrapRenderNode: (node) => (
-							<RuntimeContextBridge>{node}</RuntimeContextBridge>
-						),
-					});
+						{
+							wrapRenderNode: (node) => (
+								<RuntimeContextBridge>{node}</RuntimeContextBridge>
+							),
+							resolveCompositionTimeline: (sceneId) => {
+								if (!runtimeManager) return null;
+								const childRuntime = runtimeManager.getTimelineRuntime(
+									toSceneTimelineRef(sceneId),
+								);
+							if (!childRuntime) return null;
+							const childState = childRuntime.timelineStore.getState();
+							return {
+								sceneId,
+								elements: childState.elements,
+								tracks: childState.tracks,
+								fps: childState.fps,
+								canvasSize: childState.canvasSize,
+								getModelStore: (id: string) =>
+									childRuntime.modelRegistry.get(id),
+								wrapRenderNode: (childNode) => (
+									<EditorRuntimeContext.Provider
+										value={{
+											id: `${childRuntime.id}:composition-preview`,
+											timelineStore: childRuntime.timelineStore,
+											modelRegistry: childRuntime.modelRegistry,
+										}}
+									>
+										{childNode}
+									</EditorRuntimeContext.Provider>
+								),
+							};
+						},
+					},
+				);
 				return useQueue ? enqueueBuild(build) : build();
 			};
 
@@ -218,7 +271,10 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 						}
 						disposeRef.current?.();
 						disposeRef.current = frameState.dispose ?? null;
-						frameControllerRef.current.commitFrame(frameIndex, buildFrameSnapshot);
+						frameControllerRef.current.commitFrame(
+							frameIndex,
+							buildFrameSnapshot,
+						);
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) {
@@ -247,16 +303,16 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 					const nextDispose = frameControllerRef.current.takeDispose(entry);
 					disposeRef.current?.();
 					disposeRef.current = nextDispose ?? null;
-					frameControllerRef.current.commitFrame(frameIndex, buildFrameSnapshot);
+					frameControllerRef.current.commitFrame(
+						frameIndex,
+						buildFrameSnapshot,
+					);
 				})
 				.catch((error) => {
 					if (renderTokenRef.current !== renderToken) {
 						return;
 					}
-					console.error(
-						"Failed to build skia preview frame snapshot:",
-						error,
-					);
+					console.error("Failed to build skia preview frame snapshot:", error);
 					if (!hasRenderedContentRef.current) {
 						renderBlackFrame();
 						hasRenderedContentRef.current = true;
@@ -272,7 +328,9 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			isPlaying,
 			modelRegistry,
 			renderBlackFrame,
+			rootSceneId,
 			RuntimeContextBridge,
+			runtimeManager,
 			sortByTrackIndex,
 			targetCanvasRef,
 			tracks,

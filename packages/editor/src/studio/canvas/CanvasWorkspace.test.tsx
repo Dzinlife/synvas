@@ -67,7 +67,9 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 vi.mock("./InfiniteSkiaCanvas", () => ({
 	default: (props: MockInfiniteSkiaCanvasProps) => {
 		infiniteSkiaCanvasPropsMock(props);
-		return <div data-testid="infinite-skia-canvas" data-canvas-surface="true" />;
+		return (
+			<div data-testid="infinite-skia-canvas" data-canvas-surface="true" />
+		);
 	},
 }));
 
@@ -107,6 +109,40 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			drawer
 		</button>
 	);
+	const wouldCreateCycle = (
+		project: {
+			scenes: Record<
+				string,
+				{
+					timeline?: {
+						elements?: Array<{ type?: string; props?: { sceneId?: string } }>;
+					};
+				}
+			>;
+		},
+		parentSceneId: string,
+		childSceneId: string,
+	): boolean => {
+		if (parentSceneId === childSceneId) return true;
+		const stack = [childSceneId];
+		const visited = new Set<string>();
+		while (stack.length > 0) {
+			const sceneId = stack.pop();
+			if (!sceneId) continue;
+			if (sceneId === parentSceneId) return true;
+			if (visited.has(sceneId)) continue;
+			visited.add(sceneId);
+			const scene = project.scenes[sceneId];
+			const elements = scene?.timeline?.elements ?? [];
+			for (const element of elements) {
+				if (element.type !== "Composition") continue;
+				const nextSceneId = element.props?.sceneId;
+				if (!nextSceneId) continue;
+				stack.push(nextSceneId);
+			}
+		}
+		return false;
+	};
 	const definitions = {
 		scene: {
 			type: "scene",
@@ -118,7 +154,9 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 				scene,
 				node,
 			}: {
-				scene: { timeline?: { canvas?: { width?: number; height?: number } } } | null;
+				scene: {
+					timeline?: { canvas?: { width?: number; height?: number } };
+				} | null;
 				node: { width: number; height: number };
 			}) => ({
 				lockAspectRatio: true,
@@ -135,6 +173,51 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 				minHeight: 240,
 				maxHeightRatio: 0.65,
 			},
+			contextMenu: (context: {
+				node: { sceneId: string };
+				project: {
+					scenes: Record<
+						string,
+						{
+							timeline?: {
+								elements?: Array<{
+									type?: string;
+									props?: { sceneId?: string };
+								}>;
+							};
+						}
+					>;
+				};
+				sceneOptions: Array<{ sceneId: string; label: string }>;
+				onInsertNodeToScene: (sceneId: string) => void;
+			}) => {
+				const sceneActions = context.sceneOptions.map((scene) => {
+					const disabled =
+						scene.sceneId === context.node.sceneId ||
+						wouldCreateCycle(
+							context.project,
+							scene.sceneId,
+							context.node.sceneId,
+						);
+					return {
+						key: `insert-scene:${scene.sceneId}`,
+						label: scene.label,
+						disabled,
+						onSelect: () => {
+							context.onInsertNodeToScene(scene.sceneId);
+						},
+					};
+				});
+				return [
+					{
+						key: "insert-scene",
+						label: "插入到其他 Scene",
+						disabled: sceneActions.length === 0,
+						onSelect: () => {},
+						children: sceneActions,
+					},
+				];
+			},
 		},
 		video: {
 			type: "video",
@@ -146,11 +229,9 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 				asset,
 				node,
 			}: {
-				asset:
-					| {
-							meta?: { sourceSize?: { width?: number; height?: number } };
-					  }
-					| null;
+				asset: {
+					meta?: { sourceSize?: { width?: number; height?: number } };
+				} | null;
 				node: { width: number; height: number };
 			}) => ({
 				lockAspectRatio: true,
@@ -241,11 +322,9 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 				asset,
 				node,
 			}: {
-				asset:
-					| {
-							meta?: { sourceSize?: { width?: number; height?: number } };
-					  }
-					| null;
+				asset: {
+					meta?: { sourceSize?: { width?: number; height?: number } };
+				} | null;
 				node: { width: number; height: number };
 			}) => ({
 				lockAspectRatio: true,
@@ -724,7 +803,11 @@ const resizeNodeAt = (
 			last: true,
 			buttons: 0,
 		};
-		getLatestInfiniteSkiaCanvasProps().onNodeResizeEnd?.(node, anchor, endEvent);
+		getLatestInfiniteSkiaCanvasProps().onNodeResizeEnd?.(
+			node,
+			anchor,
+			endEvent,
+		);
 	});
 };
 
@@ -771,7 +854,9 @@ describe("CanvasWorkspace", () => {
 		expect(panel.textContent).toContain("node-scene-1");
 
 		clickCanvasAt(1120, 700);
-		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.activeNodeId,
+		).toBeNull();
 		expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
 	});
 
@@ -802,7 +887,9 @@ describe("CanvasWorkspace", () => {
 
 		fireEvent.click(screen.getByLabelText("收起侧边栏"));
 		await waitFor(() => {
-			expect(screen.getByTestId("canvas-overlay-drawer").style.left).toBe("12px");
+			expect(screen.getByTestId("canvas-overlay-drawer").style.left).toBe(
+				"12px",
+			);
 		});
 		expect(screen.getByTestId("canvas-sidebar-expand-button")).toBeTruthy();
 	});
@@ -838,7 +925,8 @@ describe("CanvasWorkspace", () => {
 			expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
 		});
 		await waitFor(() => {
-			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 1;
+			const zoom =
+				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 1;
 			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -846,10 +934,12 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const beforeZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+		const beforeZoom =
+			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 		fireEvent.click(screen.getByLabelText("收起侧边栏"));
 		await waitFor(() => {
-			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			const zoom =
+				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -857,7 +947,8 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const afterZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+		const afterZoom =
+			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
@@ -868,7 +959,8 @@ describe("CanvasWorkspace", () => {
 			expect(screen.getByTestId("canvas-active-node-meta-panel")).toBeTruthy();
 		});
 		await waitFor(() => {
-			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 1;
+			const zoom =
+				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 1;
 			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -876,7 +968,8 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const beforeZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+		const beforeZoom =
+			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 		act(() => {
 			useProjectStore.getState().setActiveNode(null);
 		});
@@ -884,7 +977,8 @@ describe("CanvasWorkspace", () => {
 			expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
 		});
 		await waitFor(() => {
-			const zoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			const zoom =
+				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -892,7 +986,8 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const afterZoom = useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+		const afterZoom =
+			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
@@ -1001,7 +1096,8 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		const beforeCamera = useProjectStore.getState().currentProject?.ui.camera;
 		doubleClickNodeAt(300, 160);
-		const immediateCamera = useProjectStore.getState().currentProject?.ui.camera;
+		const immediateCamera =
+			useProjectStore.getState().currentProject?.ui.camera;
 		expect(
 			useProjectStore.getState().currentProject?.ui.focusedNodeId,
 		).toBeNull();
@@ -1135,7 +1231,9 @@ describe("CanvasWorkspace", () => {
 		const beforeUi = useProjectStore.getState().currentProject?.ui;
 
 		rightClickNodeAt(720, 360);
-		fireEvent.mouseEnter(screen.getByRole("menuitem", { name: /插入到 Scene/ }));
+		fireEvent.mouseEnter(
+			screen.getByRole("menuitem", { name: /插入到 Scene/ }),
+		);
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Scene 2" }));
 
 		const project = useProjectStore.getState().currentProject;
@@ -1155,6 +1253,104 @@ describe("CanvasWorkspace", () => {
 
 		const afterUi = project?.ui;
 		expect(afterUi).toEqual(beforeUi);
+	});
+
+	it("右键 scene 节点可插入 Composition 到目标 scene timeline", async () => {
+		render(<CanvasWorkspace />);
+		const beforeUi = useProjectStore.getState().currentProject?.ui;
+
+		rightClickNodeAt(60, 60);
+		fireEvent.mouseEnter(
+			screen.getByRole("menuitem", { name: /插入到其他 Scene/ }),
+		);
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Scene 2" }));
+
+		const project = useProjectStore.getState().currentProject;
+		const inserted =
+			project?.scenes["scene-2"]?.timeline.elements.find(
+				(element) =>
+					element.type === "Composition" && element.component === "composition",
+			) ?? null;
+		expect(inserted).toBeTruthy();
+		if (!inserted) return;
+		expect((inserted.props as { sceneId?: string }).sceneId).toBe("scene-1");
+		expect(inserted.timeline.start).toBe(0);
+		expect(inserted.timeline.end).toBe(150);
+		expect(inserted.timeline.trackIndex).toBe(0);
+		expect(inserted.timeline.role).toBe("clip");
+		expect(inserted.transform?.baseSize.width).toBe(1920);
+		expect(inserted.transform?.baseSize.height).toBe(1080);
+
+		const afterUi = project?.ui;
+		expect(afterUi).toEqual(beforeUi);
+	});
+
+	it("scene 插入会形成循环时菜单项禁用且点击无副作用", async () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				currentProject: {
+					...project,
+					scenes: {
+						...project.scenes,
+						"scene-1": {
+							...project.scenes["scene-1"],
+							timeline: {
+								...project.scenes["scene-1"].timeline,
+								elements: [
+									{
+										id: "composition-existing",
+										type: "Composition",
+										component: "composition",
+										name: "scene-2",
+										props: { sceneId: "scene-2" },
+										timeline: {
+											start: 0,
+											end: 90,
+											startTimecode: "00:00:00:00",
+											endTimecode: "00:00:03:00",
+											trackIndex: 0,
+											role: "clip",
+										},
+										transform: {
+											baseSize: { width: 1920, height: 1080 },
+											position: { x: 0, y: 0, space: "canvas" },
+											anchor: { x: 0.5, y: 0.5, space: "normalized" },
+											scale: { x: 1, y: 1 },
+											rotation: { value: 0, unit: "deg" },
+										},
+										render: {
+											zIndex: 0,
+											visible: true,
+											opacity: 1,
+										},
+									},
+								],
+							},
+						},
+					},
+				},
+			};
+		});
+
+		render(<CanvasWorkspace />);
+		rightClickNodeAt(60, 60);
+		fireEvent.mouseEnter(
+			screen.getByRole("menuitem", { name: /插入到其他 Scene/ }),
+		);
+		const scene2Item = await screen.findByRole("menuitem", { name: "Scene 2" });
+		expect(scene2Item.getAttribute("data-disabled")).not.toBeNull();
+		fireEvent.click(scene2Item);
+
+		const project = useProjectStore.getState().currentProject;
+		const scene2Compositions =
+			project?.scenes["scene-2"]?.timeline.elements.filter(
+				(element) =>
+					element.type === "Composition" &&
+					(element.props as { sceneId?: string }).sceneId === "scene-1",
+			) ?? [];
+		expect(scene2Compositions).toHaveLength(0);
 	});
 
 	it("右键非 image 节点会回退到画布菜单", () => {
@@ -1253,7 +1449,9 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 420, 260);
 		const project = useProjectStore.getState().currentProject;
-		const node = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
 		expect(node?.x).toBe(360);
 		expect(node?.y).toBe(220);
 		expect(project?.ui.activeNodeId).toBe("node-video-1");
@@ -1275,7 +1473,9 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		resizeNodeAt(300, 160, 420, 260, "bottom-right");
 		const project = useProjectStore.getState().currentProject;
-		const node = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
 		expect(node?.x).toBe(240);
 		expect(node?.y).toBe(120);
 		expect((node?.width ?? 0) > 320).toBe(true);
@@ -1341,7 +1541,9 @@ describe("CanvasWorkspace", () => {
 		resizeNodeAt(1000, 640, 1120, 640, "bottom-right");
 
 		const project = useProjectStore.getState().currentProject;
-		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const video = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
 		const text = project?.canvas.nodes.find((item) => item.id === textId);
 		expect(video).toBeTruthy();
 		expect(text).toBeTruthy();
@@ -1417,7 +1619,9 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 420, 260);
 		const project = useProjectStore.getState().currentProject;
-		const node = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
 		expect(node?.x).toBe(332);
 		expect(node?.y).toBe(197);
 		expect(Number.isInteger(node?.x ?? NaN)).toBe(true);
