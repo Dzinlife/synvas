@@ -302,13 +302,15 @@ export const SceneNodeSkiaRenderer: React.FC<
 		renderTokenRef.current += 1;
 		invalidateBuffer();
 		frameControllerRef.current.disposeAll();
-		disposeRef.current?.();
-		disposeRef.current = null;
-		hasRenderedContentRef.current = false;
 		lastRequestedFrameRef.current = null;
-		setPicture(null);
 
-		if (!runtime) return;
+		if (!runtime) {
+			disposeRef.current?.();
+			disposeRef.current = null;
+			hasRenderedContentRef.current = false;
+			setPicture(null);
+			return;
+		}
 
 		const timelineStore = runtime.timelineStore;
 		const renderSkia = () => {
@@ -368,12 +370,20 @@ export const SceneNodeSkiaRenderer: React.FC<
 			unsubIsPlaying();
 			renderTokenRef.current += 1;
 			frameControllerRef.current.disposeAll();
+			lastRequestedFrameRef.current = null;
+		};
+	}, [invalidateBuffer, runRender, runtime]);
+
+	useEffect(() => {
+		return () => {
+			renderTokenRef.current += 1;
+			frameControllerRef.current.disposeAll();
 			disposeRef.current?.();
 			disposeRef.current = null;
 			hasRenderedContentRef.current = false;
 			lastRequestedFrameRef.current = null;
 		};
-	}, [invalidateBuffer, runRender, runtime]);
+	}, []);
 
 	if (!scene) {
 		return (
