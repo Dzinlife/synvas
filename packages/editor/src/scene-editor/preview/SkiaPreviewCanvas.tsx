@@ -40,6 +40,26 @@ interface SkiaPreviewCanvasProps {
 const PRECOMPILE_LOOKAHEAD_FRAMES = 2;
 
 type SkiaFrameSnapshot = Awaited<ReturnType<typeof buildSkiaFrameSnapshot>>;
+const preemptedBuildErrorSymbol = Symbol("preview-build-preempted");
+type PreemptedBuildError = Error & {
+	[preemptedBuildErrorSymbol]: true;
+};
+const createPreemptedBuildError = (): PreemptedBuildError => {
+	const error = new Error(
+		"Preview frame build preempted",
+	) as PreemptedBuildError;
+	error[preemptedBuildErrorSymbol] = true;
+	return error;
+};
+const isPreemptedBuildError = (
+	error: unknown,
+): error is PreemptedBuildError => {
+	return Boolean(
+		error &&
+			typeof error === "object" &&
+			preemptedBuildErrorSymbol in (error as Record<PropertyKey, unknown>),
+	);
+};
 
 export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	canvasWidth,
@@ -76,11 +96,13 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	const disposeRef = useRef<(() => void) | null>(null);
 	const hasRenderedContentRef = useRef(false);
 	const buildQueueRef = useRef<Promise<void>>(Promise.resolve());
+	const buildQueueEpochRef = useRef(0);
 	const frameControllerRef = useRef(
 		createFramePrecompileController<SkiaFrameSnapshot>({
 			lookaheadFrames: PRECOMPILE_LOOKAHEAD_FRAMES,
 			scheduleTask: schedulePrecompileTask,
 			onPrefetchError: (error, frameIndex) => {
+				if (isPreemptedBuildError(error)) return;
 				console.error(
 					`Failed to precompile preview frame ${frameIndex}:`,
 					error,
@@ -100,14 +122,26 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	const fps = useTimelineStore((state) => state.fps);
 	const isPlaying = useTimelineStore((state) => state.isPlaying);
 
-	const invalidateBuffer = useCallback(() => {
-		frameControllerRef.current.invalidateAll();
+	const preemptBuildQueue = useCallback(() => {
+		buildQueueEpochRef.current += 1;
+		buildQueueRef.current = Promise.resolve();
 	}, []);
 
+	const invalidateBuffer = useCallback(() => {
+		frameControllerRef.current.invalidateAll();
+		preemptBuildQueue();
+	}, [preemptBuildQueue]);
+
 	const enqueueBuild = useCallback(
-		<T,>(build: () => Promise<T>): Promise<T> => {
+		<T,>(build: () => Promise<T>, queueEpoch: number): Promise<T> => {
+			const run = async () => {
+				if (queueEpoch !== buildQueueEpochRef.current) {
+					throw createPreemptedBuildError();
+				}
+				return build();
+			};
 			const pending = buildQueueRef.current;
-			const next = pending.then(build, build);
+			const next = pending.then(run, run);
 			buildQueueRef.current = next.then(
 				() => undefined,
 				() => undefined,
@@ -127,6 +161,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 		(elements: TimelineElement[], displayTime: number) => {
 			const renderToken = renderTokenRef.current + 1;
 			renderTokenRef.current = renderToken;
+			const queueEpoch = buildQueueEpochRef.current;
 
 			const normalizedFps = Number.isFinite(fps) ? Math.round(fps) : 0;
 			const frameIndex = toFrameIndex(displayTime, normalizedFps);
@@ -147,8 +182,11 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 								normalizedFps,
 								displayTime,
 							);
-				const build = () =>
-					buildSkiaFrameSnapshot(
+				const build = async () => {
+					if (renderTokenRef.current !== renderToken) {
+						throw createPreemptedBuildError();
+					}
+					const frameSnapshot = await buildSkiaFrameSnapshot(
 						{
 							elements,
 							displayTime: targetDisplayTime,
@@ -177,32 +215,38 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 								const childRuntime = runtimeManager.getTimelineRuntime(
 									toSceneTimelineRef(sceneId),
 								);
-							if (!childRuntime) return null;
-							const childState = childRuntime.timelineStore.getState();
-							return {
-								sceneId,
-								elements: childState.elements,
-								tracks: childState.tracks,
-								fps: childState.fps,
-								canvasSize: childState.canvasSize,
-								getModelStore: (id: string) =>
-									childRuntime.modelRegistry.get(id),
-								wrapRenderNode: (childNode) => (
-									<EditorRuntimeContext.Provider
-										value={{
-											id: `${childRuntime.id}:composition-preview`,
-											timelineStore: childRuntime.timelineStore,
-											modelRegistry: childRuntime.modelRegistry,
-										}}
-									>
-										{childNode}
-									</EditorRuntimeContext.Provider>
-								),
-							};
+								if (!childRuntime) return null;
+								const childState = childRuntime.timelineStore.getState();
+								return {
+									sceneId,
+									elements: childState.elements,
+									tracks: childState.tracks,
+									fps: childState.fps,
+									canvasSize: childState.canvasSize,
+									getModelStore: (id: string) =>
+										childRuntime.modelRegistry.get(id),
+									wrapRenderNode: (childNode) => (
+										<EditorRuntimeContext.Provider
+											value={{
+												id: `${childRuntime.id}:composition-preview`,
+												timelineStore: childRuntime.timelineStore,
+												modelRegistry: childRuntime.modelRegistry,
+											}}
+										>
+											{childNode}
+										</EditorRuntimeContext.Provider>
+									),
+								};
+							},
 						},
-					},
-				);
-				return useQueue ? enqueueBuild(build) : build();
+					);
+					if (renderTokenRef.current !== renderToken) {
+						frameSnapshot.dispose?.();
+						throw createPreemptedBuildError();
+					}
+					return frameSnapshot;
+				};
+				return useQueue ? enqueueBuild(build, queueEpoch) : build();
 			};
 
 			const commitCurrentFrame = (
@@ -224,6 +268,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 
 			if (!isPlaying) {
 				// Scrubbing/暂停态不做 lookahead，优先尽快产出当前帧。
+				preemptBuildQueue();
 				frameControllerRef.current.invalidateAll();
 				buildFrameSnapshot(frameIndex, false)
 					.then((frameState) => {
@@ -243,6 +288,9 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 						if (renderTokenRef.current !== renderToken) {
 							return;
 						}
+						if (isPreemptedBuildError(error)) {
+							return;
+						}
 						console.error(
 							"Failed to build skia preview frame snapshot:",
 							error,
@@ -257,6 +305,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 
 			if (isDiscontinuousSeek) {
 				// 播放中发生 seek/跳帧时，优先直接构建当前帧，避免被旧队列阻塞。
+				preemptBuildQueue();
 				frameControllerRef.current.invalidateAll();
 				buildFrameSnapshot(frameIndex, false)
 					.then((frameState) => {
@@ -280,6 +329,9 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 						if (renderTokenRef.current !== renderToken) {
 							return;
 						}
+						if (isPreemptedBuildError(error)) {
+							return;
+						}
 						console.error(
 							"Failed to build skia preview frame snapshot:",
 							error,
@@ -293,7 +345,9 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			}
 
 			frameControllerRef.current
-				.getOrBuildCurrent(frameIndex, buildFrameSnapshot)
+				.getOrBuildCurrent(frameIndex, (targetFrame) =>
+					buildFrameSnapshot(targetFrame, false),
+				)
 				.then((entry) => {
 					if (renderTokenRef.current !== renderToken) {
 						return;
@@ -312,6 +366,9 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 					if (renderTokenRef.current !== renderToken) {
 						return;
 					}
+					if (isPreemptedBuildError(error)) {
+						return;
+					}
 					console.error("Failed to build skia preview frame snapshot:", error);
 					if (!hasRenderedContentRef.current) {
 						renderBlackFrame();
@@ -327,6 +384,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			getTrackIndexForElement,
 			isPlaying,
 			modelRegistry,
+			preemptBuildQueue,
 			renderBlackFrame,
 			rootSceneId,
 			RuntimeContextBridge,

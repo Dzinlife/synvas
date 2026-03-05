@@ -20,6 +20,24 @@ import type { CanvasNodeSkiaRenderProps } from "../types";
 const PRECOMPILE_LOOKAHEAD_FRAMES = 2;
 
 type SceneFrameSnapshot = Awaited<ReturnType<typeof buildSkiaFrameSnapshot>>;
+const preemptedBuildErrorSymbol = Symbol("scene-build-preempted");
+type PreemptedBuildError = Error & {
+	[preemptedBuildErrorSymbol]: true;
+};
+const createPreemptedBuildError = (): PreemptedBuildError => {
+	const error = new Error("Scene frame build preempted") as PreemptedBuildError;
+	error[preemptedBuildErrorSymbol] = true;
+	return error;
+};
+const isPreemptedBuildError = (
+	error: unknown,
+): error is PreemptedBuildError => {
+	return Boolean(
+		error &&
+			typeof error === "object" &&
+			preemptedBuildErrorSymbol in (error as Record<PropertyKey, unknown>),
+	);
+};
 
 const createScopedRuntime = (runtime: TimelineRuntime): EditorRuntime => ({
 	id: `${runtime.id}:infinite-scene-render`,
@@ -62,11 +80,13 @@ export const SceneNodeSkiaRenderer: React.FC<
 	const disposeRef = useRef<(() => void) | null>(null);
 	const hasRenderedContentRef = useRef(false);
 	const buildQueueRef = useRef<Promise<void>>(Promise.resolve());
+	const buildQueueEpochRef = useRef(0);
 	const frameControllerRef = useRef(
 		createFramePrecompileController<SceneFrameSnapshot>({
 			lookaheadFrames: PRECOMPILE_LOOKAHEAD_FRAMES,
 			scheduleTask: schedulePrecompileTask,
 			onPrefetchError: (error, frameIndex) => {
+				if (isPreemptedBuildError(error)) return;
 				console.error(
 					`Failed to precompile scene preview frame ${frameIndex}:`,
 					error,
@@ -78,14 +98,26 @@ export const SceneNodeSkiaRenderer: React.FC<
 		}),
 	);
 
-	const invalidateBuffer = useCallback(() => {
-		frameControllerRef.current.invalidateAll();
+	const preemptBuildQueue = useCallback(() => {
+		buildQueueEpochRef.current += 1;
+		buildQueueRef.current = Promise.resolve();
 	}, []);
 
+	const invalidateBuffer = useCallback(() => {
+		frameControllerRef.current.invalidateAll();
+		preemptBuildQueue();
+	}, [preemptBuildQueue]);
+
 	const enqueueBuild = useCallback(
-		<T,>(build: () => Promise<T>): Promise<T> => {
+		<T,>(build: () => Promise<T>, queueEpoch: number): Promise<T> => {
+			const run = async () => {
+				if (queueEpoch !== buildQueueEpochRef.current) {
+					throw createPreemptedBuildError();
+				}
+				return build();
+			};
 			const pending = buildQueueRef.current;
-			const next = pending.then(build, build);
+			const next = pending.then(run, run);
 			buildQueueRef.current = next.then(
 				() => undefined,
 				() => undefined,
@@ -107,6 +139,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 			const state = runtime.timelineStore.getState();
 			const renderToken = renderTokenRef.current + 1;
 			renderTokenRef.current = renderToken;
+			const queueEpoch = buildQueueEpochRef.current;
 
 			const normalizedFps = Number.isFinite(state.fps)
 				? Math.round(state.fps)
@@ -189,7 +222,20 @@ export const SceneNodeSkiaRenderer: React.FC<
 							},
 						},
 					);
-				return useQueue ? enqueueBuild(build) : build();
+				const guardedBuild = async () => {
+					if (renderTokenRef.current !== renderToken) {
+						throw createPreemptedBuildError();
+					}
+					const frameSnapshot = await build();
+					if (renderTokenRef.current !== renderToken) {
+						frameSnapshot.dispose?.();
+						throw createPreemptedBuildError();
+					}
+					return frameSnapshot;
+				};
+				return useQueue
+					? enqueueBuild(guardedBuild, queueEpoch)
+					: guardedBuild();
 			};
 
 			const commitCurrentFrame = (
@@ -206,6 +252,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 
 			if (!state.isPlaying) {
 				// 暂停/拖拽时直接渲染当前帧，避免 lookahead 造成视觉延迟。
+				preemptBuildQueue();
 				frameControllerRef.current.invalidateAll();
 				buildFrameSnapshot(frameIndex, false)
 					.then((frameState) => {
@@ -223,6 +270,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) return;
+						if (isPreemptedBuildError(error)) return;
 						console.error(
 							`Failed to build scene skia frame snapshot (${node.sceneId}):`,
 							error,
@@ -234,6 +282,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 
 			if (isDiscontinuousSeek) {
 				// 播放时发生跳帧/seek，优先直出当前帧并重建 lookahead。
+				preemptBuildQueue();
 				frameControllerRef.current.invalidateAll();
 				buildFrameSnapshot(frameIndex, false)
 					.then((frameState) => {
@@ -255,6 +304,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) return;
+						if (isPreemptedBuildError(error)) return;
 						console.error(
 							`Failed to build scene skia frame snapshot (${node.sceneId}):`,
 							error,
@@ -265,7 +315,9 @@ export const SceneNodeSkiaRenderer: React.FC<
 			}
 
 			frameControllerRef.current
-				.getOrBuildCurrent(frameIndex, buildFrameSnapshot)
+				.getOrBuildCurrent(frameIndex, (targetFrame) =>
+					buildFrameSnapshot(targetFrame, false),
+				)
 				.then((entry) => {
 					if (renderTokenRef.current !== renderToken) return;
 					const rendered = commitCurrentFrame(entry.state);
@@ -280,6 +332,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 				})
 				.catch((error) => {
 					if (renderTokenRef.current !== renderToken) return;
+					if (isPreemptedBuildError(error)) return;
 					console.error(
 						`Failed to build scene skia frame snapshot (${node.sceneId}):`,
 						error,
@@ -290,6 +343,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 		[
 			enqueueBuild,
 			node.sceneId,
+			preemptBuildQueue,
 			renderFallback,
 			runtime,
 			runtimeManager,

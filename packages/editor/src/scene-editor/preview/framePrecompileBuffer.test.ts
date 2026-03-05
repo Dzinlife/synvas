@@ -50,13 +50,24 @@ describe("framePrecompileBuffer", () => {
 			lookaheadFrames: 3,
 		});
 		const disposeByFrame = new Map<number, ReturnType<typeof vi.fn>>();
+		const prefetchedFrame = createDeferred<MockFrameState>();
 		const factory = vi.fn(async (frame: number) => {
 			const dispose = vi.fn();
 			disposeByFrame.set(frame, dispose);
+			if (frame === 20) {
+				return prefetchedFrame.promise;
+			}
 			return { frame, dispose };
 		});
 
 		buffer.prefetch(20, factory);
+		await waitForMicrotasks();
+		const prefetchedDispose = disposeByFrame.get(20);
+		if (!prefetchedDispose) {
+			throw new Error("missing prefetched dispose callback");
+		}
+		prefetchedFrame.resolve({ frame: 20, dispose: prefetchedDispose });
+		await waitForMicrotasks();
 		await waitForMicrotasks();
 		const entry = await buffer.getOrBuildCurrent(20, factory);
 		const dispose = buffer.takeDispose(entry);
@@ -65,6 +76,37 @@ describe("framePrecompileBuffer", () => {
 
 		expect(factory).toHaveBeenCalledTimes(1);
 		expect(disposeByFrame.get(20)).toHaveBeenCalledTimes(1);
+	});
+
+	it("should preempt pending prefetched frame when current frame is requested", async () => {
+		const buffer = createFramePrecompileBuffer<MockFrameState>({
+			lookaheadFrames: 3,
+		});
+		const slowPrefetch = createDeferred<MockFrameState>();
+		const fastCurrent = createDeferred<MockFrameState>();
+		const slowDispose = vi.fn();
+		const fastDispose = vi.fn();
+		const factory = vi
+			.fn<(_: number) => Promise<MockFrameState>>()
+			.mockImplementationOnce(async () => slowPrefetch.promise)
+			.mockImplementationOnce(async () => fastCurrent.promise);
+
+		buffer.prefetch(60, factory);
+		await waitForMicrotasks();
+
+		const currentPromise = buffer.getOrBuildCurrent(60, factory);
+		fastCurrent.resolve({ frame: 60, dispose: fastDispose });
+		const entry = await currentPromise;
+		const dispose = buffer.takeDispose(entry);
+		dispose?.();
+
+		slowPrefetch.resolve({ frame: 60, dispose: slowDispose });
+		await waitForMicrotasks();
+
+		expect(factory).toHaveBeenCalledTimes(2);
+		expect(fastDispose).toHaveBeenCalledTimes(1);
+		expect(slowDispose).toHaveBeenCalledTimes(1);
+		buffer.disposeAll();
 	});
 
 	it("should fallback to sync build when current frame cache miss", async () => {
