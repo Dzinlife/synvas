@@ -67,7 +67,7 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 vi.mock("./InfiniteSkiaCanvas", () => ({
 	default: (props: MockInfiniteSkiaCanvasProps) => {
 		infiniteSkiaCanvasPropsMock(props);
-		return <div data-testid="infinite-skia-canvas" />;
+		return <div data-testid="infinite-skia-canvas" data-canvas-surface="true" />;
 	},
 }));
 
@@ -611,7 +611,7 @@ const getTopVisibleNodeAt = (clientX: number, clientY: number): CanvasNode => {
 };
 
 const clickCanvasAt = (clientX: number, clientY: number): void => {
-	fireEvent.click(screen.getByTestId("canvas-workspace"), {
+	fireEvent.click(screen.getByTestId("infinite-skia-canvas"), {
 		button: 0,
 		clientX,
 		clientY,
@@ -626,7 +626,7 @@ const clickNodeAt = (clientX: number, clientY: number): void => {
 };
 
 const rightClickNodeAt = (clientX: number, clientY: number): void => {
-	fireEvent.contextMenu(screen.getByTestId("canvas-workspace"), {
+	fireEvent.contextMenu(screen.getByTestId("infinite-skia-canvas"), {
 		clientX,
 		clientY,
 	});
@@ -1105,7 +1105,7 @@ describe("CanvasWorkspace", () => {
 	it("右键菜单可在画布位置创建 text 节点", async () => {
 		render(<CanvasWorkspace />);
 
-		fireEvent.contextMenu(screen.getByTestId("canvas-workspace"), {
+		fireEvent.contextMenu(screen.getByTestId("infinite-skia-canvas"), {
 			clientX: 420,
 			clientY: 260,
 		});
@@ -1119,6 +1119,15 @@ describe("CanvasWorkspace", () => {
 			expect(textNode?.x).toBe(420);
 			expect(textNode?.y).toBe(260);
 		});
+	});
+
+	it("非 InfiniteSkiaCanvas 区域右键不会弹出画布菜单", () => {
+		render(<CanvasWorkspace />);
+		fireEvent.contextMenu(screen.getByTestId("canvas-workspace"), {
+			clientX: 420,
+			clientY: 260,
+		});
+		expect(screen.queryByRole("menuitem", { name: "新建文本节点" })).toBeNull();
 	});
 
 	it("右键 image 节点可通过二级菜单插入到目标 scene timeline", async () => {

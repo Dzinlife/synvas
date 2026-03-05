@@ -60,6 +60,7 @@ import {
 	isCameraAlmostEqual,
 	isLayoutEqual,
 	isOverlayWheelTarget,
+	isCanvasSurfaceTarget,
 	isWorldPointInNode,
 	pickLayout,
 	resolveDrawerOptions,
@@ -1088,6 +1089,7 @@ const CanvasWorkspace = () => {
 				suppressNextNodeClickRef.current = false;
 				return;
 			}
+			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
 			if (isCanvasInteractionLocked) return;
 			const world = resolveWorldPoint(event.clientX, event.clientY);
@@ -1105,6 +1107,7 @@ const CanvasWorkspace = () => {
 
 	const handleCanvasContextMenu = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
+			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
 			event.preventDefault();
 			if (isCanvasInteractionLocked) return;

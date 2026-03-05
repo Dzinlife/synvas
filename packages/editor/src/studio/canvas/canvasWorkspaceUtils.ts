@@ -399,6 +399,11 @@ export const isOverlayWheelTarget = (target: EventTarget | null): boolean => {
 	return Boolean(target.closest('[data-canvas-overlay-ui="true"]'));
 };
 
+export const isCanvasSurfaceTarget = (target: EventTarget | null): boolean => {
+	if (!(target instanceof Element)) return false;
+	return Boolean(target.closest('[data-canvas-surface="true"]'));
+};
+
 export const toTimelineContextMenuActions = (
 	actions: CanvasNodeContextMenuAction[],
 ): TimelineContextMenuAction[] => {

@@ -496,6 +496,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		<div
 			ref={containerRef}
 			data-testid="infinite-skia-canvas"
+			data-canvas-surface="true"
 			className="pointer-events-auto absolute inset-0"
 		>
 			<Canvas ref={canvasRef} style={{ width, height }} />
