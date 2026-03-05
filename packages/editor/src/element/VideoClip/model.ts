@@ -21,11 +21,11 @@ import {
 	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
 } from "@/audio/playback";
-import type { EditorRuntime } from "@/scene-editor/runtime/types";
 import {
 	getAudioPlaybackSessionKey,
 	getVideoPlaybackSessionKey,
 } from "@/scene-editor/playback/clipContinuityIndex";
+import type { EditorRuntime } from "@/scene-editor/runtime/types";
 import { isTimelineTrackAudible } from "@/scene-editor/utils/trackAudibility";
 import {
 	framesToSeconds,
@@ -55,6 +55,13 @@ export type VideoSeekReason = "default" | "reverse-playback";
 export interface VideoSeekOptions {
 	reason?: VideoSeekReason;
 	frameChannel?: RenderFrameChannel;
+}
+
+interface PendingSeekRequest {
+	time: number;
+	options: VideoSeekOptions;
+	wait: Promise<void>;
+	resolve: () => void;
 }
 
 const resolveSeekReason = (
@@ -193,7 +200,7 @@ export function createVideoClipModel(
 	};
 	let pendingSeekRequestByChannel: Record<
 		RenderFrameChannel,
-		{ time: number; options: VideoSeekOptions } | null
+		PendingSeekRequest | null
 	> = {
 		current: null,
 		offscreen: null,
@@ -795,12 +802,33 @@ export function createVideoClipModel(
 		};
 		// 防止并发 seek
 		if (isSeekingFlag) {
-			pendingSeekRequestByChannel[frameChannel] = {
+			const pending = pendingSeekRequestByChannel[frameChannel];
+			if (pending) {
+				pending.time = alignedTime;
+				pending.options = normalizedOptions;
+				// seek 忙碌时也触发倒放预热，避免预编译阶段丢失 lookahead 机会。
+				triggerReverseLookaheadPrewarm();
+				await pending.wait;
+				return;
+			}
+			let resolveWait: (() => void) | null = null;
+			const wait = new Promise<void>((resolve) => {
+				resolveWait = resolve;
+			});
+			const nextPending: PendingSeekRequest = {
 				time: alignedTime,
 				options: normalizedOptions,
+				wait,
+				resolve: () => {
+					const resolve = resolveWait;
+					resolveWait = null;
+					resolve?.();
+				},
 			};
+			pendingSeekRequestByChannel[frameChannel] = nextPending;
 			// seek 忙碌时也触发倒放预热，避免预编译阶段丢失 lookahead 机会。
 			triggerReverseLookaheadPrewarm();
+			await nextPending.wait;
 			return;
 		}
 		if (lastSeekTimeByChannel[frameChannel] === alignedTime) {
@@ -937,7 +965,11 @@ export function createVideoClipModel(
 				const nextRequest = pendingSeekRequestByChannel[nextChannel];
 				pendingSeekRequestByChannel[nextChannel] = null;
 				if (nextRequest) {
-					await seekToTime(nextRequest.time, nextRequest.options);
+					try {
+						await seekToTime(nextRequest.time, nextRequest.options);
+					} finally {
+						nextRequest.resolve();
+					}
 				}
 			}
 		}
@@ -981,19 +1013,18 @@ export function createVideoClipModel(
 			lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
 			return;
 		}
-		// 正放场景按帧顺序流式解码，只有回退或首次才重建迭代器。
+		// 正放首帧优先走 seek，避免流式步进在首个可解码帧晚于目标时间时返回空帧。
 		const lastPreparedFrameIndex =
 			lastPreparedFrameIndexByChannel[frameChannel];
-		if (
-			lastPreparedFrameIndex === null ||
-			alignedFrameIndex < lastPreparedFrameIndex
-		) {
-			await stepPlayback(alignedVideoTime, frameChannel);
+		if (lastPreparedFrameIndex === null) {
+			await seekToTime(alignedVideoTime, { frameChannel });
 			lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
-		} else if (alignedFrameIndex > lastPreparedFrameIndex) {
-			await stepPlayback(alignedVideoTime, frameChannel);
-			lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
+			return;
 		}
+		// 后续帧按顺序流式解码，回退时由 session 自动重建迭代器。
+		if (alignedFrameIndex === lastPreparedFrameIndex) return;
+		await stepPlayback(alignedVideoTime, frameChannel);
+		lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
 	};
 
 	const store = createStore<
@@ -1008,12 +1039,12 @@ export function createVideoClipModel(
 				canTrimStart: true,
 				canTrimEnd: true,
 			},
-				internal: {
-					videoSink: null,
-					input: null,
-					currentFrame: null,
-					offscreenFrame: null,
-					videoDuration: 0,
+			internal: {
+				videoSink: null,
+				input: null,
+				currentFrame: null,
+				offscreenFrame: null,
+				videoDuration: 0,
 				isReady: false,
 				playbackEpoch: 0,
 				audioSink: null,
