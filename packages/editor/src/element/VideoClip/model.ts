@@ -956,6 +956,8 @@ export function createVideoClipModel(
 				if (!request) continue;
 				if (request.time === lastSeekTimeByChannel[candidate]) {
 					pendingSeekRequestByChannel[candidate] = null;
+					// 去重丢弃也要唤醒等待方，避免离屏通道卡死在 await pending.wait。
+					request.resolve();
 					continue;
 				}
 				nextChannel = candidate;
