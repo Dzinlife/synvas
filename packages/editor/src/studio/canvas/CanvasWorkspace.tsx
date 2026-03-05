@@ -1,95 +1,77 @@
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import type { TimelineAsset, TimelineElement } from "core/element/types";
-import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
-import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
+import type { TimelineElement } from "core/element/types";
+import type { CanvasNode } from "core/studio/types";
 import type React from "react";
 import {
 	useCallback,
 	useContext,
 	useEffect,
-	useEffectEvent,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
-import { writeAudioToOpfs } from "@/asr/opfsAudio";
 import { createTransformMeta } from "@/element/transform";
-import TimelineContextMenu, {
-	type TimelineContextMenuAction,
-} from "@/scene-editor/components/TimelineContextMenu";
+import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
 import { findAttachments } from "@/scene-editor/utils/attachments";
 import { resolveExternalVideoUri } from "@/scene-editor/utils/externalVideo";
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
+import { writeAudioToOpfs } from "@/asr/opfsAudio";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
-import CanvasNodeDrawerShell, {
-	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
-	CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO,
-	CANVAS_NODE_DRAWER_MIN_HEIGHT,
-} from "@/studio/canvas/CanvasNodeDrawerShell";
+import { CANVAS_NODE_DRAWER_DEFAULT_HEIGHT } from "@/studio/canvas/CanvasNodeDrawerShell";
 import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import {
 	canvasNodeDefinitionList,
 	getCanvasNodeDefinition,
 } from "@/studio/canvas/node-system/registry";
 import type {
-	CanvasNodeContextMenuAction,
-	CanvasNodeDrawerOptions,
 	CanvasNodeDrawerProps,
 	CanvasNodeDrawerTrigger,
 } from "@/studio/canvas/node-system/types";
-import CanvasSidebar, {
-	type CanvasSidebarTab,
-} from "@/studio/canvas/sidebar/CanvasSidebar";
+import type { CanvasSidebarTab } from "@/studio/canvas/sidebar/CanvasSidebar";
 import {
 	type CanvasNodeLayoutSnapshot,
 	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { secondsToFrames } from "@/utils/timecode";
-import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
+import CanvasWorkspaceOverlay, {
+	type DrawerViewData,
+} from "./CanvasWorkspaceOverlay";
 import {
 	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
 	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
-	type CameraSafeInsets,
 	resolveCanvasOverlayLayout,
 } from "./canvasOverlayLayout";
-import FocusSceneKonvaLayer from "./FocusSceneKonvaLayer";
+import {
+	type CameraState,
+	DEFAULT_CAMERA,
+	DROP_GRID_COLUMNS,
+	DROP_GRID_OFFSET_X,
+	DROP_GRID_OFFSET_Y,
+	GRID_SIZE,
+	SIDEBAR_VIEW_PADDING_PX,
+	buildNodeFitCamera,
+	buildNodePanCamera,
+	clampZoom,
+	isCameraAlmostEqual,
+	isLayoutEqual,
+	isOverlayWheelTarget,
+	isWorldPointInNode,
+	pickLayout,
+	resolveDrawerOptions,
+	resolveDroppedFiles,
+	resolveExternalFileUri,
+	toTimelineContextMenuActions,
+	type ResolvedCanvasDrawerOptions,
+	CAMERA_ZOOM_EPSILON,
+} from "./canvasWorkspaceUtils";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import type { CanvasNodeDragEvent } from "./InfiniteSkiaCanvas";
-
-const MIN_ZOOM = 0.2;
-const MAX_ZOOM = 2;
-const GRID_SIZE = 120;
-const CAMERA_ZOOM_EPSILON = 1e-6;
-const DROP_GRID_COLUMNS = 4;
-const DROP_GRID_OFFSET_X = 48;
-const DROP_GRID_OFFSET_Y = 40;
-const FILE_PREFIX = "file://";
-const FOCUS_VIEW_PADDING = 80;
-const SIDEBAR_VIEW_PADDING_PX = 24;
-const CAMERA_SMOOTH_DURATION_MS = 220;
-
-interface CameraState {
-	x: number;
-	y: number;
-	zoom: number;
-}
-
-type CameraTransitionMode = "smooth" | "instant";
-
-interface ApplyCameraOptions {
-	transition?: CameraTransitionMode;
-}
-
-const DEFAULT_CAMERA: CameraState = {
-	x: 0,
-	y: 0,
-	zoom: 1,
-};
+import { useCanvasCameraController } from "./useCanvasCameraController";
 
 type CanvasContextMenuState =
 	| { open: false }
@@ -117,16 +99,10 @@ interface NodeDragSession {
 	moved: boolean;
 }
 
-type FileWithPath = File & { path?: string };
 type AnyCanvasDrawer = React.FC<CanvasNodeDrawerProps<CanvasNode>>;
 
-interface ResolvedNodeDrawer {
-	Drawer: AnyCanvasDrawer;
-	node: CanvasNode;
-	scene: SceneDocument | null;
-	asset: TimelineAsset | null;
+interface ResolvedNodeDrawer extends DrawerViewData {
 	trigger: CanvasNodeDrawerTrigger;
-	options: ResolvedCanvasDrawerOptions;
 }
 
 interface ResolvedNodeDrawerTarget {
@@ -136,358 +112,19 @@ interface ResolvedNodeDrawerTarget {
 	options: ResolvedCanvasDrawerOptions;
 }
 
-interface ResolvedCanvasDrawerOptions {
-	trigger: CanvasNodeDrawerTrigger;
-	resizable: boolean;
-	defaultHeight: number;
-	minHeight: number;
-	maxHeightRatio: number;
-}
-
-interface NodeFitCameraInput {
-	node: CanvasNode;
-	stageWidth: number;
-	stageHeight: number;
-	safeInsets: CameraSafeInsets;
-}
-
-interface NodePanCameraInput {
-	node: CanvasNode;
-	camera: CameraState;
-	stageWidth: number;
-	stageHeight: number;
-	safeInsets: CameraSafeInsets;
-	paddingPx: number;
-}
-
-interface SafeViewportRect {
-	left: number;
-	top: number;
-	right: number;
-	bottom: number;
-	width: number;
-	height: number;
-}
-
-const clampZoom = (zoom: number): number => {
-	return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
-};
-
-const resolveSafeViewportRect = (
-	stageWidth: number,
-	stageHeight: number,
-	safeInsets: CameraSafeInsets,
-): SafeViewportRect => {
-	const safeLeft = Math.max(0, safeInsets.left);
-	const safeTop = Math.max(0, safeInsets.top);
-	const safeRight = Math.max(safeLeft + 1, stageWidth - Math.max(0, safeInsets.right));
-	const safeBottom = Math.max(
-		safeTop + 1,
-		stageHeight - Math.max(0, safeInsets.bottom),
-	);
-	return {
-		left: safeLeft,
-		top: safeTop,
-		right: safeRight,
-		bottom: safeBottom,
-		width: Math.max(1, safeRight - safeLeft),
-		height: Math.max(1, safeBottom - safeTop),
-	};
-};
-
-const buildNodeFitCamera = ({
-	node,
-	stageWidth,
-	stageHeight,
-	safeInsets,
-}: NodeFitCameraInput): CameraState => {
-	const safeNodeWidth = Math.max(1, Math.abs(node.width));
-	const safeNodeHeight = Math.max(1, Math.abs(node.height));
-	const viewport = resolveSafeViewportRect(stageWidth, stageHeight, safeInsets);
-	const availableWidth = Math.max(1, viewport.width - FOCUS_VIEW_PADDING * 2);
-	const availableHeight = Math.max(1, viewport.height - FOCUS_VIEW_PADDING * 2);
-	const zoomX = availableWidth / safeNodeWidth;
-	const zoomY = availableHeight / safeNodeHeight;
-	const nextZoom = clampZoom(Math.min(zoomX, zoomY));
-	const safeZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
-	const worldCenterX = node.x + node.width / 2;
-	const worldCenterY = node.y + node.height / 2;
-	const viewportCenterX = viewport.left + viewport.width / 2;
-	const viewportCenterY = viewport.top + viewport.height / 2;
-	return {
-		x: viewportCenterX / safeZoom - worldCenterX,
-		y: viewportCenterY / safeZoom - worldCenterY,
-		zoom: nextZoom,
-	};
-};
-
-const buildNodePanCamera = ({
-	node,
-	camera,
-	stageWidth,
-	stageHeight,
-	safeInsets,
-	paddingPx,
-}: NodePanCameraInput): CameraState => {
-	const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-	const viewport = resolveSafeViewportRect(stageWidth, stageHeight, safeInsets);
-	const nodeLeft = Math.min(node.x, node.x + node.width);
-	const nodeRight = Math.max(node.x, node.x + node.width);
-	const nodeTop = Math.min(node.y, node.y + node.height);
-	const nodeBottom = Math.max(node.y, node.y + node.height);
-	const stageLeft = (nodeLeft + camera.x) * safeZoom;
-	const stageRight = (nodeRight + camera.x) * safeZoom;
-	const stageTop = (nodeTop + camera.y) * safeZoom;
-	const stageBottom = (nodeBottom + camera.y) * safeZoom;
-	const viewportLeft = viewport.left + paddingPx;
-	const viewportRight = Math.max(
-		viewportLeft + 1,
-		viewport.right - paddingPx,
-	);
-	const viewportTop = viewport.top + paddingPx;
-	const viewportBottom = Math.max(
-		viewportTop + 1,
-		viewport.bottom - paddingPx,
-	);
-	const viewportWidth = viewportRight - viewportLeft;
-	const viewportHeight = viewportBottom - viewportTop;
-
-	const resolveAxisShift = (
-		nodeStart: number,
-		nodeEnd: number,
-		viewportStart: number,
-		viewportEnd: number,
-		viewportSize: number,
-	): number => {
-		const nodeSize = nodeEnd - nodeStart;
-		if (nodeSize > viewportSize) {
-			const viewportCenter = viewportStart + viewportSize / 2;
-			const nodeCenter = nodeStart + nodeSize / 2;
-			return viewportCenter - nodeCenter;
-		}
-		if (nodeStart < viewportStart) {
-			return viewportStart - nodeStart;
-		}
-		if (nodeEnd > viewportEnd) {
-			return viewportEnd - nodeEnd;
-		}
-		return 0;
-	};
-
-	const shiftX = resolveAxisShift(
-		stageLeft,
-		stageRight,
-		viewportLeft,
-		viewportRight,
-		viewportWidth,
-	);
-	const shiftY = resolveAxisShift(
-		stageTop,
-		stageBottom,
-		viewportTop,
-		viewportBottom,
-		viewportHeight,
-	);
-
-	if (Math.abs(shiftX) < 0.5 && Math.abs(shiftY) < 0.5) {
-		return camera;
-	}
-
-	return {
-		x: camera.x + shiftX / safeZoom,
-		y: camera.y + shiftY / safeZoom,
-		zoom: camera.zoom,
-	};
-};
-
-const pickLayout = (node: CanvasNode): CanvasNodeLayoutSnapshot => ({
-	x: node.x,
-	y: node.y,
-	width: node.width,
-	height: node.height,
-	zIndex: node.zIndex,
-	hidden: node.hidden,
-	locked: node.locked,
-});
-
-const isLayoutEqual = (
-	before: CanvasNodeLayoutSnapshot,
-	after: CanvasNodeLayoutSnapshot,
-): boolean => {
-	return (
-		before.x === after.x &&
-		before.y === after.y &&
-		before.width === after.width &&
-		before.height === after.height &&
-		before.zIndex === after.zIndex &&
-		before.hidden === after.hidden &&
-		before.locked === after.locked
-	);
-};
-
-const isWorldPointInNode = (
-	node: CanvasNode,
-	worldX: number,
-	worldY: number,
-): boolean => {
-	const left = Math.min(node.x, node.x + node.width);
-	const right = Math.max(node.x, node.x + node.width);
-	const top = Math.min(node.y, node.y + node.height);
-	const bottom = Math.max(node.y, node.y + node.height);
-	return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
-};
-
-const isCameraAlmostEqual = (
-	left: CameraState,
-	right: CameraState,
-): boolean => {
-	return (
-		Math.abs(left.x - right.x) < 0.5 &&
-		Math.abs(left.y - right.y) < 0.5 &&
-		Math.abs(left.zoom - right.zoom) < 0.0001
-	);
-};
-
-const easeOutCubic = (value: number): number => {
-	return 1 - (1 - value) ** 3;
-};
-
-const lerp = (from: number, to: number, progress: number): number => {
-	return from + (to - from) * progress;
-};
-
-const lerpCamera = (
-	from: CameraState,
-	to: CameraState,
-	progress: number,
-): CameraState => {
-	const nextZoom = lerp(from.zoom, to.zoom, progress);
-	const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
-	const nextTranslateX = lerp(from.x * from.zoom, to.x * to.zoom, progress);
-	const nextTranslateY = lerp(from.y * from.zoom, to.y * to.zoom, progress);
-	return {
-		x: nextTranslateX / safeNextZoom,
-		y: nextTranslateY / safeNextZoom,
-		zoom: nextZoom,
-	};
-};
-
-const isElectronEnv = (): boolean => {
-	return typeof window !== "undefined" && "aiNleElectron" in window;
-};
-
-const getFilePath = (file: File): string | null => {
-	const rawPath = (file as FileWithPath).path;
-	if (typeof rawPath !== "string") return null;
-	const trimmed = rawPath.trim();
-	return trimmed ? trimmed : null;
-};
-
-const getElectronFilePath = (file: File): string | null => {
-	if (typeof window === "undefined") return null;
-	const bridge = (
-		window as Window & {
-			aiNleElectron?: {
-				webUtils?: {
-					getPathForFile?: (file: File) => string | null | undefined;
-				};
-			};
-		}
-	).aiNleElectron;
-	const resolved = bridge?.webUtils?.getPathForFile?.(file);
-	if (typeof resolved !== "string") return null;
-	const trimmed = resolved.trim();
-	return trimmed ? trimmed : null;
-};
-
-const buildFileUrlFromPath = (rawPath: string): string => {
-	if (rawPath.startsWith(FILE_PREFIX)) return rawPath;
-	const normalized = rawPath.replace(/\\/g, "/");
-	let pathPart = normalized;
-	let isUnc = false;
-	if (pathPart.startsWith("//")) {
-		isUnc = true;
-		pathPart = pathPart.slice(2);
-	} else if (/^[a-zA-Z]:\//.test(pathPart)) {
-		pathPart = `/${pathPart}`;
-	} else if (!pathPart.startsWith("/")) {
-		pathPart = `/${pathPart}`;
-	}
-	const encoded = pathPart
-		.split("/")
-		.map((segment) => {
-			if (!segment) return "";
-			if (!isUnc && /^[a-zA-Z]:$/.test(segment)) return segment;
-			return encodeURIComponent(segment);
-		})
-		.join("/");
-	return `${FILE_PREFIX}${encoded}`;
-};
-
-const resolveDroppedFiles = (dataTransfer: DataTransfer | null): File[] => {
-	if (!dataTransfer) return [];
-	if (dataTransfer.files && dataTransfer.files.length > 0) {
-		return Array.from(dataTransfer.files);
-	}
-	if (!dataTransfer.items) return [];
-	return Array.from(dataTransfer.items)
-		.map((item) => (item.kind === "file" ? item.getAsFile() : null))
-		.filter((file): file is File => Boolean(file));
-};
-
-const resolveDrawerTrigger = (
-	trigger: CanvasNodeDrawerTrigger | undefined,
-): CanvasNodeDrawerTrigger => {
-	return trigger ?? "focus";
-};
-
-const resolveDrawerOptions = (
-	options: CanvasNodeDrawerOptions | undefined,
-	deprecatedTrigger: CanvasNodeDrawerTrigger | undefined,
-): ResolvedCanvasDrawerOptions => {
-	const trigger = resolveDrawerTrigger(options?.trigger ?? deprecatedTrigger);
-	return {
-		trigger,
-		resizable: options?.resizable ?? false,
-		defaultHeight: options?.defaultHeight ?? CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
-		minHeight: options?.minHeight ?? CANVAS_NODE_DRAWER_MIN_HEIGHT,
-		maxHeightRatio:
-			options?.maxHeightRatio ?? CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO,
-	};
-};
-
-const isOverlayWheelTarget = (target: EventTarget | null): boolean => {
-	if (!(target instanceof Element)) return false;
-	return Boolean(target.closest('[data-canvas-overlay-ui="true"]'));
-};
-
-const toTimelineContextMenuActions = (
-	actions: CanvasNodeContextMenuAction[],
-): TimelineContextMenuAction[] => {
-	return actions.map((action) => ({
-		key: action.key,
-		label: action.label,
-		disabled: action.disabled,
-		danger: action.danger,
-		onSelect: action.onSelect,
-		children: action.children
-			? toTimelineContextMenuActions(action.children)
-			: undefined,
-	}));
-};
-
 const CanvasWorkspace = () => {
 	const currentProject = useProjectStore((state) => state.currentProject);
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const createCanvasNode = useProjectStore((state) => state.createCanvasNode);
-	const updateCanvasNode = useProjectStore((state) => state.updateCanvasNode);
 	const updateCanvasNodeLayout = useProjectStore(
 		(state) => state.updateCanvasNodeLayout,
 	);
 	const ensureProjectAssetByUri = useProjectStore(
 		(state) => state.ensureProjectAssetByUri,
 	);
-	const updateSceneTimeline = useProjectStore((state) => state.updateSceneTimeline);
+	const updateSceneTimeline = useProjectStore(
+		(state) => state.updateSceneTimeline,
+	);
 	const setFocusedNode = useProjectStore((state) => state.setFocusedNode);
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
 	const setActiveNode = useProjectStore((state) => state.setActiveNode);
@@ -496,10 +133,7 @@ const CanvasWorkspace = () => {
 	const runtime = useContext(EditorRuntimeContext);
 	const runtimeManager = useMemo<StudioRuntimeManager | null>(() => {
 		const manager = runtime as Partial<StudioRuntimeManager> | null;
-		if (
-			!manager?.getTimelineRuntime ||
-			!manager.listTimelineRuntimes
-		) {
+		if (!manager?.getTimelineRuntime || !manager.listTimelineRuntimes) {
 			return null;
 		}
 		return manager as StudioRuntimeManager;
@@ -521,74 +155,10 @@ const CanvasWorkspace = () => {
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
 	const nodeDragSessionRef = useRef<NodeDragSession | null>(null);
 	const suppressNodeClickIdRef = useRef<string | null>(null);
-	const cameraAnimationFrameRef = useRef<number | null>(null);
-	const cameraAnimationTokenRef = useRef(0);
-
-	const getCamera = useEffectEvent((): CameraState => {
-		return currentProject?.ui.camera ?? DEFAULT_CAMERA;
+	const { getCamera, applyCamera } = useCanvasCameraController({
+		camera,
+		onChange: setCanvasCamera,
 	});
-
-	const stopCameraAnimation = useEffectEvent(() => {
-		if (
-			typeof window !== "undefined" &&
-			typeof window.cancelAnimationFrame === "function" &&
-			cameraAnimationFrameRef.current !== null
-		) {
-			window.cancelAnimationFrame(cameraAnimationFrameRef.current);
-		}
-		cameraAnimationFrameRef.current = null;
-		cameraAnimationTokenRef.current += 1;
-	});
-
-	const applyCamera = useEffectEvent(
-		(nextCamera: CameraState, options?: ApplyCameraOptions) => {
-			const transition = options?.transition ?? "smooth";
-			const currentCamera = getCamera();
-			if (isCameraAlmostEqual(currentCamera, nextCamera)) {
-				stopCameraAnimation();
-				return;
-			}
-			if (
-				transition === "instant" ||
-				typeof window === "undefined" ||
-				typeof window.requestAnimationFrame !== "function"
-			) {
-				stopCameraAnimation();
-				setCanvasCamera(nextCamera);
-				return;
-			}
-			stopCameraAnimation();
-			const fromCamera = currentCamera;
-			const token = cameraAnimationTokenRef.current;
-			const startedAt =
-				typeof performance !== "undefined" ? performance.now() : Date.now();
-			const animate = (timestamp: number) => {
-				if (cameraAnimationTokenRef.current !== token) return;
-				const elapsed = timestamp - startedAt;
-				const progress = Math.max(
-					0,
-					Math.min(1, elapsed / CAMERA_SMOOTH_DURATION_MS),
-				);
-				const easedProgress = easeOutCubic(progress);
-				setCanvasCamera(lerpCamera(fromCamera, nextCamera, easedProgress));
-				if (progress >= 1) {
-					cameraAnimationFrameRef.current = null;
-					setCanvasCamera(nextCamera);
-					return;
-				}
-				cameraAnimationFrameRef.current = window.requestAnimationFrame(animate);
-			};
-			cameraAnimationFrameRef.current = window.requestAnimationFrame(animate);
-		},
-	);
-
-	const sidebarNodes = useMemo(() => {
-		if (!currentProject) return [];
-		return [...currentProject.canvas.nodes].sort((a, b) => {
-			if (a.zIndex !== b.zIndex) return b.zIndex - a.zIndex;
-			return b.createdAt - a.createdAt;
-		});
-	}, [currentProject]);
 
 	const sortedNodes = useMemo(() => {
 		if (!currentProject) return [];
@@ -615,25 +185,6 @@ const CanvasWorkspace = () => {
 			null
 		);
 	}, [activeNodeId, currentProject]);
-
-	const activeNodeDefinition = useMemo(() => {
-		if (!activeNode) return null;
-		return getCanvasNodeDefinition(activeNode.type);
-	}, [activeNode]);
-	const ActiveNodeToolbar = activeNodeDefinition?.toolbar ?? null;
-
-	const activeNodeScene = useMemo(() => {
-		if (!activeNode || activeNode.type !== "scene") return null;
-		return currentProject?.scenes[activeNode.sceneId] ?? null;
-	}, [activeNode, currentProject]);
-
-	const activeNodeAsset = useMemo(() => {
-		if (!activeNode || !("assetId" in activeNode)) return null;
-		return (
-			currentProject?.assets.find((asset) => asset.id === activeNode.assetId) ??
-			null
-		);
-	}, [activeNode, currentProject]);
 
 	const contextMenuSceneOptions = useMemo(() => {
 		if (!currentProject) return [];
@@ -806,11 +357,7 @@ const CanvasWorkspace = () => {
 		};
 	}, [currentProject, resolvedDrawerTarget]);
 
-	const focusedSceneNode = useMemo((): SceneNode | null => {
-		if (!focusedNode || focusedNode.type !== "scene") return null;
-		return focusedNode;
-	}, [focusedNode]);
-	const sidebarMode = focusedSceneNode ? "focus" : "canvas";
+	const isSidebarFocusMode = focusedNode?.type === "scene";
 	const [sidebarTab, setSidebarTab] = useState<CanvasSidebarTab>("nodes");
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 
@@ -907,20 +454,6 @@ const CanvasWorkspace = () => {
 		if (!drawerIdentity) return;
 		setVisibleDrawerHeight(drawerDefaultHeight);
 	}, [drawerDefaultHeight, drawerIdentity]);
-
-	useEffect(() => {
-		return () => {
-			if (
-				typeof window !== "undefined" &&
-				typeof window.cancelAnimationFrame === "function" &&
-				cameraAnimationFrameRef.current !== null
-			) {
-				window.cancelAnimationFrame(cameraAnimationFrameRef.current);
-			}
-			cameraAnimationFrameRef.current = null;
-			cameraAnimationTokenRef.current += 1;
-		};
-	}, []);
 
 	useEffect(() => {
 		const prevFocusedNodeId = prevFocusedNodeIdRef.current;
@@ -1105,7 +638,12 @@ const CanvasWorkspace = () => {
 				moved: false,
 			};
 		},
-		[focusedNodeId, handleNodeActivate, isCanvasInteractionLocked, setActiveNode],
+		[
+			focusedNodeId,
+			handleNodeActivate,
+			isCanvasInteractionLocked,
+			setActiveNode,
+		],
 	);
 
 	const handleSkiaNodeDrag = useCallback(
@@ -1131,29 +669,32 @@ const CanvasWorkspace = () => {
 		[camera.zoom, updateCanvasNodeLayout],
 	);
 
-	const handleSkiaNodeDragEnd = useCallback((node: CanvasNode) => {
-		const dragSession = nodeDragSessionRef.current;
-		nodeDragSessionRef.current = null;
-		if (!dragSession) return;
-		if (dragSession.nodeId !== node.id) return;
-		if (!dragSession.moved) return;
-		suppressNodeClickIdRef.current = dragSession.nodeId;
-		const latestProject = useProjectStore.getState().currentProject;
-		if (!latestProject) return;
-		const latestNode = latestProject.canvas.nodes.find(
-			(item) => item.id === dragSession.nodeId,
-		);
-		if (!latestNode) return;
-		const after = pickLayout(latestNode);
-		if (isLayoutEqual(dragSession.before, after)) return;
-		pushHistory({
-			kind: "canvas.node-layout",
-			nodeId: latestNode.id,
-			before: dragSession.before,
-			after,
-			focusNodeId: latestProject.ui.focusedNodeId,
-		});
-	}, [pushHistory]);
+	const handleSkiaNodeDragEnd = useCallback(
+		(node: CanvasNode) => {
+			const dragSession = nodeDragSessionRef.current;
+			nodeDragSessionRef.current = null;
+			if (!dragSession) return;
+			if (dragSession.nodeId !== node.id) return;
+			if (!dragSession.moved) return;
+			suppressNodeClickIdRef.current = dragSession.nodeId;
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const latestNode = latestProject.canvas.nodes.find(
+				(item) => item.id === dragSession.nodeId,
+			);
+			if (!latestNode) return;
+			const after = pickLayout(latestNode);
+			if (isLayoutEqual(dragSession.before, after)) return;
+			pushHistory({
+				kind: "canvas.node-layout",
+				nodeId: latestNode.id,
+				before: dragSession.before,
+				after,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+		},
+		[pushHistory],
+	);
 
 	const handleSkiaNodeClick = useCallback(
 		(node: CanvasNode) => {
@@ -1210,7 +751,7 @@ const CanvasWorkspace = () => {
 	const handleSidebarNodeSelect = useCallback(
 		(node: CanvasNode) => {
 			handleNodeActivate(node);
-			if (sidebarMode !== "canvas") return;
+			if (isSidebarFocusMode) return;
 			if (stageSize.width <= 0 || stageSize.height <= 0) return;
 			const currentCamera = getCamera();
 			const nextCamera = buildNodePanCamera({
@@ -1229,7 +770,7 @@ const CanvasWorkspace = () => {
 			cameraSafeInsets,
 			getCamera,
 			handleNodeActivate,
-			sidebarMode,
+			isSidebarFocusMode,
 			stageSize.height,
 			stageSize.width,
 		],
@@ -1360,30 +901,18 @@ const CanvasWorkspace = () => {
 					: undefined) ?? Object.values(currentProject.scenes)[0]?.timeline;
 			const fps = activeSceneTimeline?.fps ?? 30;
 
-			const resolveExternalFileUri = async (
+			const resolveExternalFile = (
 				file: File,
 				kind: "video" | "audio" | "image",
-			): Promise<string> => {
-				if (kind === "video") {
-					return resolveExternalVideoUri(file, currentProjectId);
-				}
-				if (isElectronEnv()) {
-					const filePath = getFilePath(file) ?? getElectronFilePath(file);
-					if (!filePath) {
-						throw new Error("无法读取本地文件路径");
-					}
-					return buildFileUrlFromPath(filePath);
-				}
-				if (kind === "audio") {
-					const { uri } = await writeAudioToOpfs(file, currentProjectId);
-					return uri;
-				}
-				const { uri } = await writeProjectFileToOpfs(
+			) => {
+				return resolveExternalFileUri(
 					file,
+					kind,
 					currentProjectId,
-					"images",
+					resolveExternalVideoUri,
+					writeAudioToOpfs,
+					writeProjectFileToOpfs,
 				);
-				return uri;
 			};
 
 			const nodeInputs: Array<{
@@ -1399,7 +928,7 @@ const CanvasWorkspace = () => {
 						projectId: currentProjectId,
 						fps,
 						ensureProjectAssetByUri,
-						resolveExternalFileUri,
+						resolveExternalFileUri: resolveExternalFile,
 					});
 					if (!matched) continue;
 					resolvedInput = matched;
@@ -1484,7 +1013,6 @@ const CanvasWorkspace = () => {
 		];
 	}, [contextMenuState, focusedNodeId, handleCreateTextNodeAt]);
 
-	const DrawerComponent = resolvedDrawer?.Drawer;
 	const toolbarLeftOffset = sidebarExpanded
 		? overlayLayout.cameraSafeInsets.left + 4
 		: 56;
@@ -1521,189 +1049,54 @@ const CanvasWorkspace = () => {
 				}}
 			/>
 
-				<InfiniteSkiaCanvas
-					width={stageSize.width}
-					height={stageSize.height}
-					camera={camera}
-					nodes={sortedNodes}
-					scenes={currentProject.scenes}
-					assets={currentProject.assets}
-					activeNodeId={activeNodeId}
-					focusedNodeId={focusedNodeId}
-					onNodeDragStart={handleSkiaNodeDragStart}
-					onNodeDrag={handleSkiaNodeDrag}
-					onNodeDragEnd={handleSkiaNodeDragEnd}
-					onNodeClick={handleSkiaNodeClick}
-					onNodeDoubleClick={handleSkiaNodeDoubleClick}
-				/>
+			<InfiniteSkiaCanvas
+				width={stageSize.width}
+				height={stageSize.height}
+				camera={camera}
+				nodes={sortedNodes}
+				scenes={currentProject.scenes}
+				assets={currentProject.assets}
+				activeNodeId={activeNodeId}
+				focusedNodeId={focusedNodeId}
+				onNodeDragStart={handleSkiaNodeDragStart}
+				onNodeDrag={handleSkiaNodeDrag}
+				onNodeDragEnd={handleSkiaNodeDragEnd}
+				onNodeClick={handleSkiaNodeClick}
+				onNodeDoubleClick={handleSkiaNodeDoubleClick}
+			/>
 
-			{activeNode && ActiveNodeToolbar && (
-				<div className="absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-3 py-2 backdrop-blur">
-					<ActiveNodeToolbar
-						node={activeNode}
-						scene={activeNodeScene}
-						asset={activeNodeAsset}
-						updateNode={(patch) => {
-							updateCanvasNode(activeNode.id, patch as never);
-						}}
-						setFocusedNode={setFocusedNode}
-						setActiveScene={setActiveScene}
-					/>
-				</div>
-			)}
-
-				{!focusedNodeId && (
-					<div
-						className="absolute z-30 flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur"
-						style={{ left: toolbarLeftOffset, top: toolbarTopOffset }}
-					>
-						<button
-							type="button"
-							onClick={handleCreateScene}
-							className="flex items-center gap-1 rounded bg-white/10 px-2 py-1 hover:bg-white/20"
-						>
-							<Plus className="size-3" />
-							<span>新建 Scene</span>
-						</button>
-						<button
-							type="button"
-							onClick={() => handleZoomByStep(1.1)}
-							className="rounded bg-white/10 p-1 hover:bg-white/20"
-							aria-label="放大"
-						>
-							<Search className="size-3" />
-						</button>
-						<button
-							type="button"
-							onClick={() => handleZoomByStep(0.9)}
-							className="rounded bg-white/10 p-1 hover:bg-white/20"
-							aria-label="缩小"
-						>
-							<SearchX className="size-3" />
-						</button>
-						<button
-							type="button"
-							onClick={handleResetView}
-							className="rounded bg-white/10 px-2 py-1 hover:bg-white/20"
-						>
-							重置视图
-						</button>
-						<span className="text-white/70">
-							{Math.round(camera.zoom * 100)}%
-						</span>
-					</div>
-				)}
-
-				{sidebarExpanded ? (
-					<div
-						data-testid="canvas-overlay-sidebar"
-						className="pointer-events-none absolute z-50"
-						style={{
-							left: overlayLayout.sidebarRect.x,
-							top: overlayLayout.sidebarRect.y,
-							width: overlayLayout.sidebarRect.width,
-							height: overlayLayout.sidebarRect.height,
-						}}
-					>
-						<div
-							className="pointer-events-auto h-full w-full"
-							data-canvas-overlay-ui="true"
-						>
-							<CanvasSidebar
-								mode={sidebarMode}
-								nodes={sidebarNodes}
-								activeNodeId={activeNodeId}
-								activeTab={sidebarTab}
-								onTabChange={setSidebarTab}
-								onNodeSelect={handleSidebarNodeSelect}
-								onCollapse={() => setSidebarExpanded(false)}
-							/>
-						</div>
-					</div>
-				) : (
-					<button
-						type="button"
-						data-testid="canvas-sidebar-expand-button"
-						aria-label="展开侧边栏"
-						onClick={() => setSidebarExpanded(true)}
-						className="absolute z-50 inline-flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-xs text-white ring-1 ring-white/20 hover:bg-black/70"
-						style={{ left: expandButtonOffsetX, top: expandButtonOffsetY }}
-					>
-						<PanelLeftOpen className="size-3" />
-						侧栏
-					</button>
-				)}
-
-				{rightPanelShouldRender && activeNode && (
-					<div
-						data-testid="canvas-overlay-right-panel"
-						className="pointer-events-none absolute z-50"
-						style={{
-							left: overlayLayout.rightPanelRect.x,
-							top: overlayLayout.rightPanelRect.y,
-							width: overlayLayout.rightPanelRect.width,
-							height: overlayLayout.rightPanelRect.height,
-						}}
-					>
-						<div
-							className="pointer-events-auto h-full w-full"
-							data-canvas-overlay-ui="true"
-						>
-							<CanvasActiveNodeMetaPanel
-								node={activeNode}
-								scene={activeNodeScene}
-								asset={activeNodeAsset}
-							/>
-						</div>
-					</div>
-				)}
-
-				{focusedSceneNode && (
-					<FocusSceneKonvaLayer
-						width={stageSize.width}
-						height={stageSize.height}
-						camera={camera}
-						focusedNode={focusedSceneNode}
-						sceneId={focusedSceneNode.sceneId}
-					/>
-				)}
-
-				{resolvedDrawer && DrawerComponent && (
-					<div
-						data-testid="canvas-overlay-drawer"
-						className="absolute z-40 pointer-events-auto"
-						data-canvas-overlay-ui="true"
-						style={{
-							left: overlayLayout.drawerRect.x,
-							bottom: drawerBottomOffset,
-							width: overlayLayout.drawerRect.width,
-						}}
-					>
-						<CanvasNodeDrawerShell
-							key={drawerIdentity ?? undefined}
-							defaultHeight={resolvedDrawer.options.defaultHeight}
-							minHeight={resolvedDrawer.options.minHeight}
-							maxHeightRatio={resolvedDrawer.options.maxHeightRatio}
-							resizable={resolvedDrawer.options.resizable}
-							onHeightChange={setVisibleDrawerHeight}
-						>
-							<DrawerComponent
-								node={resolvedDrawer.node}
-								scene={resolvedDrawer.scene}
-								asset={resolvedDrawer.asset}
-								onClose={handleCloseDrawer}
-								onHeightChange={setVisibleDrawerHeight}
-							/>
-						</CanvasNodeDrawerShell>
-					</div>
-				)}
-
-			<TimelineContextMenu
-				open={contextMenuState.open}
-				x={contextMenuState.open ? contextMenuState.x : 0}
-				y={contextMenuState.open ? contextMenuState.y : 0}
-				actions={contextMenuActions}
-				onClose={closeContextMenu}
+			<CanvasWorkspaceOverlay
+				toolbarLeftOffset={toolbarLeftOffset}
+				toolbarTopOffset={toolbarTopOffset}
+				onCreateScene={handleCreateScene}
+				onZoomIn={() => handleZoomByStep(1.1)}
+				onZoomOut={() => handleZoomByStep(0.9)}
+				onResetView={handleResetView}
+				sidebarExpanded={sidebarExpanded}
+				sidebarRect={overlayLayout.sidebarRect}
+				expandButtonOffsetX={expandButtonOffsetX}
+				expandButtonOffsetY={expandButtonOffsetY}
+				sidebarTab={sidebarTab}
+				onSidebarTabChange={setSidebarTab}
+				onSidebarNodeSelect={handleSidebarNodeSelect}
+				onCollapseSidebar={() => setSidebarExpanded(false)}
+				onExpandSidebar={() => setSidebarExpanded(true)}
+				rightPanelShouldRender={rightPanelShouldRender}
+				rightPanelRect={overlayLayout.rightPanelRect}
+				stageWidth={stageSize.width}
+				stageHeight={stageSize.height}
+				camera={camera}
+				resolvedDrawer={resolvedDrawer}
+				drawerIdentity={drawerIdentity}
+				drawerRect={overlayLayout.drawerRect}
+				drawerBottomOffset={drawerBottomOffset}
+				onDrawerHeightChange={setVisibleDrawerHeight}
+				onCloseDrawer={handleCloseDrawer}
+				contextMenuOpen={contextMenuState.open}
+				contextMenuX={contextMenuState.open ? contextMenuState.x : 0}
+				contextMenuY={contextMenuState.open ? contextMenuState.y : 0}
+				contextMenuActions={contextMenuActions}
+				onCloseContextMenu={closeContextMenu}
 			/>
 		</div>
 	);
