@@ -4,6 +4,7 @@ import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { StudioProject } from "core/studio/types";
 import { framesToTimecode } from "core/utils/timecode";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { useProjectStore } from "@/projects/projectStore";
 import {
 	createEditorRuntimeWrapper,
 	createTestEditorRuntime,
@@ -12,21 +13,13 @@ import type {
 	EditorRuntime,
 	StudioRuntimeManager,
 } from "@/scene-editor/runtime/types";
-import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import { usePlaybackOwnerStore } from "./playbackOwnerStore";
 import { toSceneTimelineRef } from "./timelineRefAdapter";
-import { useSceneSessionBridge } from "./useSceneSessionBridge";
 import { useTimelineRuntimeRegistryBridge } from "./useTimelineRuntimeRegistryBridge";
 
 const BridgeMount = () => {
 	useTimelineRuntimeRegistryBridge();
-	return null;
-};
-
-const CombinedBridgeMount = () => {
-	useTimelineRuntimeRegistryBridge();
-	useSceneSessionBridge();
 	return null;
 };
 
@@ -178,6 +171,7 @@ beforeEach(() => {
 		currentProjectId: "project-1",
 		currentProject: createProject(),
 		focusedSceneDrafts: {},
+		sceneTimelineMutationOpIds: {},
 		error: null,
 	});
 });
@@ -226,8 +220,8 @@ describe("useTimelineRuntimeRegistryBridge", () => {
 		).toBe(1);
 	});
 
-	it("组合挂载时 runtime 变更会同时回写 project 并入全局历史", async () => {
-		render(<CombinedBridgeMount />, { wrapper });
+	it("runtime 变更会同时回写 project 并入全局历史", async () => {
+		render(<BridgeMount />, { wrapper });
 
 		await waitFor(() => {
 			expect(studioRuntime.listTimelineRuntimes()).toHaveLength(2);
@@ -263,6 +257,43 @@ describe("useTimelineRuntimeRegistryBridge", () => {
 				.elements.length,
 		).toBe(2);
 		expect(useStudioHistoryStore.getState().past.length).toBeGreaterThan(0);
+	});
+
+	it("两个 runtime 使用相同 historyOpId 提交时，全局历史仅新增一条", async () => {
+		render(<BridgeMount />, { wrapper });
+
+		await waitFor(() => {
+			expect(studioRuntime.listTimelineRuntimes()).toHaveLength(2);
+		});
+
+		act(() => {
+			const scene1Runtime = studioRuntime.getTimelineRuntime(
+				toSceneTimelineRef("scene-1"),
+			);
+			scene1Runtime?.timelineStore
+				.getState()
+				.setElements((prev) => prev.slice(0, 0), {
+					historyOpId: "shared-op-id",
+				});
+		});
+
+		act(() => {
+			const scene2Runtime = studioRuntime.getTimelineRuntime(
+				toSceneTimelineRef("scene-2"),
+			);
+			scene2Runtime?.timelineStore
+				.getState()
+				.setElements((prev) => prev.slice(0, 1), {
+					historyOpId: "shared-op-id",
+				});
+		});
+
+		await waitFor(() => {
+			expect(useStudioHistoryStore.getState().past).toHaveLength(1);
+		});
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"scene.timeline.batch",
+		);
 	});
 
 	it("scene 增删时会维护 runtime 池", async () => {
@@ -313,5 +344,38 @@ describe("useTimelineRuntimeRegistryBridge", () => {
 		await waitFor(() => {
 			expect(studioRuntime.listTimelineRuntimes()).toHaveLength(2);
 		});
+	});
+
+	it("应用全局历史时不会重复采集历史", async () => {
+		render(<BridgeMount />, { wrapper });
+
+		await waitFor(() => {
+			expect(studioRuntime.listTimelineRuntimes()).toHaveLength(2);
+		});
+
+		act(() => {
+			const scene1Runtime = studioRuntime.getTimelineRuntime(
+				toSceneTimelineRef("scene-1"),
+			);
+			scene1Runtime?.timelineStore
+				.getState()
+				.setElements((prev) => prev.slice(0, 0));
+		});
+
+		await waitFor(() => {
+			expect(useStudioHistoryStore.getState().past).toHaveLength(1);
+		});
+
+		act(() => {
+			useStudioHistoryStore.getState().undo({ runtimeManager: studioRuntime });
+		});
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+		expect(useStudioHistoryStore.getState().future).toHaveLength(1);
+
+		act(() => {
+			useStudioHistoryStore.getState().redo({ runtimeManager: studioRuntime });
+		});
+		expect(useStudioHistoryStore.getState().past).toHaveLength(1);
+		expect(useStudioHistoryStore.getState().future).toHaveLength(0);
 	});
 });

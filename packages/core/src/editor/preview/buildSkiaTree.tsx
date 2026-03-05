@@ -432,13 +432,23 @@ const buildSkiaRenderStateWithScopeCore = async (
 							: deps;
 					const parentFps = resolveSafeFps(fps);
 					const childFps = resolveSafeFps(compositionTimeline.fps, parentFps);
-				const compositionStart = resolveFiniteNumber(element.timeline.start, 0);
-				const localFrames = Math.max(0, displayTime - compositionStart);
-				const localSeconds = localFrames / parentFps;
-				const childDisplayTime = Math.max(
-					0,
-					Math.round(localSeconds * childFps),
-				);
+					const compositionStart = resolveFiniteNumber(
+						element.timeline.start,
+						0,
+					);
+					const compositionOffset = Math.max(
+						0,
+						Math.round(resolveFiniteNumber(element.timeline.offset, 0)),
+					);
+					const localFrames = Math.max(
+						0,
+						displayTime - compositionStart + compositionOffset,
+					);
+					const localSeconds = localFrames / parentFps;
+					const childDisplayTime = Math.max(
+						0,
+						Math.round(localSeconds * childFps),
+					);
 					const childSnapshot = await buildSkiaFrameSnapshotCore(
 					{
 						elements: compositionTimeline.elements,

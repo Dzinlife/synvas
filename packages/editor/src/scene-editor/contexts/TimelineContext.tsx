@@ -1,18 +1,16 @@
-import type {
-	TimelineElement,
-} from "core/element/types";
-import {
-	DEFAULT_TIMELINE_SETTINGS,
-	type TimelineSettings,
-} from "core/editor/timelineLoader";
-import type { TimelineCommandSnapshot } from "core/editor/command/types";
 import {
 	createTrackLockedMap,
 	resolveMovedChildrenTracks,
 	resolveTrackPlacementWithStoredAssignments,
 } from "core/editor/command/move";
 import { pruneAudioTrackStates } from "core/editor/command/postProcess";
+import type { TimelineCommandSnapshot } from "core/editor/command/types";
+import {
+	DEFAULT_TIMELINE_SETTINGS,
+	type TimelineSettings,
+} from "core/editor/timelineLoader";
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
+import type { TimelineElement } from "core/element/types";
 import {
 	createContext,
 	useCallback,
@@ -24,9 +22,9 @@ import {
 } from "react";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore, type Mutate, type StoreApi } from "zustand/vanilla";
+import { getAudioContext } from "@/audio/engine";
 import { useTimelineStoreApi } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { clampFrame } from "@/utils/timecode";
-import { getAudioContext } from "@/audio/engine";
 import type {
 	DropTarget,
 	ExtendedDropTarget,
@@ -38,13 +36,11 @@ import {
 	getAudioTrackControlState,
 } from "../utils/audioTrackState";
 import { finalizeTimelineElements } from "../utils/mainTrackMagnet";
+import { resolveTimelineElementRole } from "../utils/resolveRole";
 import type { SnapPoint } from "../utils/snap";
 import { getPixelsPerFrame } from "../utils/timelineScale";
-import {
-	MAX_TIMELINE_SCALE,
-	MIN_TIMELINE_SCALE,
-} from "../utils/timelineZoom";
 import { updateElementTime } from "../utils/timelineTime";
+import { MAX_TIMELINE_SCALE, MIN_TIMELINE_SCALE } from "../utils/timelineZoom";
 import {
 	findAvailableTrack,
 	getDropTarget,
@@ -55,7 +51,6 @@ import {
 	resolveDropTargetForRole,
 } from "../utils/trackAssignment";
 import { MAIN_TRACK_ID, reconcileTracks } from "../utils/trackState";
-import { resolveTimelineElementRole } from "../utils/resolveRole";
 
 // Ghost 元素状态类型
 export interface DragGhostState {
@@ -139,6 +134,7 @@ export interface TimelineStore {
 	audioTrackStates: AudioTrackControlStateMap;
 	historyPast: TimelineHistorySnapshot[];
 	historyFuture: TimelineHistorySnapshot[];
+	lastCommittedHistoryOpId: string | null;
 	historyLimit: number;
 	canvasSize: { width: number; height: number };
 	isPlaying: boolean;
@@ -182,7 +178,7 @@ export interface TimelineStore {
 		elements:
 			| TimelineElement[]
 			| ((prev: TimelineElement[]) => TimelineElement[]),
-		options?: { history?: boolean },
+		options?: { history?: boolean; historyOpId?: string },
 	) => void;
 	setTracks: (
 		tracks: TimelineTrack[] | ((prev: TimelineTrack[]) => TimelineTrack[]),
@@ -249,7 +245,7 @@ export interface TimelineStore {
 	getCommandSnapshot: () => TimelineCommandSnapshot;
 	applyCommandSnapshot: (
 		snapshot: TimelineCommandSnapshot,
-		options?: { history?: boolean },
+		options?: { history?: boolean; historyOpId?: string },
 	) => void;
 }
 
@@ -266,6 +262,15 @@ interface TimelineHistorySnapshot {
 }
 
 const HISTORY_LIMIT = 100;
+
+const createHistoryOpId = (): string => {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return crypto.randomUUID();
+	}
+	return `history-${Date.now().toString(36)}-${Math.random()
+		.toString(36)
+		.slice(2, 8)}`;
+};
 
 const trimHistory = (
 	history: TimelineHistorySnapshot[],
@@ -287,6 +292,24 @@ const buildHistorySnapshot = (state: {
 		tracks: state.tracks,
 		audioTrackStates: state.audioTrackStates,
 		rippleEditingEnabled: state.rippleEditingEnabled,
+	};
+};
+
+const withHistoryCommit = (
+	state: TimelineStore,
+	historyOpId?: string,
+): Pick<
+	TimelineStore,
+	"historyPast" | "historyFuture" | "lastCommittedHistoryOpId"
+> => {
+	const nextPast = trimHistory(
+		[...state.historyPast, buildHistorySnapshot(state)],
+		state.historyLimit,
+	);
+	return {
+		historyPast: nextPast,
+		historyFuture: [],
+		lastCommittedHistoryOpId: historyOpId ?? createHistoryOpId(),
 	};
 };
 
@@ -382,6 +405,7 @@ export const createTimelineStore = (): TimelineStoreApi => {
 			audioTrackStates: {},
 			historyPast: [],
 			historyFuture: [],
+			lastCommittedHistoryOpId: null,
 			historyLimit: HISTORY_LIMIT,
 			canvasSize: { width: 1920, height: 1080 },
 			isPlaying: false,
@@ -412,859 +436,774 @@ export const createTimelineStore = (): TimelineStoreApi => {
 			timelineViewportWidth: 0,
 			persistRevision: 0,
 			revision: 0,
-		getElementById: (id: string) => {
-			return get().elements.find((element) => element.id === id) ?? null;
-		},
-
-		setFps: (fps: number) => {
-			set({ fps: normalizeFps(fps) });
-		},
-
-		setTimelineScale: (
-			scale: number,
-			options?: {
-				anchorOffsetPx?: number;
-				preserveOriginWhenAnchorAfterContentEnd?: boolean;
+			getElementById: (id: string) => {
+				return get().elements.find((element) => element.id === id) ?? null;
 			},
-		) => {
-			set((state) => {
-				const parsedScale = Number.isFinite(scale) ? scale : 1;
-				const nextScale = Math.min(
-					MAX_TIMELINE_SCALE,
-					Math.max(MIN_TIMELINE_SCALE, parsedScale),
-				);
-				const prevRatio = getPixelsPerFrame(state.fps, state.timelineScale);
-				const nextRatio = getPixelsPerFrame(state.fps, nextScale);
-				if (
-					!Number.isFinite(prevRatio) ||
-					prevRatio <= 0 ||
-					!Number.isFinite(nextRatio) ||
-					nextRatio <= 0
-				) {
-					if (state.timelineScale === nextScale) return state;
-					return { timelineScale: nextScale };
-				}
 
-				const viewportWidth = Math.max(0, state.timelineViewportWidth);
-				const anchorBase = Number.isFinite(options?.anchorOffsetPx ?? NaN)
-					? (options?.anchorOffsetPx as number)
-					: viewportWidth / 2;
-				const anchorOffsetPx = Math.min(
-					Math.max(anchorBase, 0),
-					Math.max(0, viewportWidth),
-				);
-				const currentScrollLeft = Math.max(0, state.scrollLeft);
-				const timeAtAnchor = Math.max(
-					0,
-					(currentScrollLeft + anchorOffsetPx - TIMELINE_PADDING_LEFT) /
-						prevRatio,
-				);
-				const shouldPreserveOrigin =
-					options?.preserveOriginWhenAnchorAfterContentEnd &&
-					currentScrollLeft <= 0.5 &&
-					timeAtAnchor > resolveTimelineEndFrame(state.elements);
-				const rawNextScrollLeft = shouldPreserveOrigin
-					? 0
-					: Math.max(
-							0,
-							timeAtAnchor * nextRatio +
-								TIMELINE_PADDING_LEFT -
-								anchorOffsetPx,
-						);
-				const nextScrollLeft = Number.isFinite(rawNextScrollLeft)
-					? rawNextScrollLeft
-					: state.scrollLeft;
-				if (
-					state.timelineScale === nextScale &&
-					state.scrollLeft === nextScrollLeft
-				) {
-					return state;
-				}
-				return {
-					timelineScale: nextScale,
-					scrollLeft: nextScrollLeft,
-				};
-			});
-		},
+			setFps: (fps: number) => {
+				set({ fps: normalizeFps(fps) });
+			},
 
-		setCurrentTime: (time: number) => {
-			const { currentTime, isExporting } = get();
-			if (isExporting) return; // 导出期间冻结时间轴
-			const nextTime = clampFrame(time);
-			if (currentTime !== nextTime) {
-				set({ currentTime: nextTime });
-			}
-		},
-		seekTo: (time: number) => {
-			set((state) => {
-				if (state.isExporting) return state;
+			setTimelineScale: (
+				scale: number,
+				options?: {
+					anchorOffsetPx?: number;
+					preserveOriginWhenAnchorAfterContentEnd?: boolean;
+				},
+			) => {
+				set((state) => {
+					const parsedScale = Number.isFinite(scale) ? scale : 1;
+					const nextScale = Math.min(
+						MAX_TIMELINE_SCALE,
+						Math.max(MIN_TIMELINE_SCALE, parsedScale),
+					);
+					const prevRatio = getPixelsPerFrame(state.fps, state.timelineScale);
+					const nextRatio = getPixelsPerFrame(state.fps, nextScale);
+					if (
+						!Number.isFinite(prevRatio) ||
+						prevRatio <= 0 ||
+						!Number.isFinite(nextRatio) ||
+						nextRatio <= 0
+					) {
+						if (state.timelineScale === nextScale) return state;
+						return { timelineScale: nextScale };
+					}
+
+					const viewportWidth = Math.max(0, state.timelineViewportWidth);
+					const anchorBase = Number.isFinite(options?.anchorOffsetPx ?? NaN)
+						? (options?.anchorOffsetPx as number)
+						: viewportWidth / 2;
+					const anchorOffsetPx = Math.min(
+						Math.max(anchorBase, 0),
+						Math.max(0, viewportWidth),
+					);
+					const currentScrollLeft = Math.max(0, state.scrollLeft);
+					const timeAtAnchor = Math.max(
+						0,
+						(currentScrollLeft + anchorOffsetPx - TIMELINE_PADDING_LEFT) /
+							prevRatio,
+					);
+					const shouldPreserveOrigin =
+						options?.preserveOriginWhenAnchorAfterContentEnd &&
+						currentScrollLeft <= 0.5 &&
+						timeAtAnchor > resolveTimelineEndFrame(state.elements);
+					const rawNextScrollLeft = shouldPreserveOrigin
+						? 0
+						: Math.max(
+								0,
+								timeAtAnchor * nextRatio +
+									TIMELINE_PADDING_LEFT -
+									anchorOffsetPx,
+							);
+					const nextScrollLeft = Number.isFinite(rawNextScrollLeft)
+						? rawNextScrollLeft
+						: state.scrollLeft;
+					if (
+						state.timelineScale === nextScale &&
+						state.scrollLeft === nextScrollLeft
+					) {
+						return state;
+					}
+					return {
+						timelineScale: nextScale,
+						scrollLeft: nextScrollLeft,
+					};
+				});
+			},
+
+			setCurrentTime: (time: number) => {
+				const { currentTime, isExporting } = get();
+				if (isExporting) return; // 导出期间冻结时间轴
 				const nextTime = clampFrame(time);
-				if (state.currentTime === nextTime) return state;
-				return {
-					currentTime: nextTime,
-					seekEpoch: state.seekEpoch + 1,
-				};
-			});
-		},
-
-		setPreviewTime: (time: number | null) => {
-			set((state) => {
-				if (state.isExporting) {
-					return state; // 导出期间忽略 hover 预览
+				if (currentTime !== nextTime) {
+					set({ currentTime: nextTime });
 				}
-				if (!state.previewAxisEnabled) {
-					if (state.previewTime === null) return state;
-					return { previewTime: null };
-				}
-				const nextPreview = time === null ? null : clampFrame(time);
-				if (state.previewTime === nextPreview) return state;
-				return { previewTime: nextPreview };
-			});
-		},
-		setPreviewAxisEnabled: (enabled: boolean) => {
-			set((state) => {
-				if (state.previewAxisEnabled === enabled) return state;
-				return {
-					previewAxisEnabled: enabled,
-					previewTime: enabled ? state.previewTime : null,
-				};
-			});
-		},
+			},
+			seekTo: (time: number) => {
+				set((state) => {
+					if (state.isExporting) return state;
+					const nextTime = clampFrame(time);
+					if (state.currentTime === nextTime) return state;
+					return {
+						currentTime: nextTime,
+						seekEpoch: state.seekEpoch + 1,
+					};
+				});
+			},
 
-		setElements: (
-			elements:
-				| TimelineElement[]
-				| ((prev: TimelineElement[]) => TimelineElement[]),
-			options?: { history?: boolean },
-		) => {
-			set((state) => {
-				const nextElements =
-					typeof elements === "function" ? elements(state.elements) : elements;
-				if (state.elements === nextElements) return state;
-				if (options?.history === false) {
+			setPreviewTime: (time: number | null) => {
+				set((state) => {
+					if (state.isExporting) {
+						return state; // 导出期间忽略 hover 预览
+					}
+					if (!state.previewAxisEnabled) {
+						if (state.previewTime === null) return state;
+						return { previewTime: null };
+					}
+					const nextPreview = time === null ? null : clampFrame(time);
+					if (state.previewTime === nextPreview) return state;
+					return { previewTime: nextPreview };
+				});
+			},
+			setPreviewAxisEnabled: (enabled: boolean) => {
+				set((state) => {
+					if (state.previewAxisEnabled === enabled) return state;
+					return {
+						previewAxisEnabled: enabled,
+						previewTime: enabled ? state.previewTime : null,
+					};
+				});
+			},
+
+			setElements: (
+				elements:
+					| TimelineElement[]
+					| ((prev: TimelineElement[]) => TimelineElement[]),
+				options?: { history?: boolean; historyOpId?: string },
+			) => {
+				set((state) => {
+					const nextElements =
+						typeof elements === "function"
+							? elements(state.elements)
+							: elements;
+					if (state.elements === nextElements) return state;
+					if (options?.history === false) {
+						return {
+							elements: nextElements,
+						};
+					}
 					return {
 						elements: nextElements,
+						...withHistoryCommit(state, options?.historyOpId),
 					};
-				}
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					elements: nextElements,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
-
-		setTracks: (
-			tracks: TimelineTrack[] | ((prev: TimelineTrack[]) => TimelineTrack[]),
-		) => {
-			set((state) => {
-				const nextTracks =
-					typeof tracks === "function" ? tracks(state.tracks) : tracks;
-				if (state.tracks === nextTracks) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
-
-		undo: () => {
-			set((state) => {
-				if (state.historyPast.length === 0) {
-					if (!state.isPlaying) return state;
-					return { isPlaying: false };
-				}
-				const previous = state.historyPast[state.historyPast.length - 1];
-				const nextPast = state.historyPast.slice(0, -1);
-				const nextFuture = [
-					buildHistorySnapshot(state),
-					...state.historyFuture,
-				];
-				const selection = reconcileSelection(
-					previous.elements,
-					state.selectedIds,
-					state.primarySelectedId,
-				);
-				return {
-					elements: previous.elements,
-					tracks: previous.tracks,
-					audioTrackStates: previous.audioTrackStates,
-					rippleEditingEnabled: previous.rippleEditingEnabled,
-					historyPast: nextPast,
-					historyFuture: nextFuture,
-					selectedIds: selection.selectedIds,
-					primarySelectedId: selection.primarySelectedId,
-					isPlaying: false,
-				};
-			});
-		},
-
-		redo: () => {
-			set((state) => {
-				if (state.historyFuture.length === 0) {
-					if (!state.isPlaying) return state;
-					return { isPlaying: false };
-				}
-				const next = state.historyFuture[0];
-				const nextFuture = state.historyFuture.slice(1);
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				const selection = reconcileSelection(
-					next.elements,
-					state.selectedIds,
-					state.primarySelectedId,
-				);
-				return {
-					elements: next.elements,
-					tracks: next.tracks,
-					audioTrackStates: next.audioTrackStates,
-					rippleEditingEnabled: next.rippleEditingEnabled,
-					historyPast: nextPast,
-					historyFuture: nextFuture,
-					selectedIds: selection.selectedIds,
-					primarySelectedId: selection.primarySelectedId,
-					isPlaying: false,
-				};
-			});
-		},
-
-		resetHistory: () => {
-			set({
-				historyPast: [],
-				historyFuture: [],
-				selectedIds: [],
-				primarySelectedId: null,
-			});
-		},
-
-		setTrackHidden: (trackId: string, hidden: boolean) => {
-			set((state) => {
-				let didChange = false;
-				const nextTracks = state.tracks.map((track) => {
-					if (track.id !== trackId) return track;
-					if (track.hidden === hidden) return track;
-					didChange = true;
-					return { ...track, hidden };
 				});
-				if (!didChange) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			},
 
-		toggleTrackHidden: (trackId: string) => {
-			set((state) => {
-				let didChange = false;
-				const nextTracks = state.tracks.map((track) => {
-					if (track.id !== trackId) return track;
-					didChange = true;
-					return { ...track, hidden: !track.hidden };
+			setTracks: (
+				tracks: TimelineTrack[] | ((prev: TimelineTrack[]) => TimelineTrack[]),
+			) => {
+				set((state) => {
+					const nextTracks =
+						typeof tracks === "function" ? tracks(state.tracks) : tracks;
+					if (state.tracks === nextTracks) return state;
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+					};
 				});
-				if (!didChange) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			},
 
-		setTrackLocked: (trackId: string, locked: boolean) => {
-			set((state) => {
-				let didChange = false;
-				let nextLocked = locked;
-				const targetIndex = state.tracks.findIndex(
-					(track) => track.id === trackId,
-				);
-				const nextTracks = state.tracks.map((track) => {
-					if (track.id !== trackId) return track;
-					if (track.locked === locked) return track;
-					didChange = true;
-					nextLocked = locked;
-					return { ...track, locked };
+			undo: () => {
+				set((state) => {
+					if (state.historyPast.length === 0) {
+						if (!state.isPlaying) return state;
+						return { isPlaying: false };
+					}
+					const previous = state.historyPast[state.historyPast.length - 1];
+					const nextPast = state.historyPast.slice(0, -1);
+					const nextFuture = [
+						buildHistorySnapshot(state),
+						...state.historyFuture,
+					];
+					const selection = reconcileSelection(
+						previous.elements,
+						state.selectedIds,
+						state.primarySelectedId,
+					);
+					return {
+						elements: previous.elements,
+						tracks: previous.tracks,
+						audioTrackStates: previous.audioTrackStates,
+						rippleEditingEnabled: previous.rippleEditingEnabled,
+						historyPast: nextPast,
+						historyFuture: nextFuture,
+						lastCommittedHistoryOpId: null,
+						selectedIds: selection.selectedIds,
+						primarySelectedId: selection.primarySelectedId,
+						isPlaying: false,
+					};
 				});
-				if (!didChange) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				const nextSelection =
-					nextLocked && targetIndex >= 0
-						? pruneSelectionForTrackLock(state, targetIndex)
+			},
+
+			redo: () => {
+				set((state) => {
+					if (state.historyFuture.length === 0) {
+						if (!state.isPlaying) return state;
+						return { isPlaying: false };
+					}
+					const next = state.historyFuture[0];
+					const nextFuture = state.historyFuture.slice(1);
+					const nextPast = trimHistory(
+						[...state.historyPast, buildHistorySnapshot(state)],
+						state.historyLimit,
+					);
+					const selection = reconcileSelection(
+						next.elements,
+						state.selectedIds,
+						state.primarySelectedId,
+					);
+					return {
+						elements: next.elements,
+						tracks: next.tracks,
+						audioTrackStates: next.audioTrackStates,
+						rippleEditingEnabled: next.rippleEditingEnabled,
+						historyPast: nextPast,
+						historyFuture: nextFuture,
+						lastCommittedHistoryOpId: null,
+						selectedIds: selection.selectedIds,
+						primarySelectedId: selection.primarySelectedId,
+						isPlaying: false,
+					};
+				});
+			},
+
+			resetHistory: () => {
+				set({
+					historyPast: [],
+					historyFuture: [],
+					lastCommittedHistoryOpId: null,
+					selectedIds: [],
+					primarySelectedId: null,
+				});
+			},
+
+			setTrackHidden: (trackId: string, hidden: boolean) => {
+				set((state) => {
+					let didChange = false;
+					const nextTracks = state.tracks.map((track) => {
+						if (track.id !== trackId) return track;
+						if (track.hidden === hidden) return track;
+						didChange = true;
+						return { ...track, hidden };
+					});
+					if (!didChange) return state;
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+					};
+				});
+			},
+
+			toggleTrackHidden: (trackId: string) => {
+				set((state) => {
+					let didChange = false;
+					const nextTracks = state.tracks.map((track) => {
+						if (track.id !== trackId) return track;
+						didChange = true;
+						return { ...track, hidden: !track.hidden };
+					});
+					if (!didChange) return state;
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+					};
+				});
+			},
+
+			setTrackLocked: (trackId: string, locked: boolean) => {
+				set((state) => {
+					let didChange = false;
+					let nextLocked = locked;
+					const targetIndex = state.tracks.findIndex(
+						(track) => track.id === trackId,
+					);
+					const nextTracks = state.tracks.map((track) => {
+						if (track.id !== trackId) return track;
+						if (track.locked === locked) return track;
+						didChange = true;
+						nextLocked = locked;
+						return { ...track, locked };
+					});
+					if (!didChange) return state;
+					const nextSelection =
+						nextLocked && targetIndex >= 0
+							? pruneSelectionForTrackLock(state, targetIndex)
+							: {
+									selectedIds: state.selectedIds,
+									primarySelectedId: state.primarySelectedId,
+								};
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+						selectedIds: nextSelection.selectedIds,
+						primarySelectedId: nextSelection.primarySelectedId,
+					};
+				});
+			},
+
+			toggleTrackLocked: (trackId: string) => {
+				set((state) => {
+					let didChange = false;
+					let nextLocked = false;
+					const targetIndex = state.tracks.findIndex(
+						(track) => track.id === trackId,
+					);
+					const nextTracks = state.tracks.map((track) => {
+						if (track.id !== trackId) return track;
+						didChange = true;
+						nextLocked = !track.locked;
+						return { ...track, locked: nextLocked };
+					});
+					if (!didChange) return state;
+					const nextSelection =
+						nextLocked && targetIndex >= 0
+							? pruneSelectionForTrackLock(state, targetIndex)
+							: {
+									selectedIds: state.selectedIds,
+									primarySelectedId: state.primarySelectedId,
+								};
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+						selectedIds: nextSelection.selectedIds,
+						primarySelectedId: nextSelection.primarySelectedId,
+					};
+				});
+			},
+
+			setTrackMuted: (trackId: string, muted: boolean) => {
+				set((state) => {
+					let didChange = false;
+					const nextTracks = state.tracks.map((track) => {
+						if (track.id !== trackId) return track;
+						if (track.muted === muted) return track;
+						didChange = true;
+						return { ...track, muted };
+					});
+					if (!didChange) return state;
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+					};
+				});
+			},
+
+			toggleTrackMuted: (trackId: string) => {
+				set((state) => {
+					let didChange = false;
+					const nextTracks = state.tracks.map((track) => {
+						if (track.id !== trackId) return track;
+						didChange = true;
+						return { ...track, muted: !track.muted };
+					});
+					if (!didChange) return state;
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+					};
+				});
+			},
+
+			setTrackSolo: (trackId: string, solo: boolean) => {
+				set((state) => {
+					let didChange = false;
+					const nextTracks = state.tracks.map((track) => {
+						if (track.id !== trackId) return track;
+						if (track.solo === solo) return track;
+						didChange = true;
+						return { ...track, solo };
+					});
+					if (!didChange) return state;
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+					};
+				});
+			},
+
+			toggleTrackSolo: (trackId: string) => {
+				set((state) => {
+					let didChange = false;
+					const nextTracks = state.tracks.map((track) => {
+						if (track.id !== trackId) return track;
+						didChange = true;
+						return { ...track, solo: !track.solo };
+					});
+					if (!didChange) return state;
+					return {
+						tracks: nextTracks,
+						...withHistoryCommit(state),
+					};
+				});
+			},
+
+			setAudioTrackLocked: (trackIndex: number, locked: boolean) => {
+				set((state) => {
+					if (trackIndex >= 0) return state;
+					const prevAudioTrack = getAudioTrackControlState(
+						state.audioTrackStates,
+						trackIndex,
+					);
+					if (prevAudioTrack.locked === locked) return state;
+					const nextAudioTrackStates = {
+						...state.audioTrackStates,
+						[trackIndex]: {
+							...prevAudioTrack,
+							locked,
+						},
+					};
+					const nextSelection = locked
+						? pruneSelectionForTrackLock(state, trackIndex)
 						: {
 								selectedIds: state.selectedIds,
 								primarySelectedId: state.primarySelectedId,
 							};
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-					selectedIds: nextSelection.selectedIds,
-					primarySelectedId: nextSelection.primarySelectedId,
-				};
-			});
-		},
-
-		toggleTrackLocked: (trackId: string) => {
-			set((state) => {
-				let didChange = false;
-				let nextLocked = false;
-				const targetIndex = state.tracks.findIndex(
-					(track) => track.id === trackId,
-				);
-				const nextTracks = state.tracks.map((track) => {
-					if (track.id !== trackId) return track;
-					didChange = true;
-					nextLocked = !track.locked;
-					return { ...track, locked: nextLocked };
+					return {
+						audioTrackStates: nextAudioTrackStates,
+						...withHistoryCommit(state),
+						selectedIds: nextSelection.selectedIds,
+						primarySelectedId: nextSelection.primarySelectedId,
+					};
 				});
-				if (!didChange) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				const nextSelection =
-					nextLocked && targetIndex >= 0
-						? pruneSelectionForTrackLock(state, targetIndex)
+			},
+
+			toggleAudioTrackLocked: (trackIndex: number) => {
+				set((state) => {
+					if (trackIndex >= 0) return state;
+					const prevAudioTrack = getAudioTrackControlState(
+						state.audioTrackStates,
+						trackIndex,
+					);
+					const nextLocked = !prevAudioTrack.locked;
+					const nextAudioTrackStates = {
+						...state.audioTrackStates,
+						[trackIndex]: {
+							...prevAudioTrack,
+							locked: nextLocked,
+						},
+					};
+					const nextSelection = nextLocked
+						? pruneSelectionForTrackLock(state, trackIndex)
 						: {
 								selectedIds: state.selectedIds,
 								primarySelectedId: state.primarySelectedId,
 							};
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-					selectedIds: nextSelection.selectedIds,
-					primarySelectedId: nextSelection.primarySelectedId,
-				};
-			});
-		},
-
-		setTrackMuted: (trackId: string, muted: boolean) => {
-			set((state) => {
-				let didChange = false;
-				const nextTracks = state.tracks.map((track) => {
-					if (track.id !== trackId) return track;
-					if (track.muted === muted) return track;
-					didChange = true;
-					return { ...track, muted };
+					return {
+						audioTrackStates: nextAudioTrackStates,
+						...withHistoryCommit(state),
+						selectedIds: nextSelection.selectedIds,
+						primarySelectedId: nextSelection.primarySelectedId,
+					};
 				});
-				if (!didChange) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			},
 
-		toggleTrackMuted: (trackId: string) => {
-			set((state) => {
-				let didChange = false;
-				const nextTracks = state.tracks.map((track) => {
-					if (track.id !== trackId) return track;
-					didChange = true;
-					return { ...track, muted: !track.muted };
+			setAudioTrackMuted: (trackIndex: number, muted: boolean) => {
+				set((state) => {
+					if (trackIndex >= 0) return state;
+					const prevAudioTrack = getAudioTrackControlState(
+						state.audioTrackStates,
+						trackIndex,
+					);
+					if (prevAudioTrack.muted === muted) return state;
+					const nextAudioTrackStates = {
+						...state.audioTrackStates,
+						[trackIndex]: {
+							...prevAudioTrack,
+							muted,
+						},
+					};
+					return {
+						audioTrackStates: nextAudioTrackStates,
+						...withHistoryCommit(state),
+					};
 				});
-				if (!didChange) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			},
 
-		setTrackSolo: (trackId: string, solo: boolean) => {
-			set((state) => {
-				let didChange = false;
-				const nextTracks = state.tracks.map((track) => {
-					if (track.id !== trackId) return track;
-					if (track.solo === solo) return track;
-					didChange = true;
-					return { ...track, solo };
+			toggleAudioTrackMuted: (trackIndex: number) => {
+				set((state) => {
+					if (trackIndex >= 0) return state;
+					const prevAudioTrack = getAudioTrackControlState(
+						state.audioTrackStates,
+						trackIndex,
+					);
+					const nextAudioTrackStates = {
+						...state.audioTrackStates,
+						[trackIndex]: {
+							...prevAudioTrack,
+							muted: !prevAudioTrack.muted,
+						},
+					};
+					return {
+						audioTrackStates: nextAudioTrackStates,
+						...withHistoryCommit(state),
+					};
 				});
-				if (!didChange) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			},
 
-		toggleTrackSolo: (trackId: string) => {
-			set((state) => {
-				let didChange = false;
-				const nextTracks = state.tracks.map((track) => {
-					if (track.id !== trackId) return track;
-					didChange = true;
-					return { ...track, solo: !track.solo };
+			setAudioTrackSolo: (trackIndex: number, solo: boolean) => {
+				set((state) => {
+					if (trackIndex >= 0) return state;
+					const prevAudioTrack = getAudioTrackControlState(
+						state.audioTrackStates,
+						trackIndex,
+					);
+					if (prevAudioTrack.solo === solo) return state;
+					const nextAudioTrackStates = {
+						...state.audioTrackStates,
+						[trackIndex]: {
+							...prevAudioTrack,
+							solo,
+						},
+					};
+					return {
+						audioTrackStates: nextAudioTrackStates,
+						...withHistoryCommit(state),
+					};
 				});
-				if (!didChange) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					tracks: nextTracks,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			},
 
-		setAudioTrackLocked: (trackIndex: number, locked: boolean) => {
-			set((state) => {
-				if (trackIndex >= 0) return state;
-				const prevAudioTrack = getAudioTrackControlState(
-					state.audioTrackStates,
-					trackIndex,
-				);
-				if (prevAudioTrack.locked === locked) return state;
-				const nextAudioTrackStates = {
-					...state.audioTrackStates,
-					[trackIndex]: {
-						...prevAudioTrack,
-						locked,
-					},
-				};
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				const nextSelection = locked
-					? pruneSelectionForTrackLock(state, trackIndex)
-					: {
-							selectedIds: state.selectedIds,
-							primarySelectedId: state.primarySelectedId,
-						};
-				return {
-					audioTrackStates: nextAudioTrackStates,
-					historyPast: nextPast,
-					historyFuture: [],
-					selectedIds: nextSelection.selectedIds,
-					primarySelectedId: nextSelection.primarySelectedId,
-				};
-			});
-		},
+			toggleAudioTrackSolo: (trackIndex: number) => {
+				set((state) => {
+					if (trackIndex >= 0) return state;
+					const prevAudioTrack = getAudioTrackControlState(
+						state.audioTrackStates,
+						trackIndex,
+					);
+					const nextAudioTrackStates = {
+						...state.audioTrackStates,
+						[trackIndex]: {
+							...prevAudioTrack,
+							solo: !prevAudioTrack.solo,
+						},
+					};
+					return {
+						audioTrackStates: nextAudioTrackStates,
+						...withHistoryCommit(state),
+					};
+				});
+			},
 
-		toggleAudioTrackLocked: (trackIndex: number) => {
-			set((state) => {
-				if (trackIndex >= 0) return state;
-				const prevAudioTrack = getAudioTrackControlState(
-					state.audioTrackStates,
-					trackIndex,
-				);
-				const nextLocked = !prevAudioTrack.locked;
-				const nextAudioTrackStates = {
-					...state.audioTrackStates,
-					[trackIndex]: {
-						...prevAudioTrack,
-						locked: nextLocked,
-					},
-				};
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				const nextSelection = nextLocked
-					? pruneSelectionForTrackLock(state, trackIndex)
-					: {
-							selectedIds: state.selectedIds,
-							primarySelectedId: state.primarySelectedId,
-						};
-				return {
-					audioTrackStates: nextAudioTrackStates,
-					historyPast: nextPast,
-					historyFuture: [],
-					selectedIds: nextSelection.selectedIds,
-					primarySelectedId: nextSelection.primarySelectedId,
-				};
-			});
-		},
+			setCanvasSize: (size: { width: number; height: number }) => {
+				set({ canvasSize: size });
+			},
 
-		setAudioTrackMuted: (trackIndex: number, muted: boolean) => {
-			set((state) => {
-				if (trackIndex >= 0) return state;
-				const prevAudioTrack = getAudioTrackControlState(
-					state.audioTrackStates,
-					trackIndex,
-				);
-				if (prevAudioTrack.muted === muted) return state;
-				const nextAudioTrackStates = {
-					...state.audioTrackStates,
-					[trackIndex]: {
-						...prevAudioTrack,
-						muted,
-					},
-				};
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					audioTrackStates: nextAudioTrackStates,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			getCurrentTime: () => {
+				return get().currentTime;
+			},
 
-		toggleAudioTrackMuted: (trackIndex: number) => {
-			set((state) => {
-				if (trackIndex >= 0) return state;
-				const prevAudioTrack = getAudioTrackControlState(
-					state.audioTrackStates,
-					trackIndex,
-				);
-				const nextAudioTrackStates = {
-					...state.audioTrackStates,
-					[trackIndex]: {
-						...prevAudioTrack,
-						muted: !prevAudioTrack.muted,
-					},
-				};
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					audioTrackStates: nextAudioTrackStates,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			getDisplayTime: () => {
+				const { previewTime, currentTime, previewAxisEnabled } = get();
+				return previewAxisEnabled ? (previewTime ?? currentTime) : currentTime;
+			},
+			getRenderTime: () => {
+				return resolveRenderTime(get());
+			},
 
-		setAudioTrackSolo: (trackIndex: number, solo: boolean) => {
-			set((state) => {
-				if (trackIndex >= 0) return state;
-				const prevAudioTrack = getAudioTrackControlState(
-					state.audioTrackStates,
-					trackIndex,
-				);
-				if (prevAudioTrack.solo === solo) return state;
-				const nextAudioTrackStates = {
-					...state.audioTrackStates,
-					[trackIndex]: {
-						...prevAudioTrack,
-						solo,
-					},
-				};
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					audioTrackStates: nextAudioTrackStates,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			getElements: () => {
+				return get().elements;
+			},
 
-		toggleAudioTrackSolo: (trackIndex: number) => {
-			set((state) => {
-				if (trackIndex >= 0) return state;
-				const prevAudioTrack = getAudioTrackControlState(
-					state.audioTrackStates,
-					trackIndex,
-				);
-				const nextAudioTrackStates = {
-					...state.audioTrackStates,
-					[trackIndex]: {
-						...prevAudioTrack,
-						solo: !prevAudioTrack.solo,
-					},
-				};
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					audioTrackStates: nextAudioTrackStates,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+			getCanvasSize: () => {
+				return get().canvasSize;
+			},
 
-		setCanvasSize: (size: { width: number; height: number }) => {
-			set({ canvasSize: size });
-		},
+			play: () => {
+				set((state) => {
+					if (state.isPlaying) return state;
+					const nextPlaybackState = resolveStartPlaybackPatch(state);
+					if (
+						state.isPlaying === nextPlaybackState.isPlaying &&
+						state.currentTime === nextPlaybackState.currentTime &&
+						state.previewTime === nextPlaybackState.previewTime
+					) {
+						return state;
+					}
+					return nextPlaybackState;
+				});
+			},
 
-		getCurrentTime: () => {
-			return get().currentTime;
-		},
+			pause: () => {
+				set({ isPlaying: false });
+			},
 
-		getDisplayTime: () => {
-			const { previewTime, currentTime, previewAxisEnabled } = get();
-			return previewAxisEnabled ? (previewTime ?? currentTime) : currentTime;
-		},
-		getRenderTime: () => {
-			return resolveRenderTime(get());
-		},
+			togglePlay: () => {
+				set((state) => {
+					const nextIsPlaying = !state.isPlaying;
+					if (!nextIsPlaying) {
+						return { isPlaying: false };
+					}
+					const nextPlaybackState = resolveStartPlaybackPatch(state);
+					if (
+						state.isPlaying === nextPlaybackState.isPlaying &&
+						state.currentTime === nextPlaybackState.currentTime &&
+						state.previewTime === nextPlaybackState.previewTime
+					) {
+						return state;
+					}
+					return nextPlaybackState;
+				});
+			},
+			setIsExporting: (isExporting: boolean) => {
+				set((state) => {
+					if (state.isExporting === isExporting) return state;
+					return { isExporting };
+				});
+			},
+			setExportTime: (time: number | null) => {
+				set((state) => {
+					if (state.exportTime === time) return state;
+					return { exportTime: time };
+				});
+			},
 
-		getElements: () => {
-			return get().elements;
-		},
+			setIsDragging: (isDragging: boolean) => {
+				set({ isDragging });
+			},
 
-		getCanvasSize: () => {
-			return get().canvasSize;
-		},
-
-		play: () => {
-			set((state) => {
-				if (state.isPlaying) return state;
-				const nextPlaybackState = resolveStartPlaybackPatch(state);
-				if (
-					state.isPlaying === nextPlaybackState.isPlaying &&
-					state.currentTime === nextPlaybackState.currentTime &&
-					state.previewTime === nextPlaybackState.previewTime
-				) {
-					return state;
+			setSelectedElementId: (id: string | null) => {
+				if (!id) {
+					set({ selectedIds: [], primarySelectedId: null });
+					return;
 				}
-				return nextPlaybackState;
-			});
-		},
+				set({ selectedIds: [id], primarySelectedId: id });
+			},
 
-		pause: () => {
-			set({ isPlaying: false });
-		},
+			setSelectedIds: (ids: string[], primaryId?: string | null) => {
+				const uniqueIds = Array.from(new Set(ids));
+				const resolvedPrimary =
+					uniqueIds.length === 0
+						? null
+						: primaryId && uniqueIds.includes(primaryId)
+							? primaryId
+							: uniqueIds[uniqueIds.length - 1];
+				set({ selectedIds: uniqueIds, primarySelectedId: resolvedPrimary });
+			},
 
-		togglePlay: () => {
-			set((state) => {
-				const nextIsPlaying = !state.isPlaying;
-				if (!nextIsPlaying) {
-					return { isPlaying: false };
-				}
-				const nextPlaybackState = resolveStartPlaybackPatch(state);
-				if (
-					state.isPlaying === nextPlaybackState.isPlaying &&
-					state.currentTime === nextPlaybackState.currentTime &&
-					state.previewTime === nextPlaybackState.previewTime
-				) {
-					return state;
-				}
-				return nextPlaybackState;
-			});
-		},
-		setIsExporting: (isExporting: boolean) => {
-			set((state) => {
-				if (state.isExporting === isExporting) return state;
-				return { isExporting };
-			});
-		},
-		setExportTime: (time: number | null) => {
-			set((state) => {
-				if (state.exportTime === time) return state;
-				return { exportTime: time };
-			});
-		},
+			// 吸附相关方法
+			setSnapEnabled: (enabled: boolean) => {
+				set({ snapEnabled: enabled });
+			},
 
-		setIsDragging: (isDragging: boolean) => {
-			set({ isDragging });
-		},
+			setActiveSnapPoint: (point: SnapPoint | null) => {
+				set({ activeSnapPoint: point });
+			},
 
-		setSelectedElementId: (id: string | null) => {
-			if (!id) {
-				set({ selectedIds: [], primarySelectedId: null });
-				return;
-			}
-			set({ selectedIds: [id], primarySelectedId: id });
-		},
+			// 层叠关联相关方法
+			setAutoAttach: (enabled: boolean) => {
+				set({ autoAttach: enabled });
+			},
 
-		setSelectedIds: (ids: string[], primaryId?: string | null) => {
-			const uniqueIds = Array.from(new Set(ids));
-			const resolvedPrimary =
-				uniqueIds.length === 0
-					? null
-					: primaryId && uniqueIds.includes(primaryId)
-						? primaryId
-						: uniqueIds[uniqueIds.length - 1];
-			set({ selectedIds: uniqueIds, primarySelectedId: resolvedPrimary });
-		},
+			// 主轨波纹编辑模式方法
+			setRippleEditingEnabled: (enabled: boolean) => {
+				set((state) => {
+					if (state.rippleEditingEnabled === enabled) return state;
+					return {
+						rippleEditingEnabled: enabled,
+						...withHistoryCommit(state),
+					};
+				});
+			},
+			setAudioSettings: (audioSettings: TimelineSettings["audio"]) => {
+				set({ audioSettings: cloneAudioSettings(audioSettings) });
+			},
 
-		// 吸附相关方法
-		setSnapEnabled: (enabled: boolean) => {
-			set({ snapEnabled: enabled });
-		},
+			// 拖拽目标指示方法
+			setActiveDropTarget: (target: ExtendedDropTarget | null) => {
+				set({ activeDropTarget: target });
+			},
 
-		setActiveSnapPoint: (point: SnapPoint | null) => {
-			set({ activeSnapPoint: point });
-		},
+			// 拖拽 Ghost 方法
+			setDragGhosts: (ghosts: DragGhostState[]) => {
+				set({ dragGhosts: ghosts });
+			},
 
-		// 层叠关联相关方法
-		setAutoAttach: (enabled: boolean) => {
-			set({ autoAttach: enabled });
-		},
+			// 自动滚动方法
+			setAutoScrollSpeed: (speed: number) => {
+				set({ autoScrollSpeed: speed });
+			},
 
-		// 主轨波纹编辑模式方法
-		setRippleEditingEnabled: (enabled: boolean) => {
-			set((state) => {
-				if (state.rippleEditingEnabled === enabled) return state;
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
+			setAutoScrollSpeedY: (speed: number) => {
+				set({ autoScrollSpeedY: speed });
+			},
+
+			// 滚动位置方法
+			setScrollLeft: (scrollLeft: number) => {
+				set((state) => {
+					const nextScrollLeft = Number.isFinite(scrollLeft)
+						? Math.min(
+								Math.max(0, scrollLeft),
+								Math.max(0, state.timelineMaxScrollLeft),
+							)
+						: state.scrollLeft;
+					if (nextScrollLeft === state.scrollLeft) return state;
+					return { scrollLeft: nextScrollLeft };
+				});
+			},
+			setTimelineMaxScrollLeft: (maxScrollLeft: number) => {
+				set((state) => {
+					const nextMaxScrollLeft = Number.isFinite(maxScrollLeft)
+						? Math.max(0, maxScrollLeft)
+						: 0;
+					const nextScrollLeft = Math.min(state.scrollLeft, nextMaxScrollLeft);
+					if (
+						nextMaxScrollLeft === state.timelineMaxScrollLeft &&
+						nextScrollLeft === state.scrollLeft
+					) {
+						return state;
+					}
+					return {
+						timelineMaxScrollLeft: nextMaxScrollLeft,
+						scrollLeft: nextScrollLeft,
+					};
+				});
+			},
+			setTimelineViewportWidth: (width: number) => {
+				const nextWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
+				set({ timelineViewportWidth: nextWidth });
+			},
+			getRevision: () => get().revision,
+			getCommandSnapshot: () => {
+				const state = get();
 				return {
-					rippleEditingEnabled: enabled,
-					historyPast: nextPast,
-					historyFuture: [],
+					revision: state.revision,
+					fps: state.fps,
+					currentTime: state.currentTime,
+					elements: state.elements,
+					tracks: state.tracks,
+					audioTrackStates: state.audioTrackStates,
+					autoAttach: state.autoAttach,
+					rippleEditingEnabled: state.rippleEditingEnabled,
 				};
-			});
-		},
-		setAudioSettings: (audioSettings: TimelineSettings["audio"]) => {
-			set({ audioSettings: cloneAudioSettings(audioSettings) });
-		},
+			},
+			applyCommandSnapshot: (
+				snapshot: TimelineCommandSnapshot,
+				options?: { history?: boolean; historyOpId?: string },
+			) => {
+				set((state) => {
+					const nextCurrentTime = clampFrame(snapshot.currentTime);
+					const didChange =
+						state.currentTime !== nextCurrentTime ||
+						state.elements !== snapshot.elements ||
+						state.tracks !== snapshot.tracks ||
+						state.audioTrackStates !== snapshot.audioTrackStates ||
+						state.autoAttach !== snapshot.autoAttach ||
+						state.rippleEditingEnabled !== snapshot.rippleEditingEnabled;
+					if (!didChange) return state;
 
-		// 拖拽目标指示方法
-		setActiveDropTarget: (target: ExtendedDropTarget | null) => {
-			set({ activeDropTarget: target });
-		},
-
-		// 拖拽 Ghost 方法
-		setDragGhosts: (ghosts: DragGhostState[]) => {
-			set({ dragGhosts: ghosts });
-		},
-
-		// 自动滚动方法
-		setAutoScrollSpeed: (speed: number) => {
-			set({ autoScrollSpeed: speed });
-		},
-
-		setAutoScrollSpeedY: (speed: number) => {
-			set({ autoScrollSpeedY: speed });
-		},
-
-		// 滚动位置方法
-		setScrollLeft: (scrollLeft: number) => {
-			set((state) => {
-				const nextScrollLeft = Number.isFinite(scrollLeft)
-					? Math.min(
-							Math.max(0, scrollLeft),
-							Math.max(0, state.timelineMaxScrollLeft),
-						)
-					: state.scrollLeft;
-				if (nextScrollLeft === state.scrollLeft) return state;
-				return { scrollLeft: nextScrollLeft };
-			});
-		},
-		setTimelineMaxScrollLeft: (maxScrollLeft: number) => {
-			set((state) => {
-				const nextMaxScrollLeft = Number.isFinite(maxScrollLeft)
-					? Math.max(0, maxScrollLeft)
-					: 0;
-				const nextScrollLeft = Math.min(state.scrollLeft, nextMaxScrollLeft);
-				if (
-					nextMaxScrollLeft === state.timelineMaxScrollLeft &&
-					nextScrollLeft === state.scrollLeft
-				) {
-					return state;
-				}
-				return {
-					timelineMaxScrollLeft: nextMaxScrollLeft,
-					scrollLeft: nextScrollLeft,
-				};
-			});
-		},
-		setTimelineViewportWidth: (width: number) => {
-			const nextWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
-			set({ timelineViewportWidth: nextWidth });
-		},
-		getRevision: () => get().revision,
-		getCommandSnapshot: () => {
-			const state = get();
-			return {
-				revision: state.revision,
-				fps: state.fps,
-				currentTime: state.currentTime,
-				elements: state.elements,
-				tracks: state.tracks,
-				audioTrackStates: state.audioTrackStates,
-				autoAttach: state.autoAttach,
-				rippleEditingEnabled: state.rippleEditingEnabled,
-			};
-		},
-		applyCommandSnapshot: (
-			snapshot: TimelineCommandSnapshot,
-			options?: { history?: boolean },
-		) => {
-			set((state) => {
-				const nextCurrentTime = clampFrame(snapshot.currentTime);
-				const didChange =
-					state.currentTime !== nextCurrentTime ||
-					state.elements !== snapshot.elements ||
-					state.tracks !== snapshot.tracks ||
-					state.audioTrackStates !== snapshot.audioTrackStates ||
-					state.autoAttach !== snapshot.autoAttach ||
-					state.rippleEditingEnabled !== snapshot.rippleEditingEnabled;
-				if (!didChange) return state;
-
-				const selection = reconcileSelection(
-					snapshot.elements,
-					state.selectedIds,
-					state.primarySelectedId,
-				);
-				const nextStateBase = {
-					currentTime: nextCurrentTime,
-					elements: snapshot.elements,
-					tracks: snapshot.tracks,
-					audioTrackStates: snapshot.audioTrackStates,
-					autoAttach: snapshot.autoAttach,
-					rippleEditingEnabled: snapshot.rippleEditingEnabled,
-					selectedIds: selection.selectedIds,
-					primarySelectedId: selection.primarySelectedId,
-				};
-				if (options?.history === false) {
-					return nextStateBase;
-				}
-				const nextPast = trimHistory(
-					[...state.historyPast, buildHistorySnapshot(state)],
-					state.historyLimit,
-				);
-				return {
-					...nextStateBase,
-					historyPast: nextPast,
-					historyFuture: [],
-				};
-			});
-		},
+					const selection = reconcileSelection(
+						snapshot.elements,
+						state.selectedIds,
+						state.primarySelectedId,
+					);
+					const nextStateBase = {
+						currentTime: nextCurrentTime,
+						elements: snapshot.elements,
+						tracks: snapshot.tracks,
+						audioTrackStates: snapshot.audioTrackStates,
+						autoAttach: snapshot.autoAttach,
+						rippleEditingEnabled: snapshot.rippleEditingEnabled,
+						selectedIds: selection.selectedIds,
+						primarySelectedId: selection.primarySelectedId,
+					};
+					if (options?.history === false) {
+						return nextStateBase;
+					}
+					return {
+						...nextStateBase,
+						...withHistoryCommit(state, options?.historyOpId),
+					};
+				});
+			},
 		})),
 	);
 	timelineStore.subscribe(
@@ -1422,7 +1361,10 @@ export const useTimelineStore = <T,>(
 				),
 			[equalityFn, selector, timelineStore],
 		),
-		useCallback(() => selector(timelineStore.getState()), [selector, timelineStore]),
+		useCallback(
+			() => selector(timelineStore.getState()),
+			[selector, timelineStore],
+		),
 		useCallback(
 			() => selector(timelineStore.getInitialState()),
 			[selector, timelineStore],

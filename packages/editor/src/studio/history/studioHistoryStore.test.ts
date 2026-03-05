@@ -132,12 +132,68 @@ beforeEach(() => {
 		currentProjectId: "project-1",
 		currentProject: createProject(),
 		focusedSceneDrafts: {},
+		sceneTimelineMutationOpIds: {},
 		error: null,
 	});
 	useStudioHistoryStore.getState().clear();
 });
 
 describe("studioHistoryStore", () => {
+	it("同 opId 的跨 scene timeline 历史会合并为一条 batch", () => {
+		useStudioHistoryStore.getState().push({
+			kind: "scene.timeline",
+			timelineRef: toSceneTimelineRef("scene-1"),
+			sceneId: "scene-1",
+			before: createTimeline(0),
+			after: createTimeline(1),
+			focusNodeId: "node-1",
+			opId: "op-1",
+		});
+		useStudioHistoryStore.getState().push({
+			kind: "scene.timeline",
+			timelineRef: toSceneTimelineRef("scene-2"),
+			sceneId: "scene-2",
+			before: createTimeline(1),
+			after: createTimeline(2),
+			focusNodeId: "node-2",
+			opId: "op-1",
+		});
+
+		const past = useStudioHistoryStore.getState().past;
+		expect(past).toHaveLength(1);
+		expect(past[0]?.kind).toBe("scene.timeline.batch");
+		if (past[0]?.kind !== "scene.timeline.batch") return;
+		expect(past[0].entries).toHaveLength(2);
+	});
+
+	it("同 scene 同 opId 多次 push 仅保留首次 before", () => {
+		useStudioHistoryStore.getState().push({
+			kind: "scene.timeline",
+			timelineRef: toSceneTimelineRef("scene-2"),
+			sceneId: "scene-2",
+			before: createTimeline(0),
+			after: createTimeline(1),
+			focusNodeId: "node-2",
+			opId: "op-2",
+		});
+		useStudioHistoryStore.getState().push({
+			kind: "scene.timeline",
+			timelineRef: toSceneTimelineRef("scene-2"),
+			sceneId: "scene-2",
+			before: createTimeline(5),
+			after: createTimeline(3),
+			focusNodeId: "node-2",
+			opId: "op-2",
+		});
+
+		const past = useStudioHistoryStore.getState().past;
+		expect(past).toHaveLength(1);
+		expect(past[0]?.kind).toBe("scene.timeline");
+		if (past[0]?.kind !== "scene.timeline") return;
+		expect(past[0].before.elements).toHaveLength(0);
+		expect(past[0].after.elements).toHaveLength(3);
+	});
+
 	it("undo/redo scene.timeline 时会同步 focus scene", () => {
 		const before = createTimeline(0);
 		const after = createTimeline(2);
@@ -164,6 +220,47 @@ describe("studioHistoryStore", () => {
 			useProjectStore.getState().currentProject?.scenes["scene-2"].timeline
 				.elements.length,
 		).toBe(2);
+	});
+
+	it("undo/redo scene.timeline.batch 时会同步回滚多个 scene", () => {
+		useStudioHistoryStore.getState().push({
+			kind: "scene.timeline",
+			timelineRef: toSceneTimelineRef("scene-1"),
+			sceneId: "scene-1",
+			before: createTimeline(0),
+			after: createTimeline(1),
+			focusNodeId: "node-1",
+			opId: "op-batch",
+		});
+		useStudioHistoryStore.getState().push({
+			kind: "scene.timeline",
+			timelineRef: toSceneTimelineRef("scene-2"),
+			sceneId: "scene-2",
+			before: createTimeline(1),
+			after: createTimeline(3),
+			focusNodeId: "node-2",
+			opId: "op-batch",
+		});
+
+		useStudioHistoryStore.getState().undo();
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline
+				.elements.length,
+		).toBe(0);
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-2"].timeline
+				.elements.length,
+		).toBe(1);
+
+		useStudioHistoryStore.getState().redo();
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline
+				.elements.length,
+		).toBe(1);
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-2"].timeline
+				.elements.length,
+		).toBe(3);
 	});
 
 	it("canvas.node-create(scene) 可撤销和重做", () => {

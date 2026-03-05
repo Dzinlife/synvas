@@ -9,7 +9,8 @@ import {
 } from "./projectDb";
 
 vi.mock("./projectDb", async () => {
-	const actual = await vi.importActual<typeof import("./projectDb")>("./projectDb");
+	const actual =
+		await vi.importActual<typeof import("./projectDb")>("./projectDb");
 	return {
 		...actual,
 		getAllProjects: vi.fn(async () => []),
@@ -131,6 +132,7 @@ beforeEach(() => {
 		currentProjectId: project.id,
 		currentProject: project,
 		focusedSceneDrafts: {},
+		sceneTimelineMutationOpIds: {},
 		error: null,
 	});
 });
@@ -164,8 +166,9 @@ describe("projectStore", () => {
 		expect(
 			useProjectStore
 				.getState()
-				.currentProject?.assets.filter((asset) => asset.uri === "file:///same.wav")
-				.length,
+				.currentProject?.assets.filter(
+					(asset) => asset.uri === "file:///same.wav",
+				).length,
 		).toBe(1);
 	});
 
@@ -217,15 +220,15 @@ describe("projectStore", () => {
 			name: "text",
 		});
 		const project = useProjectStore.getState().currentProject;
-		expect(project?.canvas.nodes.find((node) => node.id === videoId)?.type).toBe(
-			"video",
-		);
-		expect(project?.canvas.nodes.find((node) => node.id === audioId)?.type).toBe(
-			"audio",
-		);
-		expect(project?.canvas.nodes.find((node) => node.id === imageId)?.type).toBe(
-			"image",
-		);
+		expect(
+			project?.canvas.nodes.find((node) => node.id === videoId)?.type,
+		).toBe("video");
+		expect(
+			project?.canvas.nodes.find((node) => node.id === audioId)?.type,
+		).toBe("audio");
+		expect(
+			project?.canvas.nodes.find((node) => node.id === imageId)?.type,
+		).toBe("image");
 		expect(project?.canvas.nodes.find((node) => node.id === textId)?.type).toBe(
 			"text",
 		);
@@ -261,6 +264,23 @@ describe("projectStore", () => {
 		).toBe(1);
 	});
 
+	it("updateSceneTimeline 会记录 sceneTimelineMutationOpIds", () => {
+		const baseTimeline =
+			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline;
+		if (!baseTimeline) return;
+		useProjectStore.getState().updateSceneTimeline(
+			"scene-1",
+			{
+				...baseTimeline,
+				elements: baseTimeline.elements.slice(0, 0),
+			},
+			{ historyOpId: "op-project-1" },
+		);
+		expect(
+			useProjectStore.getState().sceneTimelineMutationOpIds["scene-1"],
+		).toBe("op-project-1");
+	});
+
 	it("setFocusedNode(scene) 会同步 activeNode 与 activeScene", () => {
 		useProjectStore.getState().setFocusedNode("node-1");
 		const ui = useProjectStore.getState().currentProject?.ui;
@@ -285,7 +305,9 @@ describe("projectStore", () => {
 	it("删除 focused 节点时会清理 focusedNodeId", () => {
 		useProjectStore.getState().setFocusedNode("node-1");
 		useProjectStore.getState().removeCanvasNodeForHistory("node-1");
-		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.focusedNodeId,
+		).toBeNull();
 	});
 
 	it("initialize 会清理 non-focusable 节点的 focusedNodeId", async () => {
@@ -305,12 +327,15 @@ describe("projectStore", () => {
 			currentProjectId: null,
 			currentProject: null,
 			focusedSceneDrafts: {},
+			sceneTimelineMutationOpIds: {},
 			error: null,
 		});
 
 		await useProjectStore.getState().initialize();
 
-		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.focusedNodeId,
+		).toBeNull();
 	});
 
 	it("switchProject 会清理 non-focusable 节点的 focusedNodeId", async () => {
@@ -329,13 +354,17 @@ describe("projectStore", () => {
 
 		await useProjectStore.getState().switchProject("project-2");
 
-		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.focusedNodeId,
+		).toBeNull();
 	});
 
 	it("saveCurrentProject 可持久化当前项目", async () => {
 		await expect(
 			useProjectStore.getState().saveCurrentProject(),
 		).resolves.toBeUndefined();
-		expect(useProjectStore.getState().currentProject?.revision).toBeGreaterThan(0);
+		expect(useProjectStore.getState().currentProject?.revision).toBeGreaterThan(
+			0,
+		);
 	});
 });

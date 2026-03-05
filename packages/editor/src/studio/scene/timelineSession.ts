@@ -26,6 +26,7 @@ export const applyTimelineJsonToStore = (
 		elements,
 		tracks,
 		audioTrackStates: {},
+		lastCommittedHistoryOpId: null,
 		scrollLeft: 0,
 		canvasSize: data.canvas,
 		fps: data.fps,

@@ -529,6 +529,79 @@ describe("buildSkiaTree transform wrapper", () => {
 		expect(childPictureDispose).toHaveBeenCalledTimes(1);
 	});
 
+	it("Composition 计算子场景时间时会叠加 offset", async () => {
+		const composition = createElement({
+			id: "composition-offset",
+			type: "Composition",
+			component: "composition",
+			props: { sceneId: "scene-offset" },
+			timeline: {
+				start: 10,
+				end: 80,
+				startTimecode: "00:00:00:10",
+				endTimecode: "00:00:02:20",
+				offset: 15,
+				trackIndex: 0,
+				role: "clip",
+			},
+		});
+		const childVideo = createElement({
+			id: "child-video-offset",
+			type: "VideoClip",
+			component: "video-clip",
+		});
+		const prepareRenderFrame = vi.fn(async () => undefined);
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToPicture: vi.fn(async () => ({ dispose: vi.fn() }) as any),
+			resolveComponent: (componentId) => {
+				if (componentId === "video-clip") {
+					return {
+						Renderer: VideoRenderer,
+						prepareRenderFrame,
+					};
+				}
+				return deps.resolveComponent(componentId);
+			},
+			resolveCompositionTimeline: (sceneId) => {
+				if (sceneId !== "scene-offset") return null;
+				return {
+					sceneId,
+					elements: [childVideo],
+					tracks,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+				};
+			},
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [composition],
+				displayTime: 25,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					forcePrepareFrames: true,
+					compositionPath: ["scene-root"],
+				},
+			},
+			localDeps,
+		);
+		await renderState.ready;
+		expect(prepareRenderFrame).toHaveBeenCalledWith(
+			expect.objectContaining({
+				displayTime: 30,
+				frameChannel: "offscreen",
+			}),
+		);
+		renderState.dispose?.();
+	});
+
 	it("Composition 子树 prepareRenderFrame 使用 offscreen frameChannel", async () => {
 		const composition = createElement({
 			id: "composition-prepare-channel",

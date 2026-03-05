@@ -10,10 +10,13 @@ import {
 	useRef,
 	useState,
 } from "react";
-import TimeIndicatorCanvas from "@/scene-editor/components/TimeIndicatorCanvas";
-import { useModelRegistry, useTimelineStoreApi } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { cn } from "@/lib/utils";
 import { useProjectAssets } from "@/projects/useProjectAssets";
+import TimeIndicatorCanvas from "@/scene-editor/components/TimeIndicatorCanvas";
+import {
+	useModelRegistry,
+	useTimelineStoreApi,
+} from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { clampFrame } from "@/utils/timecode";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
@@ -52,18 +55,15 @@ import {
 } from "./timeline/trackConfig";
 import { getAudioTrackControlState } from "./utils/audioTrackState";
 import { finalizeTimelineElements } from "./utils/mainTrackMagnet";
+import { resolveElementSourceUri } from "./utils/source";
 import {
 	buildTimelineClipboardPayload,
 	pasteTimelineClipboardPayload,
 	type TimelineClipboardPayload,
 } from "./utils/timelineClipboard";
-import { resolveElementSourceUri } from "./utils/source";
 import { getPixelsPerFrame } from "./utils/timelineScale";
 import { updateElementTime } from "./utils/timelineTime";
-import {
-	MAX_TIMELINE_SCALE,
-	MIN_TIMELINE_SCALE,
-} from "./utils/timelineZoom";
+import { MAX_TIMELINE_SCALE, MIN_TIMELINE_SCALE } from "./utils/timelineZoom";
 import {
 	buildTrackLayout,
 	getTrackHeightByRole,
@@ -81,7 +81,11 @@ const normalizeOffsetFrames = (value: unknown): number => {
 };
 
 const shouldUpdateOffset = (element: TimelineElementType): boolean => {
-	return element.type === "VideoClip" || element.type === "AudioClip";
+	return (
+		element.type === "VideoClip" ||
+		element.type === "AudioClip" ||
+		element.type === "Composition"
+	);
 };
 
 const getVideoClipHasSourceAudioTrack = (
@@ -989,10 +993,13 @@ const TimelineEditor = () => {
 		if (Date.now() < manualScrollSuppressUntilRef.current) return;
 
 		const safeRatio = Number.isFinite(ratio) ? ratio : 0;
-		const visibleWidth = Number.isFinite(rulerWidth) ? Math.max(0, rulerWidth) : 0;
+		const visibleWidth = Number.isFinite(rulerWidth)
+			? Math.max(0, rulerWidth)
+			: 0;
 		if (safeRatio <= 0 || visibleWidth <= 0) return;
 
-		const playheadX = timelinePaddingLeft + currentTime * safeRatio - scrollLeft;
+		const playheadX =
+			timelinePaddingLeft + currentTime * safeRatio - scrollLeft;
 		const isPlayheadOutOfView = playheadX < 0 || playheadX > visibleWidth;
 		if (!Number.isFinite(playheadX) || !isPlayheadOutOfView) {
 			return;
@@ -1006,7 +1013,8 @@ const TimelineEditor = () => {
 			maxScrollLeft,
 		);
 		if (
-			Math.abs(targetScrollLeft - scrollLeft) <= AUTO_FOLLOW_SCROLL_MATCH_EPSILON
+			Math.abs(targetScrollLeft - scrollLeft) <=
+			AUTO_FOLLOW_SCROLL_MATCH_EPSILON
 		) {
 			return;
 		}
@@ -1409,10 +1417,10 @@ const TimelineEditor = () => {
 					: undefined;
 			const isSingleVideo = targetElement?.type === "VideoClip";
 			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
-				const hasSourceAudioTrack = getVideoClipHasSourceAudioTrack(
-					modelRegistry,
-					targetElement,
-				);
+			const hasSourceAudioTrack = getVideoClipHasSourceAudioTrack(
+				modelRegistry,
+				targetElement,
+			);
 			const videoUri = resolveElementSourceUri(targetElement, assets);
 			if (isSingleVideo && hasSourceAudioTrack) {
 				const isActionDisabled = !videoUri;

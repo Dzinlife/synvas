@@ -1,5 +1,5 @@
-import type { TimelineElement } from "core/element/types";
 import { buildSplitElements } from "core/editor/command/split";
+import type { TimelineElement } from "core/element/types";
 import { Film, Mic, Sparkles, Split, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isSupportedAssetMediaUri } from "@/asr";
@@ -67,7 +67,9 @@ import {
 } from "./timelineQuickSplit";
 
 const isSplittableClip = (element: TimelineElement) =>
-	element.type === "VideoClip" || element.type === "AudioClip";
+	element.type === "VideoClip" ||
+	element.type === "AudioClip" ||
+	element.type === "Composition";
 const TIMELINE_SCALE_STEP = 0.1;
 
 const createElementId = () => {

@@ -1,9 +1,12 @@
 import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { CanvasNode, SceneDocument } from "core/studio/types";
 import { create } from "zustand";
-import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
-import type { StudioRuntimeManager, TimelineRef } from "@/scene-editor/runtime/types";
 import { useProjectStore } from "@/projects/projectStore";
+import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
+import type {
+	StudioRuntimeManager,
+	TimelineRef,
+} from "@/scene-editor/runtime/types";
 import {
 	toSceneTimelineRef,
 	writeTimelineByRef,
@@ -15,18 +18,32 @@ export type CanvasNodeLayoutSnapshot = Pick<
 	"x" | "y" | "width" | "height" | "zIndex" | "hidden" | "locked"
 >;
 
+type SceneTimelineHistoryItem = {
+	timelineRef?: TimelineRef;
+	/**
+	 * 兼容旧历史数据：历史栈中可能只有 sceneId。
+	 */
+	sceneId?: string;
+	before: TimelineJSON;
+	after: TimelineJSON;
+};
+
+type SceneTimelineHistoryEntry = SceneTimelineHistoryItem & {
+	kind: "scene.timeline";
+	focusNodeId: string | null;
+	opId?: string;
+};
+
+type SceneTimelineBatchHistoryEntry = {
+	kind: "scene.timeline.batch";
+	entries: SceneTimelineHistoryItem[];
+	focusNodeId: string | null;
+	opId?: string;
+};
+
 export type StudioHistoryEntry =
-	| {
-			kind: "scene.timeline";
-			timelineRef?: TimelineRef;
-			/**
-			 * 兼容旧历史数据：历史栈中可能只有 sceneId。
-			 */
-			sceneId?: string;
-			before: TimelineJSON;
-			after: TimelineJSON;
-			focusNodeId: string | null;
-	  }
+	| SceneTimelineHistoryEntry
+	| SceneTimelineBatchHistoryEntry
 	| {
 			kind: "canvas.node-layout";
 			nodeId: string;
@@ -61,11 +78,129 @@ interface HistoryApplyOptions {
 }
 
 const resolveTimelineRef = (
-	entry: Extract<StudioHistoryEntry, { kind: "scene.timeline" }>,
+	entry: Pick<SceneTimelineHistoryItem, "timelineRef" | "sceneId">,
 ): TimelineRef | null => {
 	if (entry.timelineRef) return entry.timelineRef;
 	if (entry.sceneId) return toSceneTimelineRef(entry.sceneId);
 	return null;
+};
+
+const resolveSceneTimelineKey = (
+	entry: Pick<SceneTimelineHistoryItem, "timelineRef" | "sceneId">,
+): string | null => {
+	if (entry.timelineRef) {
+		return `${entry.timelineRef.kind}:${entry.timelineRef.sceneId}`;
+	}
+	if (entry.sceneId) return `scene:${entry.sceneId}`;
+	return null;
+};
+
+const toSceneTimelineHistoryItem = (
+	entry: SceneTimelineHistoryEntry,
+): SceneTimelineHistoryItem => ({
+	timelineRef: entry.timelineRef,
+	sceneId: entry.sceneId,
+	before: entry.before,
+	after: entry.after,
+});
+
+const mergeSceneTimelineBatchEntries = (
+	existingEntries: SceneTimelineHistoryItem[],
+	nextEntry: SceneTimelineHistoryItem,
+): SceneTimelineHistoryItem[] => {
+	const nextKey = resolveSceneTimelineKey(nextEntry);
+	if (!nextKey) {
+		return [...existingEntries, nextEntry];
+	}
+	const targetIndex = existingEntries.findIndex((entry) => {
+		const existingKey = resolveSceneTimelineKey(entry);
+		return existingKey === nextKey;
+	});
+	if (targetIndex < 0) {
+		return [...existingEntries, nextEntry];
+	}
+	return existingEntries.map((entry, index) =>
+		index === targetIndex
+			? {
+					...entry,
+					after: nextEntry.after,
+				}
+			: entry,
+	);
+};
+
+const tryMergeSceneTimelineEntry = (
+	past: StudioHistoryEntry[],
+	nextEntry: SceneTimelineHistoryEntry,
+): StudioHistoryEntry | null => {
+	const lastEntry = past[past.length - 1];
+	if (!lastEntry || !nextEntry.opId) return null;
+	if (lastEntry.kind === "scene.timeline") {
+		if (lastEntry.opId !== nextEntry.opId) return null;
+		const lastKey = resolveSceneTimelineKey(lastEntry);
+		const nextKey = resolveSceneTimelineKey(nextEntry);
+		if (lastKey && nextKey && lastKey === nextKey) {
+			return {
+				...lastEntry,
+				after: nextEntry.after,
+			};
+		}
+		return {
+			kind: "scene.timeline.batch",
+			opId: nextEntry.opId,
+			focusNodeId: lastEntry.focusNodeId,
+			entries: mergeSceneTimelineBatchEntries(
+				[toSceneTimelineHistoryItem(lastEntry)],
+				toSceneTimelineHistoryItem(nextEntry),
+			),
+		};
+	}
+	if (lastEntry.kind === "scene.timeline.batch") {
+		if (lastEntry.opId !== nextEntry.opId) return null;
+		return {
+			...lastEntry,
+			entries: mergeSceneTimelineBatchEntries(
+				lastEntry.entries,
+				toSceneTimelineHistoryItem(nextEntry),
+			),
+		};
+	}
+	return null;
+};
+
+const applySceneTimelineHistoryItem = (
+	entry: SceneTimelineHistoryItem,
+	mode: "undo" | "redo",
+	options?: HistoryApplyOptions,
+): void => {
+	const projectStore = useProjectStore.getState();
+	const timelineRef = resolveTimelineRef(entry);
+	if (!timelineRef) return;
+	const timeline = mode === "undo" ? entry.before : entry.after;
+
+	writeTimelineByRef(projectStore, timelineRef, timeline, {
+		recordHistory: false,
+	});
+
+	if (options?.runtimeManager) {
+		const runtime = options.runtimeManager.ensureTimelineRuntime(timelineRef);
+		applyTimelineJsonToStore(timeline, runtime.timelineStore);
+		return;
+	}
+
+	const currentProject = useProjectStore.getState().currentProject;
+	const focusedNodeId = currentProject?.ui.focusedNodeId;
+	const focusedNode =
+		currentProject?.canvas.nodes.find((node) => node.id === focusedNodeId) ??
+		null;
+	if (
+		timelineRef.kind === "scene" &&
+		focusedNode?.type === "scene" &&
+		focusedNode.sceneId === timelineRef.sceneId &&
+		options?.timelineStore
+	) {
+		applyTimelineJsonToStore(timeline, options.timelineStore);
+	}
 };
 
 const applyEntry = (
@@ -77,32 +212,12 @@ const applyEntry = (
 	const nextFocusNodeId = entry.focusNodeId;
 	projectStore.setFocusedNode(nextFocusNodeId);
 	if (entry.kind === "scene.timeline") {
-		const timelineRef = resolveTimelineRef(entry);
-		if (!timelineRef) return;
-		const timeline = mode === "undo" ? entry.before : entry.after;
-
-		writeTimelineByRef(projectStore, timelineRef, timeline, {
-			recordHistory: false,
-		});
-
-		if (options?.runtimeManager) {
-			const runtime = options.runtimeManager.ensureTimelineRuntime(timelineRef);
-			applyTimelineJsonToStore(timeline, runtime.timelineStore);
-			return;
-		}
-
-		const currentProject = useProjectStore.getState().currentProject;
-		const focusedNodeId = currentProject?.ui.focusedNodeId;
-		const focusedNode =
-			currentProject?.canvas.nodes.find((node) => node.id === focusedNodeId) ??
-			null;
-		if (
-			timelineRef.kind === "scene" &&
-			focusedNode?.type === "scene" &&
-			focusedNode.sceneId === timelineRef.sceneId &&
-			options?.timelineStore
-		) {
-			applyTimelineJsonToStore(timeline, options.timelineStore);
+		applySceneTimelineHistoryItem(entry, mode, options);
+		return;
+	}
+	if (entry.kind === "scene.timeline.batch") {
+		for (const timelineEntry of entry.entries) {
+			applySceneTimelineHistoryItem(timelineEntry, mode, options);
 		}
 		return;
 	}
@@ -136,6 +251,19 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 	canRedo: false,
 	push: (entry) => {
 		set((state) => {
+			if (entry.kind === "scene.timeline") {
+				const mergedEntry = tryMergeSceneTimelineEntry(state.past, entry);
+				if (mergedEntry) {
+					const nextPast = [...state.past.slice(0, -1), mergedEntry];
+					return {
+						past: nextPast,
+						future: [],
+						canUndo: nextPast.length > 0,
+						canRedo: false,
+					};
+				}
+			}
+
 			const nextPast = [...state.past, entry];
 			const trimmedPast =
 				nextPast.length > HISTORY_LIMIT

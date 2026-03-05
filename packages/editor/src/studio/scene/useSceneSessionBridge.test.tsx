@@ -2,6 +2,7 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { StudioProject } from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { useProjectStore } from "@/projects/projectStore";
 import {
 	createEditorRuntimeWrapper,
 	createTestEditorRuntime,
@@ -10,7 +11,6 @@ import type {
 	EditorRuntime,
 	StudioRuntimeManager,
 } from "@/scene-editor/runtime/types";
-import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import { useSceneSessionBridge } from "./useSceneSessionBridge";
 
@@ -109,6 +109,7 @@ beforeEach(() => {
 		currentProjectId: "project-1",
 		currentProject: createProject(),
 		focusedSceneDrafts: {},
+		sceneTimelineMutationOpIds: {},
 		error: null,
 	});
 	useStudioHistoryStore.getState().clear();
@@ -129,7 +130,7 @@ describe("useSceneSessionBridge", () => {
 		});
 	});
 
-	it("active runtime 的历史变更会进入全局历史但不直接回写 scene", async () => {
+	it("仅负责切换 active runtime，不采集历史", async () => {
 		render(<BridgeMount />, { wrapper });
 
 		await waitFor(() => {
@@ -160,7 +161,7 @@ describe("useSceneSessionBridge", () => {
 			]);
 		});
 
-		expect(useStudioHistoryStore.getState().past.length).toBeGreaterThan(0);
+		expect(useStudioHistoryStore.getState().past.length).toBe(0);
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline
 				.elements.length,

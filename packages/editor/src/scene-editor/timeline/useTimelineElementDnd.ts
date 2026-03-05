@@ -3,20 +3,18 @@
  */
 
 import { useDrag } from "@use-gesture/react";
-import type { TimelineElement } from "core/element/types";
 import {
 	insertElementIntoMainTrack,
 	insertElementsIntoMainTrackGroup,
 } from "core/editor/utils/mainTrackMagnet";
+import type { TimelineElement } from "core/element/types";
 import { useCallback, useMemo, useRef } from "react";
-import { useTimelineStoreApi } from "../runtime/EditorRuntimeProvider";
 import {
 	type DragGhostState,
 	useTimelineStore,
 } from "../contexts/TimelineContext";
-import {
-	findTimelineDropTargetFromScreenPosition,
-} from "../drag/timelineDropTargets";
+import { findTimelineDropTargetFromScreenPosition } from "../drag/timelineDropTargets";
+import { useTimelineStoreApi } from "../runtime/EditorRuntimeProvider";
 import { getAudioTrackControlState } from "../utils/audioTrackState";
 import { cloneValue, createCopySeed } from "../utils/copyUtils";
 import {
@@ -180,7 +178,9 @@ const normalizeOffsetFrames = (value: unknown): number => {
 };
 
 const isOffsetElement = (element: TimelineElement): boolean =>
-	element.type === "VideoClip" || element.type === "AudioClip";
+	element.type === "VideoClip" ||
+	element.type === "AudioClip" ||
+	element.type === "Composition";
 
 const isClipElement = (element: TimelineElement): boolean =>
 	getElementRole(element) === "clip" && !isTransitionElement(element);

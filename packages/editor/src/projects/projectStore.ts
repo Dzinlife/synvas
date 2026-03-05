@@ -1,4 +1,4 @@
-import { type TimelineJSON } from "core/editor/timelineLoader";
+import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { TimelineAsset } from "core/element/types";
 import { parseStudioProject } from "core/studio/schema";
 import type {
@@ -34,6 +34,7 @@ type ProjectStatus = "idle" | "loading" | "ready" | "error";
 
 interface UpdateSceneTimelineOptions {
 	recordHistory?: boolean;
+	historyOpId?: string;
 }
 
 export interface CanvasNodeLayoutPatch {
@@ -93,6 +94,7 @@ interface ProjectStoreState {
 	currentProjectId: string | null;
 	currentProject: StudioProject | null;
 	focusedSceneDrafts: Record<string, TimelineJSON>;
+	sceneTimelineMutationOpIds: Record<string, string | undefined>;
 	error: string | null;
 	initialize: () => Promise<void>;
 	createProject: () => Promise<void>;
@@ -100,7 +102,10 @@ interface ProjectStoreState {
 	switchProject: (id: string) => Promise<void>;
 	createCanvasNode: (input: CanvasNodeCreateInput) => string;
 	updateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => void;
-	updateCanvasNodeLayout: (nodeId: string, patch: CanvasNodeLayoutPatch) => void;
+	updateCanvasNodeLayout: (
+		nodeId: string,
+		patch: CanvasNodeLayoutPatch,
+	) => void;
 	setActiveNode: (nodeId: string | null) => void;
 	createSceneNode: (input?: SceneCreateInput) => string;
 	updateSceneNodeLayout: (nodeId: string, patch: CanvasNodeLayoutPatch) => void;
@@ -173,8 +178,8 @@ const createEntityId = (prefix: string): string => {
 		return `${prefix}-${crypto.randomUUID()}`;
 	}
 	return `${prefix}-${Date.now().toString(36)}-${Math.random()
-	.toString(36)
-	.slice(2, 8)}`;
+		.toString(36)
+		.slice(2, 8)}`;
 };
 
 const createAssetId = (): string => createEntityId("asset");
@@ -190,10 +195,7 @@ const DEFAULT_TEXT_NODE_HEIGHT = 160;
 const DEFAULT_TEXT_FONT_SIZE = 48;
 
 const getMaxCanvasNodeZIndex = (nodes: CanvasNode[]): number => {
-	return nodes.reduce(
-		(maxValue, node) => Math.max(maxValue, node.zIndex),
-		-1,
-	);
+	return nodes.reduce((maxValue, node) => Math.max(maxValue, node.zIndex), -1);
 };
 
 const findSceneNodeBySceneId = (
@@ -255,7 +257,9 @@ const withProjectRevision = (project: StudioProject): StudioProject => {
 const normalizeProjectFocusState = (project: StudioProject): StudioProject => {
 	const focusedNodeId = project.ui.focusedNodeId;
 	if (!focusedNodeId) return project;
-	const focusedNode = project.canvas.nodes.find((node) => node.id === focusedNodeId);
+	const focusedNode = project.canvas.nodes.find(
+		(node) => node.id === focusedNodeId,
+	);
 	if (focusedNode && isCanvasNodeFocusable(focusedNode)) {
 		return project;
 	}
@@ -274,6 +278,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	currentProjectId: null,
 	currentProject: null,
 	focusedSceneDrafts: {},
+	sceneTimelineMutationOpIds: {},
 	error: null,
 	initialize: async () => {
 		const { status } = get();
@@ -302,6 +307,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					currentProjectId: record.id,
 					currentProject: record.data,
 					focusedSceneDrafts: {},
+					sceneTimelineMutationOpIds: {},
 					error: null,
 				});
 				return;
@@ -324,6 +330,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				currentProjectId: currentId,
 				currentProject: normalizeProjectFocusState(currentRecord.data),
 				focusedSceneDrafts: {},
+				sceneTimelineMutationOpIds: {},
 				error: null,
 			});
 		} catch (error) {
@@ -352,6 +359,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				currentProjectId: record.id,
 				currentProject: record.data,
 				focusedSceneDrafts: {},
+				sceneTimelineMutationOpIds: {},
 				error: null,
 			});
 		} catch (error) {
@@ -439,6 +447,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				currentProjectId: id,
 				currentProject: normalizeProjectFocusState(validRecord.data),
 				focusedSceneDrafts: {},
+				sceneTimelineMutationOpIds: {},
 				error: null,
 			});
 		} catch (error) {
@@ -464,7 +473,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			switch (input.type) {
 				case "scene": {
 					const sceneId = createEntityId("scene");
-					const name = input.name?.trim() ? input.name.trim() : `Scene ${sceneIndex}`;
+					const name = input.name?.trim()
+						? input.name.trim()
+						: `Scene ${sceneIndex}`;
 					const width = input.width ?? DEFAULT_SCENE_NODE_WIDTH;
 					const height = input.height ?? DEFAULT_SCENE_NODE_HEIGHT;
 					nextScenes = {
@@ -636,7 +647,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	setActiveNode: (nodeId) => {
 		set((state) => {
 			if (!state.currentProject) return state;
-			if (nodeId && !state.currentProject.canvas.nodes.some((node) => node.id === nodeId)) {
+			if (
+				nodeId &&
+				!state.currentProject.canvas.nodes.some((node) => node.id === nodeId)
+			) {
 				return state;
 			}
 			const nextProject = {
@@ -781,8 +795,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				ui: {
 					...state.currentProject.ui,
 					activeSceneId: sceneId,
-					activeNodeId:
-						sceneNode?.id ?? state.currentProject.ui.activeNodeId,
+					activeNodeId: sceneNode?.id ?? state.currentProject.ui.activeNodeId,
 				},
 			};
 			return {
@@ -805,7 +818,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			};
 		});
 	},
-	updateSceneTimeline: (sceneId, timeline, _options) => {
+	updateSceneTimeline: (sceneId, timeline, options) => {
 		set((state) => {
 			if (!state.currentProject) return state;
 			const currentScene = state.currentProject.scenes[sceneId];
@@ -824,6 +837,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
+				sceneTimelineMutationOpIds: {
+					...state.sceneTimelineMutationOpIds,
+					[sceneId]: options?.historyOpId,
+				},
 			};
 		});
 	},
@@ -889,7 +906,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const nextProject = withProjectRevision({
 				...currentProject,
 				canvas: {
-					nodes: currentProject.canvas.nodes.filter((node) => node.id !== nodeId),
+					nodes: currentProject.canvas.nodes.filter(
+						(node) => node.id !== nodeId,
+					),
 				},
 				ui: {
 					...currentProject.ui,
@@ -938,7 +957,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			if (!currentProject.scenes[sceneId]) return state;
 			const nextScenes = { ...currentProject.scenes };
 			delete nextScenes[sceneId];
-			const nextNodes = currentProject.canvas.nodes.filter((node) => node.id !== nodeId);
+			const nextNodes = currentProject.canvas.nodes.filter(
+				(node) => node.id !== nodeId,
+			);
 			const fallbackSceneId = Object.keys(nextScenes)[0] ?? null;
 			const nextProject = withProjectRevision({
 				...currentProject,
@@ -962,8 +983,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 							: currentProject.ui.activeNodeId,
 				},
 			});
+			const { [sceneId]: _removedMutationOpId, ...restMutationOpIds } =
+				state.sceneTimelineMutationOpIds;
 			return {
 				currentProject: nextProject,
+				sceneTimelineMutationOpIds: restMutationOpIds,
 			};
 		});
 	},

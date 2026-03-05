@@ -1,6 +1,6 @@
+import { buildSplitElements } from "core/editor/command/split";
 import type { TimelineElement } from "core/element/types";
 import { describe, expect, it } from "vitest";
-import { buildSplitElements } from "core/editor/command/split";
 
 const createVideoClip = ({
 	id,
@@ -64,6 +64,34 @@ const createAudioClip = ({
 	},
 });
 
+const createCompositionClip = ({
+	id,
+	start,
+	end,
+	offset,
+}: {
+	id: string;
+	start: number;
+	end: number;
+	offset: number;
+}): TimelineElement => ({
+	id,
+	type: "Composition",
+	component: "composition",
+	name: id,
+	timeline: {
+		start,
+		end,
+		startTimecode: "",
+		endTimecode: "",
+		offset,
+		trackIndex: 0,
+	},
+	props: {
+		sceneId: "scene-1",
+	},
+});
+
 describe("TimelineToolbar.buildSplitElements", () => {
 	it("前向切割保持右侧 offset 递增", () => {
 		const element = createVideoClip({
@@ -114,5 +142,26 @@ describe("TimelineToolbar.buildSplitElements", () => {
 		expect(right.timeline.start).toBe(30);
 		expect(right.timeline.end).toBe(90);
 		expect(right.timeline.offset).toBe(30);
+	});
+
+	it("Composition 切割保持 offset 递增", () => {
+		const element = createCompositionClip({
+			id: "composition-1",
+			start: 0,
+			end: 90,
+			offset: 12,
+		});
+		const { left, right } = buildSplitElements(
+			element,
+			30,
+			30,
+			"composition-2",
+		);
+		expect(left.timeline.start).toBe(0);
+		expect(left.timeline.end).toBe(30);
+		expect(left.timeline.offset).toBe(12);
+		expect(right.timeline.start).toBe(30);
+		expect(right.timeline.end).toBe(90);
+		expect(right.timeline.offset).toBe(42);
 	});
 });
