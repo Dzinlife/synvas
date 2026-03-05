@@ -4,8 +4,12 @@ import {
 } from "core/editor/exportVideo";
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
 import type { TimelineElement } from "core/element/types";
-import { createElement, type ComponentType, type ReactNode } from "react";
+import { type ComponentType, createElement, type ReactNode } from "react";
 import type { ModelRegistryClass } from "@/element/model/registry";
+import {
+	buildCompositionAudioGraph,
+	type CompositionAudioGraph,
+} from "@/scene-editor/audio/buildCompositionAudioGraph";
 import { getAudioPlaybackSessionKey } from "@/scene-editor/playback/clipContinuityIndex";
 import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
 import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
@@ -22,6 +26,32 @@ const waitForStaticModelsReady = async (
 	const promises: Promise<void>[] = [];
 	for (const element of elements) {
 		const store = modelRegistry.get(element.id);
+		if (!store) continue;
+		const state = store.getState();
+		if (state.type === "VideoClip") continue;
+		if (state.waitForReady) {
+			promises.push(state.waitForReady());
+		}
+	}
+	await Promise.all(promises);
+};
+
+const waitForCompositionAudioModelsReady = async (
+	graph: CompositionAudioGraph,
+	runtimeManager: Partial<StudioRuntimeManager>,
+) => {
+	if (!runtimeManager.getTimelineRuntime) return;
+	const promises: Promise<void>[] = [];
+	const handled = new Set<string>();
+	for (const clipRef of graph.physicalClipRefs) {
+		const key = `${clipRef.sceneId}:${clipRef.elementId}`;
+		if (handled.has(key)) continue;
+		handled.add(key);
+		const runtime = runtimeManager.getTimelineRuntime(
+			toSceneTimelineRef(clipRef.sceneId),
+		);
+		if (!runtime) continue;
+		const store = runtime.modelRegistry.get(clipRef.elementId);
 		if (!store) continue;
 		const state = store.getState();
 		if (state.type === "VideoClip") continue;
@@ -81,14 +111,15 @@ export const exportTimelineAsVideo = async (options: {
 }): Promise<void> => {
 	const modelRegistry = options.runtime.modelRegistry;
 	const timelineState = options.runtime.timelineStore.getState();
-	const elements = timelineState.elements;
-	const tracks = timelineState.tracks;
+	const rootElements = timelineState.elements;
+	const rootTracks = timelineState.tracks;
 	const fps = Number.isFinite(options?.fps)
 		? Math.round(options?.fps as number)
 		: Math.round(timelineState.fps || 30);
 
 	const startFrame = Math.max(0, Math.round(options?.startFrame ?? 0));
-	const timelineEnd = options?.endFrame ?? resolveTimelineEndFrame(elements);
+	const timelineEnd =
+		options?.endFrame ?? resolveTimelineEndFrame(rootElements);
 	const endFrame = Math.max(startFrame, Math.round(timelineEnd));
 
 	const previousState = {
@@ -110,6 +141,18 @@ export const exportTimelineAsVideo = async (options: {
 		const runtimeManager = options.runtime as Partial<StudioRuntimeManager>;
 		const rootSceneId =
 			runtimeManager.getActiveEditTimelineRef?.()?.sceneId ?? null;
+		const rootTimelineRuntime =
+			rootSceneId && runtimeManager.getTimelineRuntime
+				? runtimeManager.getTimelineRuntime(toSceneTimelineRef(rootSceneId))
+				: null;
+		const compositionAudioGraph = rootTimelineRuntime
+			? buildCompositionAudioGraph({
+					rootRuntime: rootTimelineRuntime,
+					runtimeManager: runtimeManager as StudioRuntimeManager,
+				})
+			: null;
+		const audioMixElements = compositionAudioGraph?.mixElements ?? rootElements;
+		const audioMixTracks = compositionAudioGraph?.mixTracks ?? rootTracks;
 		const buildFrameSnapshot = (
 			args: Parameters<typeof buildSkiaFrameSnapshot>[0],
 		) => {
@@ -118,6 +161,8 @@ export const exportTimelineAsVideo = async (options: {
 			return buildSkiaFrameSnapshot(
 				{
 					...args,
+					elements: rootElements,
+					tracks: rootTracks,
 					prepare: {
 						isExporting: prepare?.isExporting ?? true,
 						fps: prepare?.fps ?? fps,
@@ -158,12 +203,12 @@ export const exportTimelineAsVideo = async (options: {
 								),
 						};
 					},
-					},
-				);
+				},
+			);
 		};
 		await exportTimelineAsVideoCore({
-			elements,
-			tracks,
+			elements: audioMixElements,
+			tracks: audioMixTracks,
 			fps,
 			canvasSize: timelineState.canvasSize,
 			startFrame,
@@ -174,13 +219,30 @@ export const exportTimelineAsVideo = async (options: {
 			audio: {
 				audioTrackStates: timelineState.audioTrackStates,
 				getAudioSourceByElementId: (elementId) =>
-					getExportAudioSourceByElementId(elementId, modelRegistry),
+					compositionAudioGraph
+						? (compositionAudioGraph.exportAudioSourceMap.get(elementId) ??
+							null)
+						: getExportAudioSourceByElementId(elementId, modelRegistry),
 				getAudioSessionKeyByElementId: (elementId) =>
-					getAudioPlaybackSessionKey(elements, elementId),
+					compositionAudioGraph
+						? (compositionAudioGraph.sessionKeyMap.get(elementId) ?? null)
+						: getAudioPlaybackSessionKey(rootElements, elementId),
+				isElementAudioEnabled: compositionAudioGraph
+					? (elementId) =>
+							compositionAudioGraph.enabledMap.get(elementId) ?? false
+					: undefined,
 				dspConfig: timelineState.audioSettings,
 			},
 			signal: options?.signal,
-			waitForReady: () => waitForStaticModelsReady(elements, modelRegistry),
+			waitForReady: async () => {
+				await waitForStaticModelsReady(rootElements, modelRegistry);
+				if (compositionAudioGraph) {
+					await waitForCompositionAudioModelsReady(
+						compositionAudioGraph,
+						runtimeManager,
+					);
+				}
+			},
 			onFrame: (frame) => {
 				timelineState.setExportTime(frame);
 				options?.onFrame?.(frame);

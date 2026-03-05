@@ -1,7 +1,7 @@
-import type { TimelineElement, TimelineMeta } from "core/element/types";
 import { resolveTimelineElementClipGainLinear } from "core/editor/audio/clipGain";
 import { chooseSessionInstructionCandidate } from "core/editor/audio/sessionInstructionSelector";
 import { resolveTransitionFrameState } from "core/editor/preview/transitionFrameState";
+import type { TimelineElement, TimelineMeta } from "core/element/types";
 import type { TransitionAudioCurve } from "../../element/Transition/model";
 import type { TimelineTrack } from "../timeline/types";
 import type { AudioTrackControlStateMap } from "../utils/audioTrackState";
@@ -61,10 +61,7 @@ export const runTimelineAudioMixFrame = (
 		args.getTrackIndexForElement ?? DEFAULT_TRACK_INDEX_RESOLVER;
 
 	if (!args.isPlaying || args.isExporting) {
-		const stoppedSessionKeys = new Set<string>();
 		for (const target of args.targets.values()) {
-			if (stoppedSessionKeys.has(target.sessionKey)) continue;
-			stoppedSessionKeys.add(target.sessionKey);
 			invokeApplyAudioMix(target, null);
 		}
 		return activeIds;
@@ -96,11 +93,8 @@ export const runTimelineAudioMixFrame = (
 		audioDuration: target.audioDuration,
 		enabled: target.enabled,
 		reversed: Boolean(
-			(
-				elementsById.get(target.id)?.props as
-					| { reversed?: unknown }
-					| undefined
-			)?.reversed,
+			(elementsById.get(target.id)?.props as { reversed?: unknown } | undefined)
+				?.reversed,
 		),
 	}));
 	const plan = buildTransitionAudioMixPlan({
@@ -155,11 +149,13 @@ export const runTimelineAudioMixFrame = (
 		);
 	}
 
-	for (const picked of pickedBySession.values()) {
-		invokeApplyAudioMix(picked.target, picked.instruction);
-		const instruction = picked.instruction;
-		if (instruction) {
-			activeIds.add(picked.target.id);
+	for (const target of args.targets.values()) {
+		const picked = pickedBySession.get(target.sessionKey);
+		const isPickedTarget = picked?.target.id === target.id;
+		const instruction = isPickedTarget ? (picked?.instruction ?? null) : null;
+		invokeApplyAudioMix(target, instruction);
+		if (isPickedTarget && instruction) {
+			activeIds.add(target.id);
 		}
 	}
 

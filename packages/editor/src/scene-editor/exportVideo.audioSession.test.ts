@@ -1,4 +1,3 @@
-import type { TimelineElement, TimelineMeta } from "core/element/types";
 import type {
 	ExportElementAudioSource,
 	ExportTimelineAsVideoOptions,
@@ -7,9 +6,11 @@ import {
 	__applyAudioMixPlanAtFrameForTests,
 	__chooseSessionInstructionForTests,
 	__collectExportAudioTargetsForTests,
+	__resolveExportAudioTransitionFrameStateForTests,
 } from "core/editor/exportVideo";
 import type { TransitionFrameState } from "core/editor/preview/transitionFrameState";
 import type { TimelineTrack } from "core/editor/timeline/types";
+import type { TimelineElement, TimelineMeta } from "core/element/types";
 import type { AudioBufferSink } from "mediabunny";
 import { describe, expect, it, vi } from "vitest";
 import { getAudioPlaybackSessionKey } from "./playback/clipContinuityIndex";
@@ -131,6 +132,7 @@ const createOptions = ({
 	audioSources,
 	audioTrackStates,
 	getAudioSessionKeyByElementId,
+	isElementAudioEnabled,
 }: {
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
@@ -141,6 +143,9 @@ const createOptions = ({
 	getAudioSessionKeyByElementId?: NonNullable<
 		ExportTimelineAsVideoOptions["audio"]
 	>["getAudioSessionKeyByElementId"];
+	isElementAudioEnabled?: NonNullable<
+		ExportTimelineAsVideoOptions["audio"]
+	>["isElementAudioEnabled"];
 }): ExportTimelineAsVideoOptions => ({
 	elements,
 	tracks,
@@ -153,6 +158,7 @@ const createOptions = ({
 		audioTrackStates,
 		getAudioSourceByElementId: (elementId) => audioSources[elementId] ?? null,
 		getAudioSessionKeyByElementId,
+		isElementAudioEnabled,
 	},
 });
 
@@ -410,6 +416,96 @@ describe("export audio session mix", () => {
 		}
 		expect(target.gains[10]).toBeCloseTo(0, 6);
 		expect(target.gains[40]).toBeGreaterThan(0.99);
+	});
+
+	it("无有效 source 的 clip 也会进入 audioClips 声明集合", () => {
+		const elements = [
+			createAudioClip({ id: "a1", start: 0, end: 30, offset: 0 }),
+			createAudioClip({ id: "a2", start: 30, end: 60, offset: 30 }),
+			createTransition({
+				id: "t1",
+				start: 15,
+				end: 45,
+				boundary: 30,
+				fromId: "a1",
+				toId: "a2",
+			}),
+		];
+		const options = createOptions({
+			elements,
+			tracks: [createTrack()],
+			audioSources: {
+				a1: { audioSink: {} as AudioBufferSink, audioDuration: 3 },
+			},
+		});
+
+		const collected = __collectExportAudioTargetsForTests(options, 90);
+		expect(collected.audioClipTargetsById.has("a1")).toBe(true);
+		expect(collected.audioClipTargetsById.has("a2")).toBe(false);
+		expect(collected.audioClips.map((clip) => clip.id)).toEqual(["a1", "a2"]);
+	});
+
+	it("isElementAudioEnabled 会覆盖 clip 的启用状态", () => {
+		const elements = [
+			createAudioClip({ id: "a1", start: 0, end: 60, offset: 0 }),
+		];
+		const options = createOptions({
+			elements,
+			tracks: [createTrack()],
+			audioSources: {
+				a1: { audioSink: {} as AudioBufferSink, audioDuration: 10 },
+			},
+			isElementAudioEnabled: () => false,
+		});
+
+		const collected = __collectExportAudioTargetsForTests(options, 90);
+		const clip = collected.audioClips[0];
+		expect(clip?.enabled).toBe(false);
+
+		__applyAudioMixPlanAtFrameForTests({
+			frame: 10,
+			startFrame: 0,
+			fps: 30,
+			audioClips: collected.audioClips,
+			audioClipTargetsById: collected.audioClipTargetsById,
+			audioTargetsBySessionKey: collected.audioTargetsBySessionKey,
+			transitionFrameState: EMPTY_TRANSITION_STATE,
+			transitionCurveById: {},
+		});
+
+		const target = collected.audioTargets[0];
+		if (!target) {
+			throw new Error("target should exist");
+		}
+		expect(target.gains[10]).toBeCloseTo(0, 6);
+	});
+
+	it("导出音频转场状态会基于导出音频 elements 计算", () => {
+		const elements = [
+			createAudioClip({ id: "a1", start: 0, end: 60, offset: 0 }),
+			createAudioClip({ id: "a2", start: 60, end: 120, offset: 60 }),
+			createTransition({
+				id: "t1",
+				start: 45,
+				end: 75,
+				boundary: 60,
+				fromId: "a1",
+				toId: "a2",
+			}),
+		];
+
+		const transitionState = __resolveExportAudioTransitionFrameStateForTests({
+			elements,
+			tracks: [createTrack()],
+			frame: 60,
+		});
+
+		expect(transitionState.activeTransitions).toHaveLength(1);
+		expect(transitionState.activeTransitions[0]).toMatchObject({
+			id: "t1",
+			fromId: "a1",
+			toId: "a2",
+		});
 	});
 
 	it("会叠加 clip.gainDb 到导出混音增益", () => {

@@ -21,7 +21,10 @@ import {
 	type TransitionAudioCurve,
 } from "./audio/transitionAudioMix";
 import type { buildSkiaFrameSnapshotCore } from "./preview/buildSkiaTree";
-import type { TransitionFrameState } from "./preview/transitionFrameState";
+import {
+	resolveTransitionFrameState,
+	type TransitionFrameState,
+} from "./preview/transitionFrameState";
 import type { TimelineTrack } from "./timeline/types";
 import type { AudioTrackControlStateMap } from "./utils/audioTrackState";
 import { resolveTimelineEndFrame } from "./utils/timelineEndFrame";
@@ -45,6 +48,7 @@ export type ExportTimelineAudioOptions = {
 	getAudioSessionKeyByElementId?: (
 		elementId: string,
 	) => string | null | undefined;
+	isElementAudioEnabled?: (elementId: string) => boolean;
 	dspConfig?: PartialExportAudioDspSettings;
 };
 
@@ -303,6 +307,20 @@ const collectTransitionCurveById = (
 	return curveById;
 };
 
+const resolveExportAudioTransitionFrameState = (args: {
+	elements: TimelineElement[];
+	tracks: TimelineTrack[];
+	frame: number;
+}): TransitionFrameState => {
+	return resolveTransitionFrameState({
+		elements: args.elements,
+		displayTime: args.frame,
+		tracks: args.tracks,
+		getTrackIndexForElement,
+		isTransitionElement: (element) => element.type === "Transition",
+	});
+};
+
 const resolveTimelineStart = (
 	timeline: TimelineElement["timeline"],
 ): number => {
@@ -336,37 +354,47 @@ const collectExportAudioTargets = (
 	totalFrames: number,
 ): CollectedExportAudioTargets => {
 	const getAudioSource = options.audio?.getAudioSourceByElementId;
-	if (!getAudioSource) {
-		return {
-			audioTargets: [],
-			audioTargetsBySessionKey: new Map(),
-			audioClips: [],
-			audioClipTargetsById: new Map(),
-		};
-	}
 	const audioTrackStates = options.audio?.audioTrackStates ?? {};
 
 	const clipTargets: ExportAudioClipTarget[] = [];
+	const audioClips: AudioMixClip[] = [];
 	for (const element of options.elements) {
 		if (element.type !== "AudioClip" && element.type !== "VideoClip") continue;
-		const source = getAudioSource(element.id);
-		if (!source?.audioSink) continue;
-		if (!Number.isFinite(source.audioDuration) || source.audioDuration <= 0)
-			continue;
+		const source = getAudioSource?.(element.id);
+		const hasValidSource = Boolean(
+			source?.audioSink &&
+				Number.isFinite(source.audioDuration) &&
+				(source.audioDuration ?? 0) > 0,
+		);
 
-		const enabled =
+		const enabledByTrack =
 			isTimelineTrackAudible(
 				element.timeline,
 				options.tracks,
 				audioTrackStates,
 			) && !(element.type === "VideoClip" && isVideoSourceAudioMuted(element));
+		const enabledByCaller =
+			options.audio?.isElementAudioEnabled?.(element.id) ?? true;
+		const enabled = enabledByTrack && enabledByCaller;
+		const audioDuration = hasValidSource ? (source?.audioDuration ?? 0) : 0;
+
+		audioClips.push({
+			id: element.id,
+			timeline: element.timeline,
+			audioDuration,
+			enabled,
+			reversed: Boolean(
+				(element.props as { reversed?: unknown } | undefined)?.reversed,
+			),
+		});
+		if (!hasValidSource || !source?.audioSink) continue;
 
 		clipTargets.push({
 			id: element.id,
 			sessionKey: resolveAudioSessionKey(options, element.id),
 			timeline: element.timeline,
 			audioSink: source.audioSink,
-			audioDuration: source.audioDuration,
+			audioDuration,
 			reversed: Boolean(
 				(element.props as { reversed?: unknown } | undefined)?.reversed,
 			),
@@ -408,13 +436,7 @@ const collectExportAudioTargets = (
 	return {
 		audioTargets: Array.from(audioTargetsBySessionKey.values()),
 		audioTargetsBySessionKey,
-		audioClips: clipTargets.map((clip) => ({
-			id: clip.id,
-			timeline: clip.timeline,
-			audioDuration: clip.audioDuration,
-			enabled: clip.enabled,
-			reversed: clip.reversed,
-		})),
+		audioClips,
 		audioClipTargetsById: new Map(clipTargets.map((clip) => [clip.id, clip])),
 	};
 };
@@ -514,6 +536,8 @@ export const __collectExportAudioTargetsForTests = collectExportAudioTargets;
 export const __chooseSessionInstructionForTests =
 	chooseSessionInstructionCandidate;
 export const __applyAudioMixPlanAtFrameForTests = applyAudioMixPlanAtFrame;
+export const __resolveExportAudioTransitionFrameStateForTests =
+	resolveExportAudioTransitionFrameState;
 
 export const exportTimelineAsVideoCore = async (
 	options: ExportTimelineAsVideoOptions,
@@ -555,7 +579,8 @@ export const exportTimelineAsVideoCore = async (
 	let surface: JsiSkSurface | null = null;
 	let webglCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
 	let outputTarget: ExportOutputTarget | null = null;
-	let output: Output<Mp4OutputFormat, BufferTarget | StreamTarget> | null = null;
+	let output: Output<Mp4OutputFormat, BufferTarget | StreamTarget> | null =
+		null;
 	let shouldCleanupOutputTargetImmediately = true;
 
 	try {
@@ -642,6 +667,12 @@ export const exportTimelineAsVideoCore = async (
 			try {
 				throwIfAborted(options.signal);
 				if (audioTargetsBySessionKey.size > 0) {
+					const audioTransitionFrameState =
+						resolveExportAudioTransitionFrameState({
+							elements: options.elements,
+							tracks: options.tracks,
+							frame,
+						});
 					applyAudioMixPlanAtFrame({
 						frame,
 						startFrame,
@@ -649,7 +680,7 @@ export const exportTimelineAsVideoCore = async (
 						audioClips,
 						audioClipTargetsById,
 						audioTargetsBySessionKey,
-						transitionFrameState: frameSnapshot.transitionFrameState,
+						transitionFrameState: audioTransitionFrameState,
 						transitionCurveById,
 					});
 				}

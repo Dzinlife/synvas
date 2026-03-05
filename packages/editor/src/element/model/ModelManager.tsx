@@ -1,6 +1,7 @@
 import type { TimelineAsset, TimelineElement } from "core/element/types";
 import { isAssetBackedElementType } from "core/element/types";
-import { useEffect, useEffectEvent, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useProjectStore } from "@/projects/projectStore";
 import { TimelineAudioMixManager } from "@/scene-editor/audio/TimelineAudioMixManager";
 import { TimelineProvider } from "@/scene-editor/contexts/TimelineContext";
 import {
@@ -9,8 +10,11 @@ import {
 	useEditorRuntime,
 	useStudioRuntimeManager,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
-import type { EditorRuntime, TimelineRuntime } from "@/scene-editor/runtime/types";
-import { useProjectStore } from "@/projects/projectStore";
+import type {
+	EditorRuntime,
+	StudioRuntimeManager,
+	TimelineRuntime,
+} from "@/scene-editor/runtime/types";
 import { usePlaybackOwnerStore } from "@/studio/scene/playbackOwnerStore";
 import {
 	buildTimelineRuntimeIdFromRef,
@@ -121,11 +125,6 @@ export const ModelLifecycleManager: React.FC = () => {
 		(state) => state.currentProject?.assets ?? EMPTY_ASSETS,
 	);
 	const runtimeSyncRef = useRef<Map<string, RuntimeSyncState>>(new Map());
-	const getSourceById = useEffectEvent(() =>
-		buildSourceById(
-			useProjectStore.getState().currentProject?.assets ?? EMPTY_ASSETS,
-		),
-	);
 
 	const timelineRefs = useMemo(
 		() => (currentProject ? listTimelineRefs(currentProject) : []),
@@ -135,6 +134,7 @@ export const ModelLifecycleManager: React.FC = () => {
 	useEffect(() => {
 		const runtimeSync = runtimeSyncRef.current;
 		const expectedRuntimeIds = new Set<string>();
+		const sourceById = buildSourceById(projectAssets);
 
 		for (const ref of timelineRefs) {
 			const runtime = runtimeManager.ensureTimelineRuntime(ref);
@@ -147,7 +147,7 @@ export const ModelLifecycleManager: React.FC = () => {
 					rootRuntime,
 					runtime,
 					existed.prevElements,
-					getSourceById(),
+					sourceById,
 				);
 				continue;
 			}
@@ -157,11 +157,14 @@ export const ModelLifecycleManager: React.FC = () => {
 				unsubscribers: [],
 			};
 			const runSync = () => {
+				const runtimeSourceById = buildSourceById(
+					useProjectStore.getState().currentProject?.assets ?? EMPTY_ASSETS,
+				);
 				syncState.prevElements = syncRuntimeModels(
 					rootRuntime,
 					runtime,
 					syncState.prevElements,
-					getSourceById(),
+					runtimeSourceById,
 				);
 			};
 
@@ -209,14 +212,23 @@ export const TimelineAudioMixBridge: React.FC = () => {
 				.find((runtime) => runtime.id === ownerRuntimeId) ?? null
 		);
 	}, [ownerRuntimeId, runtimeManager]);
-	const scopedRuntime = useMemo<EditorRuntime | null>(() => {
+	const scopedRuntime = useMemo<
+		(EditorRuntime & Partial<StudioRuntimeManager>) | null
+	>(() => {
 		if (!ownerRuntime) return null;
 		return {
 			id: `${rootRuntime.id}:${ownerRuntime.id}:audio-mix`,
 			timelineStore: ownerRuntime.timelineStore,
 			modelRegistry: ownerRuntime.modelRegistry,
+			ensureTimelineRuntime: runtimeManager.ensureTimelineRuntime,
+			removeTimelineRuntime: runtimeManager.removeTimelineRuntime,
+			getTimelineRuntime: runtimeManager.getTimelineRuntime,
+			listTimelineRuntimes: runtimeManager.listTimelineRuntimes,
+			setActiveEditTimeline: runtimeManager.setActiveEditTimeline,
+			getActiveEditTimelineRef: runtimeManager.getActiveEditTimelineRef,
+			getActiveEditTimelineRuntime: runtimeManager.getActiveEditTimelineRuntime,
 		};
-	}, [ownerRuntime, rootRuntime.id]);
+	}, [ownerRuntime, rootRuntime.id, runtimeManager]);
 
 	if (!ownerRuntime || !scopedRuntime) return null;
 	const shouldDriveOwnerPlaybackClock =

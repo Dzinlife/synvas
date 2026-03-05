@@ -1,19 +1,22 @@
 import type React from "react";
 import { useCallback, useEffect } from "react";
+import { setPreviewAudioDspSettings } from "@/audio/engine";
 import type { TimelineStore } from "../contexts/TimelineContext";
 import { useTimelineStore } from "../contexts/TimelineContext";
+import { getAudioPlaybackSessionKey } from "../playback/clipContinuityIndex";
 import {
+	useEditorRuntime,
 	useModelRegistry,
 	useTimelineStoreApi,
 } from "../runtime/EditorRuntimeProvider";
-import { getAudioPlaybackSessionKey } from "../playback/clipContinuityIndex";
+import type { StudioRuntimeManager, TimelineRuntime } from "../runtime/types";
 import { isTimelineTrackAudible } from "../utils/trackAudibility";
 import { isVideoSourceAudioMuted } from "../utils/videoClipAudioSeparation";
+import { buildCompositionAudioGraph } from "./buildCompositionAudioGraph";
 import {
 	type AudioMixTarget,
 	runTimelineAudioMixFrame,
 } from "./TimelineAudioMixRunner";
-import { setPreviewAudioDspSettings } from "@/audio/engine";
 import type { AudioMixInstruction } from "./transitionAudioMix";
 
 const invokeApplyAudioMix = (
@@ -66,35 +69,68 @@ const collectAudioMixTargets = (
 };
 
 export const TimelineAudioMixManager: React.FC = () => {
+	const runtime = useEditorRuntime();
 	const timelineStore = useTimelineStoreApi();
 	const modelRegistry = useModelRegistry();
 	const audioSettings = useTimelineStore((state) => state.audioSettings);
+	const runtimeCandidate = runtime as Partial<StudioRuntimeManager>;
+	const runtimeManager =
+		typeof runtimeCandidate.getTimelineRuntime === "function" &&
+		typeof runtimeCandidate.listTimelineRuntimes === "function"
+			? (runtime as unknown as StudioRuntimeManager)
+			: null;
+
+	const resolveOwnerTimelineRuntime =
+		useCallback((): TimelineRuntime | null => {
+			if (!runtimeManager) return null;
+			for (const timelineRuntime of runtimeManager.listTimelineRuntimes()) {
+				if (
+					timelineRuntime.timelineStore === timelineStore &&
+					timelineRuntime.modelRegistry === modelRegistry
+				) {
+					return timelineRuntime;
+				}
+			}
+			return runtimeManager.getActiveEditTimelineRuntime();
+		}, [modelRegistry, runtimeManager, timelineStore]);
+
+	const buildCompositionTargets = useCallback(() => {
+		const ownerRuntime = resolveOwnerTimelineRuntime();
+		if (!ownerRuntime || !runtimeManager) return null;
+		return buildCompositionAudioGraph({
+			rootRuntime: ownerRuntime,
+			runtimeManager,
+		});
+	}, [resolveOwnerTimelineRuntime, runtimeManager]);
 
 	const runMix = useCallback(() => {
 		const state = timelineStore.getState();
-		const targets = collectAudioMixTargets(state, modelRegistry);
+		const compositionGraph = buildCompositionTargets();
+		const targets =
+			compositionGraph?.previewTargets ??
+			collectAudioMixTargets(state, modelRegistry);
 		runTimelineAudioMixFrame({
 			isPlaying: state.isPlaying,
 			isExporting: state.isExporting,
 			displayTime: state.currentTime,
 			fps: state.fps,
-			elements: state.elements,
-			tracks: state.tracks,
+			elements: compositionGraph?.mixElements ?? state.elements,
+			tracks: compositionGraph?.mixTracks ?? state.tracks,
 			audioTrackStates: state.audioTrackStates,
 			targets,
 		});
-	}, [modelRegistry, timelineStore]);
+	}, [buildCompositionTargets, modelRegistry, timelineStore]);
 
 	const stopAllMixTargets = useCallback(() => {
 		const state = timelineStore.getState();
-		const targets = collectAudioMixTargets(state, modelRegistry);
-		const handledSessionKeys = new Set<string>();
+		const compositionGraph = buildCompositionTargets();
+		const targets =
+			compositionGraph?.previewTargets ??
+			collectAudioMixTargets(state, modelRegistry);
 		for (const target of targets.values()) {
-			if (handledSessionKeys.has(target.sessionKey)) continue;
-			handledSessionKeys.add(target.sessionKey);
 			invokeApplyAudioMix(target, null);
 		}
-	}, [modelRegistry, timelineStore]);
+	}, [buildCompositionTargets, modelRegistry, timelineStore]);
 
 	useEffect(() => {
 		const trigger = () => {
