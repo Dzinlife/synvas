@@ -19,6 +19,8 @@ interface NodeInteractionWrapperProps {
 	isActive: boolean;
 	isDimmed: boolean;
 	isHovered: boolean;
+	cameraZoom: number;
+	showBorder?: boolean;
 	onPointerEnter: (nodeId: string) => void;
 	onPointerLeave: (nodeId: string) => void;
 	onDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
@@ -27,6 +29,11 @@ interface NodeInteractionWrapperProps {
 	onClick?: (node: CanvasNode) => void;
 	onDoubleClick?: (node: CanvasNode) => void;
 	children: React.ReactNode;
+}
+
+interface NodeInteractionBorderStyle {
+	color: string;
+	baseStrokeWidthPx: number;
 }
 
 const resolvePointerField = (
@@ -40,11 +47,46 @@ const resolvePointerField = (
 	return Number(value);
 };
 
+export const resolveNodeInteractionBorderStyle = ({
+	isActive,
+	isHovered,
+}: {
+	isActive: boolean;
+	isHovered: boolean;
+}): NodeInteractionBorderStyle => {
+	if (isActive) {
+		return {
+			color: "rgba(251,146,60,1)",
+			baseStrokeWidthPx: 2,
+		};
+	}
+	if (isHovered) {
+		return {
+			color: "rgba(56,189,248,0.95)",
+			baseStrokeWidthPx: 2,
+		};
+	}
+	return {
+		color: "rgba(255,255,255,0.2)",
+		baseStrokeWidthPx: 1,
+	};
+};
+
+export const resolveNodeInteractionStrokeWidth = (
+	baseStrokeWidthPx: number,
+	cameraZoom: number,
+): number => {
+	const safeZoom = Math.max(cameraZoom, 1e-6);
+	return baseStrokeWidthPx / safeZoom;
+};
+
 export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	node,
 	isActive,
 	isDimmed,
 	isHovered,
+	cameraZoom,
+	showBorder = true,
 	onPointerEnter,
 	onPointerLeave,
 	onDragStart,
@@ -54,12 +96,14 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	onDoubleClick,
 	children,
 }) => {
-	const borderColor = isActive
-		? "rgba(251,146,60,1)"
-		: isHovered
-			? "rgba(56,189,248,0.95)"
-			: "rgba(255,255,255,0.2)";
-	const borderWidth = isActive || isHovered ? 2 : 1;
+	const borderStyle = resolveNodeInteractionBorderStyle({
+		isActive,
+		isHovered,
+	});
+	const borderWidth = resolveNodeInteractionStrokeWidth(
+		borderStyle.baseStrokeWidthPx,
+		cameraZoom,
+	);
 	const bindDrag = useDrag(
 		({
 			first,
@@ -129,15 +173,17 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 			}}
 		>
 			{children}
-			<Rect
-				x={0}
-				y={0}
-				width={Math.max(1, node.width)}
-				height={Math.max(1, node.height)}
-				style="stroke"
-				strokeWidth={borderWidth}
-				color={borderColor}
-			/>
+			{showBorder && (
+				<Rect
+					x={0}
+					y={0}
+					width={Math.max(1, node.width)}
+					height={Math.max(1, node.height)}
+					style="stroke"
+					strokeWidth={borderWidth}
+					color={borderStyle.color}
+				/>
+			)}
 		</Group>
 	);
 };

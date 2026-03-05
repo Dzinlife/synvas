@@ -1099,6 +1099,34 @@ describe("CanvasWorkspace", () => {
 		expect(project?.ui.activeNodeId).toBe("node-video-1");
 	});
 
+	it("节点拖拽后坐标会被约束为整数", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					ui: {
+						...project.ui,
+						camera: {
+							...project.ui.camera,
+							zoom: 1.3,
+						},
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 420, 260);
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		expect(node?.x).toBe(332);
+		expect(node?.y).toBe(197);
+		expect(Number.isInteger(node?.x ?? NaN)).toBe(true);
+		expect(Number.isInteger(node?.y ?? NaN)).toBe(true);
+	});
+
 	it("locked 节点可选中但不可拖拽", () => {
 		useProjectStore.setState((state) => {
 			const project = state.currentProject;

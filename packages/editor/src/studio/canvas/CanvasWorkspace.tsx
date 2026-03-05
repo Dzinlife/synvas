@@ -1114,8 +1114,12 @@ const CanvasWorkspace = () => {
 			if (!dragSession) return;
 			if (dragSession.nodeId !== node.id) return;
 			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-			const nextX = dragSession.startNodeX + event.movementX / safeZoom;
-			const nextY = dragSession.startNodeY + event.movementY / safeZoom;
+			const nextX = Math.round(
+				dragSession.startNodeX + event.movementX / safeZoom,
+			);
+			const nextY = Math.round(
+				dragSession.startNodeY + event.movementY / safeZoom,
+			);
 			dragSession.moved =
 				dragSession.moved ||
 				Math.abs(event.movementX) + Math.abs(event.movementY) > 2;
