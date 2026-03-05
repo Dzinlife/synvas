@@ -345,9 +345,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			}
 
 			frameControllerRef.current
-				.getOrBuildCurrent(frameIndex, (targetFrame) =>
-					buildFrameSnapshot(targetFrame, false),
-				)
+				.getOrBuildCurrent(frameIndex, buildFrameSnapshot)
 				.then((entry) => {
 					if (renderTokenRef.current !== renderToken) {
 						return;

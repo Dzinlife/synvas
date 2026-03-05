@@ -157,28 +157,13 @@ export const createFramePrecompileBuffer = <
 		return createEntry(frameIndex, factory);
 	};
 
-	const ensureCurrentEntry = (
-		frameIndex: FrameIndex,
-		factory: FrameBuildFactory<TState>,
-	): { entry: FrameCacheEntry<TState>; reused: boolean } => {
-		const existingEntry = cache.get(frameIndex);
-		if (!existingEntry) {
-			return { entry: createEntry(frameIndex, factory), reused: false };
-		}
-		if (existingEntry.status !== "pending") {
-			return { entry: existingEntry, reused: true };
-		}
-		// 当前帧命中 pending 时直接重建，避免慢预编译阻塞最新帧。
-		cache.delete(frameIndex);
-		return { entry: createEntry(frameIndex, factory), reused: false };
-	};
-
 	const getOrBuildCurrent = async (
 		frameIndex: FrameIndex,
 		factory: FrameBuildFactory<TState>,
 	): Promise<FrameCacheEntry<TState>> => {
-		const { entry, reused } = ensureCurrentEntry(frameIndex, factory);
-		if (reused) {
+		const hasExistingEntry = cache.has(frameIndex);
+		const entry = ensureEntry(frameIndex, factory);
+		if (hasExistingEntry) {
 			onCacheEvent?.({
 				type: "hit-start",
 				frameIndex,
@@ -188,7 +173,7 @@ export const createFramePrecompileBuffer = <
 			onCacheEvent?.({ type: "miss", frameIndex });
 		}
 		await entry.promise;
-		if (reused) {
+		if (hasExistingEntry) {
 			onCacheEvent?.({
 				type: "hit-resolved",
 				frameIndex,

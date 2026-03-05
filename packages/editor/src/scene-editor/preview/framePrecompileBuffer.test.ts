@@ -78,33 +78,29 @@ describe("framePrecompileBuffer", () => {
 		expect(disposeByFrame.get(20)).toHaveBeenCalledTimes(1);
 	});
 
-	it("should preempt pending prefetched frame when current frame is requested", async () => {
+	it("should reuse pending prefetched frame when current frame is requested", async () => {
 		const buffer = createFramePrecompileBuffer<MockFrameState>({
 			lookaheadFrames: 3,
 		});
 		const slowPrefetch = createDeferred<MockFrameState>();
-		const fastCurrent = createDeferred<MockFrameState>();
 		const slowDispose = vi.fn();
-		const fastDispose = vi.fn();
 		const factory = vi
 			.fn<(_: number) => Promise<MockFrameState>>()
-			.mockImplementationOnce(async () => slowPrefetch.promise)
-			.mockImplementationOnce(async () => fastCurrent.promise);
+			.mockImplementationOnce(async () => slowPrefetch.promise);
 
 		buffer.prefetch(60, factory);
 		await waitForMicrotasks();
 
 		const currentPromise = buffer.getOrBuildCurrent(60, factory);
-		fastCurrent.resolve({ frame: 60, dispose: fastDispose });
+		expect(factory).toHaveBeenCalledTimes(1);
+
+		slowPrefetch.resolve({ frame: 60, dispose: slowDispose });
 		const entry = await currentPromise;
 		const dispose = buffer.takeDispose(entry);
 		dispose?.();
-
-		slowPrefetch.resolve({ frame: 60, dispose: slowDispose });
 		await waitForMicrotasks();
 
-		expect(factory).toHaveBeenCalledTimes(2);
-		expect(fastDispose).toHaveBeenCalledTimes(1);
+		expect(factory).toHaveBeenCalledTimes(1);
 		expect(slowDispose).toHaveBeenCalledTimes(1);
 		buffer.disposeAll();
 	});

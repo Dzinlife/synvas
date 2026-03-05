@@ -315,9 +315,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 			}
 
 			frameControllerRef.current
-				.getOrBuildCurrent(frameIndex, (targetFrame) =>
-					buildFrameSnapshot(targetFrame, false),
-				)
+				.getOrBuildCurrent(frameIndex, buildFrameSnapshot)
 				.then((entry) => {
 					if (renderTokenRef.current !== renderToken) return;
 					const rendered = commitCurrentFrame(entry.state);
@@ -325,10 +323,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 					const nextDispose = frameControllerRef.current.takeDispose(entry);
 					disposeRef.current?.();
 					disposeRef.current = nextDispose ?? null;
-					frameControllerRef.current.commitFrame(
-						frameIndex,
-						buildFrameSnapshot,
-					);
+					frameControllerRef.current.commitFrame(frameIndex, buildFrameSnapshot);
 				})
 				.catch((error) => {
 					if (renderTokenRef.current !== renderToken) return;
