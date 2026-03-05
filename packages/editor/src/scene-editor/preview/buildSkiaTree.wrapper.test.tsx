@@ -67,6 +67,22 @@ const FilterRenderer: React.FC<{ id: string }> = ({ id }) => {
 	return <div data-testid={`filter-${id}`} />;
 };
 
+const VideoRenderer: React.FC<{
+	id: string;
+	__frameChannel?: string;
+	__disableRuntimePlaybackEffects?: boolean;
+}> = ({ id, __frameChannel, __disableRuntimePlaybackEffects }) => {
+	return (
+		<div
+			data-testid={`video-${id}`}
+			data-frame-channel={__frameChannel}
+			data-disable-runtime-effects={
+				__disableRuntimePlaybackEffects ? "true" : "false"
+			}
+		/>
+	);
+};
+
 const TransitionRenderer: React.FC<{
 	id: string;
 	fromNode?: React.ReactNode;
@@ -87,6 +103,9 @@ const deps: BuildSkiaDeps = {
 		}
 		if (componentId === "audio-clip") {
 			return { Renderer: PlainRenderer };
+		}
+		if (componentId === "video-clip") {
+			return { Renderer: VideoRenderer };
 		}
 		if (componentId === "filter/test") {
 			return { Renderer: FilterRenderer };
@@ -412,6 +431,40 @@ describe("buildSkiaTree transform wrapper", () => {
 		expect(plainNodes.length).toBe(1);
 	});
 
+	it("offscreen frameChannel 会透传到 VideoClip renderer", async () => {
+		const element = createElement({
+			id: "video-1",
+			type: "VideoClip",
+			component: "video-clip",
+		});
+
+		const { children } = await buildSkiaRenderStateCore(
+			{
+				elements: [element],
+				displayTime: 0,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					forcePrepareFrames: true,
+					frameChannel: "offscreen",
+				},
+			},
+			deps,
+		);
+
+		const videoNodes = collectElements(
+			children,
+			(node) => node.type === VideoRenderer,
+		);
+		expect(videoNodes.length).toBe(1);
+		expect(videoNodes[0]?.props.__frameChannel).toBe("offscreen");
+		expect(videoNodes[0]?.props.__disableRuntimePlaybackEffects).toBe(true);
+	});
+
 	it("Composition 会递归构建子 scene picture 并进入当前帧", async () => {
 		const composition = createElement({
 			id: "composition-1",
@@ -436,16 +489,16 @@ describe("buildSkiaTree transform wrapper", () => {
 			}),
 			resolveCompositionTimeline: (sceneId) => {
 				if (sceneId !== "scene-2") return null;
-					return {
-						sceneId,
-						elements: [childClip],
-						tracks,
-						fps: 30,
-						canvasSize: { width: 1920, height: 1080 },
-						wrapRenderNode: childWrapSpy,
-					};
-				},
-			};
+				return {
+					sceneId,
+					elements: [childClip],
+					tracks,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					wrapRenderNode: childWrapSpy,
+				};
+			},
+		};
 
 		const renderState = await buildSkiaRenderStateCore(
 			{
@@ -474,6 +527,70 @@ describe("buildSkiaTree transform wrapper", () => {
 
 		renderState.dispose?.();
 		expect(childPictureDispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("Composition 子树 prepareRenderFrame 使用 offscreen frameChannel", async () => {
+		const composition = createElement({
+			id: "composition-prepare-channel",
+			type: "Composition",
+			component: "composition",
+			props: { sceneId: "scene-child" },
+		});
+		const childVideo = createElement({
+			id: "child-video",
+			type: "VideoClip",
+			component: "video-clip",
+		});
+		const prepareRenderFrame = vi.fn(async () => undefined);
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToPicture: vi.fn(async () => ({ dispose: vi.fn() }) as any),
+			resolveComponent: (componentId) => {
+				if (componentId === "video-clip") {
+					return {
+						Renderer: VideoRenderer,
+						prepareRenderFrame,
+					};
+				}
+				return deps.resolveComponent(componentId);
+			},
+			resolveCompositionTimeline: (sceneId) => {
+				if (sceneId !== "scene-child") return null;
+				return {
+					sceneId,
+					elements: [childVideo],
+					tracks,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+				};
+			},
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [composition],
+				displayTime: 10,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					forcePrepareFrames: true,
+					compositionPath: ["scene-root"],
+				},
+			},
+			localDeps,
+		);
+		await renderState.ready;
+		expect(prepareRenderFrame).toHaveBeenCalled();
+		expect(prepareRenderFrame).toHaveBeenCalledWith(
+			expect.objectContaining({
+				frameChannel: "offscreen",
+			}),
+		);
+		renderState.dispose?.();
 	});
 
 	it("Composition 循环引用会被跳过，避免递归死循环", async () => {

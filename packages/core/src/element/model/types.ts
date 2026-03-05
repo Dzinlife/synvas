@@ -6,7 +6,10 @@ export type PrepareFrameContext = {
 	displayTime: number;
 	fps: number;
 	phase?: "beforeRender" | "afterRender";
+	frameChannel?: RenderFrameChannel;
 };
+
+export type RenderFrameChannel = "current" | "offscreen";
 
 export type RendererPrepareFrameContext = {
 	element: TimelineElement;
@@ -17,6 +20,7 @@ export type RendererPrepareFrameContext = {
 	canvasSize?: { width: number; height: number };
 	fromNode?: ReactNode | null;
 	toNode?: ReactNode | null;
+	frameChannel?: RenderFrameChannel;
 };
 
 export interface ComponentConstraints {

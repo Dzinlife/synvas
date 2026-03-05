@@ -128,6 +128,7 @@ export const exportTimelineAsVideo = async (options: {
 						awaitReady: prepare?.awaitReady,
 						maxCompositionDepth: prepare?.maxCompositionDepth,
 						compositionPath: rootSceneId ? [rootSceneId] : [],
+						frameChannel: "offscreen",
 					},
 				},
 				{
@@ -140,23 +141,23 @@ export const exportTimelineAsVideo = async (options: {
 						);
 						if (!childRuntime) return null;
 						const childState = childRuntime.timelineStore.getState();
-							return {
-								sceneId,
-								elements: childState.elements,
-								tracks: childState.tracks,
-								fps: childState.fps,
-								canvasSize: childState.canvasSize,
-								getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
-								wrapRenderNode: (node) =>
-									createElement(
-										RuntimeProvider,
-										{
-											runtime: createScopedRuntime(childRuntime),
-										},
-										node,
-									),
-							};
-						},
+						return {
+							sceneId,
+							elements: childState.elements,
+							tracks: childState.tracks,
+							fps: childState.fps,
+							canvasSize: childState.canvasSize,
+							getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
+							wrapRenderNode: (node) =>
+								createElement(
+									RuntimeProvider,
+									{
+										runtime: createScopedRuntime(childRuntime),
+									},
+									node,
+								),
+						};
+					},
 					},
 				);
 		};

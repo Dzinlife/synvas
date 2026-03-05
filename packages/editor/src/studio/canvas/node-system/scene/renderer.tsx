@@ -156,6 +156,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 								awaitReady: true,
 								getModelStore: (id) => runtime.modelRegistry.get(id),
 								compositionPath: [node.sceneId],
+								frameChannel: "offscreen",
 							},
 						},
 						{

@@ -9,6 +9,7 @@ describe("VideoClipRenderer playback strategy", () => {
 		const action = applyPlayingPlaybackStrategy({
 			reversed: true,
 			videoTime: 3.25,
+			frameChannel: "current",
 			seekToTime,
 			stepPlayback,
 		});
@@ -16,6 +17,7 @@ describe("VideoClipRenderer playback strategy", () => {
 		expect(action).toBe("seek");
 		expect(seekToTime).toHaveBeenCalledWith(3.25, {
 			reason: "reverse-playback",
+			frameChannel: "current",
 		});
 		expect(stepPlayback).not.toHaveBeenCalled();
 	});
@@ -27,12 +29,13 @@ describe("VideoClipRenderer playback strategy", () => {
 		const action = applyPlayingPlaybackStrategy({
 			reversed: false,
 			videoTime: 4.5,
+			frameChannel: "offscreen",
 			seekToTime,
 			stepPlayback,
 		});
 
 		expect(action).toBe("step");
-		expect(stepPlayback).toHaveBeenCalledWith(4.5);
+		expect(stepPlayback).toHaveBeenCalledWith(4.5, "offscreen");
 		expect(seekToTime).not.toHaveBeenCalled();
 	});
 });

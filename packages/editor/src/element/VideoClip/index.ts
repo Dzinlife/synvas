@@ -11,12 +11,19 @@ export const VideoClipDefinition: ElementComponentDefinition<VideoClipProps> = {
 	component: "video-clip",
 	createModel: createVideoClipModel,
 	Renderer: VideoClipRenderer,
-	prepareRenderFrame: async ({ element, displayTime, fps, modelStore }) => {
+	prepareRenderFrame: async ({
+		element,
+		displayTime,
+		fps,
+		frameChannel,
+		modelStore,
+	}) => {
 		await modelStore?.getState()?.prepareFrame?.({
 			element,
 			displayTime,
 			fps,
 			phase: "beforeRender",
+			frameChannel,
 		});
 	},
 	Timeline: VideoClipTimeline,

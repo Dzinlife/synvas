@@ -1,4 +1,7 @@
-import type { PrepareFrameContext } from "core/element/model/types";
+import type {
+	PrepareFrameContext,
+	RenderFrameChannel,
+} from "core/element/model/types";
 import type { TimelineElement } from "core/element/types";
 import type {
 	AudioBufferSink,
@@ -51,6 +54,7 @@ export type VideoSeekReason = "default" | "reverse-playback";
 
 export interface VideoSeekOptions {
 	reason?: VideoSeekReason;
+	frameChannel?: RenderFrameChannel;
 }
 
 const resolveSeekReason = (
@@ -66,6 +70,7 @@ export interface VideoClipInternal {
 	videoSink: CanvasSink | null;
 	input: Input | null;
 	currentFrame: SkImage | null;
+	offscreenFrame: SkImage | null;
 	videoDuration: number; // 秒
 	isReady: boolean;
 	playbackEpoch: number;
@@ -79,15 +84,24 @@ export interface VideoClipInternal {
 	// seek 方法（用于拖动/跳转）
 	seekToTime: (seconds: number, options?: VideoSeekOptions) => Promise<void>;
 	// 开始流式播放
-	startPlayback: (startTime: number) => Promise<void>;
+	startPlayback: (
+		startTime: number,
+		frameChannel?: RenderFrameChannel,
+	) => Promise<void>;
 	// 获取下一帧（流式播放时调用）
-	getNextFrame: (targetTime: number) => Promise<void>;
+	getNextFrame: (
+		targetTime: number,
+		frameChannel?: RenderFrameChannel,
+	) => Promise<void>;
 	// 播放步进（自动处理启动/回退）
-	stepPlayback: (targetTime: number) => Promise<void>;
+	stepPlayback: (
+		targetTime: number,
+		frameChannel?: RenderFrameChannel,
+	) => Promise<void>;
 	// 停止流式播放
-	stopPlayback: () => void;
+	stopPlayback: (frameChannel?: RenderFrameChannel) => void;
 	// 释放播放会话（组件卸载时调用）
-	releasePlaybackSession: () => void;
+	releasePlaybackSession: (frameChannel?: RenderFrameChannel) => void;
 	// 音频播放步进
 	stepAudioPlayback: (input: AudioPlaybackStepInput) => Promise<void>;
 	// 音频播放增益
@@ -135,6 +149,12 @@ export const calculateVideoTime = ({
 const DEFAULT_FPS = 30;
 // 目标时间回退超过该帧数则重启流式播放（按时间线 FPS 计算）
 const PLAYBACK_BACK_JUMP_FRAMES = 3;
+const DEFAULT_FRAME_CHANNEL: RenderFrameChannel = "current";
+const resolveFrameChannel = (
+	value: RenderFrameChannel | undefined,
+): RenderFrameChannel => {
+	return value === "offscreen" ? "offscreen" : DEFAULT_FRAME_CHANNEL;
+};
 const normalizeOffsetFrames = (offset?: number): number => {
 	if (!Number.isFinite(offset ?? NaN)) return 0;
 	return Math.max(0, Math.round(offset as number));
@@ -161,18 +181,39 @@ export function createVideoClipModel(
 	const SEEK_PREFETCH_FRAMES = 24;
 	const REVERSE_PREWARM_LOOKAHEAD_KEYFRAMES = 2;
 	const REVERSE_PREWARM_COMPLETED_LIMIT = 512;
+	const FRAME_CHANNELS: RenderFrameChannel[] = ["current", "offscreen"];
 	// 用于取消异步操作
 	let asyncId = 0;
 	// init 的取消标记，避免被播放/seek 的 asyncId 误伤
 	let initEpoch = 0;
 	let isSeekingFlag = false;
-	let lastSeekTime: number | null = null;
-	let pendingSeekRequest: { time: number; options: VideoSeekOptions } | null =
-		null;
-	let lastPreparedFrameIndex: number | null = null;
+	let lastSeekTimeByChannel: Record<RenderFrameChannel, number | null> = {
+		current: null,
+		offscreen: null,
+	};
+	let pendingSeekRequestByChannel: Record<
+		RenderFrameChannel,
+		{ time: number; options: VideoSeekOptions } | null
+	> = {
+		current: null,
+		offscreen: null,
+	};
+	let lastPreparedFrameIndexByChannel: Record<
+		RenderFrameChannel,
+		number | null
+	> = {
+		current: null,
+		offscreen: null,
+	};
 	let audioInitEpoch = 0;
 	let audioPlayback: AudioPlaybackController | null = null;
-	let retainedPlaybackSessionKey: string | null = null;
+	let retainedPlaybackSessionKeyByChannel: Record<
+		RenderFrameChannel,
+		string | null
+	> = {
+		current: null,
+		offscreen: null,
+	};
 
 	let assetHandle: AssetHandle<VideoAsset> | null = null;
 	let audioAssetHandle: AssetHandle<AudioAsset> | null = null;
@@ -209,26 +250,41 @@ export function createVideoClipModel(
 		return framesToSeconds(durationFrames, getTimelineFps());
 	};
 
-	const resolveVideoPlaybackSessionKey = (): string => {
+	const resolveVideoPlaybackSessionKey = (
+		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
+	): string => {
 		const timelineState = timelineStore.getState();
-		return `${runtime.id}:${getVideoPlaybackSessionKey(timelineState.elements, id)}`;
+		const baseKey = `${runtime.id}:${getVideoPlaybackSessionKey(timelineState.elements, id)}`;
+		return frameChannel === "offscreen" ? `${baseKey}:offscreen` : baseKey;
 	};
 
-	const retainPlaybackSession = (): string => {
-		const nextKey = resolveVideoPlaybackSessionKey();
-		if (retainedPlaybackSessionKey === nextKey) return nextKey;
+	const retainPlaybackSession = (
+		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
+	): string => {
+		const nextKey = resolveVideoPlaybackSessionKey(frameChannel);
+		const retainedKey = retainedPlaybackSessionKeyByChannel[frameChannel];
+		if (retainedKey === nextKey) return nextKey;
 		retainVideoPlaybackSession(nextKey);
-		if (retainedPlaybackSessionKey) {
-			releaseVideoPlaybackSession(retainedPlaybackSessionKey);
+		if (retainedKey) {
+			releaseVideoPlaybackSession(retainedKey);
 		}
-		retainedPlaybackSessionKey = nextKey;
+		retainedPlaybackSessionKeyByChannel[frameChannel] = nextKey;
 		return nextKey;
 	};
 
-	const releasePlaybackSession = () => {
-		if (!retainedPlaybackSessionKey) return;
-		releaseVideoPlaybackSession(retainedPlaybackSessionKey);
-		retainedPlaybackSessionKey = null;
+	const releasePlaybackSession = (
+		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
+	) => {
+		const retainedKey = retainedPlaybackSessionKeyByChannel[frameChannel];
+		if (!retainedKey) return;
+		releaseVideoPlaybackSession(retainedKey);
+		retainedPlaybackSessionKeyByChannel[frameChannel] = null;
+	};
+
+	const releaseAllPlaybackSessions = () => {
+		for (const frameChannel of FRAME_CHANNELS) {
+			releasePlaybackSession(frameChannel);
+		}
 	};
 
 	// 将时间戳对齐到帧间隔（以时间线 FPS 为准）
@@ -267,23 +323,43 @@ export function createVideoClipModel(
 	};
 
 	const fallbackFrameCache = new Map<number, SkImage>();
-	// 当前显示帧，避免缓存回收时误释放
-	let pinnedFrame: SkImage | null = null;
-	let pinnedFrameAsset: VideoAsset | null = null;
+	// 按渲染通道分别 pin，避免离屏帧覆盖主预览 pin 状态
+	const pinnedFrameByChannel: Record<
+		RenderFrameChannel,
+		{ frame: SkImage | null; asset: VideoAsset | null }
+	> = {
+		current: { frame: null, asset: null },
+		offscreen: { frame: null, asset: null },
+	};
 
 	const updatePinnedFrame = (
+		frameChannel: RenderFrameChannel,
 		nextFrame: SkImage | null,
 		asset: VideoAsset | null,
 	) => {
-		if (pinnedFrame === nextFrame && pinnedFrameAsset === asset) return;
-		if (pinnedFrame && pinnedFrameAsset) {
-			pinnedFrameAsset.unpinFrame(pinnedFrame);
+		const currentPinned = pinnedFrameByChannel[frameChannel];
+		if (
+			currentPinned.frame === nextFrame &&
+			currentPinned.asset === asset
+		) {
+			return;
+		}
+		if (currentPinned.frame && currentPinned.asset) {
+			currentPinned.asset.unpinFrame(currentPinned.frame);
 		}
 		if (nextFrame && asset) {
 			asset.pinFrame(nextFrame);
 		}
-		pinnedFrame = nextFrame;
-		pinnedFrameAsset = nextFrame && asset ? asset : null;
+		pinnedFrameByChannel[frameChannel] = {
+			frame: nextFrame,
+			asset: nextFrame && asset ? asset : null,
+		};
+	};
+
+	const resetPinnedFrames = () => {
+		for (const frameChannel of FRAME_CHANNELS) {
+			updatePinnedFrame(frameChannel, null, null);
+		}
 	};
 
 	// 将 canvas 转换为 SkImage
@@ -399,20 +475,31 @@ export function createVideoClipModel(
 		})();
 	};
 
-	// 更新当前帧
-	const updateCurrentFrame = (skiaImage: SkImage, timestamp?: number) => {
+	// 按渲染通道更新帧，避免离屏渲染覆盖主预览帧
+	const updateCurrentFrame = (
+		skiaImage: SkImage,
+		timestamp: number | undefined,
+		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
+	) => {
 		// 存入缓存
 		if (timestamp !== undefined) {
 			const alignedTime = alignTime(timestamp);
 			assetHandle?.asset.storeFrame(alignedTime, skiaImage);
 		}
 
-		updatePinnedFrame(skiaImage, assetHandle?.asset ?? null);
+		updatePinnedFrame(frameChannel, skiaImage, assetHandle?.asset ?? null);
 		store.setState((state) => ({
 			...state,
 			internal: {
 				...state.internal,
-				currentFrame: skiaImage,
+				currentFrame:
+					frameChannel === "current"
+						? skiaImage
+						: state.internal.currentFrame,
+				offscreenFrame:
+					frameChannel === "offscreen"
+						? skiaImage
+						: state.internal.offscreenFrame,
 				isReady: true,
 			},
 		}));
@@ -546,7 +633,9 @@ export function createVideoClipModel(
 		lastSinkSwitchFrame = currentTime;
 
 		const nextSink = resolveVideoSink(handle.asset, shouldDedicated);
-		stopPlayback();
+		for (const frameChannel of FRAME_CHANNELS) {
+			stopPlayback(frameChannel);
+		}
 		store.setState((state) => ({
 			...state,
 			internal: {
@@ -562,24 +651,36 @@ export function createVideoClipModel(
 	};
 
 	// 开始流式播放
-	const startPlayback = async (startTime: number): Promise<void> => {
-		await stepPlayback(startTime);
+	const startPlayback = async (
+		startTime: number,
+		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
+	): Promise<void> => {
+		await stepPlayback(startTime, frameChannel);
 	};
 
 	// 获取下一帧（流式播放时调用）
-	const getNextFrame = async (targetTime: number): Promise<void> => {
-		await stepPlayback(targetTime);
+	const getNextFrame = async (
+		targetTime: number,
+		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
+	): Promise<void> => {
+		await stepPlayback(targetTime, frameChannel);
 	};
 
 	// 停止流式播放
-	const stopPlayback = () => {
+	const stopPlayback = (
+		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
+	) => {
 		const sessionKey =
-			retainedPlaybackSessionKey ?? resolveVideoPlaybackSessionKey();
+			retainedPlaybackSessionKeyByChannel[frameChannel] ??
+			resolveVideoPlaybackSessionKey(frameChannel);
 		stopVideoPlaybackSession(sessionKey);
 	};
 
 	// 统一的播放步进方法，避免频繁挂载导致状态丢失
-	const stepPlayback = async (targetTime: number): Promise<void> => {
+	const stepPlayback = async (
+		targetTime: number,
+		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
+	): Promise<void> => {
 		if (!Number.isFinite(targetTime)) return;
 		const { internal, props } = store.getState();
 		const videoSink = internal.videoSink;
@@ -588,7 +689,7 @@ export function createVideoClipModel(
 		const backJumpThresholdSeconds = props.reversed
 			? 0
 			: PLAYBACK_BACK_JUMP_FRAMES / getTimelineFps();
-		const sessionKey = retainPlaybackSession();
+		const sessionKey = retainPlaybackSession(frameChannel);
 		const frameToShow = await stepVideoPlaybackSession({
 			key: sessionKey,
 			sink: videoSink,
@@ -609,7 +710,7 @@ export function createVideoClipModel(
 		}
 		const skiaImage = await canvasToSkImage(canvas);
 		if (!skiaImage) return;
-		updateCurrentFrame(skiaImage, frameToShow.timestamp);
+		updateCurrentFrame(skiaImage, frameToShow.timestamp, frameChannel);
 	};
 
 	const getAudioPlaybackState = () => {
@@ -655,15 +756,17 @@ export function createVideoClipModel(
 	): Promise<void> => {
 		const { internal, props } = store.getState();
 		const { videoSink, input } = internal;
+		const frameChannel = resolveFrameChannel(options.frameChannel);
 
 		if (!videoSink) return;
 
 		// seek 前先停止流式播放，避免迭代器与临时 seek 竞争
-		stopPlayback();
+		stopPlayback(frameChannel);
 
 		const alignedTime = alignTime(seconds);
 		const normalizedOptions: VideoSeekOptions = {
 			reason: resolveSeekReason(options.reason, Boolean(props.reversed)),
+			frameChannel,
 		};
 		const shouldReverseLookahead =
 			normalizedOptions.reason === "reverse-playback" &&
@@ -692,12 +795,15 @@ export function createVideoClipModel(
 		};
 		// 防止并发 seek
 		if (isSeekingFlag) {
-			pendingSeekRequest = { time: alignedTime, options: normalizedOptions };
+			pendingSeekRequestByChannel[frameChannel] = {
+				time: alignedTime,
+				options: normalizedOptions,
+			};
 			// seek 忙碌时也触发倒放预热，避免预编译阶段丢失 lookahead 机会。
 			triggerReverseLookaheadPrewarm();
 			return;
 		}
-		if (lastSeekTime === alignedTime) {
+		if (lastSeekTimeByChannel[frameChannel] === alignedTime) {
 			// 命中同帧时仍允许倒放预热继续推进。
 			triggerReverseLookaheadPrewarm();
 			return;
@@ -706,16 +812,23 @@ export function createVideoClipModel(
 		// 检查缓存
 		const cachedFrame = assetHandle?.asset.getCachedFrame(alignedTime);
 		if (cachedFrame) {
-			updatePinnedFrame(cachedFrame, assetHandle?.asset ?? null);
+			updatePinnedFrame(frameChannel, cachedFrame, assetHandle?.asset ?? null);
 			store.setState((state) => ({
 				...state,
 				internal: {
 					...state.internal,
-					currentFrame: cachedFrame,
+					currentFrame:
+						frameChannel === "current"
+							? cachedFrame
+							: state.internal.currentFrame,
+					offscreenFrame:
+						frameChannel === "offscreen"
+							? cachedFrame
+							: state.internal.offscreenFrame,
 					isReady: true,
 				},
 			}));
-			lastSeekTime = alignedTime;
+			lastSeekTimeByChannel[frameChannel] = alignedTime;
 			triggerReverseLookaheadPrewarm();
 			return;
 		}
@@ -747,8 +860,8 @@ export function createVideoClipModel(
 				if (!firstFrame) return;
 				const firstImage = await decodeWrappedFrame(firstFrame);
 				if (firstImage && currentAsyncId === asyncId) {
-					updateCurrentFrame(firstImage, alignedTime);
-					lastSeekTime = alignedTime;
+					updateCurrentFrame(firstImage, alignedTime, frameChannel);
+					lastSeekTimeByChannel[frameChannel] = alignedTime;
 				}
 				if (SEEK_PREFETCH_FRAMES <= 0) return;
 				// 预取少量连续帧，减少拖动预览时的离散命中
@@ -796,8 +909,8 @@ export function createVideoClipModel(
 				});
 				if (currentAsyncId !== asyncId) return;
 				if (warmupResult.frame) {
-					updateCurrentFrame(warmupResult.frame, alignedTime);
-					lastSeekTime = alignedTime;
+					updateCurrentFrame(warmupResult.frame, alignedTime, frameChannel);
+					lastSeekTimeByChannel[frameChannel] = alignedTime;
 					resolvedByWarmup = true;
 				}
 			}
@@ -809,12 +922,23 @@ export function createVideoClipModel(
 			console.warn("Seek failed:", err);
 		} finally {
 			isSeekingFlag = false;
-			if (pendingSeekRequest && pendingSeekRequest.time !== lastSeekTime) {
-				const nextRequest = pendingSeekRequest;
-				pendingSeekRequest = null;
-				await seekToTime(nextRequest.time, nextRequest.options);
-			} else {
-				pendingSeekRequest = null;
+			let nextChannel: RenderFrameChannel | null = null;
+			for (const candidate of FRAME_CHANNELS) {
+				const request = pendingSeekRequestByChannel[candidate];
+				if (!request) continue;
+				if (request.time === lastSeekTimeByChannel[candidate]) {
+					pendingSeekRequestByChannel[candidate] = null;
+					continue;
+				}
+				nextChannel = candidate;
+				break;
+			}
+			if (nextChannel) {
+				const nextRequest = pendingSeekRequestByChannel[nextChannel];
+				pendingSeekRequestByChannel[nextChannel] = null;
+				if (nextRequest) {
+					await seekToTime(nextRequest.time, nextRequest.options);
+				}
 			}
 		}
 	};
@@ -822,6 +946,7 @@ export function createVideoClipModel(
 	const prepareFrame = async (context: PrepareFrameContext): Promise<void> => {
 		const { element, displayTime, fps } = context;
 		if (context.phase === "afterRender") return;
+		const frameChannel = resolveFrameChannel(context.frameChannel);
 		const { internal, constraints, props } = store.getState();
 		if (constraints.isLoading || constraints.hasError) return;
 		if (!props.uri || internal.videoDuration <= 0) return;
@@ -852,20 +977,22 @@ export function createVideoClipModel(
 		const alignedVideoTime = framesToSeconds(alignedFrameIndex, fps);
 		// 倒放预编译必须走 seek 路径，才能正确处理 GOP 回退并稳定产出目标帧。
 		if (props.reversed) {
-			await seekToTime(alignedVideoTime);
-			lastPreparedFrameIndex = alignedFrameIndex;
+			await seekToTime(alignedVideoTime, { frameChannel });
+			lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
 			return;
 		}
 		// 正放场景按帧顺序流式解码，只有回退或首次才重建迭代器。
+		const lastPreparedFrameIndex =
+			lastPreparedFrameIndexByChannel[frameChannel];
 		if (
 			lastPreparedFrameIndex === null ||
 			alignedFrameIndex < lastPreparedFrameIndex
 		) {
-			await stepPlayback(alignedVideoTime);
-			lastPreparedFrameIndex = alignedFrameIndex;
+			await stepPlayback(alignedVideoTime, frameChannel);
+			lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
 		} else if (alignedFrameIndex > lastPreparedFrameIndex) {
-			await stepPlayback(alignedVideoTime);
-			lastPreparedFrameIndex = alignedFrameIndex;
+			await stepPlayback(alignedVideoTime, frameChannel);
+			lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
 		}
 	};
 
@@ -881,11 +1008,12 @@ export function createVideoClipModel(
 				canTrimStart: true,
 				canTrimEnd: true,
 			},
-			internal: {
-				videoSink: null,
-				input: null,
-				currentFrame: null,
-				videoDuration: 0,
+				internal: {
+					videoSink: null,
+					input: null,
+					currentFrame: null,
+					offscreenFrame: null,
+					videoDuration: 0,
 				isReady: false,
 				playbackEpoch: 0,
 				audioSink: null,
@@ -1180,9 +1308,14 @@ export function createVideoClipModel(
 				asyncId++; // 取消所有进行中的异步操作
 				const internal = get().internal as VideoClipInternal;
 
-				updatePinnedFrame(null, null);
-				stopPlayback();
-				releasePlaybackSession();
+				resetPinnedFrames();
+				for (const frameChannel of FRAME_CHANNELS) {
+					stopPlayback(frameChannel);
+				}
+				releaseAllPlaybackSessions();
+				lastSeekTimeByChannel = { current: null, offscreen: null };
+				pendingSeekRequestByChannel = { current: null, offscreen: null };
+				lastPreparedFrameIndexByChannel = { current: null, offscreen: null };
 				stopAudioPlayback();
 				audioPlayback?.dispose();
 

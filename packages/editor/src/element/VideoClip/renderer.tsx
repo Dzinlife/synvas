@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Group, ImageShader, Rect } from "react-skia-lite";
+import type { RenderFrameChannel } from "core/element/model/types";
 import {
 	useFps,
 	usePlaybackControl,
@@ -18,6 +19,7 @@ import { applyPlayingPlaybackStrategy } from "./playbackStrategy";
 interface VideoClipRendererProps extends VideoClipProps {
 	id: string;
 	__disableRuntimePlaybackEffects?: boolean;
+	__frameChannel?: RenderFrameChannel;
 }
 
 const useVideoClipSelector = createModelSelector<
@@ -28,7 +30,9 @@ const useVideoClipSelector = createModelSelector<
 const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 	id,
 	__disableRuntimePlaybackEffects = false,
+	__frameChannel = "current",
 }) => {
+	const frameChannel = __frameChannel === "offscreen" ? "offscreen" : "current";
 	// 渲染时优先使用导出帧
 	const currentTimeFrames = useRenderTime();
 	const { fps } = useFps();
@@ -54,9 +58,12 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 		id,
 		(state) => state.constraints.hasError ?? false,
 	);
-	const currentFrame = useVideoClipSelector(
+	const renderFrame = useVideoClipSelector(
 		id,
-		(state) => state.internal.currentFrame,
+		(state) =>
+			frameChannel === "offscreen"
+				? state.internal.offscreenFrame
+				: state.internal.currentFrame,
 	);
 	const playbackEpoch = useVideoClipSelector(
 		id,
@@ -134,6 +141,7 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 			applyPlayingPlaybackStrategy({
 				reversed: Boolean(props.reversed),
 				videoTime,
+				frameChannel,
 				seekToTime,
 				stepPlayback,
 			});
@@ -143,11 +151,11 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 		// 播放状态变化：从播放到暂停
 		if (wasPlayingRef.current) {
 			wasPlayingRef.current = false;
-			stopPlayback();
+			stopPlayback(frameChannel);
 		}
 
 		// 非播放状态：直接 seek，保证逐帧拖动时每一帧都刷新。
-		seekToTime(videoTime);
+		seekToTime(videoTime, { frameChannel });
 	}, [
 		props.uri,
 		props.reversed,
@@ -163,6 +171,7 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 		stopPlayback,
 		isExporting,
 		__disableRuntimePlaybackEffects,
+		frameChannel,
 	]);
 
 	useEffect(() => {
@@ -175,17 +184,24 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 		if (wasExportingRef.current) {
 			// 导出结束后再停止流式播放，清理资源
 			wasExportingRef.current = false;
-			stopPlayback();
+			stopPlayback(frameChannel);
 		}
-	}, [isExporting, stopPlayback]);
+	}, [isExporting, stopPlayback, frameChannel]);
 
 	// 组件卸载时仅释放会话引用，避免跨切点瞬间停流
 	useEffect(() => {
 		return () => {
 			if (isExporting) return;
-			releasePlaybackSession();
+			// 离屏树每帧都会卸载，避免频繁释放导致会话反复冷启动
+			if (__disableRuntimePlaybackEffects) return;
+			releasePlaybackSession(frameChannel);
 		};
-	}, [isExporting, releasePlaybackSession]);
+	}, [
+		isExporting,
+		releasePlaybackSession,
+		frameChannel,
+		__disableRuntimePlaybackEffects,
+	]);
 
 	// Loading 状态
 	if (isLoading) {
@@ -205,11 +221,11 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 				y={0}
 				width={width}
 				height={height}
-				color={currentFrame ? undefined : "transparent"}
+				color={renderFrame ? undefined : "transparent"}
 			>
-				{currentFrame && (
+				{renderFrame && (
 					<ImageShader
-						image={currentFrame}
+						image={renderFrame}
 						fit="contain"
 						x={0}
 						y={0}

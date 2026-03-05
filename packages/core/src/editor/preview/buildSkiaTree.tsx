@@ -2,6 +2,7 @@ import React from "react";
 import { Fill, Group, Picture, Skia, type SkPicture } from "react-skia-lite";
 import type {
 	ComponentModelStore,
+	RenderFrameChannel,
 	RendererPrepareFrameContext,
 } from "../../element/model/types";
 import { transformPositionToCanvasPoint } from "../../element/position";
@@ -29,6 +30,7 @@ type RenderPrepareOptions = {
 	awaitReady?: boolean;
 	compositionPath?: string[];
 	maxCompositionDepth?: number;
+	frameChannel?: RenderFrameChannel;
 };
 
 type ResolvedComponent = {
@@ -69,6 +71,7 @@ const defaultIsTransitionElement = (element: TimelineElement): boolean =>
 const FILTER_ELEMENT_TYPE = "Filter";
 const COMPOSITION_ELEMENT_TYPE = "Composition";
 const DEFAULT_MAX_COMPOSITION_DEPTH = 16;
+const DEFAULT_RENDER_FRAME_CHANNEL: RenderFrameChannel = "current";
 
 const waitForModelReady = async (
 	modelStore?: ComponentModelStore,
@@ -111,6 +114,14 @@ const resolveCompositionSceneId = (element: TimelineElement): string | null => {
 	if (typeof sceneId !== "string") return null;
 	const trimmed = sceneId.trim();
 	return trimmed.length > 0 ? trimmed : null;
+};
+
+const resolveRenderFrameChannel = (
+	value: RenderFrameChannel | undefined,
+): RenderFrameChannel => {
+	return value === "offscreen"
+		? "offscreen"
+		: DEFAULT_RENDER_FRAME_CHANNEL;
 };
 
 const wrapWithTransform = (
@@ -205,6 +216,7 @@ const renderElementNode = (
 	deps: BuildSkiaDeps,
 	options?: {
 		disableRuntimePlaybackEffects?: boolean;
+		frameChannel?: RenderFrameChannel;
 	},
 ): React.ReactNode | null => {
 	const componentDef = deps.resolveComponent(target.component);
@@ -222,8 +234,15 @@ const renderElementNode = (
 	}
 	const TargetRenderer = componentDef.Renderer;
 	const runtimeProps =
-		target.type === "VideoClip" && options?.disableRuntimePlaybackEffects
-			? { __disableRuntimePlaybackEffects: true }
+		target.type === "VideoClip"
+			? {
+					...(options?.disableRuntimePlaybackEffects
+						? { __disableRuntimePlaybackEffects: true }
+						: {}),
+					...(options?.frameChannel
+						? { __frameChannel: options.frameChannel }
+						: {}),
+				}
 			: {};
 	return (
 		<TargetRenderer
@@ -274,6 +293,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 		),
 	);
 	const shouldAwaitReady = isExporting || (prepare?.awaitReady ?? false);
+	const frameChannel = resolveRenderFrameChannel(prepare?.frameChannel);
 	const shouldPrepareTransitionPictures =
 		(prepare?.prepareTransitionPictures ?? false) || isExporting;
 	const transitionPictureSize =
@@ -333,6 +353,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 			element: target,
 			displayTime,
 			fps,
+			frameChannel,
 			modelStore,
 			getModelStore,
 			canvasSize,
@@ -350,6 +371,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 			target,
 			node: renderElementNode(target, deps, {
 				disableRuntimePlaybackEffects: shouldRunReadyPipeline,
+				frameChannel,
 			}),
 			isTransitionElement,
 			canvasSize,
@@ -434,6 +456,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 							awaitReady: shouldAwaitReady,
 							compositionPath: [...compositionPath, sceneId],
 							maxCompositionDepth,
+							frameChannel: "offscreen",
 						},
 						},
 						compositionDeps,
