@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, render, waitFor } from "@testing-library/react";
-import type { CanvasNode, StudioProject } from "core/studio/types";
+import type { StudioProject, VideoCanvasNode } from "core/studio/types";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
@@ -9,6 +9,50 @@ import { NodeInteractionWrapper } from "./NodeInteractionWrapper";
 
 const { rootRenderSpy } = vi.hoisted(() => ({
 	rootRenderSpy: vi.fn(),
+}));
+
+vi.mock("@use-gesture/react", () => ({
+	useDrag: (handler: (state: Record<string, unknown>) => void) => {
+		return () => ({
+			onPointerDown: (event: Record<string, unknown>) => {
+				const clientX = Number(event.clientX ?? 0);
+				const clientY = Number(event.clientY ?? 0);
+				handler({
+					first: true,
+					last: false,
+					tap: false,
+					movement: [0, 0],
+					xy: [clientX, clientY],
+					event: {
+						button: Number(event.button ?? 0),
+						buttons: Number(event.buttons ?? 1),
+					},
+				});
+				handler({
+					first: false,
+					last: false,
+					tap: false,
+					movement: [12, 8],
+					xy: [clientX + 12, clientY + 8],
+					event: {
+						button: Number(event.button ?? 0),
+						buttons: Number(event.buttons ?? 1),
+					},
+				});
+				handler({
+					first: false,
+					last: true,
+					tap: false,
+					movement: [12, 8],
+					xy: [clientX + 12, clientY + 8],
+					event: {
+						button: Number(event.button ?? 0),
+						buttons: 0,
+					},
+				});
+			},
+		});
+	},
 }));
 
 vi.mock("react-skia-lite", async () => {
@@ -32,6 +76,7 @@ vi.mock("react-skia-lite", async () => {
 		Canvas,
 		Group: "group",
 		Rect: "rect",
+		Path: "path",
 		Shader: "shader",
 		Skia: {
 			RuntimeEffect: {
@@ -91,7 +136,25 @@ const getLatestRenderTree = (): React.ReactNode => {
 	return latestCall[0] as React.ReactNode;
 };
 
-const createVideoNode = (id: string, zIndex: number): CanvasNode => ({
+const collectAnchorGroups = (tree: React.ReactNode): AnyElement[] => {
+	return collectElements(
+		tree,
+		(element) =>
+			element.type === "group" &&
+			Boolean(element.props.hitRect) &&
+			typeof element.props.onPointerDown === "function" &&
+			collectElements(
+				element.props.children as React.ReactNode,
+				(child) => child.type === "path",
+			).length > 0,
+	);
+};
+
+const createVideoNode = (
+	id: string,
+	zIndex: number,
+	patch: Partial<VideoCanvasNode> = {},
+): VideoCanvasNode => ({
 	id,
 	type: "video",
 	name: id,
@@ -105,6 +168,7 @@ const createVideoNode = (id: string, zIndex: number): CanvasNode => ({
 	createdAt: 1,
 	updatedAt: 1,
 	assetId: `${id}-asset`,
+	...patch,
 });
 
 const emptyScenes: StudioProject["scenes"] = {};
@@ -320,4 +384,119 @@ describe("InfiniteSkiaCanvas", () => {
 		);
 		expect(endNodeBWrapper?.props.showBorder).toBe(false);
 	});
+
+	it("active 节点渲染两个 resize anchor", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createVideoNode("node-a", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				focusedNodeId={null}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const anchorGroups = collectAnchorGroups(tree);
+		expect(anchorGroups).toHaveLength(2);
+	});
+
+	it("locked active 节点不渲染 resize anchor", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createVideoNode("node-a", 0, { locked: true })]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				focusedNodeId={null}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const anchorGroups = collectAnchorGroups(tree);
+		expect(anchorGroups).toHaveLength(0);
+	});
+
+	it("focus 状态下不显示 resize anchor", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createVideoNode("node-a", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				focusedNodeId="node-a"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const anchorGroups = collectAnchorGroups(tree);
+		expect(anchorGroups).toHaveLength(0);
+	});
+
+	it("anchor pointer down 会透传 resize start/drag/end 回调并包含 anchor", async () => {
+		const onNodeResizeStart = vi.fn();
+		const onNodeResize = vi.fn();
+		const onNodeResizeEnd = vi.fn();
+
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createVideoNode("node-a", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				focusedNodeId={null}
+				onNodeResizeStart={onNodeResizeStart}
+				onNodeResize={onNodeResize}
+				onNodeResizeEnd={onNodeResizeEnd}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const anchorGroups = collectAnchorGroups(tree);
+		expect(anchorGroups).toHaveLength(2);
+
+		act(() => {
+			anchorGroups[0]?.props.onPointerDown?.({
+				button: 0,
+				buttons: 1,
+				clientX: 120,
+				clientY: 80,
+			});
+		});
+
+		expect(onNodeResizeStart).toHaveBeenCalled();
+		expect(onNodeResize).toHaveBeenCalled();
+		expect(onNodeResizeEnd).toHaveBeenCalled();
+		expect(onNodeResizeStart.mock.calls[0]?.[0]?.id).toBe("node-a");
+		expect(onNodeResizeStart.mock.calls[0]?.[1]).toBe("top-left");
+	});
+
 });

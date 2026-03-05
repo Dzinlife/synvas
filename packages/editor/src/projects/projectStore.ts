@@ -71,8 +71,6 @@ export type CanvasNodeCreateInput =
 			name?: string;
 			assetId?: string;
 			duration?: number;
-			naturalWidth?: number;
-			naturalHeight?: number;
 			text?: string;
 			fontSize?: number;
 	  };
@@ -548,8 +546,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						type: "image",
 						assetId: input.assetId ?? "",
 						name: input.name?.trim() ? input.name.trim() : "Image",
-						naturalWidth: input.naturalWidth,
-						naturalHeight: input.naturalHeight,
 						x: input.x ?? -width / 2,
 						y: input.y ?? -height / 2,
 						width,

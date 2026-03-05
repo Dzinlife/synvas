@@ -46,8 +46,6 @@ const createNode = (id = "node-1"): ImageCanvasNode => ({
 	createdAt: 1,
 	updatedAt: 1,
 	assetId: "asset-1",
-	naturalWidth: 320,
-	naturalHeight: 180,
 });
 
 const createImageAsset = (uri: string): TimelineAsset => ({

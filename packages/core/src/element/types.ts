@@ -153,6 +153,10 @@ export type SourceKind = (typeof SOURCE_KIND_VALUES)[number];
 
 export interface AssetMetaSet {
 	asr?: TranscriptRecord;
+	sourceSize?: {
+		width: number;
+		height: number;
+	};
 	[key: string]: unknown;
 }
 

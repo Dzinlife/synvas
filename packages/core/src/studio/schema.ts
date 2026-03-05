@@ -38,8 +38,6 @@ const audioNodeSchema = canvasNodeBaseSchema.extend({
 const imageNodeSchema = canvasNodeBaseSchema.extend({
 	type: z.literal("image"),
 	assetId: nonEmptyStringSchema,
-	naturalWidth: z.number().positive().optional(),
-	naturalHeight: z.number().positive().optional(),
 });
 
 const textNodeSchema = canvasNodeBaseSchema.extend({

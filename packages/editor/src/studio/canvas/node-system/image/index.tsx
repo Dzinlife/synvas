@@ -60,6 +60,24 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 	create: () => ({ type: "image" }),
 	skiaRenderer: ImageNodeSkiaRenderer,
 	toolbar: ImageNodeToolbar,
+	resolveResizeConstraints: ({ node, asset }) => {
+		const sourceWidth = asset?.meta?.sourceSize?.width ?? node.width;
+		const sourceHeight = asset?.meta?.sourceSize?.height ?? node.height;
+		if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight)) {
+			return {
+				lockAspectRatio: true,
+			};
+		}
+		if (sourceWidth <= 0 || sourceHeight <= 0) {
+			return {
+				lockAspectRatio: true,
+			};
+		}
+		return {
+			lockAspectRatio: true,
+			aspectRatio: sourceWidth / sourceHeight,
+		};
+	},
 	contextMenu: ({ node, sceneOptions, onInsertNodeToScene }) => {
 		const canInsert = Boolean(node.assetId);
 		const sceneActions = sceneOptions.map((scene) => ({
@@ -92,14 +110,27 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 			kind: "image",
 			name: file.name,
 		});
+		context.updateProjectAssetMeta(assetId, (prev) => {
+			if (
+				prev?.sourceSize?.width === metadata.width &&
+				prev?.sourceSize?.height === metadata.height
+			) {
+				return prev;
+			}
+			return {
+				...prev,
+				sourceSize: {
+					width: metadata.width,
+					height: metadata.height,
+				},
+			};
+		});
 		return {
 			type: "image",
 			assetId,
 			name: file.name,
 			width: metadata.width,
 			height: metadata.height,
-			naturalWidth: metadata.width,
-			naturalHeight: metadata.height,
 		};
 	},
 };

@@ -11,6 +11,24 @@ const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
 	create: () => ({ type: "scene" }),
 	skiaRenderer: SceneNodeSkiaRenderer,
 	toolbar: SceneNodeToolbar,
+	resolveResizeConstraints: ({ node, scene }) => {
+		const sourceWidth = scene?.timeline.canvas.width ?? node.width;
+		const sourceHeight = scene?.timeline.canvas.height ?? node.height;
+		if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight)) {
+			return {
+				lockAspectRatio: true,
+			};
+		}
+		if (sourceWidth <= 0 || sourceHeight <= 0) {
+			return {
+				lockAspectRatio: true,
+			};
+		}
+		return {
+			lockAspectRatio: true,
+			aspectRatio: sourceWidth / sourceHeight,
+		};
+	},
 	focusable: true,
 	drawer: SceneNodeDrawer,
 	drawerOptions: {

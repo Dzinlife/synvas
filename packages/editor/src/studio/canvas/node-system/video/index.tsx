@@ -15,6 +15,24 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 	create: () => ({ type: "video" }),
 	skiaRenderer: VideoNodeSkiaRenderer,
 	toolbar: VideoNodeToolbar,
+	resolveResizeConstraints: ({ node, asset }) => {
+		const sourceWidth = asset?.meta?.sourceSize?.width ?? node.width;
+		const sourceHeight = asset?.meta?.sourceSize?.height ?? node.height;
+		if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight)) {
+			return {
+				lockAspectRatio: true,
+			};
+		}
+		if (sourceWidth <= 0 || sourceHeight <= 0) {
+			return {
+				lockAspectRatio: true,
+			};
+		}
+		return {
+			lockAspectRatio: true,
+			aspectRatio: sourceWidth / sourceHeight,
+		};
+	},
 	fromExternalFile: async (file, context) => {
 		if (!isVideoFile(file)) return null;
 		const metadata = await readVideoMetadata(file).catch(() =>
@@ -26,6 +44,21 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 			kind: "video",
 			name: file.name,
 		});
+		context.updateProjectAssetMeta(assetId, (prev) => {
+			if (
+				prev?.sourceSize?.width === metadata.width &&
+				prev?.sourceSize?.height === metadata.height
+			) {
+				return prev;
+			}
+			return {
+				...prev,
+				sourceSize: {
+					width: metadata.width,
+					height: metadata.height,
+				},
+			};
+		});
 		return {
 			type: "video",
 			assetId,
@@ -33,8 +66,6 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 			width: metadata.width,
 			height: metadata.height,
 			duration: Math.max(1, Math.round(metadata.duration * context.fps)),
-			naturalWidth: metadata.width,
-			naturalHeight: metadata.height,
 		};
 	},
 };

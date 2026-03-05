@@ -10,6 +10,7 @@ import {
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
+import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import CanvasWorkspace from "./CanvasWorkspace";
 
 const togglePlaybackMock = vi.fn();
@@ -39,6 +40,21 @@ interface MockInfiniteSkiaCanvasProps {
 	onNodeDragStart?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
 	onNodeDrag?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
 	onNodeDragEnd?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
+	onNodeResizeStart?: (
+		node: CanvasNode,
+		anchor: "top-left" | "bottom-right",
+		event: MockCanvasNodeDragEvent,
+	) => void;
+	onNodeResize?: (
+		node: CanvasNode,
+		anchor: "top-left" | "bottom-right",
+		event: MockCanvasNodeDragEvent,
+	) => void;
+	onNodeResizeEnd?: (
+		node: CanvasNode,
+		anchor: "top-left" | "bottom-right",
+		event: MockCanvasNodeDragEvent,
+	) => void;
 }
 
 vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
@@ -98,6 +114,18 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			create: () => ({ type: "scene" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("scene"),
+			resolveResizeConstraints: ({
+				scene,
+				node,
+			}: {
+				scene: { timeline?: { canvas?: { width?: number; height?: number } } } | null;
+				node: { width: number; height: number };
+			}) => ({
+				lockAspectRatio: true,
+				aspectRatio:
+					(scene?.timeline?.canvas?.width ?? node.width) /
+					(scene?.timeline?.canvas?.height ?? node.height),
+			}),
 			focusable: true,
 			drawer: SceneDrawer,
 			drawerOptions: {
@@ -114,6 +142,22 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			create: () => ({ type: "video" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("video"),
+			resolveResizeConstraints: ({
+				asset,
+				node,
+			}: {
+				asset:
+					| {
+							meta?: { sourceSize?: { width?: number; height?: number } };
+					  }
+					| null;
+				node: { width: number; height: number };
+			}) => ({
+				lockAspectRatio: true,
+				aspectRatio:
+					(asset?.meta?.sourceSize?.width ?? node.width) /
+					(asset?.meta?.sourceSize?.height ?? node.height),
+			}),
 			drawer: VideoDrawer,
 			drawerOptions: {
 				trigger: "active" as const,
@@ -126,6 +170,10 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 						kind: "video" | "audio" | "image";
 						name?: string;
 					}) => string;
+					updateProjectAssetMeta: (
+						assetId: string,
+						updater: (prev: Record<string, unknown> | undefined) => unknown,
+					) => void;
 				},
 			) => {
 				if (!file.type.startsWith("video/")) return null;
@@ -135,6 +183,13 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					kind: "video",
 					name: file.name,
 				});
+				context.updateProjectAssetMeta(assetId, (prev) => ({
+					...(prev ?? {}),
+					sourceSize: {
+						width: 200,
+						height: 120,
+					},
+				}));
 				return {
 					type: "video",
 					assetId,
@@ -182,6 +237,22 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			create: () => ({ type: "image" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("image"),
+			resolveResizeConstraints: ({
+				asset,
+				node,
+			}: {
+				asset:
+					| {
+							meta?: { sourceSize?: { width?: number; height?: number } };
+					  }
+					| null;
+				node: { width: number; height: number };
+			}) => ({
+				lockAspectRatio: true,
+				aspectRatio:
+					(asset?.meta?.sourceSize?.width ?? node.width) /
+					(asset?.meta?.sourceSize?.height ?? node.height),
+			}),
 			contextMenu: (context: {
 				node: { assetId: string };
 				sceneOptions: Array<{ sceneId: string; label: string }>;
@@ -214,6 +285,10 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 						kind: "video" | "audio" | "image";
 						name?: string;
 					}) => string;
+					updateProjectAssetMeta: (
+						assetId: string,
+						updater: (prev: Record<string, unknown> | undefined) => unknown,
+					) => void;
 				},
 			) => {
 				if (!file.type.startsWith("image/")) return null;
@@ -223,6 +298,13 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					kind: "image",
 					name: file.name,
 				});
+				context.updateProjectAssetMeta(assetId, (prev) => ({
+					...(prev ?? {}),
+					sourceSize: {
+						width: 240,
+						height: 140,
+					},
+				}));
 				return {
 					type: "image",
 					assetId,
@@ -477,6 +559,7 @@ beforeEach(() => {
 		focusedSceneDrafts: {},
 		error: null,
 	});
+	useStudioHistoryStore.getState().clear();
 });
 
 afterEach(() => {
@@ -595,6 +678,53 @@ const dragNodeAt = (
 			buttons: 0,
 		};
 		getLatestInfiniteSkiaCanvasProps().onNodeDragEnd?.(node, endEvent);
+	});
+};
+
+const resizeNodeAt = (
+	startClientX: number,
+	startClientY: number,
+	endClientX: number,
+	endClientY: number,
+	anchor: "top-left" | "bottom-right",
+): void => {
+	const node = getTopVisibleNodeAt(startClientX, startClientY);
+	act(() => {
+		const startEvent: MockCanvasNodeDragEvent = {
+			movementX: 0,
+			movementY: 0,
+			clientX: startClientX,
+			clientY: startClientY,
+			first: true,
+			last: false,
+			tap: false,
+			button: 0,
+			buttons: 1,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeResizeStart?.(
+			node,
+			anchor,
+			startEvent,
+		);
+		getLatestInfiniteSkiaCanvasProps().onNodeResize?.(node, anchor, startEvent);
+		const moveEvent: MockCanvasNodeDragEvent = {
+			movementX: endClientX - startClientX,
+			movementY: endClientY - startClientY,
+			clientX: endClientX,
+			clientY: endClientY,
+			first: false,
+			last: false,
+			tap: false,
+			button: 0,
+			buttons: 1,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeResize?.(node, anchor, moveEvent);
+		const endEvent: MockCanvasNodeDragEvent = {
+			...moveEvent,
+			last: true,
+			buttons: 0,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeResizeEnd?.(node, anchor, endEvent);
 	});
 };
 
@@ -1069,10 +1199,31 @@ describe("CanvasWorkspace", () => {
 		expect(newAudio).toBeTruthy();
 		expect(newImage).toBeTruthy();
 		if (!newVideo || !newAudio || !newImage) return;
+		if (
+			newVideo.type !== "video" ||
+			newAudio.type !== "audio" ||
+			newImage.type !== "image"
+		) {
+			return;
+		}
+		const newVideoAsset = project?.assets.find(
+			(asset) => asset.id === newVideo.assetId,
+		);
+		const newImageAsset = project?.assets.find(
+			(asset) => asset.id === newImage.assetId,
+		);
 		expect(newAudio.x - newVideo.x).toBe(48);
 		expect(newImage.x - newAudio.x).toBe(48);
 		expect(newVideo.y).toBe(newAudio.y);
 		expect(newAudio.y).toBe(newImage.y);
+		expect(newVideoAsset?.meta?.sourceSize).toEqual({
+			width: 200,
+			height: 120,
+		});
+		expect(newImageAsset?.meta?.sourceSize).toEqual({
+			width: 240,
+			height: 140,
+		});
 		expect(useProjectStore.getState().currentProject?.ui.activeSceneId).toBe(
 			"scene-1",
 		);
@@ -1097,6 +1248,143 @@ describe("CanvasWorkspace", () => {
 		expect(node?.x).toBe(360);
 		expect(node?.y).toBe(220);
 		expect(project?.ui.activeNodeId).toBe("node-video-1");
+	});
+
+	it("拖拽结束后的首个 click 会被抑制，避免 active 误切换", () => {
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 420, 260);
+		const otherNode = getTopVisibleNodeAt(720, 360);
+		act(() => {
+			getLatestInfiniteSkiaCanvasProps().onNodeClick?.(otherNode);
+		});
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-video-1",
+		);
+	});
+
+	it("右下角 resize 会保持左上角不动", () => {
+		render(<CanvasWorkspace />);
+		resizeNodeAt(300, 160, 420, 260, "bottom-right");
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		expect(node?.x).toBe(240);
+		expect(node?.y).toBe(120);
+		expect((node?.width ?? 0) > 320).toBe(true);
+		expect((node?.height ?? 0) > 180).toBe(true);
+	});
+
+	it("左上角 resize 会保持右下角不动", () => {
+		render(<CanvasWorkspace />);
+		const before = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((item) => item.id === "node-video-1");
+		expect(before).toBeTruthy();
+		if (!before) return;
+		const beforeRight = before.x + before.width;
+		const beforeBottom = before.y + before.height;
+
+		resizeNodeAt(300, 160, 360, 220, "top-left");
+		const after = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((item) => item.id === "node-video-1");
+		expect(after).toBeTruthy();
+		if (!after) return;
+		expect(Math.abs(after.x + after.width - beforeRight)).toBeLessThan(1e-6);
+		expect(Math.abs(after.y + after.height - beforeBottom)).toBeLessThan(1e-6);
+	});
+
+	it("scene/video/image 等比缩放，text 保持自由缩放", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					assets: project.assets.map((asset) => {
+						if (asset.id !== "asset-scene") return asset;
+						return {
+							...asset,
+							meta: {
+								...(asset.meta ?? {}),
+								sourceSize: {
+									width: 400,
+									height: 300,
+								},
+							},
+						};
+					}),
+				},
+			};
+		});
+		const textId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			name: "Resizable Text",
+			text: "hello",
+			fontSize: 24,
+			x: 980,
+			y: 620,
+			width: 200,
+			height: 80,
+		});
+		render(<CanvasWorkspace />);
+		resizeNodeAt(300, 160, 420, 200, "bottom-right");
+		resizeNodeAt(1000, 640, 1120, 640, "bottom-right");
+
+		const project = useProjectStore.getState().currentProject;
+		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const text = project?.canvas.nodes.find((item) => item.id === textId);
+		expect(video).toBeTruthy();
+		expect(text).toBeTruthy();
+		if (!video || !text) return;
+		expect(Math.abs(video.width / video.height - 4 / 3)).toBeLessThan(1e-6);
+		expect(Math.abs(text.width / text.height - 200 / 80)).toBeGreaterThan(0.2);
+	});
+
+	it("resize 最小尺寸按 32px(屏幕) 约束", () => {
+		const textId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			name: "Min Text",
+			text: "min",
+			fontSize: 24,
+			x: 980,
+			y: 100,
+			width: 80,
+			height: 60,
+		});
+		render(<CanvasWorkspace />);
+		resizeNodeAt(1000, 120, 1200, 260, "top-left");
+		const project = useProjectStore.getState().currentProject;
+		const text = project?.canvas.nodes.find((item) => item.id === textId);
+		expect(text).toBeTruthy();
+		if (!text) return;
+		expect(text.width).toBeGreaterThanOrEqual(32);
+		expect(text.height).toBeGreaterThanOrEqual(32);
+	});
+
+	it("resize 结束仅在布局变化时写入一次历史", () => {
+		render(<CanvasWorkspace />);
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+
+		resizeNodeAt(300, 160, 300, 160, "bottom-right");
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+
+		resizeNodeAt(300, 160, 360, 220, "bottom-right");
+		const past = useStudioHistoryStore.getState().past;
+		expect(past).toHaveLength(1);
+		expect(past[0]?.kind).toBe("canvas.node-layout");
+	});
+
+	it("resize 结束后的首个 click 会被抑制，避免选中其他节点", () => {
+		render(<CanvasWorkspace />);
+		resizeNodeAt(300, 160, 360, 220, "bottom-right");
+		const otherNode = getTopVisibleNodeAt(720, 360);
+		act(() => {
+			getLatestInfiniteSkiaCanvasProps().onNodeClick?.(otherNode);
+		});
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-video-1",
+		);
 	});
 
 	it("节点拖拽后坐标会被约束为整数", () => {

@@ -30,6 +30,7 @@ import {
 import type {
 	CanvasNodeDrawerProps,
 	CanvasNodeDrawerTrigger,
+	CanvasNodeResizeConstraints,
 } from "@/studio/canvas/node-system/types";
 import type { CanvasSidebarTab } from "@/studio/canvas/sidebar/CanvasSidebar";
 import {
@@ -69,7 +70,10 @@ import {
 	CAMERA_ZOOM_EPSILON,
 } from "./canvasWorkspaceUtils";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
-import type { CanvasNodeDragEvent } from "./InfiniteSkiaCanvas";
+import type {
+	CanvasNodeDragEvent,
+	CanvasNodeResizeAnchor,
+} from "./InfiniteSkiaCanvas";
 import { useCanvasCameraController } from "./useCanvasCameraController";
 
 type CanvasContextMenuState =
@@ -98,6 +102,49 @@ interface NodeDragSession {
 	moved: boolean;
 }
 
+interface ResolvedCanvasNodeResizeConstraints {
+	lockAspectRatio: boolean;
+	aspectRatio: number | null;
+	minWidth: number | null;
+	minHeight: number | null;
+	maxWidth: number | null;
+	maxHeight: number | null;
+}
+
+interface NodeResizeSession {
+	nodeId: string;
+	anchor: CanvasNodeResizeAnchor;
+	startNodeX: number;
+	startNodeY: number;
+	startNodeWidth: number;
+	startNodeHeight: number;
+	fixedCornerX: number;
+	fixedCornerY: number;
+	before: CanvasNodeLayoutSnapshot;
+	moved: boolean;
+	constraints: ResolvedCanvasNodeResizeConstraints;
+}
+
+const resolvePositiveNumber = (value: unknown): number | null => {
+	if (typeof value !== "number" || !Number.isFinite(value)) return null;
+	if (value <= 0) return null;
+	return value;
+};
+
+const clampSize = (
+	value: number,
+	minValue: number,
+	maxValue?: number,
+): number => {
+	if (!Number.isFinite(value)) return minValue;
+	if (!Number.isFinite(minValue)) return value;
+	if (maxValue !== undefined && Number.isFinite(maxValue)) {
+		if (maxValue < minValue) return minValue;
+		return Math.min(Math.max(value, minValue), maxValue);
+	}
+	return Math.max(value, minValue);
+};
+
 type AnyCanvasDrawer = React.FC<CanvasNodeDrawerProps<CanvasNode>>;
 
 interface ResolvedNodeDrawer extends DrawerViewData {
@@ -120,6 +167,9 @@ const CanvasWorkspace = () => {
 	);
 	const ensureProjectAssetByUri = useProjectStore(
 		(state) => state.ensureProjectAssetByUri,
+	);
+	const updateProjectAssetMeta = useProjectStore(
+		(state) => state.updateProjectAssetMeta,
 	);
 	const updateSceneTimeline = useProjectStore(
 		(state) => state.updateSceneTimeline,
@@ -153,7 +203,8 @@ const CanvasWorkspace = () => {
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
 	const nodeDragSessionRef = useRef<NodeDragSession | null>(null);
-	const suppressNodeClickIdRef = useRef<string | null>(null);
+	const nodeResizeSessionRef = useRef<NodeResizeSession | null>(null);
+	const suppressNextNodeClickRef = useRef(false);
 	const { getCamera, applyCamera } = useCanvasCameraController({
 		camera,
 		onChange: setCanvasCamera,
@@ -617,10 +668,218 @@ const CanvasWorkspace = () => {
 		[focusedNodeId, isCanvasInteractionLocked, setActiveNode, setActiveScene],
 	);
 
+	const resolveNodeResizeConstraints = useCallback(
+		(node: CanvasNode): ResolvedCanvasNodeResizeConstraints => {
+			const definition = getCanvasNodeDefinition(node.type);
+			const scene =
+				node.type === "scene"
+					? (currentProject?.scenes[node.sceneId] ?? null)
+					: null;
+			const asset =
+				"assetId" in node
+					? (currentProject?.assets.find((item) => item.id === node.assetId) ??
+						null)
+					: null;
+			const constraints: CanvasNodeResizeConstraints =
+				definition.resolveResizeConstraints?.({
+					node,
+					scene,
+					asset,
+				}) ?? {};
+			const minWidth = resolvePositiveNumber(constraints.minWidth);
+			const minHeight = resolvePositiveNumber(constraints.minHeight);
+			const maxWidth = resolvePositiveNumber(constraints.maxWidth);
+			const maxHeight = resolvePositiveNumber(constraints.maxHeight);
+			const fallbackAspectRatio = resolvePositiveNumber(
+				node.width / Math.max(node.height, CAMERA_ZOOM_EPSILON),
+			);
+			const requestedAspectRatio = resolvePositiveNumber(constraints.aspectRatio);
+			const lockAspectRatio =
+				constraints.lockAspectRatio === true &&
+				(requestedAspectRatio !== null || fallbackAspectRatio !== null);
+
+			return {
+				lockAspectRatio,
+				aspectRatio: lockAspectRatio
+					? (requestedAspectRatio ?? fallbackAspectRatio)
+					: null,
+				minWidth,
+				minHeight,
+				maxWidth,
+				maxHeight,
+			};
+		},
+		[currentProject],
+	);
+
+	const handleSkiaNodeResizeStart = useCallback(
+		(node: CanvasNode, anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
+			if (event.button !== 0) return;
+			const canInteractNode =
+				!isCanvasInteractionLocked || node.id === focusedNodeId;
+			if (!canInteractNode) return;
+			if (node.locked) {
+				handleNodeActivate(node);
+				return;
+			}
+			nodeDragSessionRef.current = null;
+			suppressNextNodeClickRef.current = false;
+			setActiveNode(node.id);
+			nodeResizeSessionRef.current = {
+				nodeId: node.id,
+				anchor,
+				startNodeX: node.x,
+				startNodeY: node.y,
+				startNodeWidth: node.width,
+				startNodeHeight: node.height,
+				fixedCornerX:
+					anchor === "bottom-right" ? node.x : node.x + node.width,
+				fixedCornerY:
+					anchor === "bottom-right" ? node.y : node.y + node.height,
+				before: pickLayout(node),
+				moved: false,
+				constraints: resolveNodeResizeConstraints(node),
+			};
+		},
+		[
+			focusedNodeId,
+			handleNodeActivate,
+			isCanvasInteractionLocked,
+			resolveNodeResizeConstraints,
+			setActiveNode,
+		],
+	);
+
+	const handleSkiaNodeResize = useCallback(
+		(node: CanvasNode, anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
+			const resizeSession = nodeResizeSessionRef.current;
+			if (!resizeSession) return;
+			if (resizeSession.nodeId !== node.id) return;
+			if (resizeSession.anchor !== anchor) return;
+
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const deltaX = event.movementX / safeZoom;
+			const deltaY = event.movementY / safeZoom;
+			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
+
+			const draftWidth =
+				anchor === "bottom-right"
+					? resizeSession.startNodeWidth + deltaX
+					: resizeSession.startNodeWidth - deltaX;
+			const draftHeight =
+				anchor === "bottom-right"
+					? resizeSession.startNodeHeight + deltaY
+					: resizeSession.startNodeHeight - deltaY;
+			const globalMinSize = 32 / safeZoom;
+			const minWidth = Math.max(
+				globalMinSize,
+				resizeSession.constraints.minWidth ?? 0,
+			);
+			const minHeight = Math.max(
+				globalMinSize,
+				resizeSession.constraints.minHeight ?? 0,
+			);
+			const maxWidth = resizeSession.constraints.maxWidth ?? undefined;
+			const maxHeight = resizeSession.constraints.maxHeight ?? undefined;
+
+			let nextWidth: number;
+			let nextHeight: number;
+			if (
+				resizeSession.constraints.lockAspectRatio &&
+				resizeSession.constraints.aspectRatio
+			) {
+				const aspectRatio = resizeSession.constraints.aspectRatio;
+				const scaleX =
+					draftWidth /
+					Math.max(resizeSession.startNodeWidth, CAMERA_ZOOM_EPSILON);
+				const scaleY =
+					draftHeight /
+					Math.max(resizeSession.startNodeHeight, CAMERA_ZOOM_EPSILON);
+				let scale = (scaleX + scaleY) / 2;
+				if (!Number.isFinite(scale) || scale <= 0) {
+					scale =
+						minWidth /
+						Math.max(resizeSession.startNodeWidth, CAMERA_ZOOM_EPSILON);
+				}
+				const minWidthByHeight = minHeight * aspectRatio;
+				const minWidthWithAspect = Math.max(minWidth, minWidthByHeight);
+				const maxWidthByHeight =
+					maxHeight !== undefined ? maxHeight * aspectRatio : undefined;
+				const maxWidthWithAspect =
+					maxWidthByHeight !== undefined
+						? maxWidth !== undefined
+							? Math.min(maxWidth, maxWidthByHeight)
+							: maxWidthByHeight
+						: maxWidth;
+				nextWidth = clampSize(
+					resizeSession.startNodeWidth * scale,
+					minWidthWithAspect,
+					maxWidthWithAspect,
+				);
+				nextHeight = nextWidth / aspectRatio;
+			} else {
+				nextWidth = clampSize(draftWidth, minWidth, maxWidth);
+				nextHeight = clampSize(draftHeight, minHeight, maxHeight);
+			}
+
+			const nextX =
+				anchor === "bottom-right"
+					? resizeSession.fixedCornerX
+					: resizeSession.fixedCornerX - nextWidth;
+			const nextY =
+				anchor === "bottom-right"
+					? resizeSession.fixedCornerY
+					: resizeSession.fixedCornerY - nextHeight;
+			const didLayoutChange =
+				Math.abs(nextX - resizeSession.startNodeX) > 1e-6 ||
+				Math.abs(nextY - resizeSession.startNodeY) > 1e-6 ||
+				Math.abs(nextWidth - resizeSession.startNodeWidth) > 1e-6 ||
+				Math.abs(nextHeight - resizeSession.startNodeHeight) > 1e-6;
+
+			resizeSession.moved = resizeSession.moved || didLayoutChange;
+			updateCanvasNodeLayout(resizeSession.nodeId, {
+				x: nextX,
+				y: nextY,
+				width: nextWidth,
+				height: nextHeight,
+			});
+		},
+		[camera.zoom, updateCanvasNodeLayout],
+	);
+
+	const handleSkiaNodeResizeEnd = useCallback(
+		(node: CanvasNode, anchor: CanvasNodeResizeAnchor) => {
+			const resizeSession = nodeResizeSessionRef.current;
+			nodeResizeSessionRef.current = null;
+			if (!resizeSession) return;
+			if (resizeSession.nodeId !== node.id) return;
+			if (resizeSession.anchor !== anchor) return;
+			if (!resizeSession.moved) return;
+			suppressNextNodeClickRef.current = true;
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const latestNode = latestProject.canvas.nodes.find(
+				(item) => item.id === resizeSession.nodeId,
+			);
+			if (!latestNode) return;
+			const after = pickLayout(latestNode);
+			if (isLayoutEqual(resizeSession.before, after)) return;
+			pushHistory({
+				kind: "canvas.node-layout",
+				nodeId: latestNode.id,
+				before: resizeSession.before,
+				after,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+		},
+		[pushHistory],
+	);
+
 	const handleSkiaNodeDragStart = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
+			if (nodeResizeSessionRef.current) return;
 			if (event.button !== 0) return;
-			suppressNodeClickIdRef.current = null;
+			suppressNextNodeClickRef.current = false;
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
@@ -647,6 +906,7 @@ const CanvasWorkspace = () => {
 
 	const handleSkiaNodeDrag = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
+			if (nodeResizeSessionRef.current) return;
 			const dragSession = nodeDragSessionRef.current;
 			if (!dragSession) return;
 			if (dragSession.nodeId !== node.id) return;
@@ -670,12 +930,13 @@ const CanvasWorkspace = () => {
 
 	const handleSkiaNodeDragEnd = useCallback(
 		(node: CanvasNode) => {
+			if (nodeResizeSessionRef.current) return;
 			const dragSession = nodeDragSessionRef.current;
 			nodeDragSessionRef.current = null;
 			if (!dragSession) return;
 			if (dragSession.nodeId !== node.id) return;
 			if (!dragSession.moved) return;
-			suppressNodeClickIdRef.current = dragSession.nodeId;
+			suppressNextNodeClickRef.current = true;
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			const latestNode = latestProject.canvas.nodes.find(
@@ -697,8 +958,8 @@ const CanvasWorkspace = () => {
 
 	const handleSkiaNodeClick = useCallback(
 		(node: CanvasNode) => {
-			if (suppressNodeClickIdRef.current === node.id) {
-				suppressNodeClickIdRef.current = null;
+			if (suppressNextNodeClickRef.current) {
+				suppressNextNodeClickRef.current = false;
 				return;
 			}
 			handleNodeActivate(node);
@@ -823,6 +1084,10 @@ const CanvasWorkspace = () => {
 
 	const handleCanvasClick = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
+			if (suppressNextNodeClickRef.current) {
+				suppressNextNodeClickRef.current = false;
+				return;
+			}
 			if (isOverlayWheelTarget(event.target)) return;
 			if (isCanvasInteractionLocked) return;
 			const world = resolveWorldPoint(event.clientX, event.clientY);
@@ -927,6 +1192,7 @@ const CanvasWorkspace = () => {
 						projectId: currentProjectId,
 						fps,
 						ensureProjectAssetByUri,
+						updateProjectAssetMeta,
 						resolveExternalFileUri: resolveExternalFile,
 					});
 					if (!matched) continue;
@@ -965,6 +1231,7 @@ const CanvasWorkspace = () => {
 			currentProject,
 			currentProjectId,
 			ensureProjectAssetByUri,
+			updateProjectAssetMeta,
 			pushHistory,
 			resolveWorldPoint,
 		],
@@ -1046,6 +1313,9 @@ const CanvasWorkspace = () => {
 				onNodeDragStart={handleSkiaNodeDragStart}
 				onNodeDrag={handleSkiaNodeDrag}
 				onNodeDragEnd={handleSkiaNodeDragEnd}
+				onNodeResizeStart={handleSkiaNodeResizeStart}
+				onNodeResize={handleSkiaNodeResize}
+				onNodeResizeEnd={handleSkiaNodeResizeEnd}
 				onNodeClick={handleSkiaNodeClick}
 				onNodeDoubleClick={handleSkiaNodeDoubleClick}
 			/>

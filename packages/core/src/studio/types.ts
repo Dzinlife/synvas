@@ -44,8 +44,6 @@ export interface TextCanvasNode extends CanvasNodeBase {
 export interface ImageCanvasNode extends CanvasNodeBase {
 	type: "image";
 	assetId: string;
-	naturalWidth?: number;
-	naturalHeight?: number;
 }
 
 export type CanvasNode =

@@ -55,6 +55,23 @@ export interface CanvasNodeContextMenuSceneOption {
 	label: string;
 }
 
+export interface CanvasNodeResizeConstraints {
+	lockAspectRatio?: boolean;
+	aspectRatio?: number;
+	minWidth?: number;
+	minHeight?: number;
+	maxWidth?: number;
+	maxHeight?: number;
+}
+
+export interface CanvasNodeResizeConstraintContext<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	node: TNode;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+}
+
 export interface CanvasNodeContextMenuContext<
 	TNode extends CanvasNode = CanvasNode,
 > {
@@ -72,6 +89,12 @@ export interface CanvasExternalFileContext {
 		kind: TimelineAsset["kind"];
 		name?: string;
 	}) => string;
+	updateProjectAssetMeta: (
+		assetId: string,
+		updater: (
+			prev: TimelineAsset["meta"] | undefined,
+		) => TimelineAsset["meta"] | undefined,
+	) => void;
 	resolveExternalFileUri: (
 		file: File,
 		kind: "video" | "audio" | "image",
@@ -96,6 +119,9 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	contextMenu?: (
 		context: CanvasNodeContextMenuContext<TNode>,
 	) => CanvasNodeContextMenuAction[];
+	resolveResizeConstraints?: (
+		context: CanvasNodeResizeConstraintContext<TNode>,
+	) => CanvasNodeResizeConstraints;
 	fromExternalFile?: (
 		file: File,
 		context: CanvasExternalFileContext,
