@@ -52,7 +52,6 @@ import {
 	DROP_GRID_COLUMNS,
 	DROP_GRID_OFFSET_X,
 	DROP_GRID_OFFSET_Y,
-	GRID_SIZE,
 	SIDEBAR_VIEW_PADDING_PX,
 	buildNodeFitCamera,
 	buildNodePanCamera,
@@ -989,10 +988,6 @@ const CanvasWorkspace = () => {
 		);
 	}
 
-	const gridSizePx = Math.max(20, GRID_SIZE * camera.zoom);
-	const gridOffsetX = (camera.x * camera.zoom) % gridSizePx;
-	const gridOffsetY = (camera.y * camera.zoom) % gridSizePx;
-
 	const contextMenuActions = useMemo<TimelineContextMenuAction[]>(() => {
 		if (!contextMenuState.open) return [];
 		if (contextMenuState.scope === "node") {
@@ -1039,16 +1034,6 @@ const CanvasWorkspace = () => {
 			}}
 			onDrop={handleCanvasDrop}
 		>
-			<div
-				className="pointer-events-none absolute inset-0"
-				style={{
-					backgroundImage:
-						"linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
-					backgroundSize: `${gridSizePx}px ${gridSizePx}px`,
-					backgroundPosition: `${gridOffsetX}px ${gridOffsetY}px`,
-				}}
-			/>
-
 			<InfiniteSkiaCanvas
 				width={stageSize.width}
 				height={stageSize.height}

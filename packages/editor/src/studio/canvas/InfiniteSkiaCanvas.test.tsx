@@ -32,6 +32,12 @@ vi.mock("react-skia-lite", async () => {
 		Canvas,
 		Group: "group",
 		Rect: "rect",
+		Shader: "shader",
+		Skia: {
+			RuntimeEffect: {
+				Make: () => ({ type: "runtime-effect" }),
+			},
+		},
 	};
 });
 

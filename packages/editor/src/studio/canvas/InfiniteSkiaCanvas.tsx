@@ -8,6 +8,7 @@ import {
 	resolveNodeInteractionBorderStyle,
 	resolveNodeInteractionStrokeWidth,
 } from "./NodeInteractionWrapper";
+import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import { getCanvasNodeDefinition } from "./node-system/registry";
 
 export type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
@@ -127,60 +128,62 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const root = canvasRef.current?.getRoot();
 		if (!root) return;
 		root.render(
-			<Group
-				transform={[
-					{ scale: camera.zoom },
-					{ translateX: camera.x },
-					{ translateY: camera.y },
-				]}
-			>
-				{nodes.map((node) => {
-					const definition = getCanvasNodeDefinition(node.type);
-					const Renderer = definition.skiaRenderer;
-					const scene =
-						node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
-					const asset =
-						"assetId" in node ? (assetById.get(node.assetId) ?? null) : null;
-					const isFocused = node.id === focusedNodeId;
-					const isActive = node.id === activeNodeId;
-					const isDimmed = Boolean(focusedNodeId) && !isFocused;
-					const isHovered = node.id === hoveredNodeId;
+			<Group>
+				<CanvasTriDotGridBackground width={width} height={height} camera={camera} />
+				<Group
+					transform={[
+						{ scale: camera.zoom },
+						{ translateX: camera.x },
+						{ translateY: camera.y },
+					]}
+				>
+					{nodes.map((node) => {
+						const definition = getCanvasNodeDefinition(node.type);
+						const Renderer = definition.skiaRenderer;
+						const scene =
+							node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
+						const asset =
+							"assetId" in node ? (assetById.get(node.assetId) ?? null) : null;
+						const isFocused = node.id === focusedNodeId;
+						const isActive = node.id === activeNodeId;
+						const isDimmed = Boolean(focusedNodeId) && !isFocused;
+						const isHovered = node.id === hoveredNodeId;
 
-					return (
-						<Group
-							key={`canvas-node-skia-${node.id}`}
-							clip={{
-								x: node.x,
-								y: node.y,
-								width: node.width,
-								height: node.height,
-							}}
-						>
-							<NodeInteractionWrapper
-								node={node}
-								isActive={isActive}
-								isDimmed={isDimmed}
-								isHovered={isHovered}
-								cameraZoom={camera.zoom}
-								showBorder={!isActive && !isHovered}
-								onPointerEnter={handlePointerEnter}
-								onPointerLeave={handlePointerLeave}
-								onDragStart={handleNodeDragStart}
-								onDrag={handleNodeDrag}
-								onDragEnd={handleNodeDragEnd}
-								onClick={onNodeClick}
-								onDoubleClick={onNodeDoubleClick}
+						return (
+							<Group
+								key={`canvas-node-skia-${node.id}`}
+								clip={{
+									x: node.x,
+									y: node.y,
+									width: node.width,
+									height: node.height,
+								}}
 							>
-								<Renderer
+								<NodeInteractionWrapper
 									node={node}
-									scene={scene}
-									asset={asset}
 									isActive={isActive}
-									isFocused={isFocused}
 									isDimmed={isDimmed}
-									runtimeManager={runtimeManager}
-								/>
-							</NodeInteractionWrapper>
+									isHovered={isHovered}
+									cameraZoom={camera.zoom}
+									showBorder={!isActive && !isHovered}
+									onPointerEnter={handlePointerEnter}
+									onPointerLeave={handlePointerLeave}
+									onDragStart={handleNodeDragStart}
+									onDrag={handleNodeDrag}
+									onDragEnd={handleNodeDragEnd}
+									onClick={onNodeClick}
+									onDoubleClick={onNodeDoubleClick}
+								>
+									<Renderer
+										node={node}
+										scene={scene}
+										asset={asset}
+										isActive={isActive}
+										isFocused={isFocused}
+										isDimmed={isDimmed}
+										runtimeManager={runtimeManager}
+									/>
+								</NodeInteractionWrapper>
 							</Group>
 						);
 					})}
@@ -226,9 +229,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							);
 						})}
 					</Group>
-				</Group>,
-			);
-		}, [
+				</Group>
+			</Group>,
+		);
+	}, [
 		activeNodeId,
 		assetById,
 		camera.x,
@@ -246,6 +250,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		onNodeDoubleClick,
 		runtimeManager,
 		scenes,
+		width,
+		height,
 	]);
 
 	if (width <= 0 || height <= 0) return null;
