@@ -203,6 +203,9 @@ const wrapElementNode = ({
 const renderElementNode = (
 	target: TimelineElement,
 	deps: BuildSkiaDeps,
+	options?: {
+		disableRuntimePlaybackEffects?: boolean;
+	},
 ): React.ReactNode | null => {
 	const componentDef = deps.resolveComponent(target.component);
 	if (!componentDef) {
@@ -218,7 +221,18 @@ const renderElementNode = (
 		return null;
 	}
 	const TargetRenderer = componentDef.Renderer;
-	return <TargetRenderer key={target.id} id={target.id} {...target.props} />;
+	const runtimeProps =
+		target.type === "VideoClip" && options?.disableRuntimePlaybackEffects
+			? { __disableRuntimePlaybackEffects: true }
+			: {};
+	return (
+		<TargetRenderer
+			key={target.id}
+			id={target.id}
+			{...target.props}
+			{...runtimeProps}
+		/>
+	);
 };
 
 const buildSkiaRenderStateWithScopeCore = async (
@@ -330,15 +344,17 @@ const buildSkiaRenderStateWithScopeCore = async (
 		target: TimelineElement,
 		shouldPrepare: boolean,
 	): RenderPlan => {
+		const shouldRunReadyPipeline =
+			shouldPrepare || forcePrepareFrames || shouldAwaitReady;
 		const content = wrapElementNode({
 			target,
-			node: renderElementNode(target, deps),
+			node: renderElementNode(target, deps, {
+				disableRuntimePlaybackEffects: shouldRunReadyPipeline,
+			}),
 			isTransitionElement,
 			canvasSize,
 		});
 		// 转场渲染或强制准备时，提前准备帧避免画面停在旧帧
-		const shouldRunReadyPipeline =
-			shouldPrepare || forcePrepareFrames || shouldAwaitReady;
 		const ready = shouldRunReadyPipeline
 			? runPrepareRenderFrame(
 					target,

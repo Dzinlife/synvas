@@ -17,6 +17,7 @@ import { applyPlayingPlaybackStrategy } from "./playbackStrategy";
 
 interface VideoClipRendererProps extends VideoClipProps {
 	id: string;
+	__disableRuntimePlaybackEffects?: boolean;
 }
 
 const useVideoClipSelector = createModelSelector<
@@ -24,7 +25,10 @@ const useVideoClipSelector = createModelSelector<
 	VideoClipInternal
 >();
 
-const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
+const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
+	id,
+	__disableRuntimePlaybackEffects = false,
+}) => {
 	// 渲染时优先使用导出帧
 	const currentTimeFrames = useRenderTime();
 	const { fps } = useFps();
@@ -91,6 +95,7 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 
 	// 处理播放状态变化
 	useEffect(() => {
+		if (__disableRuntimePlaybackEffects) return;
 		if (isExporting) return;
 		if (
 			isLoading ||
@@ -157,6 +162,7 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({ id }) => {
 		stepPlayback,
 		stopPlayback,
 		isExporting,
+		__disableRuntimePlaybackEffects,
 	]);
 
 	useEffect(() => {
