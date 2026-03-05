@@ -7,7 +7,7 @@ import {
 	screen,
 	waitFor,
 } from "@testing-library/react";
-import type { StudioProject } from "core/studio/types";
+import type { CanvasNode, StudioProject } from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import CanvasWorkspace from "./CanvasWorkspace";
@@ -19,6 +19,28 @@ let rafCounter = 1;
 let nativeRequestAnimationFrame: typeof window.requestAnimationFrame;
 let nativeCancelAnimationFrame: typeof window.cancelAnimationFrame;
 
+interface MockCanvasNodeDragEvent {
+	movementX: number;
+	movementY: number;
+	clientX: number;
+	clientY: number;
+	first: boolean;
+	last: boolean;
+	tap: boolean;
+	button: number;
+	buttons: number;
+}
+
+interface MockInfiniteSkiaCanvasProps {
+	width: number;
+	height: number;
+	onNodeClick?: (node: CanvasNode) => void;
+	onNodeDoubleClick?: (node: CanvasNode) => void;
+	onNodeDragStart?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
+	onNodeDrag?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
+	onNodeDragEnd?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
+}
+
 vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 	usePlaybackOwnerController: () => ({
 		togglePlayback: togglePlaybackMock,
@@ -27,7 +49,7 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 }));
 
 vi.mock("./InfiniteSkiaCanvas", () => ({
-	default: (props: { width: number; height: number }) => {
+	default: (props: MockInfiniteSkiaCanvasProps) => {
 		infiniteSkiaCanvasPropsMock(props);
 		return <div data-testid="infinite-skia-canvas" />;
 	},
@@ -467,34 +489,112 @@ afterEach(() => {
 	cleanup();
 });
 
-const clickNodeAt = (clientX: number, clientY: number): void => {
-	const hitLayer = screen.getByTestId("canvas-node-hit-layer");
-	fireEvent.pointerDown(hitLayer, {
-		button: 0,
-		clientX,
-		clientY,
-	});
-	fireEvent.pointerUp(window, {
+const getLatestInfiniteSkiaCanvasProps = (): MockInfiniteSkiaCanvasProps => {
+	const props = infiniteSkiaCanvasPropsMock.mock.calls.at(-1)?.[0] as
+		| MockInfiniteSkiaCanvasProps
+		| undefined;
+	if (!props) {
+		throw new Error("InfiniteSkiaCanvas props 未捕获");
+	}
+	return props;
+};
+
+const isPointInNode = (node: CanvasNode, x: number, y: number): boolean => {
+	const left = Math.min(node.x, node.x + node.width);
+	const right = Math.max(node.x, node.x + node.width);
+	const top = Math.min(node.y, node.y + node.height);
+	const bottom = Math.max(node.y, node.y + node.height);
+	return x >= left && x <= right && y >= top && y <= bottom;
+};
+
+const getTopVisibleNodeAt = (clientX: number, clientY: number): CanvasNode => {
+	const project = useProjectStore.getState().currentProject;
+	if (!project) {
+		throw new Error("project 不存在");
+	}
+	const sortedNodes = [...project.canvas.nodes]
+		.filter((node) => !node.hidden)
+		.sort((a, b) => {
+			if (a.zIndex !== b.zIndex) return a.zIndex - b.zIndex;
+			return a.createdAt - b.createdAt;
+		});
+	for (let i = sortedNodes.length - 1; i >= 0; i -= 1) {
+		const node = sortedNodes[i];
+		if (!node) continue;
+		if (!isPointInNode(node, clientX, clientY)) continue;
+		return node;
+	}
+	throw new Error(`未命中节点: ${clientX},${clientY}`);
+};
+
+const clickCanvasAt = (clientX: number, clientY: number): void => {
+	fireEvent.click(screen.getByTestId("canvas-workspace"), {
 		button: 0,
 		clientX,
 		clientY,
 	});
 };
 
+const clickNodeAt = (clientX: number, clientY: number): void => {
+	const node = getTopVisibleNodeAt(clientX, clientY);
+	act(() => {
+		getLatestInfiniteSkiaCanvasProps().onNodeClick?.(node);
+	});
+};
+
 const rightClickNodeAt = (clientX: number, clientY: number): void => {
-	const hitLayer = screen.getByTestId("canvas-node-hit-layer");
-	fireEvent.contextMenu(hitLayer, {
+	fireEvent.contextMenu(screen.getByTestId("canvas-workspace"), {
 		clientX,
 		clientY,
 	});
 };
 
 const doubleClickNodeAt = (clientX: number, clientY: number): void => {
-	const hitLayer = screen.getByTestId("canvas-node-hit-layer");
-	fireEvent.doubleClick(hitLayer, {
-		button: 0,
-		clientX,
-		clientY,
+	const node = getTopVisibleNodeAt(clientX, clientY);
+	act(() => {
+		getLatestInfiniteSkiaCanvasProps().onNodeDoubleClick?.(node);
+	});
+};
+
+const dragNodeAt = (
+	startClientX: number,
+	startClientY: number,
+	endClientX: number,
+	endClientY: number,
+): void => {
+	const node = getTopVisibleNodeAt(startClientX, startClientY);
+	act(() => {
+		const startEvent: MockCanvasNodeDragEvent = {
+			movementX: 0,
+			movementY: 0,
+			clientX: startClientX,
+			clientY: startClientY,
+			first: true,
+			last: false,
+			tap: false,
+			button: 0,
+			buttons: 1,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeDragStart?.(node, startEvent);
+		getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, startEvent);
+		const moveEvent: MockCanvasNodeDragEvent = {
+			movementX: endClientX - startClientX,
+			movementY: endClientY - startClientY,
+			clientX: endClientX,
+			clientY: endClientY,
+			first: false,
+			last: false,
+			tap: false,
+			button: 0,
+			buttons: 1,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, moveEvent);
+		const endEvent: MockCanvasNodeDragEvent = {
+			...moveEvent,
+			last: true,
+			buttons: 0,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeDragEnd?.(node, endEvent);
 	});
 };
 
@@ -540,7 +640,7 @@ describe("CanvasWorkspace", () => {
 		expect(panel.textContent).toContain("Scene 1");
 		expect(panel.textContent).toContain("node-scene-1");
 
-		clickNodeAt(1120, 700);
+		clickCanvasAt(1120, 700);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBeNull();
 		expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
 	});
@@ -989,6 +1089,16 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("节点拖拽会更新位置并保持 active", () => {
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 420, 260);
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		expect(node?.x).toBe(360);
+		expect(node?.y).toBe(220);
+		expect(project?.ui.activeNodeId).toBe("node-video-1");
+	});
+
 	it("locked 节点可选中但不可拖拽", () => {
 		useProjectStore.setState((state) => {
 			const project = state.currentProject;
@@ -1007,21 +1117,7 @@ describe("CanvasWorkspace", () => {
 			};
 		});
 		render(<CanvasWorkspace />);
-		const hitLayer = screen.getByTestId("canvas-node-hit-layer");
-		fireEvent.pointerDown(hitLayer, {
-			button: 0,
-			clientX: 300,
-			clientY: 160,
-		});
-		fireEvent.pointerMove(window, {
-			clientX: 420,
-			clientY: 260,
-		});
-		fireEvent.pointerUp(window, {
-			button: 0,
-			clientX: 420,
-			clientY: 260,
-		});
+		dragNodeAt(300, 160, 420, 260);
 
 		const project = useProjectStore.getState().currentProject;
 		const node = project?.canvas.nodes.find(

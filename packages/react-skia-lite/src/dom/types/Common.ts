@@ -115,6 +115,10 @@ export interface SkiaPointerEvent {
 	x: number;
 	y: number;
 	pressure: number;
+	timeStamp: number;
+	detail: number;
+	cancelable: boolean;
+	defaultPrevented: boolean;
 	altKey: boolean;
 	ctrlKey: boolean;
 	shiftKey: boolean;

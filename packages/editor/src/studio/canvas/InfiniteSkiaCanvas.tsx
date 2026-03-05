@@ -1,8 +1,21 @@
 import type { CanvasNode, StudioProject } from "core/studio/types";
+import { useDrag } from "@use-gesture/react";
 import { useEffect, useMemo, useState } from "react";
 import { Canvas, Group, Rect, type SkiaPointerEvent } from "react-skia-lite";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { getCanvasNodeDefinition } from "./node-system/registry";
+
+export interface CanvasNodeDragEvent {
+	movementX: number;
+	movementY: number;
+	clientX: number;
+	clientY: number;
+	first: boolean;
+	last: boolean;
+	tap: boolean;
+	button: number;
+	buttons: number;
+}
 
 interface InfiniteSkiaCanvasProps {
 	width: number;
@@ -19,7 +32,9 @@ interface InfiniteSkiaCanvasProps {
 	focusedNodeId: string | null;
 	onNodeClick?: (node: CanvasNode) => void;
 	onNodeDoubleClick?: (node: CanvasNode) => void;
-	onNodePointerDown?: (node: CanvasNode, event: SkiaPointerEvent) => void;
+	onNodeDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
+	onNodeDrag?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
+	onNodeDragEnd?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 }
 
 interface NodeInteractionWrapperProps {
@@ -29,11 +44,24 @@ interface NodeInteractionWrapperProps {
 	isHovered: boolean;
 	onPointerEnter: (nodeId: string) => void;
 	onPointerLeave: (nodeId: string) => void;
-	onPointerDown?: (node: CanvasNode, event: SkiaPointerEvent) => void;
+	onDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
+	onDrag?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
+	onDragEnd?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onClick?: (node: CanvasNode) => void;
 	onDoubleClick?: (node: CanvasNode) => void;
 	children: React.ReactNode;
 }
+
+const resolvePointerField = (
+	event: unknown,
+	key: "button" | "buttons",
+): number => {
+	if (!event || typeof event !== "object") return 0;
+	if (!(key in event)) return 0;
+	const value = (event as Record<string, unknown>)[key];
+	if (!Number.isFinite(value)) return 0;
+	return Number(value);
+};
 
 const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	node,
@@ -42,7 +70,9 @@ const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	isHovered,
 	onPointerEnter,
 	onPointerLeave,
-	onPointerDown,
+	onDragStart,
+	onDrag,
+	onDragEnd,
 	onClick,
 	onDoubleClick,
 	children,
@@ -53,6 +83,40 @@ const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 			? "rgba(56,189,248,0.95)"
 			: "rgba(255,255,255,0.2)";
 	const borderWidth = isActive || isHovered ? 2 : 1;
+	const bindDrag = useDrag(
+		({ first, last, tap, movement: [mx, my], xy: [clientX, clientY], event }) => {
+			const dragEvent: CanvasNodeDragEvent = {
+				movementX: mx,
+				movementY: my,
+				clientX,
+				clientY,
+				first,
+				last,
+				tap,
+				button: resolvePointerField(event, "button"),
+				buttons: resolvePointerField(event, "buttons"),
+			};
+			if (first) {
+				onDragStart?.(node, dragEvent);
+			}
+			if (!last) {
+				onDrag?.(node, dragEvent);
+			}
+			if (last) {
+				onDragEnd?.(node, dragEvent);
+			}
+		},
+		{
+			pointer: { capture: false },
+			keys: false,
+			filterTaps: false,
+			threshold: 0,
+			triggerAllEvents: true,
+		},
+	);
+	const dragHandlers = bindDrag() as {
+		onPointerDown?: (event: SkiaPointerEvent) => void;
+	};
 
 	return (
 		<Group
@@ -71,7 +135,7 @@ const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 				onPointerLeave(node.id);
 			}}
 			onPointerDown={(event) => {
-				onPointerDown?.(node, event);
+				dragHandlers.onPointerDown?.(event);
 			}}
 			onClick={() => {
 				onClick?.(node);
@@ -105,7 +169,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	focusedNodeId,
 	onNodeClick,
 	onNodeDoubleClick,
-	onNodePointerDown,
+	onNodeDragStart,
+	onNodeDrag,
+	onNodeDragEnd,
 }) => {
 	const runtimeManager = useStudioRuntimeManager();
 	const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -172,7 +238,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 											return null;
 										});
 									}}
-									onPointerDown={onNodePointerDown}
+									onDragStart={onNodeDragStart}
+									onDrag={onNodeDrag}
+									onDragEnd={onNodeDragEnd}
 									onClick={onNodeClick}
 									onDoubleClick={onNodeDoubleClick}
 								>

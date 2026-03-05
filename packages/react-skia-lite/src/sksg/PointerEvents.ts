@@ -403,6 +403,13 @@ const getPressure = (event: NativeInputEvent): number => {
 	return 0;
 };
 
+const getDetail = (event: NativeInputEvent): number => {
+	if ("detail" in event && Number.isFinite(event.detail)) {
+		return event.detail;
+	}
+	return 0;
+};
+
 const getPointerPoint = (
 	event: NativeInputEvent,
 	hostElement: HTMLElement,
@@ -563,32 +570,38 @@ export class SkiaPointerEventManager {
 		if (!targetNode) return;
 		let propagationStopped = false;
 		const target = toEventTargetNode(targetNode);
-		const event: SkiaPointerEvent = {
-			type,
-			pointerId: getPointerId(nativeEvent),
-			pointerType: getPointerType(nativeEvent),
-			button: nativeEvent.button,
-			buttons: nativeEvent.buttons,
-			clientX: nativeEvent.clientX,
-			clientY: nativeEvent.clientY,
-			x: point.x,
-			y: point.y,
-			pressure: getPressure(nativeEvent),
-			altKey: nativeEvent.altKey,
-			ctrlKey: nativeEvent.ctrlKey,
-			shiftKey: nativeEvent.shiftKey,
-			metaKey: nativeEvent.metaKey,
-			nativeEvent,
+			const event: SkiaPointerEvent = {
+				type,
+				pointerId: getPointerId(nativeEvent),
+				pointerType: getPointerType(nativeEvent),
+				button: nativeEvent.button,
+				buttons: nativeEvent.buttons,
+				clientX: nativeEvent.clientX,
+				clientY: nativeEvent.clientY,
+				x: point.x,
+				y: point.y,
+				pressure: getPressure(nativeEvent),
+				timeStamp: nativeEvent.timeStamp,
+				detail: getDetail(nativeEvent),
+				cancelable: nativeEvent.cancelable,
+				defaultPrevented: nativeEvent.defaultPrevented,
+				altKey: nativeEvent.altKey,
+				ctrlKey: nativeEvent.ctrlKey,
+				shiftKey: nativeEvent.shiftKey,
+				metaKey: nativeEvent.metaKey,
+				nativeEvent,
 			target,
-			currentTarget: target,
-			stopPropagation: () => {
-				propagationStopped = true;
-			},
-			isPropagationStopped: () => propagationStopped,
-			preventDefault: () => {
-				nativeEvent.preventDefault();
-			},
-		};
+				currentTarget: target,
+				stopPropagation: () => {
+					propagationStopped = true;
+					nativeEvent.stopPropagation();
+				},
+				isPropagationStopped: () => propagationStopped,
+				preventDefault: () => {
+					nativeEvent.preventDefault();
+					event.defaultPrevented = nativeEvent.defaultPrevented;
+				},
+			};
 
 		for (let i = path.length - 1; i >= 0; i--) {
 			const node = path[i];
@@ -626,6 +639,10 @@ export class SkiaPointerEventManager {
 			x: point.x,
 			y: point.y,
 			pressure: getPressure(nativeEvent),
+			timeStamp: nativeEvent.timeStamp,
+			detail: getDetail(nativeEvent),
+			cancelable: nativeEvent.cancelable,
+			defaultPrevented: nativeEvent.defaultPrevented,
 			altKey: nativeEvent.altKey,
 			ctrlKey: nativeEvent.ctrlKey,
 			shiftKey: nativeEvent.shiftKey,
@@ -633,10 +650,13 @@ export class SkiaPointerEventManager {
 			nativeEvent,
 			target,
 			currentTarget: target,
-			stopPropagation: () => {},
+			stopPropagation: () => {
+				nativeEvent.stopPropagation();
+			},
 			isPropagationStopped: () => false,
 			preventDefault: () => {
 				nativeEvent.preventDefault();
+				event.defaultPrevented = nativeEvent.defaultPrevented;
 			},
 		};
 		handler(event);

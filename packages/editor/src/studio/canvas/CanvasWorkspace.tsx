@@ -12,7 +12,6 @@ import {
 	useRef,
 	useState,
 } from "react";
-import type { SkiaPointerEvent } from "react-skia-lite";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
 import { createTransformMeta } from "@/element/transform";
 import TimelineContextMenu, {
@@ -60,6 +59,7 @@ import {
 } from "./canvasOverlayLayout";
 import FocusSceneKonvaLayer from "./FocusSceneKonvaLayer";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
+import type { CanvasNodeDragEvent } from "./InfiniteSkiaCanvas";
 
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2;
@@ -109,10 +109,8 @@ type CanvasContextMenuState =
 			actions: TimelineContextMenuAction[];
 	  };
 
-interface DragState {
+interface NodeDragSession {
 	nodeId: string;
-	startClientX: number;
-	startClientY: number;
 	startNodeX: number;
 	startNodeY: number;
 	before: CanvasNodeLayoutSnapshot;
@@ -521,7 +519,7 @@ const CanvasWorkspace = () => {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
-	const dragStateRef = useRef<DragState | null>(null);
+	const nodeDragSessionRef = useRef<NodeDragSession | null>(null);
 	const suppressNodeClickIdRef = useRef<string | null>(null);
 	const cameraAnimationFrameRef = useRef<number | null>(null);
 	const cameraAnimationTokenRef = useRef(0);
@@ -1087,8 +1085,8 @@ const CanvasWorkspace = () => {
 		[focusedNodeId, isCanvasInteractionLocked, setActiveNode, setActiveScene],
 	);
 
-	const handleSkiaNodePointerDown = useCallback(
-		(node: CanvasNode, event: SkiaPointerEvent) => {
+	const handleSkiaNodeDragStart = useCallback(
+		(node: CanvasNode, event: CanvasNodeDragEvent) => {
 			if (event.button !== 0) return;
 			suppressNodeClickIdRef.current = null;
 			const canInteractNode =
@@ -1099,10 +1097,8 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			setActiveNode(node.id);
-			dragStateRef.current = {
+			nodeDragSessionRef.current = {
 				nodeId: node.id,
-				startClientX: event.clientX,
-				startClientY: event.clientY,
 				startNodeX: node.x,
 				startNodeY: node.y,
 				before: pickLayout(node),
@@ -1111,6 +1107,49 @@ const CanvasWorkspace = () => {
 		},
 		[focusedNodeId, handleNodeActivate, isCanvasInteractionLocked, setActiveNode],
 	);
+
+	const handleSkiaNodeDrag = useCallback(
+		(node: CanvasNode, event: CanvasNodeDragEvent) => {
+			const dragSession = nodeDragSessionRef.current;
+			if (!dragSession) return;
+			if (dragSession.nodeId !== node.id) return;
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const nextX = dragSession.startNodeX + event.movementX / safeZoom;
+			const nextY = dragSession.startNodeY + event.movementY / safeZoom;
+			dragSession.moved =
+				dragSession.moved ||
+				Math.abs(event.movementX) + Math.abs(event.movementY) > 2;
+			updateCanvasNodeLayout(dragSession.nodeId, {
+				x: nextX,
+				y: nextY,
+			});
+		},
+		[camera.zoom, updateCanvasNodeLayout],
+	);
+
+	const handleSkiaNodeDragEnd = useCallback((node: CanvasNode) => {
+		const dragSession = nodeDragSessionRef.current;
+		nodeDragSessionRef.current = null;
+		if (!dragSession) return;
+		if (dragSession.nodeId !== node.id) return;
+		if (!dragSession.moved) return;
+		suppressNodeClickIdRef.current = dragSession.nodeId;
+		const latestProject = useProjectStore.getState().currentProject;
+		if (!latestProject) return;
+		const latestNode = latestProject.canvas.nodes.find(
+			(item) => item.id === dragSession.nodeId,
+		);
+		if (!latestNode) return;
+		const after = pickLayout(latestNode);
+		if (isLayoutEqual(dragSession.before, after)) return;
+		pushHistory({
+			kind: "canvas.node-layout",
+			nodeId: latestNode.id,
+			before: dragSession.before,
+			after,
+			focusNodeId: latestProject.ui.focusedNodeId,
+		});
+	}, [pushHistory]);
 
 	const handleSkiaNodeClick = useCallback(
 		(node: CanvasNode) => {
@@ -1192,138 +1231,6 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const handleNodeHitLayerPointerDown = useCallback(
-		(event: React.PointerEvent<HTMLButtonElement>) => {
-			if (event.button !== 0) return;
-			const world = resolveWorldPoint(event.clientX, event.clientY);
-			const node = getTopHitNode(world.x, world.y);
-			if (!node) {
-				if (!isCanvasInteractionLocked) {
-					setActiveNode(null);
-				}
-				return;
-			}
-			if (node.locked) {
-				handleNodeActivate(node);
-				return;
-			}
-			setActiveNode(node.id);
-			if (typeof event.currentTarget.setPointerCapture === "function") {
-				event.currentTarget.setPointerCapture(event.pointerId);
-			}
-			dragStateRef.current = {
-				nodeId: node.id,
-				startClientX: event.clientX,
-				startClientY: event.clientY,
-				startNodeX: node.x,
-				startNodeY: node.y,
-				before: pickLayout(node),
-				moved: false,
-			};
-		},
-		[
-			getTopHitNode,
-			handleNodeActivate,
-			isCanvasInteractionLocked,
-			resolveWorldPoint,
-			setActiveNode,
-		],
-	);
-
-	const handleNodeHitLayerDoubleClick = useCallback(
-		(event: React.MouseEvent<HTMLButtonElement>) => {
-			if (event.button !== 0) return;
-			const world = resolveWorldPoint(event.clientX, event.clientY);
-			const node = getTopHitNode(world.x, world.y);
-			if (!node) return;
-			if (isCanvasNodeFocusable(node, getCanvasNodeDefinition)) {
-				setFocusedNode(node.id);
-				return;
-			}
-			const container = containerRef.current;
-			const stageWidth =
-				stageSize.width > 0
-					? stageSize.width
-					: (container?.getBoundingClientRect().width ?? 0);
-			const stageHeight =
-				stageSize.height > 0
-					? stageSize.height
-					: (container?.getBoundingClientRect().height ?? 0);
-			if (stageWidth <= 0 || stageHeight <= 0) return;
-			const nextCamera = buildNodeFitCamera({
-				node,
-				stageWidth,
-				stageHeight,
-				safeInsets: cameraSafeInsets,
-			});
-			const currentCamera = getCamera();
-			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
-			applyCamera(nextCamera);
-		},
-		[
-			applyCamera,
-			cameraSafeInsets,
-			getCamera,
-			getTopHitNode,
-			resolveWorldPoint,
-			setFocusedNode,
-			stageSize.height,
-			stageSize.width,
-		],
-	);
-
-	useEffect(() => {
-		const handlePointerMove = (event: PointerEvent) => {
-			const dragState = dragStateRef.current;
-			if (!dragState) return;
-			const deltaX = event.clientX - dragState.startClientX;
-			const deltaY = event.clientY - dragState.startClientY;
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-			const nextX = dragState.startNodeX + deltaX / safeZoom;
-			const nextY = dragState.startNodeY + deltaY / safeZoom;
-			dragState.moved =
-				dragState.moved || Math.abs(deltaX) + Math.abs(deltaY) > 2;
-			updateCanvasNodeLayout(dragState.nodeId, {
-				x: nextX,
-				y: nextY,
-			});
-		};
-
-		const handlePointerUp = () => {
-			const dragState = dragStateRef.current;
-			dragStateRef.current = null;
-			if (!dragState) return;
-			if (!dragState.moved) {
-				return;
-			}
-			suppressNodeClickIdRef.current = dragState.nodeId;
-			const latestProject = useProjectStore.getState().currentProject;
-			if (!latestProject) return;
-			const node = latestProject.canvas.nodes.find(
-				(item) => item.id === dragState.nodeId,
-			);
-			if (!node) return;
-			const after = pickLayout(node);
-			if (isLayoutEqual(dragState.before, after)) return;
-			pushHistory({
-				kind: "canvas.node-layout",
-				nodeId: node.id,
-				before: dragState.before,
-				after,
-				focusNodeId: latestProject.ui.focusedNodeId,
-			});
-		};
-
-		window.addEventListener("pointermove", handlePointerMove);
-		window.addEventListener("pointerup", handlePointerUp);
-		window.addEventListener("pointercancel", handlePointerUp);
-		return () => {
-			window.removeEventListener("pointermove", handlePointerMove);
-			window.removeEventListener("pointerup", handlePointerUp);
-			window.removeEventListener("pointercancel", handlePointerUp);
-		};
-	}, [camera.zoom, pushHistory, updateCanvasNodeLayout]);
-
 	const openCanvasContextMenuAt = useCallback(
 		(clientX: number, clientY: number) => {
 			const world = resolveWorldPoint(clientX, clientY);
@@ -1339,39 +1246,11 @@ const CanvasWorkspace = () => {
 		[resolveWorldPoint],
 	);
 
-	const handleCanvasContextMenu = useCallback(
-		(event: React.MouseEvent<HTMLDivElement>) => {
-			event.preventDefault();
-			if (isCanvasInteractionLocked) return;
-			openCanvasContextMenuAt(event.clientX, event.clientY);
-		},
-		[isCanvasInteractionLocked, openCanvasContextMenuAt],
-	);
-
-	const closeContextMenu = useCallback(() => {
-		setContextMenuState({ open: false });
-	}, []);
-
-	const handleNodeHitLayerContextMenu = useCallback(
-		(event: React.MouseEvent<HTMLButtonElement>) => {
-			event.preventDefault();
-			event.stopPropagation();
-			if (isCanvasInteractionLocked) return;
-			const world = resolveWorldPoint(event.clientX, event.clientY);
-			const node = getTopHitNode(world.x, world.y);
-			if (!node) {
-				openCanvasContextMenuAt(event.clientX, event.clientY);
-				return;
-			}
-			if (!currentProject) {
-				openCanvasContextMenuAt(event.clientX, event.clientY);
-				return;
-			}
+	const openNodeContextMenuAt = useCallback(
+		(node: CanvasNode, clientX: number, clientY: number): boolean => {
+			if (!currentProject) return false;
 			const definition = getCanvasNodeDefinition(node.type);
-			if (!definition.contextMenu) {
-				openCanvasContextMenuAt(event.clientX, event.clientY);
-				return;
-			}
+			if (!definition.contextMenu) return false;
 			const nodeActions = definition.contextMenu({
 				node,
 				project: currentProject,
@@ -1380,28 +1259,65 @@ const CanvasWorkspace = () => {
 					insertImageNodeToScene(node, sceneId);
 				},
 			});
-			if (nodeActions.length === 0) {
-				openCanvasContextMenuAt(event.clientX, event.clientY);
-				return;
-			}
+			if (nodeActions.length === 0) return false;
 			setContextMenuState({
 				open: true,
 				scope: "node",
-				x: event.clientX,
-				y: event.clientY,
+				x: clientX,
+				y: clientY,
 				actions: toTimelineContextMenuActions(nodeActions),
 			});
+			return true;
 		},
 		[
 			contextMenuSceneOptions,
 			currentProject,
-			getTopHitNode,
 			insertImageNodeToScene,
+			setContextMenuState,
+		],
+	);
+
+	const handleCanvasClick = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			if (isOverlayWheelTarget(event.target)) return;
+			if (isCanvasInteractionLocked) return;
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			const node = getTopHitNode(world.x, world.y);
+			if (node) return;
+			setActiveNode(null);
+		},
+		[
+			getTopHitNode,
+			isCanvasInteractionLocked,
+			resolveWorldPoint,
+			setActiveNode,
+		],
+	);
+
+	const handleCanvasContextMenu = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			if (isOverlayWheelTarget(event.target)) return;
+			event.preventDefault();
+			if (isCanvasInteractionLocked) return;
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			const node = getTopHitNode(world.x, world.y);
+			if (node && openNodeContextMenuAt(node, event.clientX, event.clientY)) {
+				return;
+			}
+			openCanvasContextMenuAt(event.clientX, event.clientY);
+		},
+		[
+			getTopHitNode,
 			isCanvasInteractionLocked,
 			openCanvasContextMenuAt,
+			openNodeContextMenuAt,
 			resolveWorldPoint,
 		],
 	);
+
+	const closeContextMenu = useCallback(() => {
+		setContextMenuState({ open: false });
+	}, []);
 
 	const handleCreateTextNodeAt = useCallback(
 		(worldX: number, worldY: number) => {
@@ -1583,6 +1499,7 @@ const CanvasWorkspace = () => {
 			data-testid="canvas-workspace"
 			role="application"
 			className="relative h-full w-full overflow-hidden"
+			onClick={handleCanvasClick}
 			onContextMenu={handleCanvasContextMenu}
 			onDragOver={(event) => {
 				event.preventDefault();
@@ -1600,29 +1517,21 @@ const CanvasWorkspace = () => {
 				}}
 			/>
 
-			<InfiniteSkiaCanvas
-				width={stageSize.width}
-				height={stageSize.height}
-				camera={camera}
-				nodes={sortedNodes}
-				scenes={currentProject.scenes}
-				assets={currentProject.assets}
-				activeNodeId={activeNodeId}
-				focusedNodeId={focusedNodeId}
-				onNodePointerDown={handleSkiaNodePointerDown}
-				onNodeClick={handleSkiaNodeClick}
-				onNodeDoubleClick={handleSkiaNodeDoubleClick}
-			/>
-
-			<button
-				type="button"
-				data-testid="canvas-node-hit-layer"
-				aria-label="画布节点命中层"
-				className="absolute inset-0 z-20 border-0 bg-transparent p-0"
-				onPointerDown={handleNodeHitLayerPointerDown}
-				onDoubleClick={handleNodeHitLayerDoubleClick}
-				onContextMenu={handleNodeHitLayerContextMenu}
-			/>
+				<InfiniteSkiaCanvas
+					width={stageSize.width}
+					height={stageSize.height}
+					camera={camera}
+					nodes={sortedNodes}
+					scenes={currentProject.scenes}
+					assets={currentProject.assets}
+					activeNodeId={activeNodeId}
+					focusedNodeId={focusedNodeId}
+					onNodeDragStart={handleSkiaNodeDragStart}
+					onNodeDrag={handleSkiaNodeDrag}
+					onNodeDragEnd={handleSkiaNodeDragEnd}
+					onNodeClick={handleSkiaNodeClick}
+					onNodeDoubleClick={handleSkiaNodeDoubleClick}
+				/>
 
 			{activeNode && ActiveNodeToolbar && (
 				<div className="absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-3 py-2 backdrop-blur">
