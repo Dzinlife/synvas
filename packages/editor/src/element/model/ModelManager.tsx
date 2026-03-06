@@ -203,15 +203,22 @@ export const TimelineAudioMixBridge: React.FC = () => {
 	const runtimeManager = useStudioRuntimeManager();
 	const activeRuntime = useActiveTimelineRuntime();
 	const ownerRuntimeId = usePlaybackOwnerStore((state) => state.ownerRuntimeId);
+	const ensureTimelineRuntime = runtimeManager.ensureTimelineRuntime;
+	const removeTimelineRuntime = runtimeManager.removeTimelineRuntime;
+	const getTimelineRuntime = runtimeManager.getTimelineRuntime;
+	const listTimelineRuntimes = runtimeManager.listTimelineRuntimes;
+	const setActiveEditTimeline = runtimeManager.setActiveEditTimeline;
+	const getActiveEditTimelineRef = runtimeManager.getActiveEditTimelineRef;
+	const getActiveEditTimelineRuntime =
+		runtimeManager.getActiveEditTimelineRuntime;
 
 	const ownerRuntime = useMemo(() => {
 		if (!ownerRuntimeId) return null;
 		return (
-			runtimeManager
-				.listTimelineRuntimes()
-				.find((runtime) => runtime.id === ownerRuntimeId) ?? null
+			listTimelineRuntimes().find((runtime) => runtime.id === ownerRuntimeId) ??
+			null
 		);
-	}, [ownerRuntimeId, runtimeManager]);
+	}, [listTimelineRuntimes, ownerRuntimeId]);
 	const scopedRuntime = useMemo<
 		(EditorRuntime & Partial<StudioRuntimeManager>) | null
 	>(() => {
@@ -220,15 +227,25 @@ export const TimelineAudioMixBridge: React.FC = () => {
 			id: `${rootRuntime.id}:${ownerRuntime.id}:audio-mix`,
 			timelineStore: ownerRuntime.timelineStore,
 			modelRegistry: ownerRuntime.modelRegistry,
-			ensureTimelineRuntime: runtimeManager.ensureTimelineRuntime,
-			removeTimelineRuntime: runtimeManager.removeTimelineRuntime,
-			getTimelineRuntime: runtimeManager.getTimelineRuntime,
-			listTimelineRuntimes: runtimeManager.listTimelineRuntimes,
-			setActiveEditTimeline: runtimeManager.setActiveEditTimeline,
-			getActiveEditTimelineRef: runtimeManager.getActiveEditTimelineRef,
-			getActiveEditTimelineRuntime: runtimeManager.getActiveEditTimelineRuntime,
+			ensureTimelineRuntime,
+			removeTimelineRuntime,
+			getTimelineRuntime,
+			listTimelineRuntimes,
+			setActiveEditTimeline,
+			getActiveEditTimelineRef,
+			getActiveEditTimelineRuntime,
 		};
-	}, [ownerRuntime, rootRuntime.id, runtimeManager]);
+	}, [
+		ensureTimelineRuntime,
+		getActiveEditTimelineRef,
+		getActiveEditTimelineRuntime,
+		getTimelineRuntime,
+		listTimelineRuntimes,
+		ownerRuntime,
+		removeTimelineRuntime,
+		rootRuntime.id,
+		setActiveEditTimeline,
+	]);
 
 	if (!ownerRuntime || !scopedRuntime) return null;
 	const shouldDriveOwnerPlaybackClock =

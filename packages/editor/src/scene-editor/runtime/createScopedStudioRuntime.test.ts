@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { EditorRuntime, StudioRuntimeManager } from "./types";
 import { createEditorRuntime } from "./createEditorRuntime";
 import { createScopedStudioRuntime } from "./createScopedStudioRuntime";
+import type { EditorRuntime, StudioRuntimeManager } from "./types";
 
 const toSceneTimelineRef = (sceneId: string) =>
 	({
@@ -90,5 +90,31 @@ describe("createScopedStudioRuntime", () => {
 
 		scopedRuntime.removeTimelineRuntime(scene3Ref);
 		expect(runtimeManager.getTimelineRuntime(scene3Ref)).toBeNull();
+	});
+
+	it("activeSceneId 以 getter 传入时会按最新值动态解析", () => {
+		const runtimeManager = createRuntimeManager();
+		const scene1Ref = toSceneTimelineRef("scene-1");
+		const scene2Ref = toSceneTimelineRef("scene-2");
+		const scene1Runtime = runtimeManager.ensureTimelineRuntime(scene1Ref);
+		const scene2Runtime = runtimeManager.ensureTimelineRuntime(scene2Ref);
+		let activeSceneId: string | null = "scene-1";
+
+		const scopedRuntime = createScopedStudioRuntime({
+			runtimeManager,
+			activeSceneId: () => activeSceneId,
+		});
+
+		expect(scopedRuntime.timelineStore).toBe(scene1Runtime.timelineStore);
+		expect(scopedRuntime.getActiveEditTimelineRef()).toEqual(scene1Ref);
+
+		activeSceneId = "scene-2";
+		expect(scopedRuntime.timelineStore).toBe(scene2Runtime.timelineStore);
+		expect(scopedRuntime.getActiveEditTimelineRef()).toEqual(scene2Ref);
+
+		activeSceneId = null;
+		runtimeManager.setActiveEditTimeline(scene1Ref);
+		expect(scopedRuntime.timelineStore).toBe(scene1Runtime.timelineStore);
+		expect(scopedRuntime.getActiveEditTimelineRef()).toEqual(scene1Ref);
 	});
 });

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { setPreviewAudioDspSettings } from "@/audio/engine";
 import type { TimelineStore } from "../contexts/TimelineContext";
 import { useTimelineStore } from "../contexts/TimelineContext";
@@ -74,11 +74,40 @@ export const TimelineAudioMixManager: React.FC = () => {
 	const modelRegistry = useModelRegistry();
 	const audioSettings = useTimelineStore((state) => state.audioSettings);
 	const runtimeCandidate = runtime as Partial<StudioRuntimeManager>;
-	const runtimeManager =
-		typeof runtimeCandidate.getTimelineRuntime === "function" &&
-		typeof runtimeCandidate.listTimelineRuntimes === "function"
-			? (runtime as unknown as StudioRuntimeManager)
-			: null;
+	const ensureTimelineRuntime = runtimeCandidate.ensureTimelineRuntime;
+	const removeTimelineRuntime = runtimeCandidate.removeTimelineRuntime;
+	const getTimelineRuntime = runtimeCandidate.getTimelineRuntime;
+	const listTimelineRuntimes = runtimeCandidate.listTimelineRuntimes;
+	const setActiveEditTimeline = runtimeCandidate.setActiveEditTimeline;
+	const getActiveEditTimelineRef = runtimeCandidate.getActiveEditTimelineRef;
+	const getActiveEditTimelineRuntime =
+		runtimeCandidate.getActiveEditTimelineRuntime;
+	const runtimeManager = useMemo<StudioRuntimeManager | null>(() => {
+		if (typeof ensureTimelineRuntime !== "function") return null;
+		if (typeof removeTimelineRuntime !== "function") return null;
+		if (typeof getTimelineRuntime !== "function") return null;
+		if (typeof listTimelineRuntimes !== "function") return null;
+		if (typeof setActiveEditTimeline !== "function") return null;
+		if (typeof getActiveEditTimelineRef !== "function") return null;
+		if (typeof getActiveEditTimelineRuntime !== "function") return null;
+		return {
+			ensureTimelineRuntime,
+			removeTimelineRuntime,
+			getTimelineRuntime,
+			listTimelineRuntimes,
+			setActiveEditTimeline,
+			getActiveEditTimelineRef,
+			getActiveEditTimelineRuntime,
+		};
+	}, [
+		ensureTimelineRuntime,
+		getActiveEditTimelineRef,
+		getActiveEditTimelineRuntime,
+		getTimelineRuntime,
+		listTimelineRuntimes,
+		removeTimelineRuntime,
+		setActiveEditTimeline,
+	]);
 
 	const resolveOwnerTimelineRuntime =
 		useCallback((): TimelineRuntime | null => {

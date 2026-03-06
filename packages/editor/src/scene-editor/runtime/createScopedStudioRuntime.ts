@@ -2,7 +2,7 @@ import type { EditorRuntime, StudioRuntimeManager, TimelineRef } from "./types";
 
 interface CreateScopedStudioRuntimeParams {
 	runtimeManager: EditorRuntime & StudioRuntimeManager;
-	activeSceneId: string | null;
+	activeSceneId: string | null | (() => string | null);
 }
 
 const toSceneTimelineRef = (sceneId: string): TimelineRef => ({
@@ -15,31 +15,41 @@ const resolveScopedTimelineRuntime = (
 	activeSceneId: string | null,
 ) => {
 	if (activeSceneId) {
-		return runtimeManager.ensureTimelineRuntime(toSceneTimelineRef(activeSceneId));
+		return runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef(activeSceneId),
+		);
 	}
 	return runtimeManager.getActiveEditTimelineRuntime();
+};
+
+const resolveActiveSceneId = (
+	value: string | null | (() => string | null),
+): string | null => {
+	if (typeof value === "function") {
+		return value();
+	}
+	return value;
 };
 
 export const createScopedStudioRuntime = (
 	params: CreateScopedStudioRuntimeParams,
 ): EditorRuntime & StudioRuntimeManager => {
 	const { runtimeManager, activeSceneId } = params;
-	const activeTimelineRef = activeSceneId
-		? toSceneTimelineRef(activeSceneId)
-		: null;
 
 	return {
 		id: runtimeManager.id,
 		get timelineStore() {
+			const resolvedActiveSceneId = resolveActiveSceneId(activeSceneId);
 			return (
-				resolveScopedTimelineRuntime(runtimeManager, activeSceneId)?.timelineStore ??
-				runtimeManager.timelineStore
+				resolveScopedTimelineRuntime(runtimeManager, resolvedActiveSceneId)
+					?.timelineStore ?? runtimeManager.timelineStore
 			);
 		},
 		get modelRegistry() {
+			const resolvedActiveSceneId = resolveActiveSceneId(activeSceneId);
 			return (
-				resolveScopedTimelineRuntime(runtimeManager, activeSceneId)?.modelRegistry ??
-				runtimeManager.modelRegistry
+				resolveScopedTimelineRuntime(runtimeManager, resolvedActiveSceneId)
+					?.modelRegistry ?? runtimeManager.modelRegistry
 			);
 		},
 		ensureTimelineRuntime: runtimeManager.ensureTimelineRuntime,
@@ -47,9 +57,17 @@ export const createScopedStudioRuntime = (
 		getTimelineRuntime: runtimeManager.getTimelineRuntime,
 		listTimelineRuntimes: runtimeManager.listTimelineRuntimes,
 		setActiveEditTimeline: runtimeManager.setActiveEditTimeline,
-		getActiveEditTimelineRef: () =>
-			activeTimelineRef ?? runtimeManager.getActiveEditTimelineRef(),
-		getActiveEditTimelineRuntime: () =>
-			resolveScopedTimelineRuntime(runtimeManager, activeSceneId),
+		getActiveEditTimelineRef: () => {
+			const resolvedActiveSceneId = resolveActiveSceneId(activeSceneId);
+			return resolvedActiveSceneId
+				? toSceneTimelineRef(resolvedActiveSceneId)
+				: runtimeManager.getActiveEditTimelineRef();
+		},
+		getActiveEditTimelineRuntime: () => {
+			return resolveScopedTimelineRuntime(
+				runtimeManager,
+				resolveActiveSceneId(activeSceneId),
+			);
+		},
 	};
 };

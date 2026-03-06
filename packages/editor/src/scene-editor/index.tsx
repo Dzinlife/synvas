@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type React from "react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ModelManager } from "@/element/model";
@@ -51,11 +51,13 @@ const Editor = () => {
 	const runtimeManager = useEditorRuntime() as EditorRuntime &
 		StudioRuntimeManager;
 	const status = useProjectStore((state) => state.status);
-	const currentProject = useProjectStore((state) => state.currentProject);
+	const hasProject = useProjectStore((state) => state.currentProject !== null);
 	const activeSceneId = useProjectStore(
 		(state) => state.currentProject?.ui.activeSceneId ?? null,
 	);
 	const initialize = useProjectStore((state) => state.initialize);
+	const activeSceneIdRef = useRef<string | null>(activeSceneId);
+	activeSceneIdRef.current = activeSceneId;
 
 	useEffect(() => {
 		initialize();
@@ -66,12 +68,12 @@ const Editor = () => {
 		() =>
 			createScopedStudioRuntime({
 				runtimeManager,
-				activeSceneId,
+				activeSceneId: () => activeSceneIdRef.current,
 			}),
-		[activeSceneId, runtimeManager],
+		[runtimeManager],
 	);
 
-	if (status !== "ready" || !currentProject) {
+	if (status !== "ready" || !hasProject) {
 		return <div>Loading timeline...</div>;
 	}
 
