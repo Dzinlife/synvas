@@ -1,26 +1,138 @@
-import { useTimelineStore } from "@/scene-editor/contexts/TimelineContext";
+import type React from "react";
+import { useMemo } from "react";
+import { AudioGainBaselineControl } from "@/element/AudioGainBaselineControl";
+import { SceneThumbnailStripCanvas } from "@/element/SceneThumbnailStripCanvas";
+import { SceneWaveformCanvas } from "@/element/SceneWaveformCanvas";
+import { useSceneReferenceRuntimeState } from "@/element/useSceneReferenceRuntimeState";
+import {
+	useFps,
+	useTimelineScale,
+	useTimelineStore,
+} from "@/scene-editor/contexts/TimelineContext";
+import { hasSceneAudibleLeafAudio } from "@/scene-editor/audio/sceneReferenceAudio";
+import { isTimelineTrackMuted } from "@/scene-editor/utils/trackAudibility";
+import { isCompositionSourceAudioMuted } from "@/scene-editor/utils/compositionAudioSeparation";
+import { cn } from "@/lib/utils";
+import type { TimelineProps } from "../model/types";
 
-interface CompositionTimelineProps {
+interface CompositionTimelineProps extends TimelineProps {
 	id: string;
 }
 
 export const CompositionTimeline: React.FC<CompositionTimelineProps> = ({
 	id,
+	start,
+	end,
+	fps,
+	offsetFrames,
 }) => {
+	const { fps: timelineFps } = useFps();
+	const { timelineScale } = useTimelineScale();
 	const element = useTimelineStore((state) => state.getElementById(id));
-	const sceneId =
+	const name = element?.name?.trim() || "Composition";
+	const sceneIdRaw =
 		(element?.props as { sceneId?: unknown } | undefined)?.sceneId ?? "";
-	const displaySceneId =
-		typeof sceneId === "string" && sceneId.trim().length > 0
-			? sceneId.trim()
-			: "unknown";
+	const sceneId =
+		typeof sceneIdRaw === "string" && sceneIdRaw.trim().length > 0
+			? sceneIdRaw.trim()
+			: null;
+	const isSourceAudioMuted = isCompositionSourceAudioMuted(element);
+	const clipGainDb = element?.clip?.gainDb ?? 0;
+	const storeOffsetFrames = useTimelineStore(
+		(state) => state.getElementById(id)?.timeline?.offset ?? 0,
+	);
+	const effectiveOffsetFrames = offsetFrames ?? storeOffsetFrames;
+	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
+	const isTrackMuted = useTimelineStore((state) =>
+		isTimelineTrackMuted(
+			state.getElementById(id)?.timeline,
+			state.tracks,
+			state.audioTrackStates,
+		),
+	);
+	const safeFps = Number.isFinite(fps) && fps > 0 ? fps : timelineFps;
+	const {
+		runtime,
+		runtimeManager,
+		revision,
+		fps: sourceFps,
+		durationFrames: sourceDurationFrames,
+		canvasSize,
+	} = useSceneReferenceRuntimeState(sceneId);
+
+	const hasSourceAudioTrack = useMemo(() => {
+		return hasSceneAudibleLeafAudio({
+			sceneRuntime: runtime,
+			runtimeManager,
+		});
+	}, [revision, runtime, runtimeManager]);
+
+	const shouldShowWaveform = hasSourceAudioTrack && !isSourceAudioMuted;
+	const waveformColor = isTrackMuted
+		? "rgba(163, 163, 163, 0.88)"
+		: "rgba(34, 211, 238, 0.92)";
 
 	return (
-		<div className="absolute inset-0 bg-cyan-700/90 px-2 py-1 text-white">
-			<div className="truncate text-xs font-medium">
-				{element?.name?.trim() || "Composition"}
+		<div className="absolute inset-0 overflow-hidden bg-zinc-800">
+			<div className="absolute left-1 top-1 z-10 flex h-4.5 max-w-[calc(100%-8px)] min-w-0 items-center gap-1 rounded-xs bg-black/20 px-1 leading-none backdrop-blur-2xl">
+				<span className="truncate text-xs text-white">{name}</span>
+				{sceneId && (
+					<span className="truncate text-[10px] text-cyan-100/90">
+						{sceneId}
+					</span>
+				)}
 			</div>
-			<div className="truncate text-[10px] text-cyan-100">{displaySceneId}</div>
+
+			<SceneThumbnailStripCanvas
+				sceneRuntime={runtime}
+				runtimeManager={runtimeManager}
+				sceneRevision={revision}
+				sourceFps={sourceFps}
+				sourceDurationFrames={sourceDurationFrames}
+				sourceCanvasSize={canvasSize}
+				start={start}
+				end={end}
+				fps={safeFps}
+				timelineScale={timelineScale}
+				offsetFrames={effectiveOffsetFrames}
+				scrollLeft={scrollLeft}
+				isOffsetPreviewing={offsetFrames !== undefined}
+				className={cn(
+					"absolute top-0 w-full",
+					shouldShowWaveform ? "bottom-5.5" : "bottom-0",
+				)}
+			/>
+
+			{shouldShowWaveform && (
+				<div
+					className={cn(
+						"absolute inset-x-0 bottom-0 h-5.5 overflow-hidden",
+						isTrackMuted ? "bg-neutral-500/20" : "bg-cyan-500/20",
+					)}
+				>
+					{runtime && (
+						<SceneWaveformCanvas
+							sceneRuntime={runtime}
+							runtimeManager={runtimeManager}
+							sceneRevision={revision}
+							sourceFps={sourceFps}
+							gainDb={clipGainDb}
+							start={start}
+							end={end}
+							fps={safeFps}
+							timelineScale={timelineScale}
+							offsetFrames={effectiveOffsetFrames}
+							scrollLeft={scrollLeft}
+							color={waveformColor}
+							className="absolute inset-0"
+						/>
+					)}
+					<AudioGainBaselineControl
+						elementId={id}
+						lineClassName={isTrackMuted ? "bg-zinc-100/70" : "bg-cyan-100/80"}
+					/>
+				</div>
+			)}
 		</div>
 	);
 };

@@ -19,6 +19,7 @@ import type {
 } from "../model/types";
 
 const DEFAULT_FPS = 30;
+type SceneReferenceElementType = "Composition" | "CompositionAudioClip";
 
 const validateSceneId = (sceneId: unknown): ValidationResult => {
 	if (typeof sceneId !== "string" || sceneId.trim().length === 0) {
@@ -157,11 +158,12 @@ const resolveSourceDuration = (
 
 export type CompositionModelStore = ComponentModelStore<CompositionProps>;
 
-export function createCompositionModel(
+const createSceneReferenceClipModel = (
+	elementType: SceneReferenceElementType,
 	id: string,
 	initialProps: CompositionProps,
 	runtime: EditorRuntime,
-): CompositionModelStore {
+): CompositionModelStore => {
 	const timelineStore = runtime.timelineStore;
 	const initialValidation = validateSceneId(initialProps.sceneId);
 	const initialSceneId = initialValidation.valid
@@ -250,7 +252,7 @@ export function createCompositionModel(
 	const store = createStore<ComponentModel<CompositionProps>>()(
 		subscribeWithSelector((set, get) => ({
 			id,
-			type: "Composition",
+			type: elementType,
 			props: {
 				sceneId: initialSceneId,
 			},
@@ -322,4 +324,30 @@ export function createCompositionModel(
 	);
 
 	return store;
+};
+
+export function createCompositionModel(
+	id: string,
+	initialProps: CompositionProps,
+	runtime: EditorRuntime,
+): CompositionModelStore {
+	return createSceneReferenceClipModel(
+		"Composition",
+		id,
+		initialProps,
+		runtime,
+	);
+}
+
+export function createCompositionAudioClipModel(
+	id: string,
+	initialProps: CompositionProps,
+	runtime: EditorRuntime,
+): CompositionModelStore {
+	return createSceneReferenceClipModel(
+		"CompositionAudioClip",
+		id,
+		initialProps,
+		runtime,
+	);
 }

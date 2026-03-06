@@ -2,6 +2,7 @@ export { default as AudioClip } from "./AudioClip";
 // export { default as BackdropZoom } from "./BackdropZoom";
 export { default as ColorFilterLayer } from "./ColorFilterLayer";
 export { default as Composition } from "./Composition";
+export { default as CompositionAudioClip } from "./CompositionAudioClip";
 export { default as FreezeFrame } from "./FreezeFrame";
 export { default as HalationFilterLayer } from "./HalationFilterLayer";
 export { default as Image } from "./Image";

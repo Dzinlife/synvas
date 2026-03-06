@@ -15,9 +15,12 @@ import { useProjectAssets } from "@/projects/useProjectAssets";
 import TimeIndicatorCanvas from "@/scene-editor/components/TimeIndicatorCanvas";
 import {
 	useModelRegistry,
+	useStudioRuntimeManager,
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import { hasSceneAudibleLeafAudio } from "@/scene-editor/audio/sceneReferenceAudio";
 import { clampFrame } from "@/utils/timecode";
+import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
 } from "./components/TimelineContextMenu";
@@ -70,6 +73,11 @@ import {
 } from "./utils/trackAssignment";
 import { reconcileTransitions } from "./utils/transitions";
 import {
+	detachCompositionAudio,
+	isCompositionSourceAudioMuted,
+	restoreCompositionAudio,
+} from "./utils/compositionAudioSeparation";
+import {
 	detachVideoClipAudio,
 	isVideoSourceAudioMuted,
 	restoreVideoClipAudio,
@@ -84,7 +92,8 @@ const shouldUpdateOffset = (element: TimelineElementType): boolean => {
 	return (
 		element.type === "VideoClip" ||
 		element.type === "AudioClip" ||
-		element.type === "Composition"
+		element.type === "Composition" ||
+		element.type === "CompositionAudioClip"
 	);
 };
 
@@ -103,6 +112,25 @@ const getVideoClipHasSourceAudioTrack = (
 		}
 	).internal;
 	return internal?.hasSourceAudioTrack !== false;
+};
+
+const getCompositionHasSourceAudioTrack = (
+	runtimeManager: ReturnType<typeof useStudioRuntimeManager>,
+	element: TimelineElementType | undefined,
+): boolean => {
+	if (!element || element.type !== "Composition") return false;
+	const rawSceneId = (element.props as { sceneId?: unknown } | undefined)?.sceneId;
+	if (typeof rawSceneId !== "string" || rawSceneId.trim().length === 0) {
+		return false;
+	}
+	const sceneRef = toSceneTimelineRef(rawSceneId.trim());
+	const sceneRuntime =
+		runtimeManager.getTimelineRuntime(sceneRef) ??
+		runtimeManager.ensureTimelineRuntime(sceneRef);
+	return hasSceneAudibleLeafAudio({
+		sceneRuntime,
+		runtimeManager,
+	});
 };
 
 const LOCKED_TRACK_OVERLAY_STYLE: React.CSSProperties = {
@@ -159,6 +187,7 @@ type TimelineContextMenuState =
 const TimelineEditor = () => {
 	const timelineStore = useTimelineStoreApi();
 	const modelRegistry = useModelRegistry();
+	const runtimeManager = useStudioRuntimeManager();
 	const scrollLeft = useTimelineStore((state) => state.scrollLeft);
 	const setScrollLeft = useTimelineStore((state) => state.setScrollLeft);
 	const setTimelineMaxScrollLeft = useTimelineStore(
@@ -1416,9 +1445,17 @@ const TimelineEditor = () => {
 					? elements.find((element) => element.id === targetIds[0])
 					: undefined;
 			const isSingleVideo = targetElement?.type === "VideoClip";
+			const isSingleComposition = targetElement?.type === "Composition";
 			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
 			const hasSourceAudioTrack = getVideoClipHasSourceAudioTrack(
 				modelRegistry,
+				targetElement,
+			);
+			const isCompositionSourceMuted = isCompositionSourceAudioMuted(
+				targetElement,
+			);
+			const hasCompositionSourceAudioTrack = getCompositionHasSourceAudioTrack(
+				runtimeManager,
 				targetElement,
 			);
 			const videoUri = resolveElementSourceUri(targetElement, assets);
@@ -1442,6 +1479,34 @@ const TimelineEditor = () => {
 										fps,
 										trackLockedMap,
 										hasSourceAudioTrack,
+									});
+							if (updated === prev) return prev;
+							return finalizeTimelineElements(updated, postProcessOptions);
+						});
+					},
+				});
+			}
+			if (isSingleComposition) {
+				actions.splice(2, 0, {
+					key: isCompositionSourceMuted
+						? "restore-composition-audio"
+						: "detach-composition-audio",
+					label: isCompositionSourceMuted ? "还原音频" : "分离音频",
+					disabled: !hasCompositionSourceAudioTrack,
+					onSelect: () => {
+						if (!hasCompositionSourceAudioTrack) return;
+						setElements((prev) => {
+							const updated = isCompositionSourceMuted
+								? restoreCompositionAudio({
+										elements: prev,
+										compositionId: targetElement.id,
+									})
+								: detachCompositionAudio({
+										elements: prev,
+										compositionId: targetElement.id,
+										fps,
+										trackLockedMap,
+										hasSourceAudioTrack: hasCompositionSourceAudioTrack,
 									});
 							if (updated === prev) return prev;
 							return finalizeTimelineElements(updated, postProcessOptions);
@@ -1475,6 +1540,8 @@ const TimelineEditor = () => {
 		deleteElementsByIds,
 		elements,
 		fps,
+		modelRegistry,
+		runtimeManager,
 		pasteFromClipboard,
 		postProcessOptions,
 		setElements,

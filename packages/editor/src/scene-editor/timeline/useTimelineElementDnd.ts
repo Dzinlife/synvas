@@ -180,6 +180,7 @@ const normalizeOffsetFrames = (value: unknown): number => {
 const isOffsetElement = (element: TimelineElement): boolean =>
 	element.type === "VideoClip" ||
 	element.type === "AudioClip" ||
+	element.type === "CompositionAudioClip" ||
 	element.type === "Composition";
 
 const isClipElement = (element: TimelineElement): boolean =>

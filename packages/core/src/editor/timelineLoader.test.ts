@@ -171,4 +171,89 @@ describe("timelineLoader asset reference", () => {
 			"scene-2",
 		);
 	});
+
+	it("CompositionAudioClip 缺少 props.sceneId 会校验失败", () => {
+		const timeline = createBaseTimeline();
+		timeline.elements = [
+			{
+				id: "composition-audio-1",
+				type: "CompositionAudioClip",
+				component: "composition-audio-clip",
+				name: "composition-audio-1",
+				timeline: {
+					start: 0,
+					end: 30,
+					startTimecode: "00:00:00:00",
+					endTimecode: "00:00:01:00",
+					trackIndex: -1,
+					role: "audio",
+				},
+				props: {},
+			},
+		];
+
+		expect(() => loadTimelineFromObject(timeline)).toThrow(
+			"elements[0].props.sceneId",
+		);
+	});
+
+	it("CompositionAudioClip 使用合法 sceneId 和负轨道时可正常加载", () => {
+		const timeline = createBaseTimeline();
+		timeline.elements = [
+			{
+				id: "composition-audio-1",
+				type: "CompositionAudioClip",
+				component: "composition-audio-clip",
+				name: "composition-audio-1",
+				timeline: {
+					start: 0,
+					end: 30,
+					startTimecode: "00:00:00:00",
+					endTimecode: "00:00:01:00",
+					trackIndex: -1,
+					role: "audio",
+				},
+				props: {
+					sceneId: "scene-2",
+				},
+				clip: {
+					sourceCompositionId: "composition-1",
+				},
+			},
+		];
+
+		const loaded = loadTimelineFromObject(timeline);
+		expect(loaded.elements[0]?.type).toBe("CompositionAudioClip");
+		expect((loaded.elements[0]?.props as { sceneId?: string }).sceneId).toBe(
+			"scene-2",
+		);
+		expect(loaded.elements[0]?.clip?.sourceCompositionId).toBe("composition-1");
+	});
+
+	it("CompositionAudioClip 使用非负轨道会校验失败", () => {
+		const timeline = createBaseTimeline();
+		timeline.elements = [
+			{
+				id: "composition-audio-1",
+				type: "CompositionAudioClip",
+				component: "composition-audio-clip",
+				name: "composition-audio-1",
+				timeline: {
+					start: 0,
+					end: 30,
+					startTimecode: "00:00:00:00",
+					endTimecode: "00:00:01:00",
+					trackIndex: 0,
+					role: "audio",
+				},
+				props: {
+					sceneId: "scene-2",
+				},
+			},
+		];
+
+		expect(() => loadTimelineFromObject(timeline)).toThrow(
+			"AudioClip/CompositionAudioClip must use a negative trackIndex",
+		);
+	});
 });

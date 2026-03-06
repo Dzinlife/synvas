@@ -80,6 +80,31 @@ const createAudioClip = ({
 	props: { reversed },
 });
 
+const createCompositionAudioClip = ({
+	id,
+	start,
+	end,
+	offset = 0,
+	sceneId = "scene-source-a",
+	trackIndex = -1,
+}: {
+	id: string;
+	start: number;
+	end: number;
+	offset?: number;
+	sceneId?: string;
+	trackIndex?: number;
+}): TimelineElement => ({
+	id,
+	type: "CompositionAudioClip",
+	component: "composition-audio-clip",
+	name: id,
+	timeline: createTimeline(start, end, offset, trackIndex),
+	props: {
+		sceneId,
+	},
+});
+
 const createTransition = ({
 	id,
 	start,
@@ -376,6 +401,29 @@ describe("clipContinuityIndex", () => {
 		const key1 = getAudioPlaybackSessionKey(elements, "detached-a1");
 		const key2 = getAudioPlaybackSessionKey(elements, "v2");
 		expect(key1).toBe(key2);
+	});
+
+	it("CompositionAudioClip 同 scene 硬切会归并到同一音频 session", () => {
+		const elements = [
+			createCompositionAudioClip({
+				id: "c1",
+				start: 0,
+				end: 30,
+				offset: 15,
+				sceneId: "scene-source-a",
+			}),
+			createCompositionAudioClip({
+				id: "c2",
+				start: 30,
+				end: 60,
+				offset: 45,
+				sceneId: "scene-source-a",
+			}),
+		];
+		const key1 = getAudioPlaybackSessionKey(elements, "c1");
+		const key2 = getAudioPlaybackSessionKey(elements, "c2");
+		expect(key1).toBe(key2);
+		expect(key1).toContain("composition:scene-source-a");
 	});
 
 	it("不存在归并信息时回退 clip key", () => {

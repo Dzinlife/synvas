@@ -121,7 +121,9 @@ export interface RenderLayout {
 export interface ClipMeta {
 	/** 分离出来的音频来源 VideoClip */
 	sourceVideoClipId?: string;
-	/** VideoClip 是否静音源音频；仅静音时写入 true */
+	/** 分离出来的音频来源 Composition */
+	sourceCompositionId?: string;
+	/** 源音频是否静音；仅静音时写入 true */
 	muteSourceAudio?: true;
 	/** 片段音量（dB），0 表示不增减 */
 	gainDb?: number;
@@ -131,6 +133,7 @@ export const ELEMENT_TYPE_VALUES = [
 	"VideoClip",
 	"FreezeFrame",
 	"AudioClip",
+	"CompositionAudioClip",
 	"Composition",
 	"Transition",
 	"Filter",

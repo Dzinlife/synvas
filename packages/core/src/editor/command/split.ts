@@ -18,7 +18,9 @@ export const buildSplitElements = (
 	const leftDurationFrames = Math.max(0, splitFrame - originalStart);
 	const rightDurationFrames = Math.max(0, originalEnd - splitFrame);
 	const isReversed =
-		(element.type === "VideoClip" || element.type === "AudioClip") &&
+		(element.type === "VideoClip" ||
+			element.type === "AudioClip" ||
+			element.type === "CompositionAudioClip") &&
 		Boolean((element.props as { reversed?: unknown } | undefined)?.reversed);
 	const leftOffset = isReversed
 		? offsetFrames + rightDurationFrames

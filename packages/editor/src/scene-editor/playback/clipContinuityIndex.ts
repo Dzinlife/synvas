@@ -1,11 +1,11 @@
 import type { TimelineElement } from "core/element/types";
 
-type ClipKind = "AudioClip" | "VideoClip";
+type ClipKind = "AudioClip" | "VideoClip" | "CompositionAudioClip";
 
 type ClipInfo = {
 	id: string;
 	type: ClipKind;
-	assetId: string;
+	sourceKey: string;
 	trackIndex: number;
 	start: number;
 	end: number;
@@ -38,6 +38,18 @@ const resolveTrackIndex = (element: TimelineElement): number => {
 
 const hasMutedVideoSourceAudio = (element: TimelineElement): boolean => {
 	return element.type === "VideoClip" && element.clip?.muteSourceAudio === true;
+};
+
+const resolveAudioSourceKey = (element: TimelineElement): string | null => {
+	if (element.type === "CompositionAudioClip") {
+		const sceneId = (element.props as { sceneId?: unknown } | undefined)?.sceneId;
+		if (typeof sceneId !== "string" || sceneId.trim().length === 0) {
+			return null;
+		}
+		return `composition:${sceneId.trim()}`;
+	}
+	if (!element.assetId) return null;
+	return `asset:${element.assetId}`;
 };
 
 const resolveDuration = (element: TimelineElement): number => {
@@ -139,8 +151,8 @@ const assignSessionKeysForGroup = (
 		}
 		const sessionKey =
 			kind === "audio"
-				? `audio|${current.assetId}|${current.reversed}|${chainHeadId}`
-				: `video|${current.trackIndex}|${current.assetId}|${current.reversed}|${chainHeadId}`;
+				? `audio|${current.sourceKey}|${current.reversed}|${chainHeadId}`
+				: `video|${current.trackIndex}|${current.sourceKey}|${current.reversed}|${chainHeadId}`;
 		target.set(current.id, sessionKey);
 	}
 };
@@ -155,13 +167,20 @@ const buildContinuityIndex = (
 	const boundarySet = buildTransitionBoundarySet(elements);
 
 	for (const element of elements) {
-		if (element.type !== "AudioClip" && element.type !== "VideoClip") continue;
-		if (!element.assetId) continue;
+		if (
+			element.type !== "AudioClip" &&
+			element.type !== "VideoClip" &&
+			element.type !== "CompositionAudioClip"
+		) {
+			continue;
+		}
+		const sourceKey = resolveAudioSourceKey(element);
+		if (!sourceKey) continue;
 
 		const clipInfo: ClipInfo = {
 			id: element.id,
 			type: element.type,
-			assetId: element.assetId,
+			sourceKey,
 			trackIndex: resolveTrackIndex(element),
 			start: normalizeInt(element.timeline.start, 0),
 			end: normalizeInt(element.timeline.end, 0),
@@ -172,7 +191,7 @@ const buildContinuityIndex = (
 		};
 
 		if (!hasMutedVideoSourceAudio(element)) {
-			const audioGroupKey = `${clipInfo.assetId}|${clipInfo.reversed}`;
+			const audioGroupKey = `${clipInfo.sourceKey}|${clipInfo.reversed}`;
 			const audioGroup = audioGroups.get(audioGroupKey);
 			if (audioGroup) {
 				audioGroup.push(clipInfo);
@@ -185,7 +204,7 @@ const buildContinuityIndex = (
 			continue;
 		}
 
-		const groupKey = `${clipInfo.trackIndex}|${clipInfo.assetId}|${clipInfo.reversed}`;
+		const groupKey = `${clipInfo.trackIndex}|${clipInfo.sourceKey}|${clipInfo.reversed}`;
 		const group = videoGroups.get(groupKey);
 		if (group) {
 			group.push(clipInfo);

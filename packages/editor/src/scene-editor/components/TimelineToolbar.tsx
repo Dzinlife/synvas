@@ -69,6 +69,7 @@ import {
 const isSplittableClip = (element: TimelineElement) =>
 	element.type === "VideoClip" ||
 	element.type === "AudioClip" ||
+	element.type === "CompositionAudioClip" ||
 	element.type === "Composition";
 const TIMELINE_SCALE_STEP = 0.1;
 

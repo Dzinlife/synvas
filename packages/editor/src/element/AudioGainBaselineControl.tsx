@@ -68,7 +68,9 @@ const updateClipGainDb = (
 ): ClipMeta | undefined => {
 	const safeDb = normalizeClipGainDb(gainDb);
 	const hasNonGainMeta =
-		Boolean(clip?.sourceVideoClipId) || clip?.muteSourceAudio === true;
+		Boolean(clip?.sourceVideoClipId) ||
+		Boolean(clip?.sourceCompositionId) ||
+		clip?.muteSourceAudio === true;
 	if (Math.abs(safeDb - CLIP_GAIN_DB_DEFAULT) <= DB_EPSILON) {
 		if (!hasNonGainMeta) return undefined;
 		if (!clip) return undefined;

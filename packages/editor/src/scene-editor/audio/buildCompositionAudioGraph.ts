@@ -1,4 +1,8 @@
 import type { ExportElementAudioSource } from "core/editor/exportVideo";
+import {
+	CLIP_GAIN_DB_DEFAULT,
+	resolveClipGainDb,
+} from "core/editor/audio/clipGain";
 import { isTimelineTrackAudible } from "core/editor/utils/trackAudibility";
 import type { TimelineElement, TimelineMeta } from "core/element/types";
 import type { AudioBufferSink } from "mediabunny";
@@ -8,6 +12,7 @@ import type {
 	TimelineRuntime,
 } from "@/scene-editor/runtime/types";
 import type { TimelineTrack } from "@/scene-editor/timeline/types";
+import { isCompositionSourceAudioMuted } from "@/scene-editor/utils/compositionAudioSeparation";
 import { isVideoSourceAudioMuted } from "@/scene-editor/utils/videoClipAudioSeparation";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import type { AudioMixTarget } from "./TimelineAudioMixRunner";
@@ -126,8 +131,15 @@ const toOptionalOffsetFrame = (value: unknown): number | undefined => {
 	return Math.max(0, Math.round(resolveFiniteNumber(value, 0)));
 };
 
-const resolveCompositionSceneId = (element: TimelineElement): string | null => {
-	if (element.type !== "Composition") return null;
+const resolveSceneReferenceSceneId = (
+	element: TimelineElement,
+): string | null => {
+	if (
+		element.type !== "Composition" &&
+		element.type !== "CompositionAudioClip"
+	) {
+		return null;
+	}
 	const rawSceneId = (element.props as { sceneId?: unknown } | undefined)
 		?.sceneId;
 	if (typeof rawSceneId !== "string") return null;
@@ -137,6 +149,46 @@ const resolveCompositionSceneId = (element: TimelineElement): string | null => {
 
 const shouldIncludeAudioLeaf = (element: TimelineElement): boolean => {
 	return element.type === "AudioClip" || element.type === "VideoClip";
+};
+
+const withAccumulatedClipGain = (
+	element: TimelineElement,
+	accumulatedGainDb: number,
+): TimelineElement => {
+	const ownGainDb = resolveClipGainDb(element.clip);
+	const nextGainDb = accumulatedGainDb + ownGainDb;
+	const baseClip = element.clip ? { ...element.clip } : undefined;
+	if (
+		Math.abs(nextGainDb - CLIP_GAIN_DB_DEFAULT) <= 1e-6 &&
+		baseClip?.gainDb === undefined
+	) {
+		return element;
+	}
+	if (baseClip) {
+		if (Math.abs(nextGainDb - CLIP_GAIN_DB_DEFAULT) <= 1e-6) {
+			const { gainDb: _removedGain, ...rest } = baseClip;
+			return {
+				...element,
+				clip: Object.keys(rest).length > 0 ? rest : undefined,
+			};
+		}
+		return {
+			...element,
+			clip: {
+				...baseClip,
+				gainDb: nextGainDb,
+			},
+		};
+	}
+	if (Math.abs(nextGainDb - CLIP_GAIN_DB_DEFAULT) <= 1e-6) {
+		return element;
+	}
+	return {
+		...element,
+		clip: {
+			gainDb: nextGainDb,
+		},
+	};
 };
 
 const intersectsFrameRange = (
@@ -215,9 +267,10 @@ const createVirtualClipElement = (params: {
 	element: TimelineElement;
 	virtualId: string;
 	timeline: TimelineMeta;
+	accumulatedGainDb: number;
 }): TimelineElement => {
 	return {
-		...params.element,
+		...withAccumulatedClipGain(params.element, params.accumulatedGainDb),
 		id: params.virtualId,
 		timeline: params.timeline,
 		transition: undefined,
@@ -339,6 +392,7 @@ const buildFlattenedAudioGraph = (params: {
 	sceneStartInRootFrame: number;
 	sceneWindowInSceneFrame: SceneFrameWindow | null;
 	inheritedEnabled: boolean;
+	inheritedGainDb: number;
 	instancePath: string[];
 	compositionPath: string[];
 	context: BuildFlattenContext;
@@ -367,26 +421,36 @@ const buildFlattenedAudioGraph = (params: {
 			continue;
 		}
 
-		if (element.type === "Composition") {
-			const childSceneId = resolveCompositionSceneId(element);
+		if (
+			element.type === "Composition" ||
+			element.type === "CompositionAudioClip"
+		) {
+			const childSceneId = resolveSceneReferenceSceneId(element);
 			if (!childSceneId) {
 				console.warn(
-					`[TimelineAudioMix] Composition "${element.id}" missing props.sceneId`,
+					`[TimelineAudioMix] Scene reference "${element.id}" missing props.sceneId`,
 				);
 				descendantClipIdsByLocalElementId.set(element.id, []);
 				continue;
 			}
 			if (params.compositionPath.includes(childSceneId)) {
 				console.warn(
-					`[TimelineAudioMix] Skip recursive Composition "${element.id}" -> "${childSceneId}"`,
+					`[TimelineAudioMix] Skip recursive scene reference "${element.id}" -> "${childSceneId}"`,
 				);
 				descendantClipIdsByLocalElementId.set(element.id, []);
 				continue;
 			}
 			if (params.compositionPath.length >= params.context.maxDepth) {
 				console.warn(
-					`[TimelineAudioMix] Skip Composition "${element.id}" because max depth (${params.context.maxDepth}) is reached`,
+					`[TimelineAudioMix] Skip scene reference "${element.id}" because max depth (${params.context.maxDepth}) is reached`,
 				);
+				descendantClipIdsByLocalElementId.set(element.id, []);
+				continue;
+			}
+			if (
+				element.type === "Composition" &&
+				isCompositionSourceAudioMuted(element)
+			) {
 				descendantClipIdsByLocalElementId.set(element.id, []);
 				continue;
 			}
@@ -406,6 +470,8 @@ const buildFlattenedAudioGraph = (params: {
 					state.tracks,
 					state.audioTrackStates,
 				);
+			const compositionGainDb =
+				params.inheritedGainDb + resolveClipGainDb(element.clip);
 			const compositionOffsetInParent = Math.max(
 				0,
 				toFrame(element.timeline.offset),
@@ -456,6 +522,7 @@ const buildFlattenedAudioGraph = (params: {
 					end: childWindowEnd,
 				},
 				inheritedEnabled: compositionEnabled,
+				inheritedGainDb: compositionGainDb,
 				instancePath: [
 					...instancePath,
 					`composition:${element.id}:scene:${childSceneId}`,
@@ -506,6 +573,7 @@ const buildFlattenedAudioGraph = (params: {
 			element,
 			virtualId,
 			timeline: mappedTimeline,
+			accumulatedGainDb: params.inheritedGainDb,
 		});
 		mixElements.push(virtualElement);
 
@@ -747,6 +815,7 @@ export const buildCompositionAudioGraph = (options: {
 		sceneStartInRootFrame: 0,
 		sceneWindowInSceneFrame: null,
 		inheritedEnabled: true,
+		inheritedGainDb: 0,
 		instancePath: [`scene:${options.rootRuntime.ref.sceneId}`],
 		compositionPath: [options.rootRuntime.ref.sceneId],
 		context,

@@ -1,4 +1,5 @@
 import type { TimelineTrack } from "core/editor/timeline/types";
+import { resolveClipGainDb } from "core/editor/audio/clipGain";
 import type { TimelineElement, TimelineMeta } from "core/element/types";
 import { describe, expect, it, vi } from "vitest";
 import { createEditorRuntime } from "@/scene-editor/runtime/createEditorRuntime";
@@ -37,11 +38,13 @@ const createAudioClip = ({
 	start,
 	end,
 	offset = 0,
+	clip,
 }: {
 	id: string;
 	start: number;
 	end: number;
 	offset?: number;
+	clip?: TimelineElement["clip"];
 }): TimelineElement => ({
 	id,
 	type: "AudioClip",
@@ -50,6 +53,7 @@ const createAudioClip = ({
 	assetId: `${id}-asset`,
 	timeline: createTimeline(start, end, offset),
 	props: {},
+	clip,
 });
 
 const createComposition = ({
@@ -58,12 +62,14 @@ const createComposition = ({
 	start,
 	end,
 	offset = 0,
+	clip,
 }: {
 	id: string;
 	sceneId: string;
 	start: number;
 	end: number;
 	offset?: number;
+	clip?: TimelineElement["clip"];
 }): TimelineElement => ({
 	id,
 	type: "Composition",
@@ -73,6 +79,33 @@ const createComposition = ({
 	props: {
 		sceneId,
 	},
+	clip,
+});
+
+const createCompositionAudioClip = ({
+	id,
+	sceneId,
+	start,
+	end,
+	offset = 0,
+	clip,
+}: {
+	id: string;
+	sceneId: string;
+	start: number;
+	end: number;
+	offset?: number;
+	clip?: TimelineElement["clip"];
+}): TimelineElement => ({
+	id,
+	type: "CompositionAudioClip",
+	component: "composition-audio-clip",
+	name: id,
+	timeline: createTimeline(start, end, offset, -1),
+	props: {
+		sceneId,
+	},
+	clip,
 });
 
 const createTransition = ({
@@ -218,6 +251,145 @@ describe("buildCompositionAudioGraph", () => {
 		expect(mixedClip?.timeline.start).toBe(10);
 		expect(mixedClip?.timeline.end).toBe(70);
 		expect(mixedClip?.timeline.offset).toBe(15);
+	});
+
+	it("Composition gain 会级联到展开后的叶子节点", () => {
+		const runtimeManager = createEditorRuntime({
+			id: "runtime-root",
+		}) as unknown as StudioRuntimeManager;
+		const rootRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-root"),
+		);
+		const childRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-child"),
+		);
+
+		rootRuntime.timelineStore.getState().setTracks([createTrack()]);
+		rootRuntime.timelineStore.getState().setElements([
+			createComposition({
+				id: "comp-gain",
+				sceneId: "scene-child",
+				start: 0,
+				end: 90,
+				clip: {
+					gainDb: 6,
+				},
+			}),
+		]);
+
+		childRuntime.timelineStore.getState().setTracks([createTrack()]);
+		childRuntime.timelineStore.getState().setElements([
+			createAudioClip({
+				id: "child-audio",
+				start: 0,
+				end: 90,
+				clip: {
+					gainDb: -3,
+				},
+			}),
+		]);
+		registerAudioModel(childRuntime, "child-audio");
+
+		const graph = buildCompositionAudioGraph({
+			rootRuntime,
+			runtimeManager,
+		});
+		const mixedClip = graph.mixElements.find((element) => {
+			return element.type === "AudioClip";
+		});
+		expect(resolveClipGainDb(mixedClip?.clip)).toBe(3);
+	});
+
+	it("muteSourceAudio 的 Composition 不会继续下钻源 scene 音频", () => {
+		const runtimeManager = createEditorRuntime({
+			id: "runtime-root",
+		}) as unknown as StudioRuntimeManager;
+		const rootRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-root"),
+		);
+		const childRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-child"),
+		);
+
+		rootRuntime.timelineStore.getState().setTracks([createTrack()]);
+		rootRuntime.timelineStore.getState().setElements([
+			createComposition({
+				id: "comp-muted",
+				sceneId: "scene-child",
+				start: 0,
+				end: 90,
+				clip: {
+					muteSourceAudio: true,
+				},
+			}),
+		]);
+
+		childRuntime.timelineStore.getState().setTracks([createTrack()]);
+		childRuntime.timelineStore.getState().setElements([
+			createAudioClip({
+				id: "child-audio",
+				start: 0,
+				end: 90,
+			}),
+		]);
+		registerAudioModel(childRuntime, "child-audio");
+
+		const graph = buildCompositionAudioGraph({
+			rootRuntime,
+			runtimeManager,
+		});
+
+		expect(graph.previewTargets.size).toBe(0);
+		expect(graph.exportAudioSourceMap.size).toBe(0);
+		expect(graph.mixElements).toHaveLength(0);
+	});
+
+	it("CompositionAudioClip 会递归展开子 scene 的 AudioClip", () => {
+		const runtimeManager = createEditorRuntime({
+			id: "runtime-root",
+		}) as unknown as StudioRuntimeManager;
+		const rootRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-root"),
+		);
+		const childRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-child"),
+		);
+
+		rootRuntime.timelineStore.getState().setTracks([createTrack()]);
+		rootRuntime.timelineStore.getState().setElements([
+			createCompositionAudioClip({
+				id: "proxy-audio",
+				sceneId: "scene-child",
+				start: 10,
+				end: 70,
+				offset: 5,
+				clip: {
+					sourceCompositionId: "comp-1",
+				},
+			}),
+		]);
+
+		childRuntime.timelineStore.getState().setTracks([createTrack()]);
+		childRuntime.timelineStore.getState().setElements([
+			createAudioClip({
+				id: "child-audio",
+				start: 0,
+				end: 120,
+			}),
+		]);
+		registerAudioModel(childRuntime, "child-audio");
+
+		const graph = buildCompositionAudioGraph({
+			rootRuntime,
+			runtimeManager,
+		});
+		const mixedClip = graph.mixElements.find((element) => {
+			return element.type === "AudioClip";
+		});
+		expect(mixedClip?.timeline.start).toBe(10);
+		expect(mixedClip?.timeline.end).toBe(70);
+		expect(mixedClip?.timeline.offset).toBe(5);
+		expect(graph.previewTargets.size).toBe(1);
 	});
 
 	it("Composition 边界单片段映射会保持双侧转场", () => {

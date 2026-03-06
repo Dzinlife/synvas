@@ -21,6 +21,7 @@ import ViewportHost from "./ViewportHost";
 // 导入所有组件以触发注册
 import "@/element/AudioClip";
 import "@/element/Composition";
+import "@/element/CompositionAudioClip";
 import "@/element/VideoClip";
 import "@/element/ColorFilterLayer";
 import "@/element/FreezeFrame";

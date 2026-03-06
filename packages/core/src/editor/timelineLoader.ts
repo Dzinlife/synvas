@@ -180,7 +180,7 @@ const transitionMetaSchema = z.object({
 	toId: nonEmptyStringSchema,
 });
 
-const compositionPropsSchema: z.ZodType<CompositionProps> = z.object({
+const sceneReferencePropsSchema: z.ZodType<CompositionProps> = z.object({
 	sceneId: nonEmptyStringSchema,
 });
 
@@ -371,6 +371,8 @@ function validateElement(
 	const path = `elements[${index}]`;
 	const element = parseWithSchema(timelineElementBaseSchema, el, path);
 	const type = element.type;
+	const isNegativeTrackAudioType =
+		type === "AudioClip" || type === "CompositionAudioClip";
 
 	// 验证 transform
 	const transform = validateTransform(element.transform, `${path}.transform`);
@@ -384,8 +386,8 @@ function validateElement(
 		fps,
 		allowZeroDuration,
 		{
-			allowNegativeTrackIndex: type === "AudioClip",
-			requireNegativeTrackIndex: type === "AudioClip",
+			allowNegativeTrackIndex: isNegativeTrackAudioType,
+			requireNegativeTrackIndex: isNegativeTrackAudioType,
 		},
 	);
 
@@ -398,7 +400,7 @@ function validateElement(
 	if (isAssetBackedElementType(type) && mediaProps.uri !== undefined) {
 		throw new Error(`${path}.props.uri: must use assetId instead`);
 	}
-	if (type === "Composition") {
+	if (type === "Composition" || type === "CompositionAudioClip") {
 		props = validateCompositionProps(props, `${path}.props`);
 	}
 
@@ -551,7 +553,7 @@ function createTimelineMetaSchema(
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					path: ["trackIndex"],
-					message: "AudioClip must use a negative trackIndex",
+					message: "AudioClip/CompositionAudioClip must use a negative trackIndex",
 				});
 			}
 
@@ -678,7 +680,7 @@ function validateCompositionProps(
 	props: unknown,
 	path: string,
 ): CompositionProps {
-	return parseWithSchema(compositionPropsSchema, props, path);
+	return parseWithSchema(sceneReferencePropsSchema, props, path);
 }
 
 /**

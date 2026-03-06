@@ -403,7 +403,8 @@ const CommonElementSettingsPanel: React.FC<CommonElementSettingsPanelProps> = ({
 					当前元素不包含 Transform 数据。
 				</div>
 			)}
-			{element.type === "AudioClip" && (
+			{(element.type === "AudioClip" ||
+				element.type === "CompositionAudioClip") && (
 				<div className="text-xs text-neutral-500">
 					当前类型可能无可视效果，Transform 仅保存数据。
 				</div>

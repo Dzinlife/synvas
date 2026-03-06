@@ -45,6 +45,7 @@ const resolveSegmentColor = (elementType: TimelineElement["type"]) => {
 		case "VideoClip":
 			return "#4995FF";
 		case "AudioClip":
+		case "CompositionAudioClip":
 			return "#34d399";
 		case "Image":
 			return "#FFFA62";

@@ -5,7 +5,10 @@ import { framesToTimecode } from "core/utils/timecode";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";
-import { createCompositionModel } from "./model";
+import {
+	createCompositionAudioClipModel,
+	createCompositionModel,
+} from "./model";
 
 const createSceneTimeline = (durationFrames: number): TimelineJSON => ({
 	fps: 30,
@@ -167,6 +170,30 @@ const createTailClip = (start: number, end: number): TimelineElement => ({
 	},
 });
 
+const createCompositionAudioClipElement = (
+	duration: number,
+	offset = 0,
+): TimelineElement<{
+	sceneId: string;
+}> => ({
+	id: "composition-audio-1",
+	type: "CompositionAudioClip",
+	component: "composition-audio-clip",
+	name: "Composition Audio",
+	props: {
+		sceneId: "scene-source",
+	},
+	timeline: {
+		start: 0,
+		end: duration,
+		startTimecode: framesToTimecode(0, 30),
+		endTimecode: framesToTimecode(duration, 30),
+		offset,
+		trackIndex: -1,
+		role: "audio",
+	},
+});
+
 beforeEach(() => {
 	useProjectStore.setState({
 		status: "ready",
@@ -271,6 +298,61 @@ describe("Composition model", () => {
 		const tail = elements.find((element) => element.id === "tail-clip");
 		expect(composition?.timeline.end).toBe(70);
 		expect(tail?.timeline.start).toBe(70);
+		model.getState().dispose();
+	});
+
+	it("CompositionAudioClip 会按 offset 感知来源时长变化", () => {
+		const runtime = createTestEditorRuntime(
+			"composition-audio-model-test-grow-shrink",
+		);
+		const timelineStore = runtime.timelineStore;
+		timelineStore.getState().setRippleEditingEnabled(true);
+		timelineStore
+			.getState()
+			.setElements([createCompositionAudioClipElement(90, 10)], {
+				history: false,
+			});
+		timelineStore.getState().resetHistory();
+
+		const model = createCompositionAudioClipModel(
+			"composition-audio-1",
+			{
+				sceneId: "scene-source",
+			},
+			runtime,
+		);
+		model.getState().init();
+		expect(model.getState().constraints.maxDuration).toBe(90);
+
+		useProjectStore
+			.getState()
+			.updateSceneTimeline("scene-source", createSceneTimeline(120), {
+				historyOpId: "op-audio-grow",
+			});
+
+		let proxyClip = timelineStore
+			.getState()
+			.elements.find((element) => element.id === "composition-audio-1");
+		expect(proxyClip?.timeline.end).toBe(110);
+		expect(model.getState().constraints.maxDuration).toBe(110);
+		expect(timelineStore.getState().lastCommittedHistoryOpId).toBe(
+			"op-audio-grow",
+		);
+
+		useProjectStore
+			.getState()
+			.updateSceneTimeline("scene-source", createSceneTimeline(70), {
+				historyOpId: "op-audio-shrink",
+			});
+
+		proxyClip = timelineStore
+			.getState()
+			.elements.find((element) => element.id === "composition-audio-1");
+		expect(proxyClip?.timeline.end).toBe(60);
+		expect(model.getState().constraints.maxDuration).toBe(60);
+		expect(timelineStore.getState().lastCommittedHistoryOpId).toBe(
+			"op-audio-shrink",
+		);
 		model.getState().dispose();
 	});
 });
