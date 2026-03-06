@@ -15,6 +15,7 @@ import { getSceneWaveformThumbnail } from "./sceneWaveformCache";
 
 type LoadedWaveformWindow = {
 	identityKey: string;
+	renderQualityKey: string;
 	windowStartFrame: number;
 	windowEndFrame: number;
 	waveform: HTMLCanvasElement;
@@ -140,6 +141,10 @@ export const SceneWaveformCanvas: React.FC<SceneWaveformCanvasProps> = ({
 					requestOverscanPx,
 			);
 			const requestWidth = Math.max(1e-6, requestEndX - requestStartX);
+			const requestTargetWidth = Math.max(
+				1,
+				Math.round(requestWidth * pixelRatio),
+			);
 			const viewportSourceStartSeconds =
 				offsetSeconds + canvasOffsetX / safePixelsPerSecond;
 			const viewportSourceEndSeconds =
@@ -172,13 +177,18 @@ export const SceneWaveformCanvas: React.FC<SceneWaveformCanvasProps> = ({
 				color,
 				Math.round(currentGainDb * 10) / 10,
 			].join("|");
+			const renderQualityKey = [
+				requestTargetWidth,
+				targetHeight,
+				pixelRatio,
+				timelineScale.toFixed(4),
+			].join("|");
 			const requestKey = [
 				identityKey,
+				renderQualityKey,
 				requestStartFrame,
 				requestEndFrame,
 				canvasHeight,
-				pixelRatio,
-				timelineScale.toFixed(4),
 			].join("|");
 
 			if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
@@ -192,7 +202,7 @@ export const SceneWaveformCanvas: React.FC<SceneWaveformCanvasProps> = ({
 			ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
 			const loaded = loadedWindowRef.current;
-			if (loaded && loaded.identityKey === identityKey) {
+			if (loaded) {
 				const overlapStart = Math.max(viewportStartFrame, loaded.windowStartFrame);
 				const overlapEnd = Math.min(viewportEndFrame, loaded.windowEndFrame);
 				if (overlapEnd > overlapStart) {
@@ -231,6 +241,7 @@ export const SceneWaveformCanvas: React.FC<SceneWaveformCanvasProps> = ({
 			const needRefresh =
 				!loaded ||
 				loaded.identityKey !== identityKey ||
+				loaded.renderQualityKey !== renderQualityKey ||
 				loaded.windowStartFrame > viewportStartFrame ||
 				loaded.windowEndFrame < viewportEndFrame;
 			if (needRefresh && inflightRequestKeyRef.current !== requestKey) {
@@ -254,6 +265,7 @@ export const SceneWaveformCanvas: React.FC<SceneWaveformCanvasProps> = ({
 						if (inflightRequestKeyRef.current !== requestKey) return;
 						loadedWindowRef.current = {
 							identityKey,
+							renderQualityKey,
 							windowStartFrame: requestStartFrame,
 							windowEndFrame: requestEndFrame,
 							waveform: waveformCanvas,

@@ -4,8 +4,16 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SceneWaveformCanvas } from "./SceneWaveformCanvas";
 
-const { getSceneWaveformThumbnailMock } = vi.hoisted(() => ({
+const {
+	getSceneWaveformThumbnailMock,
+	setTransformMock,
+	clearRectMock,
+	drawImageMock,
+} = vi.hoisted(() => ({
 	getSceneWaveformThumbnailMock: vi.fn(),
+	setTransformMock: vi.fn(),
+	clearRectMock: vi.fn(),
+	drawImageMock: vi.fn(),
 }));
 
 vi.mock("./sceneWaveformCache", () => ({
@@ -13,13 +21,13 @@ vi.mock("./sceneWaveformCache", () => ({
 }));
 
 vi.mock("@/scene-editor/utils/timelineScale", () => ({
-	getPixelsPerFrame: () => 2,
+	getPixelsPerFrame: (_fps: number, timelineScale: number) => 2 * timelineScale,
 }));
 
 const createCanvasContext = () => ({
-	setTransform: vi.fn(),
-	clearRect: vi.fn(),
-	drawImage: vi.fn(),
+	setTransform: setTransformMock,
+	clearRect: clearRectMock,
+	drawImage: drawImageMock,
 });
 
 describe("SceneWaveformCanvas", () => {
@@ -30,6 +38,9 @@ describe("SceneWaveformCanvas", () => {
 
 	beforeEach(() => {
 		getSceneWaveformThumbnailMock.mockReset();
+		setTransformMock.mockReset();
+		clearRectMock.mockReset();
+		drawImageMock.mockReset();
 		getSceneWaveformThumbnailMock.mockResolvedValue(
 			document.createElement("canvas"),
 		);
@@ -132,5 +143,139 @@ describe("SceneWaveformCanvas", () => {
 				gainDb: 3,
 			}),
 		);
+	});
+
+	it("timelineScale 变化后会重新请求更高精度的波形", async () => {
+		const props = {
+			sceneRuntime: {
+				ref: {
+					sceneId: "scene-child",
+				},
+			} as never,
+			runtimeManager: {
+				getTimelineRuntime: vi.fn(),
+			} as never,
+			sceneRevision: 5,
+			sourceFps: 24,
+			gainDb: 3,
+			start: 0,
+			end: 90,
+			fps: 30,
+			offsetFrames: 15,
+			scrollLeft: 0,
+			color: "rgba(34, 211, 238, 0.92)",
+		};
+		const { rerender } = render(
+			<div data-timeline-scroll-area>
+				<div data-vertical-scroll-area>
+					<SceneWaveformCanvas {...props} timelineScale={1} />
+				</div>
+			</div>,
+		);
+
+		resizeObserverCallback?.([], {} as ResizeObserver);
+
+		await waitFor(() => {
+			expect(getSceneWaveformThumbnailMock).toHaveBeenCalledTimes(1);
+		});
+
+		rerender(
+			<div data-timeline-scroll-area>
+				<div data-vertical-scroll-area>
+					<SceneWaveformCanvas {...props} timelineScale={2} />
+				</div>
+			</div>,
+		);
+
+		await waitFor(() => {
+			expect(getSceneWaveformThumbnailMock).toHaveBeenCalledTimes(2);
+		});
+
+		expect(getSceneWaveformThumbnailMock).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				sceneRevision: 5,
+				windowStartFrame: 12,
+				windowEndFrame: 53,
+				width: 200,
+				height: 40,
+				pixelRatio: 1,
+			}),
+		);
+	});
+
+	it("拖拽 gain 时会继续复用旧波形，避免短暂消失", async () => {
+		const firstWaveform = document.createElement("canvas");
+		firstWaveform.width = 200;
+		firstWaveform.height = 40;
+		const resolveNextWaveformRef: {
+			current: ((value: HTMLCanvasElement | null) => void) | null;
+		} = {
+			current: null,
+		};
+		const nextWaveformPromise = new Promise<HTMLCanvasElement | null>(
+			(resolve) => {
+				resolveNextWaveformRef.current = resolve;
+			},
+		);
+		getSceneWaveformThumbnailMock
+			.mockReset()
+			.mockResolvedValueOnce(firstWaveform)
+			.mockImplementationOnce(() => nextWaveformPromise);
+
+		const props = {
+			sceneRuntime: {
+				ref: {
+					sceneId: "scene-child",
+				},
+			} as never,
+			runtimeManager: {
+				getTimelineRuntime: vi.fn(),
+			} as never,
+			sceneRevision: 5,
+			sourceFps: 24,
+			start: 0,
+			end: 90,
+			fps: 30,
+			timelineScale: 1,
+			offsetFrames: 15,
+			scrollLeft: 0,
+			color: "rgba(34, 211, 238, 0.92)",
+		};
+
+		const { rerender } = render(
+			<div data-timeline-scroll-area>
+				<div data-vertical-scroll-area>
+					<SceneWaveformCanvas {...props} gainDb={0} />
+				</div>
+			</div>,
+		);
+
+		resizeObserverCallback?.([], {} as ResizeObserver);
+
+		await waitFor(() => {
+			expect(getSceneWaveformThumbnailMock).toHaveBeenCalledTimes(1);
+		});
+		await waitFor(() => {
+			expect(drawImageMock).toHaveBeenCalled();
+		});
+
+		drawImageMock.mockClear();
+
+		rerender(
+			<div data-timeline-scroll-area>
+				<div data-vertical-scroll-area>
+					<SceneWaveformCanvas {...props} gainDb={6} />
+				</div>
+			</div>,
+		);
+
+		await waitFor(() => {
+			expect(getSceneWaveformThumbnailMock).toHaveBeenCalledTimes(2);
+		});
+		expect(drawImageMock).toHaveBeenCalled();
+
+		if (resolveNextWaveformRef.current) {
+			resolveNextWaveformRef.current(document.createElement("canvas"));
+		}
 	});
 });

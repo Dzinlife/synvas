@@ -613,7 +613,9 @@ const buildSkiaRenderStateWithScopeCore = async (
 		...plans.map((plan) => plan.node),
 	];
 
-	const ready = shouldAwaitReady
+	const ready = shouldAwaitReady || forcePrepareFrames
+		// forcePrepareFrames 的语义也必须等待 prepareRenderFrame 完成，
+		// 否则像 VideoClip 这类依赖离屏帧准备的元素会在未就绪时被提前截图成黑帧。
 		? Promise.all(plans.map((plan) => plan.ready)).then(() => undefined)
 		: Promise.resolve();
 

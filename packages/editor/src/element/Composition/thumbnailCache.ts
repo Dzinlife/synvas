@@ -13,9 +13,19 @@ import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import type { TimelineElement } from "core/element/types";
 
 const THUMBNAIL_CACHE_LIMIT = 240;
+const THUMBNAIL_CACHE_VERSION = 2;
+const SHARED_RASTER_SURFACE_MIN_SIZE = 512;
 const thumbnailCache = new Map<string, HTMLCanvasElement>();
 const thumbnailAccessOrder: string[] = [];
 const thumbnailInflight = new Map<string, Promise<HTMLCanvasElement | null>>();
+let sharedRasterSurface:
+	| {
+			surface: NonNullable<ReturnType<typeof Skia.Surface.Make>>;
+			width: number;
+			height: number;
+	  }
+	| null = null;
+let rasterQueue: Promise<void> = Promise.resolve();
 const yieldToMainThread = () =>
 	new Promise<void>((resolve) => {
 		window.setTimeout(resolve, 0);
@@ -69,43 +79,123 @@ const createScopedRuntime = (
 	modelRegistry: runtime.modelRegistry,
 });
 
-const renderPictureToCanvas = (params: {
+const resolveThumbnailCacheKey = (params: {
+	sceneRuntime: TimelineRuntime;
+	sceneRevision: number;
+	displayFrame: number;
+	width: number;
+	height: number;
+	pixelRatio: number;
+}) => {
+	const targetWidth = Math.max(1, Math.round(params.width * params.pixelRatio));
+	const targetHeight = Math.max(1, Math.round(params.height * params.pixelRatio));
+	const displayFrameKey = Math.max(0, Math.round(params.displayFrame));
+	return [
+		THUMBNAIL_CACHE_VERSION,
+		params.sceneRuntime.ref.sceneId,
+		params.sceneRevision,
+		displayFrameKey,
+		targetWidth,
+		targetHeight,
+	].join("|");
+};
+
+const getSharedRasterSurface = (params: { width: number; height: number }) => {
+	const requiredWidth = Math.max(
+		SHARED_RASTER_SURFACE_MIN_SIZE,
+		Math.ceil(params.width),
+	);
+	const requiredHeight = Math.max(
+		SHARED_RASTER_SURFACE_MIN_SIZE,
+		Math.ceil(params.height),
+	);
+	if (
+		sharedRasterSurface &&
+		sharedRasterSurface.width >= requiredWidth &&
+		sharedRasterSurface.height >= requiredHeight
+	) {
+		return sharedRasterSurface.surface;
+	}
+	sharedRasterSurface?.surface.dispose();
+	sharedRasterSurface = null;
+	const surface =
+		Skia.Surface.MakeOffscreen(requiredWidth, requiredHeight) ??
+		Skia.Surface.Make(requiredWidth, requiredHeight);
+	if (!surface) return null;
+	sharedRasterSurface = {
+		surface,
+		width: requiredWidth,
+		height: requiredHeight,
+	};
+	return surface;
+};
+
+const enqueueRasterTask = <T,>(task: () => Promise<T>): Promise<T> => {
+	const next = rasterQueue.then(task, task);
+	rasterQueue = next.then(
+		() => undefined,
+		() => undefined,
+	);
+	return next;
+};
+
+const renderPictureToCanvas = async (params: {
 	picture: NonNullable<Awaited<ReturnType<typeof buildSkiaFrameSnapshot>>["picture"]>;
 	width: number;
 	height: number;
-}): HTMLCanvasElement | null => {
-	const { picture, width, height } = params;
-	if (width <= 0 || height <= 0) return null;
-	// 缩略图缓存必须避免额外申请 WebGL context，否则 scene 节点较多时会触发上限。
-	const surface = Skia.Surface.Make(width, height);
-	if (!surface) return null;
-	try {
+	sourceCanvasSize: {
+		width: number;
+		height: number;
+	};
+}): Promise<HTMLCanvasElement | null> => {
+	return enqueueRasterTask(async () => {
+		const { picture, width, height, sourceCanvasSize } = params;
+		if (width <= 0 || height <= 0) return null;
+		// 复用单个 GPU surface，避免每张缩略图都新建 WebGL context，
+		// 同时让 VideoClip 的纹理帧走 GPU 栅格化路径，避免软件 surface 读出黑帧。
+		const surface = getSharedRasterSurface({ width, height });
+		if (!surface) return null;
 		const skCanvas = surface.getCanvas();
-		skCanvas.clear(Float32Array.of(0, 0, 0, 0));
-		skCanvas.drawPicture(picture);
-		surface.flush();
-		const image = surface.makeImageSnapshot();
+		skCanvas.save();
 		try {
-			const info = image.getImageInfo();
-			const pixels = image.readPixels(0, 0, info);
-			if (!pixels) return null;
-			const canvas = document.createElement("canvas");
-			canvas.width = width;
-			canvas.height = height;
-			const ctx = canvas.getContext("2d");
-			if (!ctx) return null;
-			ctx.putImageData(
-				new ImageData(new Uint8ClampedArray(pixels), width, height),
-				0,
-				0,
-			);
-			return canvas;
+			skCanvas.clear(Float32Array.of(0, 0, 0, 0));
+			const safeSourceWidth = Math.max(1, sourceCanvasSize.width || width);
+			const safeSourceHeight = Math.max(1, sourceCanvasSize.height || height);
+			const scale = Math.min(width / safeSourceWidth, height / safeSourceHeight);
+			const scaledWidth = safeSourceWidth * scale;
+			const scaledHeight = safeSourceHeight * scale;
+			const offsetX = (width - scaledWidth) * 0.5;
+			const offsetY = (height - scaledHeight) * 0.5;
+			skCanvas.translate(offsetX, offsetY);
+			skCanvas.scale(scale, scale);
+			skCanvas.drawPicture(picture);
+			surface.flush();
+			const snapshotRect = Skia.XYWHRect(0, 0, width, height);
+			const snapshotImage = surface.makeImageSnapshot(snapshotRect);
+			const image = snapshotImage.makeNonTextureImage();
+			try {
+				const info = image.getImageInfo();
+				const pixels = image.readPixels(0, 0, info);
+				if (!pixels) return null;
+				const canvas = document.createElement("canvas");
+				canvas.width = width;
+				canvas.height = height;
+				const ctx = canvas.getContext("2d");
+				if (!ctx) return null;
+				ctx.putImageData(
+					new ImageData(new Uint8ClampedArray(pixels), width, height),
+					0,
+					0,
+				);
+				return canvas;
+			} finally {
+				image.dispose();
+				snapshotImage.dispose();
+			}
 		} finally {
-			image.dispose();
+			skCanvas.restore();
 		}
-	} finally {
-		surface.dispose();
-	}
+	});
 };
 
 export const getCompositionThumbnail = async (params: {
@@ -131,13 +221,14 @@ export const getCompositionThumbnail = async (params: {
 	const targetWidth = Math.max(1, Math.round(width * pixelRatio));
 	const targetHeight = Math.max(1, Math.round(height * pixelRatio));
 	const displayFrameKey = Math.max(0, Math.round(displayFrame));
-	const cacheKey = [
-		sceneRuntime.ref.sceneId,
+	const cacheKey = resolveThumbnailCacheKey({
+		sceneRuntime,
 		sceneRevision,
-		displayFrameKey,
-		targetWidth,
-		targetHeight,
-	].join("|");
+		displayFrame,
+		width,
+		height,
+		pixelRatio,
+	});
 
 	const cached = thumbnailCache.get(cacheKey);
 	if (cached) {
@@ -151,6 +242,13 @@ export const getCompositionThumbnail = async (params: {
 	const promise = (async () => {
 		await yieldToMainThread();
 		const state = sceneRuntime.timelineStore.getState();
+		const sourceCanvasSize =
+			state.canvasSize?.width > 0 && state.canvasSize?.height > 0
+				? state.canvasSize
+				: {
+						width: targetWidth,
+						height: targetHeight,
+					};
 		const RuntimeProvider = EditorRuntimeProvider as RuntimeProviderComponent;
 		const frameSnapshot = await buildSkiaFrameSnapshot(
 			{
@@ -162,13 +260,10 @@ export const getCompositionThumbnail = async (params: {
 				prepare: {
 					isExporting: false,
 					fps: Math.max(1, Math.round(state.fps || 30)),
-					canvasSize: {
-						width: targetWidth,
-						height: targetHeight,
-					},
+					canvasSize: sourceCanvasSize,
 					prepareTransitionPictures: false,
-					forcePrepareFrames: false,
-					awaitReady: false,
+					forcePrepareFrames: true,
+					awaitReady: true,
 					getModelStore: (id) => sceneRuntime.modelRegistry.get(id),
 					compositionPath: [sceneRuntime.ref.sceneId],
 					frameChannel: "offscreen",
@@ -210,10 +305,11 @@ export const getCompositionThumbnail = async (params: {
 		);
 		try {
 			if (!frameSnapshot.picture) return null;
-			const canvas = renderPictureToCanvas({
+			const canvas = await renderPictureToCanvas({
 				picture: frameSnapshot.picture,
 				width: targetWidth,
 				height: targetHeight,
+				sourceCanvasSize,
 			});
 			if (!canvas) return null;
 			thumbnailCache.set(cacheKey, canvas);
@@ -231,4 +327,19 @@ export const getCompositionThumbnail = async (params: {
 	} finally {
 		thumbnailInflight.delete(cacheKey);
 	}
+};
+
+export const peekCompositionThumbnail = (params: {
+	sceneRuntime: TimelineRuntime;
+	sceneRevision: number;
+	displayFrame: number;
+	width: number;
+	height: number;
+	pixelRatio: number;
+}): HTMLCanvasElement | null => {
+	const cacheKey = resolveThumbnailCacheKey(params);
+	const cached = thumbnailCache.get(cacheKey);
+	if (!cached) return null;
+	touchThumbnailKey(cacheKey);
+	return cached;
 };

@@ -46,7 +46,7 @@ export const CompositionAudioClipTimeline: React.FC<
 	const {
 		runtime,
 		runtimeManager,
-		revision,
+		contentRevision,
 		fps: sourceFps,
 	} = useSceneReferenceRuntimeState(sceneId);
 
@@ -55,7 +55,7 @@ export const CompositionAudioClipTimeline: React.FC<
 			sceneRuntime: runtime,
 			runtimeManager,
 		});
-	}, [revision, runtime, runtimeManager]);
+	}, [contentRevision, runtime, runtimeManager]);
 
 	const waveformColor = isTrackMuted
 		? "rgba(163, 163, 163, 0.9)"
@@ -73,7 +73,7 @@ export const CompositionAudioClipTimeline: React.FC<
 				<SceneWaveformCanvas
 					sceneRuntime={runtime}
 					runtimeManager={runtimeManager}
-					sceneRevision={revision}
+					sceneRevision={contentRevision}
 					sourceFps={sourceFps}
 					gainDb={clipGainDb}
 					start={start}

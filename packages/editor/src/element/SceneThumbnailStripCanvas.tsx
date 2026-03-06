@@ -7,7 +7,10 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { getCompositionThumbnail } from "@/element/Composition/thumbnailCache";
+import {
+	getCompositionThumbnail,
+	peekCompositionThumbnail,
+} from "@/element/Composition/thumbnailCache";
 import type {
 	StudioRuntimeManager,
 	TimelineRuntime,
@@ -135,16 +138,40 @@ export const SceneThumbnailStripCanvas: React.FC<
 			const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
 			const targetWidth = Math.max(1, Math.floor(canvasWidth * pixelRatio));
 			const targetHeight = Math.max(1, Math.floor(canvasHeight * pixelRatio));
-
+			let snapshotCanvas: HTMLCanvasElement | null = null;
 			if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+				if (canvas.width > 0 && canvas.height > 0) {
+					snapshotCanvas = document.createElement("canvas");
+					snapshotCanvas.width = canvas.width;
+					snapshotCanvas.height = canvas.height;
+					const snapshotCtx = snapshotCanvas.getContext("2d");
+					if (snapshotCtx) {
+						snapshotCtx.drawImage(canvas, 0, 0);
+					}
+				}
 				canvas.width = targetWidth;
 				canvas.height = targetHeight;
 			}
+			// 和 VideoClip 一样，滚动重绘时保留已有像素，只覆盖新请求到的缩略图，
+			// 这样不会因为先 clearRect 再逐张补绘而闪烁。
+			ctx.setTransform(1, 0, 0, 1, 0, 0);
+			ctx.scale(pixelRatio, pixelRatio);
 			canvas.style.transform = `translateX(${canvasOffsetX}px)`;
 			canvas.style.width = `${canvasWidth}px`;
 			canvas.style.height = `${canvasHeight}px`;
-			ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-			ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+			if (snapshotCanvas) {
+				ctx.drawImage(
+					snapshotCanvas,
+					0,
+					0,
+					snapshotCanvas.width,
+					snapshotCanvas.height,
+					0,
+					0,
+					canvasWidth,
+					canvasHeight,
+				);
+			}
 
 			const currentSceneRuntime = getSceneRuntime();
 			const currentRuntimeManager = getRuntimeManager();
@@ -198,12 +225,9 @@ export const SceneThumbnailStripCanvas: React.FC<
 			const currentToken = ++renderTokenRef.current;
 			let didDraw = false;
 			let hasPendingThumbnail = false;
+			let asyncThumbnailCount = 0;
 			for (let i = startIndex; i <= endIndex; i += 1) {
 				if (renderTokenRef.current !== currentToken) return;
-				if (i > startIndex) {
-					await yieldToMainThread();
-					if (renderTokenRef.current !== currentToken) return;
-				}
 				const displaySeconds = Math.max(
 					0,
 					offsetSeconds + i * previewIntervalSeconds,
@@ -219,7 +243,7 @@ export const SceneThumbnailStripCanvas: React.FC<
 								displayFrame,
 							)
 						: displayFrame;
-				const thumbnail = await getCompositionThumbnail({
+				const thumbnailParams = {
 					sceneRuntime: currentSceneRuntime,
 					runtimeManager: currentRuntimeManager,
 					sceneRevision: getSceneRevision(),
@@ -227,7 +251,17 @@ export const SceneThumbnailStripCanvas: React.FC<
 					width: thumbnailWidth,
 					height: thumbnailHeight,
 					pixelRatio,
-				});
+				};
+				const cachedThumbnail = peekCompositionThumbnail(thumbnailParams);
+				let thumbnail = cachedThumbnail;
+				if (!thumbnail) {
+					if (asyncThumbnailCount > 0) {
+						await yieldToMainThread();
+						if (renderTokenRef.current !== currentToken) return;
+					}
+					asyncThumbnailCount += 1;
+					thumbnail = await getCompositionThumbnail(thumbnailParams);
+				}
 				if (renderTokenRef.current !== currentToken) return;
 				if (!thumbnail) {
 					hasPendingThumbnail = true;

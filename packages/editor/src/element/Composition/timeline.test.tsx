@@ -37,6 +37,7 @@ const {
 			getTimelineRuntime: vi.fn(),
 		},
 		revision: 7,
+		contentRevision: 3,
 		fps: 24,
 		durationFrames: 96,
 		canvasSize: {
@@ -99,6 +100,7 @@ vi.mock("@/element/SceneWaveformCanvas", () => ({
 
 vi.mock("./thumbnailCache", () => ({
 	getCompositionThumbnail: getCompositionThumbnailMock,
+	peekCompositionThumbnail: () => null,
 }));
 
 vi.mock("@/element/AudioGainBaselineControl", () => ({
@@ -223,7 +225,7 @@ describe("CompositionTimeline", () => {
 			expect.objectContaining({
 				sceneRuntime: sceneReferenceState.runtime,
 				runtimeManager: sceneReferenceState.runtimeManager,
-				sceneRevision: 7,
+				sceneRevision: 3,
 				displayFrame: 10,
 			}),
 		);

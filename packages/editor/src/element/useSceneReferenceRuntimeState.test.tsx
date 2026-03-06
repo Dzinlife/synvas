@@ -37,6 +37,7 @@ const Probe = () => {
 			data-testid="probe"
 			data-runtime={state.runtime?.ref.sceneId ?? ""}
 			data-revision={String(state.revision)}
+			data-content-revision={String(state.contentRevision)}
 			data-fps={String(state.fps)}
 			data-duration={String(state.durationFrames)}
 			data-canvas={`${state.canvasSize.width}x${state.canvasSize.height}`}
@@ -87,6 +88,8 @@ describe("useSceneReferenceRuntimeState", () => {
 		expect(probe.dataset.fps).toBe("24");
 		expect(probe.dataset.duration).toBe("60");
 		expect(probe.dataset.canvas).toBe("1280x720");
+		const contentRevisionAfterInit = Number(probe.dataset.contentRevision);
+		expect(contentRevisionAfterInit).toBeGreaterThan(0);
 
 		act(() => {
 			sceneRuntime.timelineStore
@@ -96,6 +99,23 @@ describe("useSceneReferenceRuntimeState", () => {
 
 		probe = screen.getByTestId("probe");
 		expect(probe.dataset.duration).toBe("90");
+		const contentRevisionAfterElementsChange = Number(
+			probe.dataset.contentRevision,
+		);
+		expect(contentRevisionAfterElementsChange).toBeGreaterThan(
+			contentRevisionAfterInit,
+		);
+
+		const revisionBeforeScroll = probe.dataset.revision;
+		act(() => {
+			sceneRuntime.timelineStore.getState().setPreviewTime(12);
+		});
+
+		probe = screen.getByTestId("probe");
+		expect(probe.dataset.revision).not.toBe(revisionBeforeScroll);
+		expect(Number(probe.dataset.contentRevision)).toBe(
+			contentRevisionAfterElementsChange,
+		);
 
 		const loggedErrors = errorSpy.mock.calls.map((call) => call.join(" "));
 		expect(

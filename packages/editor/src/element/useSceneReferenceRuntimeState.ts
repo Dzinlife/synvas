@@ -10,6 +10,7 @@ import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 type SceneReferenceRuntimeState = {
 	runtime: TimelineRuntime | null;
 	revision: number;
+	contentRevision: number;
 	fps: number;
 	durationFrames: number;
 	canvasSize: { width: number; height: number };
@@ -18,6 +19,7 @@ type SceneReferenceRuntimeState = {
 const EMPTY_RUNTIME_STATE: SceneReferenceRuntimeState = {
 	runtime: null,
 	revision: 0,
+	contentRevision: 0,
 	fps: 30,
 	durationFrames: 0,
 	canvasSize: { width: 1920, height: 1080 },
@@ -30,6 +32,7 @@ const areSnapshotStatesEqual = (
 	return (
 		left.runtime === right.runtime &&
 		left.revision === right.revision &&
+		left.contentRevision === right.contentRevision &&
 		left.fps === right.fps &&
 		left.durationFrames === right.durationFrames &&
 		left.canvasSize.width === right.canvasSize.width &&
@@ -57,6 +60,7 @@ const buildSnapshot = (
 	return {
 		runtime,
 		revision: state.revision,
+		contentRevision: state.persistRevision,
 		fps: Math.max(1, Math.round(state.fps || fallback.fps || 30)),
 		durationFrames: resolveTimelineEndFrame(state.elements),
 		canvasSize:

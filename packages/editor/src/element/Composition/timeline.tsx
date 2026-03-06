@@ -54,7 +54,7 @@ export const CompositionTimeline: React.FC<CompositionTimelineProps> = ({
 	const {
 		runtime,
 		runtimeManager,
-		revision,
+		contentRevision,
 		fps: sourceFps,
 		durationFrames: sourceDurationFrames,
 		canvasSize,
@@ -65,7 +65,7 @@ export const CompositionTimeline: React.FC<CompositionTimelineProps> = ({
 			sceneRuntime: runtime,
 			runtimeManager,
 		});
-	}, [revision, runtime, runtimeManager]);
+	}, [contentRevision, runtime, runtimeManager]);
 
 	const shouldShowWaveform = hasSourceAudioTrack && !isSourceAudioMuted;
 	const waveformColor = isTrackMuted
@@ -86,7 +86,7 @@ export const CompositionTimeline: React.FC<CompositionTimelineProps> = ({
 			<SceneThumbnailStripCanvas
 				sceneRuntime={runtime}
 				runtimeManager={runtimeManager}
-				sceneRevision={revision}
+				sceneRevision={contentRevision}
 				sourceFps={sourceFps}
 				sourceDurationFrames={sourceDurationFrames}
 				sourceCanvasSize={canvasSize}
@@ -114,7 +114,7 @@ export const CompositionTimeline: React.FC<CompositionTimelineProps> = ({
 						<SceneWaveformCanvas
 							sceneRuntime={runtime}
 							runtimeManager={runtimeManager}
-							sceneRevision={revision}
+							sceneRevision={contentRevision}
 							sourceFps={sourceFps}
 							gainDb={clipGainDb}
 							start={start}

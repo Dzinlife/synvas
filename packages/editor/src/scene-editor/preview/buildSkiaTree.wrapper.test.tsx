@@ -1055,6 +1055,59 @@ describe("buildSkiaTree transform wrapper", () => {
 		expect(prepareRenderFrame).toHaveBeenCalledTimes(1);
 	});
 
+	it("forcePrepareFrames 会等待 prepareRenderFrame 完成，即使 awaitReady=false", async () => {
+		const element = createElement({
+			id: "force-prepare-element",
+			type: "Image",
+			component: "image",
+		});
+		const deferred = createDeferred();
+		const prepareRenderFrame = vi.fn(() => deferred.promise);
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			resolveComponent: (componentId) => {
+				if (componentId === "image") {
+					return {
+						Renderer: PlainRenderer,
+						prepareRenderFrame,
+					};
+				}
+				return deps.resolveComponent(componentId);
+			},
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [element],
+				displayTime: 0,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					forcePrepareFrames: true,
+					awaitReady: false,
+				},
+			},
+			localDeps,
+		);
+
+		let readyResolved = false;
+		void renderState.ready.then(() => {
+			readyResolved = true;
+		});
+		await Promise.resolve();
+
+		expect(prepareRenderFrame).toHaveBeenCalledTimes(1);
+		expect(readyResolved).toBe(false);
+
+		deferred.resolve();
+		await renderState.ready;
+		expect(readyResolved).toBe(true);
+	});
+
 	it("waitForReady 失败时 ready 会直接失败，不会挂起", async () => {
 		const element = createElement({
 			id: "ready-failed-element",
