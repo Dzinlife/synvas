@@ -505,7 +505,16 @@ const buildSkiaRenderStateWithScopeCore = async (
 				);
 				const compositionNode = (
 					<Group matrix={matrix} key={element.id}>
-						<Picture picture={childSnapshot.picture} />
+						<Group
+							clip={{
+								x: 0,
+								y: 0,
+								width: childCanvasWidth,
+								height: childCanvasHeight,
+							}}
+						>
+							<Picture picture={childSnapshot.picture} />
+						</Group>
 					</Group>
 				);
 				const node = wrapElementNode({
