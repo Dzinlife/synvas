@@ -3,11 +3,11 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { TimelineElement } from "core/element/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as audioEngine from "@/audio/engine";
-import { TimelineProvider } from "./TimelineContext";
 import {
 	createRuntimeProviderWrapper,
 	createTestEditorRuntime,
 } from "../runtime/testUtils";
+import { TimelineProvider } from "./TimelineContext";
 
 const runtime = createTestEditorRuntime("timeline-playback-end-test");
 const timelineStore = runtime.timelineStore;
@@ -36,14 +36,15 @@ const createElement = (
 	},
 });
 
-let rafQueue: FrameRequestCallback[] = [];
+let rafQueue: Array<{ id: number; callback: FrameRequestCallback }> = [];
 let rafNow = 0;
+let rafIdSeed = 0;
 
 const flushNextAnimationFrame = (deltaMs = 16): boolean => {
-	const callback = rafQueue.shift();
-	if (!callback) return false;
+	const frame = rafQueue.shift();
+	if (!frame) return false;
 	rafNow += deltaMs;
-	callback(rafNow);
+	frame.callback(rafNow);
 	return true;
 };
 
@@ -51,12 +52,17 @@ describe("TimelineContext playback end guard", () => {
 	beforeEach(() => {
 		rafQueue = [];
 		rafNow = 0;
+		rafIdSeed = 0;
 		vi.spyOn(audioEngine, "getAudioContext").mockReturnValue(null);
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-			rafQueue.push(callback);
-			return rafQueue.length;
+			rafIdSeed += 1;
+			const id = rafIdSeed;
+			rafQueue.push({ id, callback });
+			return id;
 		});
-		vi.stubGlobal("cancelAnimationFrame", vi.fn());
+		vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+			rafQueue = rafQueue.filter((entry) => entry.id !== id);
+		});
 	});
 
 	afterEach(() => {
@@ -65,6 +71,7 @@ describe("TimelineContext playback end guard", () => {
 		vi.unstubAllGlobals();
 		rafQueue = [];
 		rafNow = 0;
+		rafIdSeed = 0;
 		timelineStore.setState(initialState, true);
 	});
 
@@ -191,6 +198,38 @@ describe("TimelineContext playback end guard", () => {
 		expect(stopped.isPlaying).toBe(false);
 		expect(stopped.currentTime).toBe(14);
 		expect(rafQueue.length).toBe(0);
+	});
+
+	it("播放中卸载 TimelineProvider 会停止 RAF 循环", async () => {
+		const view = render(
+			<TimelineProvider elements={[createElement("clip-1", 0, 200)]} fps={30}>
+				<div />
+			</TimelineProvider>,
+			{ wrapper },
+		);
+
+		await waitFor(() => {
+			expect(timelineStore.getState().elements).toHaveLength(1);
+		});
+
+		act(() => {
+			timelineStore.setState({
+				currentTime: 10,
+				previewTime: null,
+				isPlaying: false,
+			});
+			timelineStore.getState().play();
+		});
+		expect(timelineStore.getState().isPlaying).toBe(true);
+		expect(rafQueue.length).toBeGreaterThan(0);
+
+		act(() => {
+			view.unmount();
+		});
+		expect(rafQueue.length).toBe(0);
+
+		const didRun = flushNextAnimationFrame(16);
+		expect(didRun).toBe(false);
 	});
 
 	it("Filter 不影响播放停止边界", () => {

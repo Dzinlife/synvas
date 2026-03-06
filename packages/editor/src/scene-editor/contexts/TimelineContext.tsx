@@ -2119,6 +2119,7 @@ export const TimelineProvider = ({
 	const audioStartTimeRef = useRef<number | null>(null);
 	const perfStartTimeRef = useRef<number | null>(null);
 	const seekEpochRef = useRef<number | null>(null);
+	const playbackRafIdRef = useRef<number | null>(null);
 	const settingsState = initialSettings
 		? {
 				snapEnabled: initialSettings.snapEnabled,
@@ -2245,10 +2246,25 @@ export const TimelineProvider = ({
 
 	// 播放循环
 	useEffect(() => {
+		// provider 卸载时必须显式停止 RAF，避免跨 scene/runtime 切换后残留循环持续占用主线程。
+		const stopPlaybackRaf = () => {
+			const rafId = playbackRafIdRef.current;
+			if (rafId === null) return;
+			playbackRafIdRef.current = null;
+			if (typeof cancelAnimationFrame === "function") {
+				cancelAnimationFrame(rafId);
+			}
+		};
+		const schedulePlaybackRaf = (callback: FrameRequestCallback) => {
+			playbackRafIdRef.current = requestAnimationFrame(callback);
+		};
 		const unsubscribe = timelineStore.subscribe(
 			(state) => state.isPlaying,
 			(isPlaying) => {
 				if (isPlaying) {
+					if (playbackRafIdRef.current !== null) {
+						return;
+					}
 					const resetAudioClock = (
 						state: TimelineStore,
 						context: AudioContext,
@@ -2265,6 +2281,7 @@ export const TimelineProvider = ({
 						audioStartTimeRef.current = null;
 					};
 					const animate = (now: number) => {
+						playbackRafIdRef.current = null;
 						const state = timelineStore.getState();
 						if (!state.isPlaying) return;
 						const timelineEndFrame = resolveTimelineEndFrame(state.elements);
@@ -2288,7 +2305,7 @@ export const TimelineProvider = ({
 							} else {
 								resetPerfClock(state, now);
 							}
-							requestAnimationFrame(animate);
+							schedulePlaybackRaf(animate);
 							return;
 						}
 
@@ -2336,10 +2353,11 @@ export const TimelineProvider = ({
 							}
 						}
 
-						requestAnimationFrame(animate);
+						schedulePlaybackRaf(animate);
 					};
-					requestAnimationFrame(animate);
+					schedulePlaybackRaf(animate);
 				} else {
+					stopPlaybackRaf();
 					clockModeRef.current = null;
 					audioStartTimeRef.current = null;
 					perfStartTimeRef.current = null;
@@ -2349,7 +2367,10 @@ export const TimelineProvider = ({
 			{ fireImmediately: true },
 		);
 
-		return () => unsubscribe();
+		return () => {
+			stopPlaybackRaf();
+			unsubscribe();
+		};
 	}, [timelineStore]);
 
 	return <>{children}</>;
