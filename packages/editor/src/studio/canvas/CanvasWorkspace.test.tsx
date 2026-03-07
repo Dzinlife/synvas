@@ -35,6 +35,7 @@ interface MockCanvasNodeDragEvent {
 interface MockInfiniteSkiaCanvasProps {
 	width: number;
 	height: number;
+	focusedNodeId?: string | null;
 	onNodeClick?: (node: CanvasNode) => void;
 	onNodeDoubleClick?: (node: CanvasNode) => void;
 	onNodeDragStart?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
@@ -68,13 +69,14 @@ vi.mock("./InfiniteSkiaCanvas", () => ({
 	default: (props: MockInfiniteSkiaCanvasProps) => {
 		infiniteSkiaCanvasPropsMock(props);
 		return (
-			<div data-testid="infinite-skia-canvas" data-canvas-surface="true" />
+			<>
+				<div data-testid="infinite-skia-canvas" data-canvas-surface="true" />
+				{props.focusedNodeId ? (
+					<div data-testid="focus-scene-skia-layer" />
+				) : null}
+			</>
 		);
 	},
-}));
-
-vi.mock("./FocusSceneKonvaLayer", () => ({
-	default: () => <div data-testid="focus-scene-konva-layer" />,
 }));
 
 vi.mock("@/scene-editor/components/SceneTimelineDrawer", () => ({
@@ -922,7 +924,7 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(80, 80);
 		await waitFor(() => {
-			expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
+			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
 		});
 		await waitFor(() => {
 			const zoom =
@@ -1020,7 +1022,7 @@ describe("CanvasWorkspace", () => {
 			"node-scene-1",
 		);
 		await waitFor(() => {
-			expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
+			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
 		});
 		expect(screen.getByTestId("scene-timeline-drawer")).toBeTruthy();
 		expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
@@ -1103,7 +1105,7 @@ describe("CanvasWorkspace", () => {
 		expect(
 			useProjectStore.getState().currentProject?.ui.focusedNodeId,
 		).toBeNull();
-		expect(screen.queryByTestId("focus-scene-konva-layer")).toBeNull();
+		expect(screen.queryByTestId("focus-scene-skia-layer")).toBeNull();
 		expect(immediateCamera).toBeTruthy();
 		expect(beforeCamera).toBeTruthy();
 		if (!immediateCamera || !beforeCamera) return;

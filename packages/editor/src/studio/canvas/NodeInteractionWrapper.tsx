@@ -21,6 +21,7 @@ interface NodeInteractionWrapperProps {
 	isHovered: boolean;
 	cameraZoom: number;
 	showBorder?: boolean;
+	disabled?: boolean;
 	onPointerEnter: (nodeId: string) => void;
 	onPointerLeave: (nodeId: string) => void;
 	onDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
@@ -87,6 +88,7 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	isHovered,
 	cameraZoom,
 	showBorder = true,
+	disabled = false,
 	onPointerEnter,
 	onPointerLeave,
 	onDragStart,
@@ -150,25 +152,26 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 		<Group
 			transform={[{ translateX: node.x }, { translateY: node.y }]}
 			opacity={isDimmed ? 0.35 : 1}
+			pointerEvents={disabled ? "none" : "auto"}
 			hitRect={{
 				x: 0,
 				y: 0,
 				width: Math.max(1, node.width),
 				height: Math.max(1, node.height),
 			}}
-			onPointerEnter={() => {
+			onPointerEnter={disabled ? undefined : () => {
 				onPointerEnter(node.id);
 			}}
-			onPointerLeave={() => {
+			onPointerLeave={disabled ? undefined : () => {
 				onPointerLeave(node.id);
 			}}
-			onPointerDown={(event) => {
+			onPointerDown={disabled ? undefined : (event) => {
 				dragHandlers.onPointerDown?.(event);
 			}}
-			onClick={() => {
+			onClick={disabled ? undefined : () => {
 				onClick?.(node);
 			}}
-			onDoubleClick={() => {
+			onDoubleClick={disabled ? undefined : () => {
 				onDoubleClick?.(node);
 			}}
 		>

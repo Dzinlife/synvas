@@ -10,6 +10,17 @@ import { NodeInteractionWrapper } from "./NodeInteractionWrapper";
 const { rootRenderSpy } = vi.hoisted(() => ({
 	rootRenderSpy: vi.fn(),
 }));
+const {
+	focusLayerPointerDownSpy,
+	focusLayerPointerMoveSpy,
+	focusLayerPointerUpSpy,
+	focusLayerPointerLeaveSpy,
+} = vi.hoisted(() => ({
+	focusLayerPointerDownSpy: vi.fn(),
+	focusLayerPointerMoveSpy: vi.fn(),
+	focusLayerPointerUpSpy: vi.fn(),
+	focusLayerPointerLeaveSpy: vi.fn(),
+}));
 
 vi.mock("@use-gesture/react", () => ({
 	useDrag: (handler: (state: Record<string, unknown>) => void) => {
@@ -88,6 +99,35 @@ vi.mock("react-skia-lite", async () => {
 
 vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", () => ({
 	useStudioRuntimeManager: () => ({}),
+}));
+
+vi.mock("./useFocusSceneTimelineElements", () => ({
+	useFocusSceneTimelineElements: ({ sceneId }: { sceneId: string | null }) => ({
+		runtime: sceneId ? ({ timelineStore: {} } as any) : null,
+		renderElements: [],
+		renderElementsRef: { current: [] },
+		sourceWidth: 1920,
+		sourceHeight: 1080,
+	}),
+}));
+
+vi.mock("./useFocusSceneSkiaInteractions", () => ({
+	useFocusSceneSkiaInteractions: () => ({
+		elementLayouts: [],
+		selectedIds: [],
+		hoveredId: null,
+		draggingId: null,
+		selectionRectScreen: null,
+		snapGuidesScreen: { vertical: [], horizontal: [] },
+		selectionFrameScreen: null,
+		handleItems: [],
+		activeHandle: null,
+		labelItems: [],
+		onLayerPointerDown: focusLayerPointerDownSpy,
+		onLayerPointerMove: focusLayerPointerMoveSpy,
+		onLayerPointerUp: focusLayerPointerUpSpy,
+		onLayerPointerLeave: focusLayerPointerLeaveSpy,
+	}),
 }));
 
 vi.mock("./node-system/registry", () => ({
@@ -171,11 +211,31 @@ const createVideoNode = (
 	...patch,
 });
 
+const createSceneNode = (id: string, zIndex: number) => ({
+	id,
+	type: "scene" as const,
+	name: id,
+	x: 20,
+	y: 30,
+	width: 320,
+	height: 180,
+	zIndex,
+	locked: false,
+	hidden: false,
+	createdAt: 1,
+	updatedAt: 1,
+	sceneId: "scene-1",
+});
+
 const emptyScenes: StudioProject["scenes"] = {};
 
 describe("InfiniteSkiaCanvas", () => {
 	beforeEach(() => {
 		rootRenderSpy.mockReset();
+		focusLayerPointerDownSpy.mockReset();
+		focusLayerPointerMoveSpy.mockReset();
+		focusLayerPointerUpSpy.mockReset();
+		focusLayerPointerLeaveSpy.mockReset();
 	});
 
 	it("active 边框会在 overlay 顶层渲染并关闭主通道描边", async () => {
@@ -452,6 +512,51 @@ describe("InfiniteSkiaCanvas", () => {
 		const tree = getLatestRenderTree();
 		const anchorGroups = collectAnchorGroups(tree);
 		expect(anchorGroups).toHaveLength(0);
+	});
+
+	it("focus scene 模式会抑制普通 node 交互并接管 Focus 层事件", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createSceneNode("node-scene", 0), createVideoNode("node-video", 1)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-scene"
+				focusedNodeId="node-scene"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const wrappers = collectElements(
+			tree,
+			(element) => element.type === NodeInteractionWrapper,
+		);
+		expect(wrappers).toHaveLength(2);
+		expect(wrappers.every((wrapper) => wrapper.props.disabled === true)).toBe(
+			true,
+		);
+
+		const focusLayer = collectElements(
+			tree,
+			(element) => element.props.onLayerPointerDown === focusLayerPointerDownSpy,
+		)[0];
+		expect(focusLayer).toBeTruthy();
+
+		act(() => {
+			focusLayer?.props.onLayerPointerDown?.({
+				x: 240,
+				y: 120,
+				button: 0,
+				buttons: 1,
+			});
+		});
+		expect(focusLayerPointerDownSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it("anchor pointer down 会透传 resize start/drag/end 回调并包含 anchor", async () => {

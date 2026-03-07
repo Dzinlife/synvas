@@ -1,5 +1,5 @@
 import { useDrag } from "@use-gesture/react";
-import type { CanvasNode, StudioProject } from "core/studio/types";
+import type { CanvasNode, SceneNode, StudioProject } from "core/studio/types";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
 	Canvas,
@@ -10,6 +10,8 @@ import {
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
+import { FocusSceneLabelLayer } from "./FocusSceneLabelLayer";
+import { FocusSceneSkiaLayer } from "./FocusSceneSkiaLayer";
 import type {
 	CanvasNodeResizeAnchor,
 	CanvasNodeResizeAnchorState,
@@ -20,6 +22,8 @@ import {
 	NodeInteractionWrapper,
 } from "./NodeInteractionWrapper";
 import { getCanvasNodeDefinition } from "./node-system/registry";
+import { useFocusSceneSkiaInteractions } from "./useFocusSceneSkiaInteractions";
+import { useFocusSceneTimelineElements } from "./useFocusSceneTimelineElements";
 
 export type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 export type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
@@ -123,6 +127,39 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (!activeNodeId) return null;
 		return nodes.find((node) => node.id === activeNodeId) ?? null;
 	}, [activeNodeId, nodes]);
+	const focusedSceneNode = useMemo<SceneNode | null>(() => {
+		if (!focusedNodeId) return null;
+		const focusedNode = nodes.find((node) => node.id === focusedNodeId);
+		if (!focusedNode || focusedNode.type !== "scene") return null;
+		return focusedNode;
+	}, [focusedNodeId, nodes]);
+	const disableBaseNodeInteraction = Boolean(focusedSceneNode);
+	const {
+		runtime: focusRuntime,
+		renderElements: focusRenderElements,
+		renderElementsRef: focusRenderElementsRef,
+		sourceWidth: focusSourceWidth,
+		sourceHeight: focusSourceHeight,
+	} = useFocusSceneTimelineElements({
+		runtimeManager,
+		sceneId: focusedSceneNode?.sceneId ?? null,
+	});
+	const focusInteractions = useFocusSceneSkiaInteractions({
+		width,
+		height,
+		camera,
+		focusedNode: focusedSceneNode,
+		sourceWidth: focusSourceWidth,
+		sourceHeight: focusSourceHeight,
+		renderElements: focusRenderElements,
+		renderElementsRef: focusRenderElementsRef,
+		timelineStore: focusRuntime?.timelineStore ?? null,
+		disabled:
+			suspendHover ||
+			!focusedSceneNode ||
+			!focusRuntime,
+	});
+	const focusLayerEnabled = Boolean(focusedSceneNode && focusRuntime);
 
 	useLayoutEffect(() => {
 		if (!suspendHover) return;
@@ -130,6 +167,15 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		setHoveredResizeAnchor(null);
 		setPressedResizeAnchor(null);
 	}, [suspendHover]);
+
+	useLayoutEffect(() => {
+		if (!disableBaseNodeInteraction) return;
+		draggingNodeIdRef.current = null;
+		resizingAnchorRef.current = null;
+		setHoveredNodeId(null);
+		setHoveredResizeAnchor(null);
+		setPressedResizeAnchor(null);
+	}, [disableBaseNodeInteraction]);
 
 	useLayoutEffect(() => {
 		// 节点列表变化时，清理已失效的 hover 引用
@@ -187,22 +233,23 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, [activeNodeId, hoveredResizeAnchor, pressedResizeAnchor]);
 
 	const handlePointerEnter = useCallback((nodeId: string) => {
-		if (suspendHover) return;
+		if (suspendHover || disableBaseNodeInteraction) return;
 		if (draggingNodeIdRef.current || resizingAnchorRef.current) return;
 		setHoveredNodeId(nodeId);
-	}, [suspendHover]);
+	}, [disableBaseNodeInteraction, suspendHover]);
 
 	const handlePointerLeave = useCallback((nodeId: string) => {
-		if (suspendHover) return;
+		if (suspendHover || disableBaseNodeInteraction) return;
 		if (draggingNodeIdRef.current || resizingAnchorRef.current) return;
 		setHoveredNodeId((prev) => {
 			if (prev !== nodeId) return prev;
 			return null;
 		});
-	}, [suspendHover]);
+	}, [disableBaseNodeInteraction, suspendHover]);
 
 	const handleNodeDragStart = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
+			if (disableBaseNodeInteraction) return;
 			if (resizingAnchorRef.current) return;
 			if (event.button === 0) {
 				draggingNodeIdRef.current = node.id;
@@ -211,43 +258,45 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			}
 			onNodeDragStart?.(node, event);
 		},
-		[onNodeDragStart],
+		[disableBaseNodeInteraction, onNodeDragStart],
 	);
 
 	const handleNodeDrag = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
+			if (disableBaseNodeInteraction) return;
 			if (resizingAnchorRef.current) return;
 			onNodeDrag?.(node, event);
 		},
-		[onNodeDrag],
+		[disableBaseNodeInteraction, onNodeDrag],
 	);
 
 	const handleNodeDragEnd = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
+			if (disableBaseNodeInteraction) return;
 			if (resizingAnchorRef.current) return;
 			if (draggingNodeIdRef.current === node.id) {
 				draggingNodeIdRef.current = null;
 			}
 			onNodeDragEnd?.(node, event);
 		},
-		[onNodeDragEnd],
+		[disableBaseNodeInteraction, onNodeDragEnd],
 	);
 
 	const handleResizeAnchorPointerEnter = useCallback(
 		(nodeId: string, anchor: CanvasNodeResizeAnchor) => {
-			if (suspendHover) return;
+			if (suspendHover || disableBaseNodeInteraction) return;
 			if (draggingNodeIdRef.current || resizingAnchorRef.current) return;
 			setHoveredResizeAnchor({
 				nodeId,
 				anchor,
 			});
 		},
-		[suspendHover],
+		[disableBaseNodeInteraction, suspendHover],
 	);
 
 	const handleResizeAnchorPointerLeave = useCallback(
 		(nodeId: string, anchor: CanvasNodeResizeAnchor) => {
-			if (suspendHover) return;
+			if (suspendHover || disableBaseNodeInteraction) return;
 			if (draggingNodeIdRef.current || resizingAnchorRef.current) return;
 			setHoveredResizeAnchor((prev) => {
 				if (!prev) return prev;
@@ -255,7 +304,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				return null;
 			});
 		},
-		[suspendHover],
+		[disableBaseNodeInteraction, suspendHover],
 	);
 
 	const handleResizeDragGesture = useCallback(
@@ -270,6 +319,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				event: unknown;
 			},
 		) => {
+			if (disableBaseNodeInteraction) return;
 			const node = activeNode;
 			if (!node || node.locked) return;
 			const dragEvent: CanvasNodeDragEvent = {
@@ -353,6 +403,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			camera.x,
 			camera.y,
 			camera.zoom,
+			disableBaseNodeInteraction,
 			focusedNodeId,
 			onNodeResize,
 			onNodeResizeEnd,
@@ -408,21 +459,22 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						{ translateY: camera.y },
 					]}
 				>
-					{nodes.map((node) => {
-						const definition = getCanvasNodeDefinition(node.type);
-						const Renderer = definition.skiaRenderer;
-						const scene =
-							node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
-						const asset =
-							"assetId" in node ? (assetById.get(node.assetId) ?? null) : null;
-						const isFocused = node.id === focusedNodeId;
-						const isActive = node.id === activeNodeId;
-						const isDimmed = Boolean(focusedNodeId) && !isFocused;
-						const isHovered = node.id === hoveredNodeId;
+						{nodes.map((node) => {
+							const definition = getCanvasNodeDefinition(node.type);
+							const Renderer = definition.skiaRenderer;
+							const scene =
+								node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
+							const asset =
+								"assetId" in node ? (assetById.get(node.assetId) ?? null) : null;
+							const isFocused = node.id === focusedNodeId;
+							const isActive = node.id === activeNodeId;
+							const isDimmed = Boolean(focusedNodeId) && !isFocused;
+							const isHovered =
+								!disableBaseNodeInteraction && node.id === hoveredNodeId;
 
-						return (
-							<Group
-								key={`canvas-node-skia-${node.id}`}
+							return (
+								<Group
+									key={`canvas-node-skia-${node.id}`}
 								clip={{
 									x: node.x,
 									y: node.y,
@@ -433,13 +485,16 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 								<NodeInteractionWrapper
 									node={node}
 									isActive={isActive}
-									isDimmed={isDimmed}
-									isHovered={isHovered}
-									cameraZoom={camera.zoom}
-									showBorder={!isActive && !isHovered}
-									onPointerEnter={handlePointerEnter}
-									onPointerLeave={handlePointerLeave}
-									onDragStart={handleNodeDragStart}
+										isDimmed={isDimmed}
+										isHovered={isHovered}
+										cameraZoom={camera.zoom}
+										showBorder={
+											!disableBaseNodeInteraction && !isActive && !isHovered
+										}
+										disabled={disableBaseNodeInteraction}
+										onPointerEnter={handlePointerEnter}
+										onPointerLeave={handlePointerLeave}
+										onDragStart={handleNodeDragStart}
 									onDrag={handleNodeDrag}
 									onDragEnd={handleNodeDragEnd}
 									onClick={onNodeClick}
@@ -455,35 +510,57 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 										runtimeManager={runtimeManager}
 									/>
 								</NodeInteractionWrapper>
-							</Group>
-						);
-					})}
-					{CanvasNodeOverlayLayer({
-						nodes,
-						cameraZoom: camera.zoom,
-						activeNodeId,
-						focusedNodeId,
-						hoveredNodeId,
-						hoveredResizeAnchor,
-						pressedResizeAnchor,
-						onResizeAnchorPointerEnter: handleResizeAnchorPointerEnter,
-						onResizeAnchorPointerLeave: handleResizeAnchorPointerLeave,
-						onTopLeftResizePointerDown: topLeftResizeHandlers.onPointerDown,
-						onBottomRightResizePointerDown:
-							bottomRightResizeHandlers.onPointerDown,
-					})}
-				</Group>
-			</Group>,
-		);
-	}, [
-		activeNodeId,
-		assetById,
+								</Group>
+							);
+						})}
+						{!disableBaseNodeInteraction &&
+							CanvasNodeOverlayLayer({
+								nodes,
+								cameraZoom: camera.zoom,
+								activeNodeId,
+								focusedNodeId,
+								hoveredNodeId,
+								hoveredResizeAnchor,
+								pressedResizeAnchor,
+								onResizeAnchorPointerEnter: handleResizeAnchorPointerEnter,
+								onResizeAnchorPointerLeave: handleResizeAnchorPointerLeave,
+								onTopLeftResizePointerDown: topLeftResizeHandlers.onPointerDown,
+								onBottomRightResizePointerDown:
+									bottomRightResizeHandlers.onPointerDown,
+							})}
+					</Group>
+					{focusLayerEnabled && (
+						<FocusSceneSkiaLayer
+							width={width}
+							height={height}
+							elements={focusInteractions.elementLayouts}
+							selectedIds={focusInteractions.selectedIds}
+							hoveredId={focusInteractions.hoveredId}
+							draggingId={focusInteractions.draggingId}
+							selectionRectScreen={focusInteractions.selectionRectScreen}
+							snapGuidesScreen={focusInteractions.snapGuidesScreen}
+							selectionFrameScreen={focusInteractions.selectionFrameScreen}
+							handleItems={focusInteractions.handleItems}
+							activeHandle={focusInteractions.activeHandle}
+							disabled={suspendHover}
+							onLayerPointerDown={focusInteractions.onLayerPointerDown}
+							onLayerPointerMove={focusInteractions.onLayerPointerMove}
+							onLayerPointerUp={focusInteractions.onLayerPointerUp}
+							onLayerPointerLeave={focusInteractions.onLayerPointerLeave}
+						/>
+					)}
+				</Group>,
+			);
+		}, [
+			activeNodeId,
+			assetById,
 		camera.x,
-		camera.y,
-		camera.zoom,
-		handleNodeDrag,
-		handleNodeDragEnd,
-		handleNodeDragStart,
+			camera.y,
+			camera.zoom,
+			disableBaseNodeInteraction,
+			handleNodeDrag,
+			handleNodeDragEnd,
+			handleNodeDragStart,
 		handlePointerEnter,
 		handlePointerLeave,
 		handleResizeAnchorPointerEnter,
@@ -495,12 +572,27 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		nodes,
 		onNodeClick,
 		onNodeDoubleClick,
-		pressedResizeAnchor,
-		runtimeManager,
-		scenes,
-		topLeftResizeHandlers,
-		width,
-		height,
+			pressedResizeAnchor,
+			focusInteractions.activeHandle,
+			focusInteractions.draggingId,
+			focusInteractions.elementLayouts,
+			focusInteractions.handleItems,
+			focusInteractions.hoveredId,
+			focusInteractions.onLayerPointerDown,
+			focusInteractions.onLayerPointerLeave,
+			focusInteractions.onLayerPointerMove,
+			focusInteractions.onLayerPointerUp,
+			focusInteractions.selectedIds,
+			focusInteractions.selectionFrameScreen,
+			focusInteractions.selectionRectScreen,
+			focusInteractions.snapGuidesScreen,
+			focusLayerEnabled,
+			runtimeManager,
+			scenes,
+			suspendHover,
+			topLeftResizeHandlers,
+			width,
+			height,
 	]);
 
 	if (width <= 0 || height <= 0) return null;
@@ -515,6 +607,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			}`}
 		>
 			<Canvas ref={canvasRef} style={{ width, height }} />
+			{focusLayerEnabled && (
+				<FocusSceneLabelLayer labels={focusInteractions.labelItems} />
+			)}
 		</div>
 	);
 };

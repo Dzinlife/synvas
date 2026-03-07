@@ -15,10 +15,8 @@ import CanvasSidebar, {
 } from "@/studio/canvas/sidebar/CanvasSidebar";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
 import type {
-	CameraState,
 	ResolvedCanvasDrawerOptions,
 } from "./canvasWorkspaceUtils";
-import FocusSceneKonvaLayer from "./FocusSceneKonvaLayer";
 
 interface OverlayRect {
 	x: number;
@@ -53,10 +51,6 @@ interface CanvasWorkspaceOverlayProps {
 	onExpandSidebar: () => void;
 	rightPanelShouldRender: boolean;
 	rightPanelRect: OverlayRect;
-	stageWidth: number;
-	stageHeight: number;
-	camera: CameraState;
-	suspendFocusSceneInteraction: boolean;
 	resolvedDrawer: DrawerViewData | null;
 	drawerIdentity: string | null;
 	drawerRect: OverlayRect;
@@ -88,10 +82,6 @@ const CanvasWorkspaceOverlay = ({
 	onExpandSidebar,
 	rightPanelShouldRender,
 	rightPanelRect,
-	stageWidth,
-	stageHeight,
-	camera,
-	suspendFocusSceneInteraction,
 	resolvedDrawer,
 	drawerIdentity,
 	drawerRect,
@@ -271,16 +261,6 @@ const CanvasWorkspaceOverlay = ({
 						/>
 					</div>
 				</div>
-			)}
-
-			{focusedSceneNode && !suspendFocusSceneInteraction && (
-				<FocusSceneKonvaLayer
-					width={stageWidth}
-					height={stageHeight}
-					camera={camera}
-					focusedNode={focusedSceneNode}
-					sceneId={focusedSceneNode.sceneId}
-				/>
 			)}
 
 			{resolvedDrawer && DrawerComponent && (

@@ -1465,10 +1465,6 @@ const CanvasWorkspace = () => {
 				onExpandSidebar={() => setSidebarExpanded(true)}
 				rightPanelShouldRender={rightPanelShouldRender}
 				rightPanelRect={overlayLayout.rightPanelRect}
-				stageWidth={stageSize.width}
-				stageHeight={stageSize.height}
-				camera={camera}
-				suspendFocusSceneInteraction={isCameraAnimating}
 				resolvedDrawer={resolvedDrawer}
 				drawerIdentity={drawerIdentity}
 				drawerRect={overlayLayout.drawerRect}
