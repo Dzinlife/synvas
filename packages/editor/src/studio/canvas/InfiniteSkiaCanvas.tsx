@@ -61,6 +61,7 @@ interface InfiniteSkiaCanvasProps {
 	assets: StudioProject["assets"];
 	activeNodeId: string | null;
 	focusedNodeId: string | null;
+	suspendHover?: boolean;
 	onNodeClick?: (node: CanvasNode) => void;
 	onNodeDoubleClick?: (node: CanvasNode) => void;
 	onNodeDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
@@ -92,6 +93,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	assets,
 	activeNodeId,
 	focusedNodeId,
+	suspendHover = false,
 	onNodeClick,
 	onNodeDoubleClick,
 	onNodeDragStart,
@@ -121,6 +123,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (!activeNodeId) return null;
 		return nodes.find((node) => node.id === activeNodeId) ?? null;
 	}, [activeNodeId, nodes]);
+
+	useLayoutEffect(() => {
+		if (!suspendHover) return;
+		setHoveredNodeId(null);
+		setHoveredResizeAnchor(null);
+		setPressedResizeAnchor(null);
+	}, [suspendHover]);
 
 	useLayoutEffect(() => {
 		// 节点列表变化时，清理已失效的 hover 引用
@@ -178,17 +187,19 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, [activeNodeId, hoveredResizeAnchor, pressedResizeAnchor]);
 
 	const handlePointerEnter = useCallback((nodeId: string) => {
+		if (suspendHover) return;
 		if (draggingNodeIdRef.current || resizingAnchorRef.current) return;
 		setHoveredNodeId(nodeId);
-	}, []);
+	}, [suspendHover]);
 
 	const handlePointerLeave = useCallback((nodeId: string) => {
+		if (suspendHover) return;
 		if (draggingNodeIdRef.current || resizingAnchorRef.current) return;
 		setHoveredNodeId((prev) => {
 			if (prev !== nodeId) return prev;
 			return null;
 		});
-	}, []);
+	}, [suspendHover]);
 
 	const handleNodeDragStart = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
@@ -224,17 +235,19 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 	const handleResizeAnchorPointerEnter = useCallback(
 		(nodeId: string, anchor: CanvasNodeResizeAnchor) => {
+			if (suspendHover) return;
 			if (draggingNodeIdRef.current || resizingAnchorRef.current) return;
 			setHoveredResizeAnchor({
 				nodeId,
 				anchor,
 			});
 		},
-		[],
+		[suspendHover],
 	);
 
 	const handleResizeAnchorPointerLeave = useCallback(
 		(nodeId: string, anchor: CanvasNodeResizeAnchor) => {
+			if (suspendHover) return;
 			if (draggingNodeIdRef.current || resizingAnchorRef.current) return;
 			setHoveredResizeAnchor((prev) => {
 				if (!prev) return prev;
@@ -242,7 +255,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				return null;
 			});
 		},
-		[],
+		[suspendHover],
 	);
 
 	const handleResizeDragGesture = useCallback(
@@ -497,7 +510,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			ref={containerRef}
 			data-testid="infinite-skia-canvas"
 			data-canvas-surface="true"
-			className="pointer-events-auto absolute inset-0"
+			className={`absolute inset-0 ${
+				suspendHover ? "pointer-events-none" : "pointer-events-auto"
+			}`}
 		>
 			<Canvas ref={canvasRef} style={{ width, height }} />
 		</div>

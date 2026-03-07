@@ -11,6 +11,7 @@ import {
 interface UseCanvasCameraControllerOptions {
 	camera: CameraState;
 	onChange: (camera: CameraState) => void;
+	onAnimationStateChange?: (isAnimating: boolean) => void;
 }
 
 interface UseCanvasCameraControllerResult {
@@ -22,15 +23,20 @@ interface UseCanvasCameraControllerResult {
 export const useCanvasCameraController = ({
 	camera,
 	onChange,
+	onAnimationStateChange,
 }: UseCanvasCameraControllerOptions): UseCanvasCameraControllerResult => {
 	const cameraAnimationFrameRef = useRef<number | null>(null);
 	const cameraAnimationTokenRef = useRef(0);
+	const setCameraAnimating = useEffectEvent((isAnimating: boolean) => {
+		onAnimationStateChange?.(isAnimating);
+	});
 
 	const getCamera = useEffectEvent((): CameraState => {
 		return camera;
 	});
 
 	const stopCameraAnimation = useEffectEvent(() => {
+		const hadAnimation = cameraAnimationFrameRef.current !== null;
 		if (
 			typeof window !== "undefined" &&
 			typeof window.cancelAnimationFrame === "function" &&
@@ -40,6 +46,9 @@ export const useCanvasCameraController = ({
 		}
 		cameraAnimationFrameRef.current = null;
 		cameraAnimationTokenRef.current += 1;
+		if (hadAnimation) {
+			setCameraAnimating(false);
+		}
 	});
 
 	const applyCamera = useEffectEvent(
@@ -66,6 +75,7 @@ export const useCanvasCameraController = ({
 			stopCameraAnimation();
 			const fromCamera = currentCamera;
 			const token = cameraAnimationTokenRef.current;
+			setCameraAnimating(true);
 			const startedAt =
 				typeof performance !== "undefined" ? performance.now() : Date.now();
 			const animate = (timestamp: number) => {
@@ -80,6 +90,7 @@ export const useCanvasCameraController = ({
 				if (progress >= 1) {
 					cameraAnimationFrameRef.current = null;
 					onChange(nextCamera);
+					setCameraAnimating(false);
 					return;
 				}
 				cameraAnimationFrameRef.current = window.requestAnimationFrame(animate);

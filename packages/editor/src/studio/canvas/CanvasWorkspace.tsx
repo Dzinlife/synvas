@@ -199,6 +199,7 @@ const CanvasWorkspace = () => {
 	const [visibleDrawerHeight, setVisibleDrawerHeight] = useState(
 		CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
 	);
+	const [isCameraAnimating, setIsCameraAnimating] = useState(false);
 	const [contextMenuState, setContextMenuState] =
 		useState<CanvasContextMenuState>({ open: false });
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -210,6 +211,7 @@ const CanvasWorkspace = () => {
 	const { getCamera, applyCamera } = useCanvasCameraController({
 		camera,
 		onChange: setCanvasCamera,
+		onAnimationStateChange: setIsCameraAnimating,
 	});
 
 	const sortedNodes = useMemo(() => {
@@ -1434,6 +1436,7 @@ const CanvasWorkspace = () => {
 				assets={currentProject.assets}
 				activeNodeId={activeNodeId}
 				focusedNodeId={focusedNodeId}
+				suspendHover={isCameraAnimating}
 				onNodeDragStart={handleSkiaNodeDragStart}
 				onNodeDrag={handleSkiaNodeDrag}
 				onNodeDragEnd={handleSkiaNodeDragEnd}
@@ -1465,6 +1468,7 @@ const CanvasWorkspace = () => {
 				stageWidth={stageSize.width}
 				stageHeight={stageSize.height}
 				camera={camera}
+				suspendFocusSceneInteraction={isCameraAnimating}
 				resolvedDrawer={resolvedDrawer}
 				drawerIdentity={drawerIdentity}
 				drawerRect={overlayLayout.drawerRect}

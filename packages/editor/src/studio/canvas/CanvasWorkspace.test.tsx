@@ -1002,7 +1002,7 @@ describe("CanvasWorkspace", () => {
 		expect(screen.getByTestId("node-toolbar-video")).toBeTruthy();
 	});
 
-	it("单击仅 active，双击 scene 才进入 focus", () => {
+	it("单击仅 active，双击 scene 才进入 focus", async () => {
 		render(<CanvasWorkspace />);
 
 		clickNodeAt(300, 160);
@@ -1019,7 +1019,9 @@ describe("CanvasWorkspace", () => {
 		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBe(
 			"node-scene-1",
 		);
-		expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
+		await waitFor(() => {
+			expect(screen.getByTestId("focus-scene-konva-layer")).toBeTruthy();
+		});
 		expect(screen.getByTestId("scene-timeline-drawer")).toBeTruthy();
 		expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
 	});
