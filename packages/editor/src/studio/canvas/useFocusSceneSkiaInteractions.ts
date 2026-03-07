@@ -32,6 +32,7 @@ import {
 } from "./focusSceneCoordinates";
 
 const SNAP_GUIDE_THRESHOLD_PX = 6;
+const SNAP_GUIDE_MATCH_EPSILON = 1e-6;
 const MIN_TRANSFORM_SIZE_PX = 5;
 const HANDLE_HIT_SIZE_PX = 14;
 const ROTATER_OFFSET_PX = 28;
@@ -272,11 +273,21 @@ const hasTransform = (
 	return Boolean(element?.transform);
 };
 
+const appendUniqueGuideLine = (lines: number[], line: number) => {
+	const exists = lines.some((item) => {
+		return Math.abs(item - line) <= SNAP_GUIDE_MATCH_EPSILON;
+	});
+	if (!exists) {
+		lines.push(line);
+	}
+};
+
 const findNearestGuide = (values: number[], guides: number[]) => {
 	let bestLine: number | null = null;
 	let bestDelta = 0;
 	let bestDistance = Number.POSITIVE_INFINITY;
 	let bestValue: number | null = null;
+	const lines: number[] = [];
 	for (const value of values) {
 		for (const guide of guides) {
 			const distance = Math.abs(guide - value);
@@ -288,11 +299,22 @@ const findNearestGuide = (values: number[], guides: number[]) => {
 			}
 		}
 	}
+	if (bestLine !== null) {
+		for (const value of values) {
+			for (const guide of guides) {
+				const distance = Math.abs(guide - value);
+				if (Math.abs(distance - bestDistance) <= SNAP_GUIDE_MATCH_EPSILON) {
+					appendUniqueGuideLine(lines, guide);
+				}
+			}
+		}
+	}
 	return {
 		line: bestLine,
 		delta: bestDelta,
 		distance: bestDistance,
 		value: bestValue,
+		lines,
 	};
 };
 
@@ -1305,11 +1327,15 @@ export const useFocusSceneSkiaInteractions = ({
 					const horizontalGuides: number[] = [];
 					if (snapX.line !== null && snapX.distance <= threshold) {
 						adjustedDeltaX += snapX.delta;
-						verticalGuides.push(snapX.line);
+						for (const line of snapX.lines) {
+							appendUniqueGuideLine(verticalGuides, line);
+						}
 					}
 					if (snapY.line !== null && snapY.distance <= threshold) {
 						adjustedDeltaY += snapY.delta;
-						horizontalGuides.push(snapY.line);
+						for (const line of snapY.lines) {
+							appendUniqueGuideLine(horizontalGuides, line);
+						}
 					}
 					setSnapGuidesScene({
 						vertical: verticalGuides,
@@ -1509,24 +1535,26 @@ export const useFocusSceneSkiaInteractions = ({
 								ctx.stageScaleX,
 								ctx.stageScaleY,
 							);
-							const snapX =
-								movingX.length > 0
-									? findNearestGuide(movingX, guidesX)
-									: {
-											line: null,
-											delta: 0,
-											distance: Number.POSITIVE_INFINITY,
-											value: null,
-										};
-							const snapY =
-								movingY.length > 0
-									? findNearestGuide(movingY, guidesY)
-									: {
-											line: null,
-											delta: 0,
-											distance: Number.POSITIVE_INFINITY,
-											value: null,
-										};
+								const snapX =
+									movingX.length > 0
+										? findNearestGuide(movingX, guidesX)
+										: {
+												line: null,
+												delta: 0,
+												distance: Number.POSITIVE_INFINITY,
+												value: null,
+												lines: [],
+											};
+								const snapY =
+									movingY.length > 0
+										? findNearestGuide(movingY, guidesY)
+										: {
+												line: null,
+												delta: 0,
+												distance: Number.POSITIVE_INFINITY,
+												value: null,
+												lines: [],
+											};
 
 							let deltaX =
 								snapX.line !== null && snapX.distance <= threshold
@@ -1643,9 +1671,9 @@ export const useFocusSceneSkiaInteractions = ({
 								}
 								setSnapGuidesScene({
 									vertical:
-										deltaX !== 0 && snapX.line !== null ? [snapX.line] : [],
+										deltaX !== 0 && snapX.line !== null ? [...snapX.lines] : [],
 									horizontal:
-										deltaY !== 0 && snapY.line !== null ? [snapY.line] : [],
+										deltaY !== 0 && snapY.line !== null ? [...snapY.lines] : [],
 								});
 							}
 						}

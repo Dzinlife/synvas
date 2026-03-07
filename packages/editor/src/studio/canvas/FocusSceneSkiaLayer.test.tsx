@@ -235,6 +235,24 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(movedCenter.y).toBeCloseTo(200, 2);
 	});
 
+	it("并列同尺寸元素吸附时会显示全部匹配吸附线", () => {
+		const elementA = createElement("element-a", 200, 300);
+		const elementB = createElement("element-b", 500, 300);
+		const { result } = setupInteractions([elementA, elementB]);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(200, 300));
+			result.current.onLayerPointerMove(createPointerEvent(497, 300));
+		});
+
+		expect(result.current.snapGuidesScreen.vertical.length).toBeGreaterThan(0);
+		expect(result.current.snapGuidesScreen.horizontal.length).toBeGreaterThanOrEqual(3);
+
+		act(() => {
+			result.current.onLayerPointerUp(createPointerEvent(497, 300));
+		});
+	});
+
 	it("支持单元素 transform（缩放 + Shift 旋转吸附）", () => {
 		const elementA = createElement("element-a", 300, 300);
 		const { result, timelineStore } = setupInteractions([elementA]);
