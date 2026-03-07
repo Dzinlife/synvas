@@ -627,7 +627,8 @@ const CanvasWorkspace = () => {
 		if (prevFocusedNodeId && !focusedNodeId) {
 			const previous = preFocusCameraRef.current;
 			preFocusCameraRef.current = null;
-			if (previous && !isCameraAlmostEqual(previous, currentCamera)) {
+			// 退出 focus 时总是尝试恢复，避免在首帧前退出导致旧 focus 动画继续到终点。
+			if (previous) {
 				applyCamera(previous);
 			}
 		}
