@@ -1,10 +1,12 @@
 import { DashPathEffect, Group, Line, Rect } from "react-skia-lite";
 import type {
 	FocusSnapGuides,
-	FocusTransformHandle,
-	FocusTransformHandleRenderItem,
 } from "./useFocusSceneSkiaInteractions";
-import { FOCUS_SCENE_HANDLE_SIZE_PX } from "./focusSceneHandleGeometry";
+import {
+	FOCUS_SCENE_CORNER_HANDLE_SIZE_PX,
+	type FocusTransformHandle,
+	type FocusTransformHandleRenderItem,
+} from "./focusSceneHandleGeometry";
 import type { FocusFrame, FocusRect } from "./focusSceneCoordinates";
 import type { SkiaPointerEvent } from "react-skia-lite";
 
@@ -32,26 +34,20 @@ interface FocusSceneSkiaLayerProps {
 	onLayerPointerLeave: () => void;
 }
 
-const HANDLE_SIZE_PX = FOCUS_SCENE_HANDLE_SIZE_PX;
+const HANDLE_SIZE_PX = FOCUS_SCENE_CORNER_HANDLE_SIZE_PX;
 
-const resolveHandleCursor = (handle: FocusTransformHandle): string => {
-	switch (handle) {
-		case "top-left":
-		case "bottom-right":
-			return "nwse-resize";
-		case "top-right":
-		case "bottom-left":
-			return "nesw-resize";
-		case "top-center":
-		case "bottom-center":
-			return "ns-resize";
-		case "middle-left":
-		case "middle-right":
-			return "ew-resize";
-		case "rotater":
-			return "grab";
+const resolveAnchorHitDrawPriority = (
+	item: FocusTransformHandleRenderItem,
+): number => {
+	switch (item.kind) {
+		case "resize-edge":
+			return 0;
+		case "rotate-corner":
+			return 1;
+		case "resize-corner":
+			return 2;
 		default:
-			return "default";
+			return 0;
 	}
 };
 
@@ -175,62 +171,88 @@ export const FocusSceneSkiaLayer = ({
 							{ rotate: selectionFrameScreen.rotationRad },
 						]}
 					>
-						<Rect
-							x={-selectionFrameScreen.width / 2}
-							y={-selectionFrameScreen.height / 2}
-							width={selectionFrameScreen.width}
-							height={selectionFrameScreen.height}
-							style="stroke"
-							strokeWidth={1}
-							color="rgba(255,0,0,0.7)"
-						/>
+						<Group
+							transform={[
+								{ translateX: -selectionFrameScreen.width / 2 },
+								{ translateY: -selectionFrameScreen.height / 2 },
+							]}
+						>
+							{[...handleItems]
+								.sort((left, right) => {
+									return (
+										resolveAnchorHitDrawPriority(left) -
+										resolveAnchorHitDrawPriority(right)
+									);
+								})
+								.map((item) => (
+									<Rect
+										key={`focus-scene-anchor-hit-${item.id}`}
+										x={item.rectLocal.x}
+										y={item.rectLocal.y}
+										width={item.rectLocal.width}
+										height={item.rectLocal.height}
+										color="rgba(0,0,0,0.0001)"
+										cursor={item.cursor}
+									/>
+								))}
+							{handleItems
+								.filter((item) => item.visibleCornerMarker)
+								.map((item) => {
+									const isActive = activeHandle === item.handle;
+									const cornerMarkerX =
+										item.rectLocal.x +
+										(item.rectLocal.width - HANDLE_SIZE_PX) / 2;
+									const cornerMarkerY =
+										item.rectLocal.y +
+										(item.rectLocal.height - HANDLE_SIZE_PX) / 2;
+									return (
+										<Rect
+											key={`focus-scene-corner-marker-${item.id}`}
+											x={cornerMarkerX}
+											y={cornerMarkerY}
+											width={HANDLE_SIZE_PX}
+											height={HANDLE_SIZE_PX}
+											color={isActive ? "rgba(255,0,0,1)" : "rgba(0,0,0,1)"}
+											pointerEvents="none"
+										/>
+									);
+								})}
+							{handleItems
+								.filter((item) => item.visibleCornerMarker)
+								.map((item) => {
+									const cornerMarkerX =
+										item.rectLocal.x +
+										(item.rectLocal.width - HANDLE_SIZE_PX) / 2;
+									const cornerMarkerY =
+										item.rectLocal.y +
+										(item.rectLocal.height - HANDLE_SIZE_PX) / 2;
+									return (
+										<Rect
+											key={`focus-scene-corner-marker-border-${item.id}`}
+											x={cornerMarkerX}
+											y={cornerMarkerY}
+											width={HANDLE_SIZE_PX}
+											height={HANDLE_SIZE_PX}
+											style="stroke"
+											strokeWidth={1}
+											color="rgba(255,255,255,1)"
+											pointerEvents="none"
+										/>
+									);
+								})}
+							<Rect
+								x={0}
+								y={0}
+								width={selectionFrameScreen.width}
+								height={selectionFrameScreen.height}
+								style="stroke"
+								strokeWidth={1}
+								color="rgba(255,0,0,0.7)"
+								pointerEvents="none"
+							/>
+						</Group>
 					</Group>
 				)}
-				{handleItems.map((item) => {
-					const isActive = activeHandle === item.handle;
-					const isRotater = item.handle === "rotater";
-					if (isRotater) {
-						return (
-							<Rect
-								key={`focus-scene-handle-${item.handle}`}
-								x={item.screenX - HANDLE_SIZE_PX / 2}
-								y={item.screenY - HANDLE_SIZE_PX / 2}
-								width={HANDLE_SIZE_PX}
-								height={HANDLE_SIZE_PX}
-								style="stroke"
-								strokeWidth={1.25}
-								color={isActive ? "rgba(255,0,0,1)" : "rgba(255,255,255,1)"}
-								cursor={resolveHandleCursor(item.handle)}
-							/>
-						);
-					}
-					return (
-						<Rect
-							key={`focus-scene-handle-${item.handle}`}
-							x={item.screenX - HANDLE_SIZE_PX / 2}
-							y={item.screenY - HANDLE_SIZE_PX / 2}
-							width={HANDLE_SIZE_PX}
-							height={HANDLE_SIZE_PX}
-							color={isActive ? "rgba(255,0,0,1)" : "rgba(0,0,0,1)"}
-							cursor={resolveHandleCursor(item.handle)}
-						/>
-					);
-				})}
-				{handleItems
-					.filter((item) => item.handle !== "rotater")
-					.map((item) => (
-						<Rect
-							key={`focus-scene-handle-border-${item.handle}`}
-							x={item.screenX - HANDLE_SIZE_PX / 2}
-							y={item.screenY - HANDLE_SIZE_PX / 2}
-							width={HANDLE_SIZE_PX}
-							height={HANDLE_SIZE_PX}
-							style="stroke"
-							strokeWidth={1}
-							color="rgba(255,255,255,1)"
-							pointerEvents="none"
-						/>
-					))}
 			</Group>
 		</Group>
 	);

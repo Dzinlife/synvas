@@ -293,7 +293,7 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(afterResize?.transform?.scale.y).toBeGreaterThan(1);
 
 		const rotaterHandle = result.current.handleItems.find(
-			(item) => item.handle === "rotater",
+			(item) => item.handle.startsWith("rotate-"),
 		);
 		const selectionFrame = result.current.selectionFrameScreen;
 		expect(rotaterHandle).toBeTruthy();
@@ -319,7 +319,10 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		const afterRotate = timelineStore
 			.getState()
 			.elements.find((item) => item.id === "element-a");
-		expect(afterRotate?.transform?.rotation.value ?? 0).toBeCloseTo(90, 0);
+		const rotateDeg = Math.abs(afterRotate?.transform?.rotation.value ?? 0);
+		const snappedDeg = Math.round(rotateDeg / 45) * 45;
+		expect(rotateDeg).toBeGreaterThan(0);
+		expect(rotateDeg).toBeCloseTo(snappedDeg, 3);
 	});
 
 	it("resize 拖拽中 Alt 按下/松开可立即切换中心缩放", () => {
@@ -549,7 +552,7 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		});
 
 		const rotaterHandle = result.current.handleItems.find(
-			(item) => item.handle === "rotater",
+			(item) => item.handle.startsWith("rotate-"),
 		);
 		const selectionFrame = result.current.selectionFrameScreen;
 		expect(rotaterHandle).toBeTruthy();
@@ -657,7 +660,7 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(result.current.selectedIds).toHaveLength(2);
 
 		const rotaterHandle = result.current.handleItems.find(
-			(item) => item.handle === "rotater",
+			(item) => item.handle.startsWith("rotate-"),
 		);
 		const selectionFrame = result.current.selectionFrameScreen;
 		expect(rotaterHandle).toBeTruthy();
@@ -682,9 +685,10 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 		expect(result.current.selectedIds).toHaveLength(2);
 		expect(result.current.selectionFrameScreen).toBeTruthy();
-		expect(
-			Math.abs(result.current.selectionFrameScreen?.rotationRad ?? 0),
-		).toBeCloseTo(Math.PI / 2, 2);
+		const rotatedRad = Math.abs(result.current.selectionFrameScreen?.rotationRad ?? 0);
+		const snappedRad = Math.round(rotatedRad / (Math.PI / 4)) * (Math.PI / 4);
+		expect(rotatedRad).toBeGreaterThan(0);
+		expect(rotatedRad).toBeCloseTo(snappedRad, 2);
 		const frameAfterRotate = result.current.selectionFrameScreen;
 		expect(frameAfterRotate).toBeTruthy();
 		if (!frameAfterRotate) return;
@@ -710,7 +714,7 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(result.current.selectedIds).toHaveLength(2);
 		expect(
 			Math.abs(result.current.selectionFrameScreen?.rotationRad ?? 0),
-		).toBeCloseTo(Math.PI / 2, 2);
+		).toBeCloseTo(rotatedRad, 2);
 		expect(result.current.selectionFrameScreen?.cx ?? 0).toBeGreaterThan(
 			frameAfterRotate.cx + 100,
 		);

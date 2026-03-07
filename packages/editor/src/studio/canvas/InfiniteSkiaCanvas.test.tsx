@@ -24,11 +24,29 @@ const {
 const { focusLayerMockState } = vi.hoisted(() => ({
 	focusLayerMockState: {
 		handleItems: [] as Array<{
+			id: string;
 			handle: string;
+			kind: string;
 			screenX: number;
 			screenY: number;
+			rectLocal: {
+				x: number;
+				y: number;
+				width: number;
+				height: number;
+			};
+			cursor: string;
+			visibleCornerMarker: boolean;
 		}>,
 		activeHandle: null as string | null,
+		selectedIds: [] as string[],
+		selectionFrameScreen: null as {
+			cx: number;
+			cy: number;
+			width: number;
+			height: number;
+			rotationRad: number;
+		} | null,
 	},
 }));
 
@@ -124,12 +142,12 @@ vi.mock("./useFocusSceneTimelineElements", () => ({
 vi.mock("./useFocusSceneSkiaInteractions", () => ({
 	useFocusSceneSkiaInteractions: () => ({
 		elementLayouts: [],
-		selectedIds: [],
+		selectedIds: focusLayerMockState.selectedIds,
 		hoveredId: null,
 		draggingId: null,
 		selectionRectScreen: null,
 		snapGuidesScreen: { vertical: [], horizontal: [] },
-		selectionFrameScreen: null,
+		selectionFrameScreen: focusLayerMockState.selectionFrameScreen,
 		handleItems: focusLayerMockState.handleItems,
 		activeHandle: focusLayerMockState.activeHandle,
 		labelItems: [],
@@ -248,6 +266,8 @@ describe("InfiniteSkiaCanvas", () => {
 		focusLayerPointerLeaveSpy.mockReset();
 		focusLayerMockState.handleItems = [];
 		focusLayerMockState.activeHandle = null;
+		focusLayerMockState.selectedIds = [];
+		focusLayerMockState.selectionFrameScreen = null;
 	});
 
 	it("active 边框会在 overlay 顶层渲染并关闭主通道描边", async () => {
@@ -576,16 +596,135 @@ describe("InfiniteSkiaCanvas", () => {
 
 	it("focus resize handles 会携带对应 cursor", async () => {
 		focusLayerMockState.handleItems = [
-			{ handle: "top-left", screenX: 100, screenY: 100 },
-			{ handle: "top-center", screenX: 140, screenY: 100 },
-			{ handle: "top-right", screenX: 180, screenY: 100 },
-			{ handle: "middle-left", screenX: 100, screenY: 140 },
-			{ handle: "middle-right", screenX: 180, screenY: 140 },
-			{ handle: "bottom-left", screenX: 100, screenY: 180 },
-			{ handle: "bottom-center", screenX: 140, screenY: 180 },
-			{ handle: "bottom-right", screenX: 180, screenY: 180 },
-			{ handle: "rotater", screenX: 140, screenY: 60 },
+			{
+				id: "rotate-top-left",
+				handle: "rotate-top-left",
+				kind: "rotate-corner",
+				screenX: 90,
+				screenY: 90,
+				rectLocal: { x: -55, y: -55, width: 10, height: 10 },
+				cursor: "rotate-cursor-top-left",
+				visibleCornerMarker: false,
+			},
+			{
+				id: "rotate-top-right",
+				handle: "rotate-top-right",
+				kind: "rotate-corner",
+				screenX: 190,
+				screenY: 90,
+				rectLocal: { x: 45, y: -55, width: 10, height: 10 },
+				cursor: "rotate-cursor-top-right",
+				visibleCornerMarker: false,
+			},
+			{
+				id: "rotate-bottom-right",
+				handle: "rotate-bottom-right",
+				kind: "rotate-corner",
+				screenX: 190,
+				screenY: 190,
+				rectLocal: { x: 45, y: 45, width: 10, height: 10 },
+				cursor: "rotate-cursor-bottom-right",
+				visibleCornerMarker: false,
+			},
+			{
+				id: "rotate-bottom-left",
+				handle: "rotate-bottom-left",
+				kind: "rotate-corner",
+				screenX: 90,
+				screenY: 190,
+				rectLocal: { x: -55, y: 45, width: 10, height: 10 },
+				cursor: "rotate-cursor-bottom-left",
+				visibleCornerMarker: false,
+			},
+			{
+				id: "top-left",
+				handle: "top-left",
+				kind: "resize-corner",
+				screenX: 100,
+				screenY: 100,
+				rectLocal: { x: -44, y: -44, width: 8, height: 8 },
+				cursor: "nwse-resize",
+				visibleCornerMarker: true,
+			},
+			{
+				id: "top-right",
+				handle: "top-right",
+				kind: "resize-corner",
+				screenX: 180,
+				screenY: 100,
+				rectLocal: { x: 36, y: -44, width: 8, height: 8 },
+				cursor: "nesw-resize",
+				visibleCornerMarker: true,
+			},
+			{
+				id: "bottom-right",
+				handle: "bottom-right",
+				kind: "resize-corner",
+				screenX: 180,
+				screenY: 180,
+				rectLocal: { x: 36, y: 36, width: 8, height: 8 },
+				cursor: "nwse-resize",
+				visibleCornerMarker: true,
+			},
+			{
+				id: "bottom-left",
+				handle: "bottom-left",
+				kind: "resize-corner",
+				screenX: 100,
+				screenY: 180,
+				rectLocal: { x: -44, y: 36, width: 8, height: 8 },
+				cursor: "nesw-resize",
+				visibleCornerMarker: true,
+			},
+			{
+				id: "top-center",
+				handle: "top-center",
+				kind: "resize-edge",
+				screenX: 140,
+				screenY: 100,
+				rectLocal: { x: -40, y: -43, width: 80, height: 6 },
+				cursor: "ns-resize",
+				visibleCornerMarker: false,
+			},
+			{
+				id: "middle-right",
+				handle: "middle-right",
+				kind: "resize-edge",
+				screenX: 180,
+				screenY: 140,
+				rectLocal: { x: 37, y: -40, width: 6, height: 80 },
+				cursor: "ew-resize",
+				visibleCornerMarker: false,
+			},
+			{
+				id: "bottom-center",
+				handle: "bottom-center",
+				kind: "resize-edge",
+				screenX: 140,
+				screenY: 180,
+				rectLocal: { x: -40, y: 37, width: 80, height: 6 },
+				cursor: "ns-resize",
+				visibleCornerMarker: false,
+			},
+			{
+				id: "middle-left",
+				handle: "middle-left",
+				kind: "resize-edge",
+				screenX: 100,
+				screenY: 140,
+				rectLocal: { x: -43, y: -40, width: 6, height: 80 },
+				cursor: "ew-resize",
+				visibleCornerMarker: false,
+			},
 		];
+		focusLayerMockState.selectedIds = ["element-a"];
+		focusLayerMockState.selectionFrameScreen = {
+			cx: 140,
+			cy: 140,
+			width: 80,
+			height: 80,
+			rotationRad: 0,
+		};
 
 		render(
 			<InfiniteSkiaCanvas
@@ -617,25 +756,38 @@ describe("InfiniteSkiaCanvas", () => {
 						focusLayerElement.props as Record<string, unknown>,
 					)
 				: null;
-		const handleRects = collectElements(
+		const anchorHitRects = collectElements(
 			focusLayerRender,
 			(element) =>
 				element.type === "rect" &&
-				String(element.key ?? "").includes("focus-scene-handle-") &&
+				String(element.key ?? "").includes("focus-scene-anchor-hit-") &&
 				typeof element.props.cursor === "string",
 		);
+		const visibleCornerMarkers = collectElements(
+			focusLayerRender,
+			(element) =>
+				element.type === "rect" &&
+				String(element.key ?? "").includes("focus-scene-corner-marker-") &&
+				!String(element.key ?? "").includes("border"),
+		);
 
-		const cursorByHandle = new Map<string, string>();
-		for (const rect of handleRects) {
+		const cursorByAnchorId = new Map<string, string>();
+		for (const rect of anchorHitRects) {
 			const rawKey = String(rect.key ?? "");
-			const handle = rawKey.replace(/^.*focus-scene-handle-/, "");
-			if (!cursorByHandle.has(handle)) {
-				cursorByHandle.set(handle, rect.props.cursor as string);
+			const anchorId = rawKey
+				.replace(/^.*focus-scene-anchor-hit-/, "")
+				.replace(/-\d+$/, "");
+			if (!cursorByAnchorId.has(anchorId)) {
+				cursorByAnchorId.set(anchorId, rect.props.cursor as string);
 			}
 		}
-
-		expect(cursorByHandle).toEqual(
+		expect(visibleCornerMarkers).toHaveLength(4);
+		expect(cursorByAnchorId).toEqual(
 			new Map<string, string>([
+				["rotate-top-left", "rotate-cursor-top-left"],
+				["rotate-top-right", "rotate-cursor-top-right"],
+				["rotate-bottom-right", "rotate-cursor-bottom-right"],
+				["rotate-bottom-left", "rotate-cursor-bottom-left"],
 				["top-left", "nwse-resize"],
 				["top-center", "ns-resize"],
 				["top-right", "nesw-resize"],
@@ -644,9 +796,19 @@ describe("InfiniteSkiaCanvas", () => {
 				["bottom-left", "nesw-resize"],
 				["bottom-center", "ns-resize"],
 				["bottom-right", "nwse-resize"],
-				["rotater", "grab"],
 			]),
 		);
+		const rotateCursors = [
+			cursorByAnchorId.get("rotate-top-left"),
+			cursorByAnchorId.get("rotate-top-right"),
+			cursorByAnchorId.get("rotate-bottom-right"),
+			cursorByAnchorId.get("rotate-bottom-left"),
+		];
+		expect(rotateCursors.every((cursor) => typeof cursor === "string")).toBe(true);
+		expect(new Set(rotateCursors).size).toBe(4);
+		expect(
+			rotateCursors.some((cursor) => /grab|hand/i.test(String(cursor))),
+		).toBe(false);
 	});
 
 	it("anchor pointer down 会透传 resize start/drag/end 回调并包含 anchor", async () => {

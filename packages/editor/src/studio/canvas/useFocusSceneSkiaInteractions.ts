@@ -11,7 +11,13 @@ import { transformMetaToRenderLayout } from "@/element/layout";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { cloneValue, createCopySeed } from "@/scene-editor/utils/copyUtils";
 import type { CameraState } from "./canvasWorkspaceUtils";
-import { FOCUS_SCENE_HANDLE_SIZE_PX } from "./focusSceneHandleGeometry";
+import {
+	buildFocusTransformHandleItems,
+	isRotateHandle,
+	resolveFocusTransformHandleAtPoint,
+	type FocusTransformHandle,
+	type FocusTransformHandleRenderItem,
+} from "./focusSceneHandleGeometry";
 import {
 	createFocusFrameMatrix,
 	createFocusSceneCoordinateContext,
@@ -35,7 +41,6 @@ import {
 const SNAP_GUIDE_THRESHOLD_PX = 6;
 const SNAP_GUIDE_MATCH_EPSILON = 1e-6;
 const MIN_TRANSFORM_SIZE_PX = 5;
-const ROTATER_OFFSET_PX = 28;
 
 const POSITION_QUANTUM = 1e-6;
 const SCALE_QUANTUM = 1e-6;
@@ -75,22 +80,7 @@ export type FocusSnapGuides = {
 	horizontal: number[];
 };
 
-export type FocusTransformHandle =
-	| "top-left"
-	| "top-center"
-	| "top-right"
-	| "middle-left"
-	| "middle-right"
-	| "bottom-left"
-	| "bottom-center"
-	| "bottom-right"
-	| "rotater";
-
-export type FocusTransformHandleRenderItem = {
-	handle: FocusTransformHandle;
-	screenX: number;
-	screenY: number;
-};
+export type { FocusTransformHandle, FocusTransformHandleRenderItem };
 
 interface UseFocusSceneSkiaInteractionsOptions {
 	width: number;
@@ -360,48 +350,6 @@ const screenFrameToSceneFrame = (
 	};
 };
 
-const resolveHandleScreenPoints = (
-	frameScreen: FocusFrame,
-): FocusTransformHandleRenderItem[] => {
-	const matrix = createFocusFrameMatrix(frameScreen);
-	const localPoints: Array<[FocusTransformHandle, FocusPoint]> = [
-		["top-left", { x: 0, y: 0 }],
-		["top-center", { x: frameScreen.width / 2, y: 0 }],
-		["top-right", { x: frameScreen.width, y: 0 }],
-		["middle-left", { x: 0, y: frameScreen.height / 2 }],
-		["middle-right", { x: frameScreen.width, y: frameScreen.height / 2 }],
-		["bottom-left", { x: 0, y: frameScreen.height }],
-		["bottom-center", { x: frameScreen.width / 2, y: frameScreen.height }],
-		["bottom-right", { x: frameScreen.width, y: frameScreen.height }],
-		[
-			"rotater",
-			{
-				x: frameScreen.width / 2,
-				y: -ROTATER_OFFSET_PX,
-			},
-		],
-	];
-	return localPoints.map(([handle, localPoint]) => {
-		const point = mapFocusPoint(matrix, localPoint);
-		return {
-			handle,
-			screenX: point.x,
-			screenY: point.y,
-		};
-	});
-};
-
-const isPointInTransformHandle = (
-	screenPoint: FocusPoint,
-	item: FocusTransformHandleRenderItem,
-): boolean => {
-	const halfSize = FOCUS_SCENE_HANDLE_SIZE_PX / 2;
-	return (
-		Math.abs(screenPoint.x - item.screenX) <= halfSize &&
-		Math.abs(screenPoint.y - item.screenY) <= halfSize
-	);
-};
-
 const resolvePointerField = (
 	event: SkiaPointerEvent,
 	key: "button" | "buttons",
@@ -507,7 +455,7 @@ const resolveResizeAnchorDelta = (params: {
 	scaleSignY: number;
 } | null => {
 	const { baseFrameScreen, handle, pointerScreen, centered } = params;
-	if (handle === "rotater") {
+	if (isRotateHandle(handle)) {
 		return null;
 	}
 	const baseMatrix = createFocusFrameMatrix(baseFrameScreen);
@@ -947,7 +895,7 @@ export const useFocusSceneSkiaInteractions = ({
 
 	const handleItems = useMemo(() => {
 		if (!selectionFrameScreen) return [];
-		return resolveHandleScreenPoints(selectionFrameScreen);
+		return buildFocusTransformHandleItems(selectionFrameScreen);
 	}, [selectionFrameScreen]);
 
 	const labelItems = useMemo<FocusSceneLabelItem[]>(() => {
@@ -1057,9 +1005,11 @@ export const useFocusSceneSkiaInteractions = ({
 			const currentSelection = timelineStore.getState().selectedIds;
 
 			if (selectionFrameScreen) {
-				const maybeHandle = resolveHandleScreenPoints(
+				const maybeHandle = resolveFocusTransformHandleAtPoint(
 					selectionFrameScreen,
-				).find((item) => isPointInTransformHandle(screenPoint, item));
+					screenPoint,
+					handleItems,
+				);
 				if (maybeHandle && selectionFrameScene) {
 					const startAngleRad = Math.atan2(
 						scenePoint.y - selectionFrameScene.cy,
@@ -1241,6 +1191,7 @@ export const useFocusSceneSkiaInteractions = ({
 			timelineStore,
 			selectionFrameScreen,
 			selectionFrameScene,
+			handleItems,
 			elementLayouts,
 			captureHistorySnapshot,
 			modelCenterToSceneCenter,
@@ -1260,8 +1211,10 @@ export const useFocusSceneSkiaInteractions = ({
 				const hitLayout = resolveTopHitElement(screenPoint, elementLayouts);
 				setHoveredId(hitLayout?.id ?? null);
 				if (selectionFrameScreen) {
-					const handle = resolveHandleScreenPoints(selectionFrameScreen).find(
-						(item) => isPointInTransformHandle(screenPoint, item),
+					const handle = resolveFocusTransformHandleAtPoint(
+						selectionFrameScreen,
+						screenPoint,
+						handleItems,
 					);
 					setActiveHandle(handle?.handle ?? null);
 				}
@@ -1393,7 +1346,7 @@ export const useFocusSceneSkiaInteractions = ({
 				let resizeScaleSignX = 1;
 				let resizeScaleSignY = 1;
 
-				if (session.handle === "rotater") {
+				if (isRotateHandle(session.handle)) {
 					const currentAngle = Math.atan2(
 						scenePoint.y - baseFrameScene.cy,
 						scenePoint.x - baseFrameScene.cx,
@@ -1448,7 +1401,7 @@ export const useFocusSceneSkiaInteractions = ({
 					return;
 				}
 				let nextFrameScene = nextFrameSceneRaw;
-				if (session.handle === "rotater") {
+				if (isRotateHandle(session.handle)) {
 					setSnapGuidesScene({ vertical: [], horizontal: [] });
 				} else {
 					const snapEnabled = timelineStore.getState().snapEnabled;
@@ -1751,6 +1704,7 @@ export const useFocusSceneSkiaInteractions = ({
 			disabled,
 			ctx,
 			elementLayouts,
+			handleItems,
 			selectionFrameScreen,
 			timelineStore,
 			renderElements,
@@ -1860,7 +1814,7 @@ export const useFocusSceneSkiaInteractions = ({
 		const handleModifierKeyEvent = (event: KeyboardEvent) => {
 			const session = interactionSessionRef.current;
 			if (!session || session.kind !== "transform") return;
-			if (session.handle === "rotater") return;
+			if (isRotateHandle(session.handle)) return;
 			const pointerInput = transformPointerInputRef.current;
 			if (!pointerInput) return;
 			const nextAltKey =
