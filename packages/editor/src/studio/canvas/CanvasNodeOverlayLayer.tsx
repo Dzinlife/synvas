@@ -156,14 +156,15 @@ export const CanvasNodeOverlayLayer = ({
 							transform={[{ translateX: node.x }, { translateY: node.y }]}
 							opacity={isDimmed ? 0.35 : 1}
 						>
-								<Group
-									hitRect={{
-										x: topLeftCornerX - hitSizeWorld / 2,
-										y: topLeftCornerY - hitSizeWorld / 2,
-										width: hitSizeWorld,
-										height: hitSizeWorld,
-									}}
-									opacity={isTopLeftHovered || isTopLeftPressed ? 1 : 0.3}
+							<Group
+								hitRect={{
+									x: topLeftCornerX - hitSizeWorld / 2,
+									y: topLeftCornerY - hitSizeWorld / 2,
+									width: hitSizeWorld,
+									height: hitSizeWorld,
+								}}
+								opacity={isTopLeftHovered || isTopLeftPressed ? 1 : 0.3}
+								cursor="nwse-resize"
 								onPointerEnter={() => {
 									onResizeAnchorPointerEnter(node.id, "top-left");
 								}}
@@ -187,14 +188,15 @@ export const CanvasNodeOverlayLayer = ({
 									color="rgba(255,255,255,1)"
 								/>
 							</Group>
-								<Group
-									hitRect={{
-										x: bottomRightCornerX - hitSizeWorld / 2,
-										y: bottomRightCornerY - hitSizeWorld / 2,
-										width: hitSizeWorld,
-										height: hitSizeWorld,
-									}}
-									opacity={isBottomRightHovered || isBottomRightPressed ? 1 : 0.3}
+							<Group
+								hitRect={{
+									x: bottomRightCornerX - hitSizeWorld / 2,
+									y: bottomRightCornerY - hitSizeWorld / 2,
+									width: hitSizeWorld,
+									height: hitSizeWorld,
+								}}
+								opacity={isBottomRightHovered || isBottomRightPressed ? 1 : 0.3}
+								cursor="nwse-resize"
 								onPointerEnter={() => {
 									onResizeAnchorPointerEnter(node.id, "bottom-right");
 								}}

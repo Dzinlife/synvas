@@ -21,6 +21,16 @@ const {
 	focusLayerPointerUpSpy: vi.fn(),
 	focusLayerPointerLeaveSpy: vi.fn(),
 }));
+const { focusLayerMockState } = vi.hoisted(() => ({
+	focusLayerMockState: {
+		handleItems: [] as Array<{
+			handle: string;
+			screenX: number;
+			screenY: number;
+		}>,
+		activeHandle: null as string | null,
+	},
+}));
 
 vi.mock("@use-gesture/react", () => ({
 	useDrag: (handler: (state: Record<string, unknown>) => void) => {
@@ -120,8 +130,8 @@ vi.mock("./useFocusSceneSkiaInteractions", () => ({
 		selectionRectScreen: null,
 		snapGuidesScreen: { vertical: [], horizontal: [] },
 		selectionFrameScreen: null,
-		handleItems: [],
-		activeHandle: null,
+		handleItems: focusLayerMockState.handleItems,
+		activeHandle: focusLayerMockState.activeHandle,
 		labelItems: [],
 		onLayerPointerDown: focusLayerPointerDownSpy,
 		onLayerPointerMove: focusLayerPointerMoveSpy,
@@ -236,6 +246,8 @@ describe("InfiniteSkiaCanvas", () => {
 		focusLayerPointerMoveSpy.mockReset();
 		focusLayerPointerUpSpy.mockReset();
 		focusLayerPointerLeaveSpy.mockReset();
+		focusLayerMockState.handleItems = [];
+		focusLayerMockState.activeHandle = null;
 	});
 
 	it("active 边框会在 overlay 顶层渲染并关闭主通道描边", async () => {
@@ -466,6 +478,9 @@ describe("InfiniteSkiaCanvas", () => {
 		const tree = getLatestRenderTree();
 		const anchorGroups = collectAnchorGroups(tree);
 		expect(anchorGroups).toHaveLength(2);
+		expect(anchorGroups.every((group) => group.props.cursor === "nwse-resize")).toBe(
+			true,
+		);
 	});
 
 	it("locked active 节点不渲染 resize anchor", async () => {
@@ -557,6 +572,81 @@ describe("InfiniteSkiaCanvas", () => {
 			});
 		});
 		expect(focusLayerPointerDownSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("focus resize handles 会携带对应 cursor", async () => {
+		focusLayerMockState.handleItems = [
+			{ handle: "top-left", screenX: 100, screenY: 100 },
+			{ handle: "top-center", screenX: 140, screenY: 100 },
+			{ handle: "top-right", screenX: 180, screenY: 100 },
+			{ handle: "middle-left", screenX: 100, screenY: 140 },
+			{ handle: "middle-right", screenX: 180, screenY: 140 },
+			{ handle: "bottom-left", screenX: 100, screenY: 180 },
+			{ handle: "bottom-center", screenX: 140, screenY: 180 },
+			{ handle: "bottom-right", screenX: 180, screenY: 180 },
+			{ handle: "rotater", screenX: 140, screenY: 60 },
+		];
+
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createSceneNode("node-scene", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-scene"
+				focusedNodeId="node-scene"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const focusLayerElement = collectElements(
+			tree,
+			(element) => element.props.onLayerPointerDown === focusLayerPointerDownSpy,
+		)[0];
+		expect(focusLayerElement).toBeTruthy();
+		if (!focusLayerElement) return;
+		const focusLayerRender =
+			typeof focusLayerElement.type === "function"
+				? focusLayerElement.type(
+						focusLayerElement.props as Record<string, unknown>,
+					)
+				: null;
+		const handleRects = collectElements(
+			focusLayerRender,
+			(element) =>
+				element.type === "rect" &&
+				String(element.key ?? "").includes("focus-scene-handle-") &&
+				typeof element.props.cursor === "string",
+		);
+
+		const cursorByHandle = new Map<string, string>();
+		for (const rect of handleRects) {
+			const rawKey = String(rect.key ?? "");
+			const handle = rawKey.replace(/^.*focus-scene-handle-/, "");
+			if (!cursorByHandle.has(handle)) {
+				cursorByHandle.set(handle, rect.props.cursor as string);
+			}
+		}
+
+		expect(cursorByHandle).toEqual(
+			new Map<string, string>([
+				["top-left", "nwse-resize"],
+				["top-center", "ns-resize"],
+				["top-right", "nesw-resize"],
+				["middle-left", "ew-resize"],
+				["middle-right", "ew-resize"],
+				["bottom-left", "nesw-resize"],
+				["bottom-center", "ns-resize"],
+				["bottom-right", "nwse-resize"],
+				["rotater", "grab"],
+			]),
+		);
 	});
 
 	it("anchor pointer down 会透传 resize start/drag/end 回调并包含 anchor", async () => {

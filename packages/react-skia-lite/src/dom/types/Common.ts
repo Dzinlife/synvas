@@ -145,6 +145,8 @@ export interface SkiaPointerEventProps {
 	// 可选命中区域，便于在不直接绘制几何时提供交互热区
 	hitRect?: RectCtor;
 	pointerEvents?: "auto" | "none";
+	// 仅 web 生效：命中该节点时设置宿主元素 cursor
+	cursor?: string;
 }
 
 export interface GroupProps

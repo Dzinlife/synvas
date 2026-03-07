@@ -11,14 +11,15 @@ import { transformMetaToRenderLayout } from "@/element/layout";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { cloneValue, createCopySeed } from "@/scene-editor/utils/copyUtils";
 import type { CameraState } from "./canvasWorkspaceUtils";
+import { FOCUS_SCENE_HANDLE_SIZE_PX } from "./focusSceneHandleGeometry";
 import {
+	createFocusFrameMatrix,
+	createFocusSceneCoordinateContext,
 	FOCUS_SCENE_EPSILON,
 	type FocusFrame,
 	type FocusMatrix,
 	type FocusPoint,
 	type FocusRect,
-	createFocusFrameMatrix,
-	createFocusSceneCoordinateContext,
 	getFocusBoundingRect,
 	getFocusFrameCorners,
 	getFocusMatrixMetrics,
@@ -34,9 +35,7 @@ import {
 const SNAP_GUIDE_THRESHOLD_PX = 6;
 const SNAP_GUIDE_MATCH_EPSILON = 1e-6;
 const MIN_TRANSFORM_SIZE_PX = 5;
-const HANDLE_HIT_SIZE_PX = 14;
 const ROTATER_OFFSET_PX = 28;
-const ROTATER_HIT_RADIUS_PX = 12;
 
 const POSITION_QUANTUM = 1e-6;
 const SCALE_QUANTUM = 1e-6;
@@ -46,7 +45,9 @@ const POSITION_INTEGER_SNAP_EPSILON = 1e-3;
 type TimelineHistorySnapshot = {
 	elements: TimelineElement[];
 	tracks: ReturnType<TimelineStoreApi["getState"]>["tracks"];
-	audioTrackStates: ReturnType<TimelineStoreApi["getState"]>["audioTrackStates"];
+	audioTrackStates: ReturnType<
+		TimelineStoreApi["getState"]
+	>["audioTrackStates"];
 	rippleEditingEnabled: boolean;
 };
 
@@ -144,7 +145,11 @@ interface TransformSession {
 	changed: boolean;
 }
 
-type InteractionSession = DragSession | MarqueeSession | TransformSession | null;
+type InteractionSession =
+	| DragSession
+	| MarqueeSession
+	| TransformSession
+	| null;
 
 type TransformPointerInput = {
 	x: number;
@@ -185,7 +190,10 @@ const quantizeTransform = (transform: TransformMeta): TransformMeta => {
 	};
 };
 
-const isTransformChanged = (prev: TransformMeta, next: TransformMeta): boolean => {
+const isTransformChanged = (
+	prev: TransformMeta,
+	next: TransformMeta,
+): boolean => {
 	return (
 		prev.position.x !== next.position.x ||
 		prev.position.y !== next.position.y ||
@@ -231,7 +239,10 @@ const createFocusRotationMatrix = (rotationRad: number): FocusMatrix => {
 	};
 };
 
-const createFocusScaleMatrix = (scaleX: number, scaleY: number): FocusMatrix => {
+const createFocusScaleMatrix = (
+	scaleX: number,
+	scaleY: number,
+): FocusMatrix => {
 	return {
 		a: scaleX,
 		b: 0,
@@ -255,7 +266,10 @@ const createFocusFrameUnitMatrix = (frame: FocusFrame): FocusMatrix => {
 	);
 };
 
-const createCopyElement = (source: TimelineElement, copyId: string): TimelineElement => {
+const createCopyElement = (
+	source: TimelineElement,
+	copyId: string,
+): TimelineElement => {
 	return {
 		...source,
 		id: copyId,
@@ -338,10 +352,10 @@ const screenFrameToSceneFrame = (
 	return {
 		cx: centerScene.x,
 		cy: centerScene.y,
-		width: frameScreen.width / Math.max(Math.abs(stageScaleX), FOCUS_SCENE_EPSILON),
+		width:
+			frameScreen.width / Math.max(Math.abs(stageScaleX), FOCUS_SCENE_EPSILON),
 		height:
-			frameScreen.height /
-			Math.max(Math.abs(stageScaleY), FOCUS_SCENE_EPSILON),
+			frameScreen.height / Math.max(Math.abs(stageScaleY), FOCUS_SCENE_EPSILON),
 		rotationRad: frameScreen.rotationRad,
 	};
 };
@@ -375,6 +389,17 @@ const resolveHandleScreenPoints = (
 			screenY: point.y,
 		};
 	});
+};
+
+const isPointInTransformHandle = (
+	screenPoint: FocusPoint,
+	item: FocusTransformHandleRenderItem,
+): boolean => {
+	const halfSize = FOCUS_SCENE_HANDLE_SIZE_PX / 2;
+	return (
+		Math.abs(screenPoint.x - item.screenX) <= halfSize &&
+		Math.abs(screenPoint.y - item.screenY) <= halfSize
+	);
 };
 
 const resolvePointerField = (
@@ -430,7 +455,9 @@ const resolveSelectionFrameScene = (
 	layouts: FocusSceneElementLayout[],
 	selectedIds: string[],
 ): FocusFrame | null => {
-	const selectedLayouts = layouts.filter((layout) => selectedIds.includes(layout.id));
+	const selectedLayouts = layouts.filter((layout) =>
+		selectedIds.includes(layout.id),
+	);
 	if (selectedLayouts.length === 0) {
 		return null;
 	}
@@ -469,20 +496,16 @@ const resolveSelectionFrameScreen = (
 	};
 };
 
-const resolveResizeAnchorDelta = (
-	params: {
-		baseFrameScreen: FocusFrame;
-		handle: FocusTransformHandle;
-		pointerScreen: FocusPoint;
-		centered: boolean;
-	},
-):
-	| {
-			frameScreen: FocusFrame;
-			scaleSignX: number;
-			scaleSignY: number;
-	  }
-	| null => {
+const resolveResizeAnchorDelta = (params: {
+	baseFrameScreen: FocusFrame;
+	handle: FocusTransformHandle;
+	pointerScreen: FocusPoint;
+	centered: boolean;
+}): {
+	frameScreen: FocusFrame;
+	scaleSignX: number;
+	scaleSignY: number;
+} | null => {
 	const { baseFrameScreen, handle, pointerScreen, centered } = params;
 	if (handle === "rotater") {
 		return null;
@@ -501,7 +524,10 @@ const resolveResizeAnchorDelta = (
 	const moveCenterX = handle === "top-center" || handle === "bottom-center";
 	const moveCenterY = handle === "middle-left" || handle === "middle-right";
 	const isCorner =
-		(moveLeft || moveRight) && (moveTop || moveBottom) && !moveCenterX && !moveCenterY;
+		(moveLeft || moveRight) &&
+		(moveTop || moveBottom) &&
+		!moveCenterX &&
+		!moveCenterY;
 
 	let left = 0;
 	let right = baseFrameScreen.width;
@@ -551,10 +577,11 @@ const resolveResizeAnchorDelta = (
 	let width = Math.abs(right - left);
 	let height = Math.abs(bottom - top);
 
-		if (isCorner && baseFrameScreen.height > FOCUS_SCENE_EPSILON) {
-			const ratio =
-				baseFrameScreen.width / Math.max(baseFrameScreen.height, FOCUS_SCENE_EPSILON);
-			const widthByHeight = height * ratio;
+	if (isCorner && baseFrameScreen.height > FOCUS_SCENE_EPSILON) {
+		const ratio =
+			baseFrameScreen.width /
+			Math.max(baseFrameScreen.height, FOCUS_SCENE_EPSILON);
+		const widthByHeight = height * ratio;
 		const heightByWidth = width / ratio;
 		const widthDelta = Math.abs(width - baseFrameScreen.width);
 		const heightDelta = Math.abs(height - baseFrameScreen.height);
@@ -564,50 +591,50 @@ const resolveResizeAnchorDelta = (
 			width = widthByHeight;
 		}
 
-			if (centered) {
-				left = originCenterX - width / 2;
-				right = originCenterX + width / 2;
-				top = originCenterY - height / 2;
-				bottom = originCenterY + height / 2;
-			} else {
-				const fixedX = moveLeft ? right : left;
-				const fixedY = moveTop ? bottom : top;
-				if (moveLeft) {
-					if (scaleSignX >= 0) {
-						left = fixedX - width;
-						right = fixedX;
-					} else {
-						left = fixedX;
-						right = fixedX + width;
-					}
+		if (centered) {
+			left = originCenterX - width / 2;
+			right = originCenterX + width / 2;
+			top = originCenterY - height / 2;
+			bottom = originCenterY + height / 2;
+		} else {
+			const fixedX = moveLeft ? right : left;
+			const fixedY = moveTop ? bottom : top;
+			if (moveLeft) {
+				if (scaleSignX >= 0) {
+					left = fixedX - width;
+					right = fixedX;
 				} else {
-					if (scaleSignX >= 0) {
-						left = fixedX;
-						right = fixedX + width;
-					} else {
-						left = fixedX - width;
-						right = fixedX;
-					}
+					left = fixedX;
+					right = fixedX + width;
 				}
-				if (moveTop) {
-					if (scaleSignY >= 0) {
-						top = fixedY - height;
-						bottom = fixedY;
-					} else {
-						top = fixedY;
-						bottom = fixedY + height;
-					}
+			} else {
+				if (scaleSignX >= 0) {
+					left = fixedX;
+					right = fixedX + width;
 				} else {
-					if (scaleSignY >= 0) {
-						top = fixedY;
-						bottom = fixedY + height;
-					} else {
-						top = fixedY - height;
-						bottom = fixedY;
-					}
+					left = fixedX - width;
+					right = fixedX;
+				}
+			}
+			if (moveTop) {
+				if (scaleSignY >= 0) {
+					top = fixedY - height;
+					bottom = fixedY;
+				} else {
+					top = fixedY;
+					bottom = fixedY + height;
+				}
+			} else {
+				if (scaleSignY >= 0) {
+					top = fixedY;
+					bottom = fixedY + height;
+				} else {
+					top = fixedY - height;
+					bottom = fixedY;
 				}
 			}
 		}
+	}
 
 	const nextLocalCenter = {
 		x: (left + right) / 2,
@@ -637,10 +664,7 @@ const frameToAxisRect = (frame: FocusFrame): FocusRect => {
 	};
 };
 
-const axisRectToFrame = (
-	rect: FocusRect,
-	rotationRad: number,
-): FocusFrame => {
+const axisRectToFrame = (rect: FocusRect, rotationRad: number): FocusFrame => {
 	return {
 		cx: rect.x + rect.width / 2,
 		cy: rect.y + rect.height / 2,
@@ -694,7 +718,8 @@ export const useFocusSceneSkiaInteractions = ({
 	});
 	const [hoveredId, setHoveredId] = useState<string | null>(null);
 	const [draggingId, setDraggingId] = useState<string | null>(null);
-	const [selectionRectScene, setSelectionRectScene] = useState<FocusRect | null>(null);
+	const [selectionRectScene, setSelectionRectScene] =
+		useState<FocusRect | null>(null);
 	const [snapGuidesScene, setSnapGuidesScene] = useState<FocusSnapGuides>({
 		vertical: [],
 		horizontal: [],
@@ -735,16 +760,17 @@ export const useFocusSceneSkiaInteractions = ({
 		);
 	}, [timelineStore]);
 
-	const captureHistorySnapshot = useCallback((): TimelineHistorySnapshot | null => {
-		if (!timelineStore) return null;
-		const state = timelineStore.getState();
-		return {
-			elements: state.elements,
-			tracks: state.tracks,
-			audioTrackStates: state.audioTrackStates,
-			rippleEditingEnabled: state.rippleEditingEnabled,
-		};
-	}, [timelineStore]);
+	const captureHistorySnapshot =
+		useCallback((): TimelineHistorySnapshot | null => {
+			if (!timelineStore) return null;
+			const state = timelineStore.getState();
+			return {
+				elements: state.elements,
+				tracks: state.tracks,
+				audioTrackStates: state.audioTrackStates,
+				rippleEditingEnabled: state.rippleEditingEnabled,
+			};
+		}, [timelineStore]);
 
 	const pushHistorySnapshot = useCallback(
 		(snapshot: TimelineHistorySnapshot | null) => {
@@ -767,14 +793,14 @@ export const useFocusSceneSkiaInteractions = ({
 	);
 
 	const setElementsWithoutHistory = useCallback(
-			(
-				elements:
-					| TimelineElement[]
-					| ((previous: TimelineElement[]) => TimelineElement[]),
-			) => {
-				if (!timelineStore) return;
-				timelineStore.getState().setElements(elements, { history: false });
-			},
+		(
+			elements:
+				| TimelineElement[]
+				| ((previous: TimelineElement[]) => TimelineElement[]),
+		) => {
+			if (!timelineStore) return;
+			timelineStore.getState().setElements(elements, { history: false });
+		},
 		[timelineStore],
 	);
 
@@ -870,9 +896,14 @@ export const useFocusSceneSkiaInteractions = ({
 
 	useEffect(() => {
 		if (!selectionFrameSceneOverride) return;
-		if (selectionFrameOverrideSelectionKeyRef.current === selectedIdsKey) return;
+		if (selectionFrameOverrideSelectionKeyRef.current === selectedIdsKey)
+			return;
 		applySelectionFrameOverride(null);
-	}, [applySelectionFrameOverride, selectedIdsKey, selectionFrameSceneOverride]);
+	}, [
+		applySelectionFrameOverride,
+		selectedIdsKey,
+		selectionFrameSceneOverride,
+	]);
 
 	const selectionFrameScreen = useMemo(() => {
 		return resolveSelectionFrameScreen(selectionFrameScene, ctx);
@@ -979,10 +1010,7 @@ export const useFocusSceneSkiaInteractions = ({
 	);
 
 	const applyDragToElements = useCallback(
-		(
-			targetIds: string[],
-			nextCenters: Record<string, FocusPoint>,
-		): boolean => {
+		(targetIds: string[], nextCenters: Record<string, FocusPoint>): boolean => {
 			if (!timelineStore) return false;
 			const currentElements = timelineStore.getState().elements;
 			let changed = false;
@@ -1029,22 +1057,9 @@ export const useFocusSceneSkiaInteractions = ({
 			const currentSelection = timelineStore.getState().selectedIds;
 
 			if (selectionFrameScreen) {
-				const maybeHandle = resolveHandleScreenPoints(selectionFrameScreen).find(
-					(item) => {
-						if (item.handle === "rotater") {
-							return (
-								Math.hypot(
-									screenPoint.x - item.screenX,
-									screenPoint.y - item.screenY,
-								) <= ROTATER_HIT_RADIUS_PX
-							);
-						}
-						return (
-							Math.abs(screenPoint.x - item.screenX) <= HANDLE_HIT_SIZE_PX / 2 &&
-							Math.abs(screenPoint.y - item.screenY) <= HANDLE_HIT_SIZE_PX / 2
-						);
-					},
-				);
+				const maybeHandle = resolveHandleScreenPoints(
+					selectionFrameScreen,
+				).find((item) => isPointInTransformHandle(screenPoint, item));
 				if (maybeHandle && selectionFrameScene) {
 					const startAngleRad = Math.atan2(
 						scenePoint.y - selectionFrameScene.cy,
@@ -1062,7 +1077,9 @@ export const useFocusSceneSkiaInteractions = ({
 					for (const element of currentElements) {
 						if (!currentSelection.includes(element.id)) continue;
 						if (!hasTransform(element)) continue;
-						const layout = elementLayouts.find((item) => item.id === element.id);
+						const layout = elementLayouts.find(
+							(item) => item.id === element.id,
+						);
 						if (!layout) continue;
 						baseElements.push({
 							id: element.id,
@@ -1175,11 +1192,11 @@ export const useFocusSceneSkiaInteractions = ({
 				interactionSessionRef.current = {
 					kind: "drag",
 					startScene: scenePoint,
-					anchorId: copyMode ? copyIds[0] ?? hitLayout.id : hitLayout.id,
+					anchorId: copyMode ? (copyIds[0] ?? hitLayout.id) : hitLayout.id,
 					targetIds,
 					initialCenters,
-						initialBounds,
-						historySnapshot: captureHistorySnapshot(),
+					initialBounds,
+					historySnapshot: captureHistorySnapshot(),
 					copyMode,
 					copyIds,
 					sourceIds: dragSelection,
@@ -1244,20 +1261,7 @@ export const useFocusSceneSkiaInteractions = ({
 				setHoveredId(hitLayout?.id ?? null);
 				if (selectionFrameScreen) {
 					const handle = resolveHandleScreenPoints(selectionFrameScreen).find(
-						(item) => {
-							if (item.handle === "rotater") {
-								return (
-									Math.hypot(
-										screenPoint.x - item.screenX,
-										screenPoint.y - item.screenY,
-									) <= ROTATER_HIT_RADIUS_PX
-								);
-							}
-							return (
-								Math.abs(screenPoint.x - item.screenX) <= HANDLE_HIT_SIZE_PX / 2 &&
-								Math.abs(screenPoint.y - item.screenY) <= HANDLE_HIT_SIZE_PX / 2
-							);
-						},
+						(item) => isPointInTransformHandle(screenPoint, item),
 					);
 					setActiveHandle(handle?.handle ?? null);
 				}
@@ -1280,8 +1284,10 @@ export const useFocusSceneSkiaInteractions = ({
 						if (leftTrack !== rightTrack) {
 							return leftTrack - rightTrack;
 						}
-						return renderElements.findIndex((el) => el.id === left.id) -
-							renderElements.findIndex((el) => el.id === right.id);
+						return (
+							renderElements.findIndex((el) => el.id === left.id) -
+							renderElements.findIndex((el) => el.id === right.id)
+						);
 					})
 					.map((layout) => layout.id);
 				if (session.additive) {
@@ -1376,7 +1382,10 @@ export const useFocusSceneSkiaInteractions = ({
 					shiftKey: Boolean(event.shiftKey),
 				};
 				const baseFrameScene = session.baseFrameScene;
-				const baseFrameScreen = resolveSelectionFrameScreen(baseFrameScene, ctx);
+				const baseFrameScreen = resolveSelectionFrameScreen(
+					baseFrameScene,
+					ctx,
+				);
 				if (!baseFrameScreen) return;
 				const centered = Boolean(event.altKey);
 				const snapRotate = Boolean(event.shiftKey);
@@ -1456,9 +1465,7 @@ export const useFocusSceneSkiaInteractions = ({
 							Math.abs(currentRect.x - oldRect.x) > FOCUS_SCENE_EPSILON;
 						const rightMoved =
 							Math.abs(
-								currentRect.x +
-									currentRect.width -
-									(oldRect.x + oldRect.width),
+								currentRect.x + currentRect.width - (oldRect.x + oldRect.width),
 							) > FOCUS_SCENE_EPSILON;
 						const topMoved =
 							Math.abs(currentRect.y - oldRect.y) > FOCUS_SCENE_EPSILON;
@@ -1535,26 +1542,26 @@ export const useFocusSceneSkiaInteractions = ({
 								ctx.stageScaleX,
 								ctx.stageScaleY,
 							);
-								const snapX =
-									movingX.length > 0
-										? findNearestGuide(movingX, guidesX)
-										: {
-												line: null,
-												delta: 0,
-												distance: Number.POSITIVE_INFINITY,
-												value: null,
-												lines: [],
-											};
-								const snapY =
-									movingY.length > 0
-										? findNearestGuide(movingY, guidesY)
-										: {
-												line: null,
-												delta: 0,
-												distance: Number.POSITIVE_INFINITY,
-												value: null,
-												lines: [],
-											};
+							const snapX =
+								movingX.length > 0
+									? findNearestGuide(movingX, guidesX)
+									: {
+											line: null,
+											delta: 0,
+											distance: Number.POSITIVE_INFINITY,
+											value: null,
+											lines: [],
+										};
+							const snapY =
+								movingY.length > 0
+									? findNearestGuide(movingY, guidesY)
+									: {
+											line: null,
+											delta: 0,
+											distance: Number.POSITIVE_INFINITY,
+											value: null,
+											lines: [],
+										};
 
 							let deltaX =
 								snapX.line !== null && snapX.distance <= threshold
@@ -1642,8 +1649,7 @@ export const useFocusSceneSkiaInteractions = ({
 											: currentRect.y;
 									if (deltaX !== 0) {
 										const nextHeight =
-											snappedRect.width /
-											Math.max(ratio, FOCUS_SCENE_EPSILON);
+											snappedRect.width / Math.max(ratio, FOCUS_SCENE_EPSILON);
 										snappedRect.height = nextHeight;
 										if (moveTopForSnap && !moveBottomForSnap) {
 											snappedRect.y = fixedY - nextHeight;
@@ -1688,19 +1694,19 @@ export const useFocusSceneSkiaInteractions = ({
 				const currentElements = timelineStore.getState().elements;
 				let changed = false;
 				const nextElements = currentElements.map((element) => {
-					const snapshot = session.baseElements.find((item) => item.id === element.id);
+					const snapshot = session.baseElements.find(
+						(item) => item.id === element.id,
+					);
 					if (!snapshot) return element;
 					if (!element.transform) return element;
 					const transformedMatrix = multiplyFocusMatrix(
 						deltaMatrix,
 						snapshot.matrix,
 					);
-					const metrics = getFocusMatrixMetrics(
-						transformedMatrix,
-						1,
-						1,
+					const metrics = getFocusMatrixMetrics(transformedMatrix, 1, 1);
+					const { positionX, positionY } = sceneCenterToModelPosition(
+						metrics.center,
 					);
-					const { positionX, positionY } = sceneCenterToModelPosition(metrics.center);
 					const updatedTransform = quantizeTransform({
 						...snapshot.transform,
 						position: {
@@ -1782,7 +1788,9 @@ export const useFocusSceneSkiaInteractions = ({
 					const currentElements = timelineStore.getState().elements;
 					const hasMoved = session.targetIds.some((id) => {
 						const initial = session.initialCenters[id];
-						const current = currentElements.find((element) => element.id === id);
+						const current = currentElements.find(
+							(element) => element.id === id,
+						);
 						if (!initial || !current?.transform) return false;
 						const center = modelCenterToSceneCenter(current.transform.position);
 						return (

@@ -4,6 +4,7 @@ import type {
 	FocusTransformHandle,
 	FocusTransformHandleRenderItem,
 } from "./useFocusSceneSkiaInteractions";
+import { FOCUS_SCENE_HANDLE_SIZE_PX } from "./focusSceneHandleGeometry";
 import type { FocusFrame, FocusRect } from "./focusSceneCoordinates";
 import type { SkiaPointerEvent } from "react-skia-lite";
 
@@ -31,7 +32,28 @@ interface FocusSceneSkiaLayerProps {
 	onLayerPointerLeave: () => void;
 }
 
-const HANDLE_SIZE_PX = 8;
+const HANDLE_SIZE_PX = FOCUS_SCENE_HANDLE_SIZE_PX;
+
+const resolveHandleCursor = (handle: FocusTransformHandle): string => {
+	switch (handle) {
+		case "top-left":
+		case "bottom-right":
+			return "nwse-resize";
+		case "top-right":
+		case "bottom-left":
+			return "nesw-resize";
+		case "top-center":
+		case "bottom-center":
+			return "ns-resize";
+		case "middle-left":
+		case "middle-right":
+			return "ew-resize";
+		case "rotater":
+			return "grab";
+		default:
+			return "default";
+	}
+};
 
 export const FocusSceneSkiaLayer = ({
 	width,
@@ -178,6 +200,7 @@ export const FocusSceneSkiaLayer = ({
 								style="stroke"
 								strokeWidth={1.25}
 								color={isActive ? "rgba(255,0,0,1)" : "rgba(255,255,255,1)"}
+								cursor={resolveHandleCursor(item.handle)}
 							/>
 						);
 					}
@@ -189,6 +212,7 @@ export const FocusSceneSkiaLayer = ({
 							width={HANDLE_SIZE_PX}
 							height={HANDLE_SIZE_PX}
 							color={isActive ? "rgba(255,0,0,1)" : "rgba(0,0,0,1)"}
+							cursor={resolveHandleCursor(item.handle)}
 						/>
 					);
 				})}
@@ -204,6 +228,7 @@ export const FocusSceneSkiaLayer = ({
 							style="stroke"
 							strokeWidth={1}
 							color="rgba(255,255,255,1)"
+							pointerEvents="none"
 						/>
 					))}
 			</Group>

@@ -421,6 +421,19 @@ const getPointerPoint = (
 	};
 };
 
+const resolveCursorFromPath = (path: Node[] | null): string | null => {
+	if (!path || path.length === 0) return null;
+	for (let i = path.length - 1; i >= 0; i--) {
+		const cursor = (path[i].props as Partial<GroupProps>)?.cursor;
+		if (typeof cursor !== "string") continue;
+		const trimmedCursor = cursor.trim();
+		if (trimmedCursor.length > 0) {
+			return trimmedCursor;
+		}
+	}
+	return null;
+};
+
 export class SkiaPointerEventManager {
 	private activeTargetPathByPointerId = new Map<number, Node[]>();
 	private hoverPathByPointerId = new Map<number, Node[]>();
@@ -443,6 +456,7 @@ export class SkiaPointerEventManager {
 
 		if (type === "pointerleave") {
 			this.updateHover(pointerId, null, event, point);
+			this.applyHostCursor(hostElement, null);
 			return;
 		}
 
@@ -455,11 +469,21 @@ export class SkiaPointerEventManager {
 			this.updateHover(pointerId, hitPath, event, point);
 		}
 
+		const activePath = this.activeTargetPathByPointerId.get(pointerId) ?? null;
+		const cursorPath = type === "pointermove" ? (activePath ?? hitPath) : hitPath;
+		this.applyHostCursor(hostElement, resolveCursorFromPath(cursorPath));
+
 		const dispatchPath = this.resolveDispatchPath(type, pointerId, hitPath);
 		if (!dispatchPath || dispatchPath.length === 0) {
 			return;
 		}
 		this.emitBubbling(dispatchPath, type, event, point);
+	}
+
+	private applyHostCursor(hostElement: HTMLElement, cursor: string | null) {
+		const nextCursor = cursor ?? "";
+		if (hostElement.style.cursor === nextCursor) return;
+		hostElement.style.cursor = nextCursor;
 	}
 
 	private resolveDispatchPath(
@@ -570,38 +594,38 @@ export class SkiaPointerEventManager {
 		if (!targetNode) return;
 		let propagationStopped = false;
 		const target = toEventTargetNode(targetNode);
-			const event: SkiaPointerEvent = {
-				type,
-				pointerId: getPointerId(nativeEvent),
-				pointerType: getPointerType(nativeEvent),
-				button: nativeEvent.button,
-				buttons: nativeEvent.buttons,
-				clientX: nativeEvent.clientX,
-				clientY: nativeEvent.clientY,
-				x: point.x,
-				y: point.y,
-				pressure: getPressure(nativeEvent),
-				timeStamp: nativeEvent.timeStamp,
-				detail: getDetail(nativeEvent),
-				cancelable: nativeEvent.cancelable,
-				defaultPrevented: nativeEvent.defaultPrevented,
-				altKey: nativeEvent.altKey,
-				ctrlKey: nativeEvent.ctrlKey,
-				shiftKey: nativeEvent.shiftKey,
-				metaKey: nativeEvent.metaKey,
-				nativeEvent,
+		const event: SkiaPointerEvent = {
+			type,
+			pointerId: getPointerId(nativeEvent),
+			pointerType: getPointerType(nativeEvent),
+			button: nativeEvent.button,
+			buttons: nativeEvent.buttons,
+			clientX: nativeEvent.clientX,
+			clientY: nativeEvent.clientY,
+			x: point.x,
+			y: point.y,
+			pressure: getPressure(nativeEvent),
+			timeStamp: nativeEvent.timeStamp,
+			detail: getDetail(nativeEvent),
+			cancelable: nativeEvent.cancelable,
+			defaultPrevented: nativeEvent.defaultPrevented,
+			altKey: nativeEvent.altKey,
+			ctrlKey: nativeEvent.ctrlKey,
+			shiftKey: nativeEvent.shiftKey,
+			metaKey: nativeEvent.metaKey,
+			nativeEvent,
 			target,
-				currentTarget: target,
-				stopPropagation: () => {
-					propagationStopped = true;
-					nativeEvent.stopPropagation();
-				},
-				isPropagationStopped: () => propagationStopped,
-				preventDefault: () => {
-					nativeEvent.preventDefault();
-					event.defaultPrevented = nativeEvent.defaultPrevented;
-				},
-			};
+			currentTarget: target,
+			stopPropagation: () => {
+				propagationStopped = true;
+				nativeEvent.stopPropagation();
+			},
+			isPropagationStopped: () => propagationStopped,
+			preventDefault: () => {
+				nativeEvent.preventDefault();
+				event.defaultPrevented = nativeEvent.defaultPrevented;
+			},
+		};
 
 		for (let i = path.length - 1; i >= 0; i--) {
 			const node = path[i];
