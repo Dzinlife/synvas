@@ -1118,9 +1118,14 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
-	it("双击非 focusable 节点后仍可滚动画布", () => {
+	it("双击非 focusable 节点后动画结束仍可滚动画布", async () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(300, 160);
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
 		const workspace = screen.getByTestId("canvas-workspace");
 		const beforeCamera = useProjectStore.getState().currentProject?.ui.camera;
 		fireEvent.wheel(workspace, {
@@ -1135,7 +1140,7 @@ describe("CanvasWorkspace", () => {
 		expect(afterCamera.y).not.toBe(beforeCamera.y);
 	});
 
-	it("instant camera 更新可打断 smooth 动画", async () => {
+	it("smooth 动画期间 instant camera 更新会被忽略", async () => {
 		render(<CanvasWorkspace />);
 		const workspace = screen.getByTestId("canvas-workspace");
 		clickSidebarNode("node-video-offscreen");
@@ -1148,9 +1153,19 @@ describe("CanvasWorkspace", () => {
 		expect(beforeWheel).toBeTruthy();
 		expect(afterWheel).toBeTruthy();
 		if (!beforeWheel || !afterWheel) return;
-		expect(
-			afterWheel.x !== beforeWheel.x || afterWheel.y !== beforeWheel.y,
-		).toBe(true);
+		expect(afterWheel).toEqual(beforeWheel);
+
+		await waitFor(() => {
+			const cameraAfterAnimation =
+				useProjectStore.getState().currentProject?.ui.camera;
+			expect(cameraAfterAnimation).toBeTruthy();
+			if (!cameraAfterAnimation) return;
+			expect(
+				cameraAfterAnimation.x !== beforeWheel.x ||
+					cameraAfterAnimation.y !== beforeWheel.y ||
+					cameraAfterAnimation.zoom !== beforeWheel.zoom,
+			).toBe(true);
+		});
 
 		await act(async () => {
 			await new Promise((resolve) => {
@@ -1158,7 +1173,39 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const settled = useProjectStore.getState().currentProject?.ui.camera;
-		expect(settled).toEqual(afterWheel);
+		expect(settled).toBeTruthy();
+		if (!settled) return;
+		expect(
+			settled.x !== afterWheel.x ||
+				settled.y !== afterWheel.y ||
+				settled.zoom !== afterWheel.zoom,
+		).toBe(true);
+	});
+
+	it("未完成的 smooth 动画会被新的 smooth 动画覆盖", async () => {
+		render(<CanvasWorkspace />);
+		const initialCamera = useProjectStore.getState().currentProject?.ui.camera;
+		clickSidebarNode("node-video-offscreen");
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 80);
+			});
+		});
+		expect(initialCamera).toBeTruthy();
+		if (!initialCamera) return;
+
+		fireEvent.click(screen.getByRole("button", { name: "重置视图" }));
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+		const settled = useProjectStore.getState().currentProject?.ui.camera;
+		expect(settled).toBeTruthy();
+		if (!settled) return;
+		expect(settled.x).toBeCloseTo(initialCamera.x, 3);
+		expect(settled.y).toBeCloseTo(initialCamera.y, 3);
+		expect(settled.zoom).toBeCloseTo(initialCamera.zoom, 3);
 	});
 
 	it("拖拽 drawer resize 时 camera 不会回退到无 drawer 视口", async () => {

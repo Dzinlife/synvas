@@ -45,6 +45,10 @@ export const useCanvasCameraController = ({
 	const applyCamera = useEffectEvent(
 		(nextCamera: CameraState, options?: ApplyCameraOptions) => {
 			const transition = options?.transition ?? "smooth";
+			const isCameraAnimationRunning = cameraAnimationFrameRef.current !== null;
+			if (transition === "instant" && isCameraAnimationRunning) {
+				return;
+			}
 			const currentCamera = getCamera();
 			if (isCameraAlmostEqual(currentCamera, nextCamera)) {
 				stopCameraAnimation();
