@@ -75,21 +75,6 @@ type CanvasPointerEvent = Parameters<
 >[0];
 type CanvasMouseEvent = Parameters<NonNullable<ViewProps["onClick"]>>[0];
 
-const resolveMouseEventDetail = (event: CanvasMouseEvent): number => {
-	const syntheticEvent = event as unknown as {
-		nativeEvent?: { detail?: unknown };
-		detail?: unknown;
-	};
-	const nativeDetail = syntheticEvent.nativeEvent?.detail;
-	if (typeof nativeDetail === "number" && Number.isFinite(nativeDetail)) {
-		return nativeDetail;
-	}
-	if (typeof syntheticEvent.detail === "number") {
-		return syntheticEvent.detail;
-	}
-	return 0;
-};
-
 export const Canvas = ({
 	debug,
 	opaque,
@@ -187,7 +172,6 @@ export const Canvas = ({
 		onDoubleClick,
 		...restViewProps
 	} = viewProps;
-	const skipNextDoubleClickDispatchRef = useRef(false);
 
 	const dispatchPointerEvent = useCallback(
 		(
@@ -223,7 +207,6 @@ export const Canvas = ({
 		NonNullable<ViewProps["onPointerDown"]>
 	>(
 		(event) => {
-			skipNextDoubleClickDispatchRef.current = false;
 			dispatchPointerEvent("pointerdown", event);
 			onPointerDown?.(event);
 		},
@@ -271,10 +254,6 @@ export const Canvas = ({
 	const onCanvasClick = useCallback<NonNullable<ViewProps["onClick"]>>(
 		(event) => {
 			dispatchPointerEvent("click", event);
-			if (resolveMouseEventDetail(event) === 2) {
-				skipNextDoubleClickDispatchRef.current = true;
-				dispatchPointerEvent("doubleclick", event);
-			}
 			onClick?.(event);
 		},
 		[dispatchPointerEvent, onClick],
@@ -284,11 +263,7 @@ export const Canvas = ({
 		NonNullable<ViewProps["onDoubleClick"]>
 	>(
 		(event) => {
-			if (skipNextDoubleClickDispatchRef.current) {
-				skipNextDoubleClickDispatchRef.current = false;
-			} else {
-				dispatchPointerEvent("doubleclick", event);
-			}
+			dispatchPointerEvent("doubleclick", event);
 			onDoubleClick?.(event);
 		},
 		[dispatchPointerEvent, onDoubleClick],
