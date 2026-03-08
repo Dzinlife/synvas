@@ -41,8 +41,19 @@ describe("SceneWaveformCanvas", () => {
 		setTransformMock.mockReset();
 		clearRectMock.mockReset();
 		drawImageMock.mockReset();
-		getSceneWaveformThumbnailMock.mockResolvedValue(
-			document.createElement("canvas"),
+		getSceneWaveformThumbnailMock.mockImplementation(
+			(params: { width: number; height: number; pixelRatio: number }) => {
+				const canvas = document.createElement("canvas");
+				canvas.width = Math.max(
+					1,
+					Math.round(params.width * params.pixelRatio),
+				);
+				canvas.height = Math.max(
+					1,
+					Math.round(params.height * params.pixelRatio),
+				);
+				return Promise.resolve(canvas);
+			},
 		);
 		vi.stubGlobal(
 			"ResizeObserver",
@@ -62,7 +73,9 @@ describe("SceneWaveformCanvas", () => {
 		window.cancelAnimationFrame = vi.fn() as typeof window.cancelAnimationFrame;
 		HTMLCanvasElement.prototype.getContext = vi
 			.fn()
-			.mockImplementation(() => createCanvasContext()) as typeof nativeGetContext;
+			.mockImplementation(() =>
+				createCanvasContext(),
+			) as typeof nativeGetContext;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
 			() =>
 				({
@@ -220,7 +233,21 @@ describe("SceneWaveformCanvas", () => {
 		getSceneWaveformThumbnailMock
 			.mockReset()
 			.mockResolvedValueOnce(firstWaveform)
-			.mockImplementationOnce(() => nextWaveformPromise);
+			.mockImplementationOnce(() => nextWaveformPromise)
+			.mockImplementation(
+				(params: { width: number; height: number; pixelRatio: number }) => {
+					const canvas = document.createElement("canvas");
+					canvas.width = Math.max(
+						1,
+						Math.round(params.width * params.pixelRatio),
+					);
+					canvas.height = Math.max(
+						1,
+						Math.round(params.height * params.pixelRatio),
+					);
+					return Promise.resolve(canvas);
+				},
+			);
 
 		const props = {
 			sceneRuntime: {
