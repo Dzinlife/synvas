@@ -160,20 +160,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			!focusRuntime,
 	});
 	const focusLayerEnabled = Boolean(focusedSceneNode && focusRuntime);
-	const [hmrRenderVersion, setHmrRenderVersion] = useState(0);
-
-	useLayoutEffect(() => {
-		const hot = import.meta.hot;
-		if (!hot) return;
-		// 开发态 HMR 后强制触发一次重绘，避免样式改动需要手动刷新页面。
-		const handleHmrUpdate = () => {
-			setHmrRenderVersion((prev) => prev + 1);
-		};
-		hot.on("vite:afterUpdate", handleHmrUpdate);
-		return () => {
-			hot.off("vite:afterUpdate", handleHmrUpdate);
-		};
-	}, []);
 
 	useLayoutEffect(() => {
 		if (!suspendHover) return;
@@ -527,21 +513,23 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 								</Group>
 							);
 						})}
-						{!disableBaseNodeInteraction &&
-							CanvasNodeOverlayLayer({
-								nodes,
-								cameraZoom: camera.zoom,
-								activeNodeId,
-								focusedNodeId,
-								hoveredNodeId,
-								hoveredResizeAnchor,
-								pressedResizeAnchor,
-								onResizeAnchorPointerEnter: handleResizeAnchorPointerEnter,
-								onResizeAnchorPointerLeave: handleResizeAnchorPointerLeave,
-								onTopLeftResizePointerDown: topLeftResizeHandlers.onPointerDown,
-								onBottomRightResizePointerDown:
-									bottomRightResizeHandlers.onPointerDown,
-							})}
+						{!disableBaseNodeInteraction && (
+							<CanvasNodeOverlayLayer
+								nodes={nodes}
+								cameraZoom={camera.zoom}
+								activeNodeId={activeNodeId}
+								focusedNodeId={focusedNodeId}
+								hoveredNodeId={hoveredNodeId}
+								hoveredResizeAnchor={hoveredResizeAnchor}
+								pressedResizeAnchor={pressedResizeAnchor}
+								onResizeAnchorPointerEnter={handleResizeAnchorPointerEnter}
+								onResizeAnchorPointerLeave={handleResizeAnchorPointerLeave}
+								onTopLeftResizePointerDown={topLeftResizeHandlers.onPointerDown}
+								onBottomRightResizePointerDown={
+									bottomRightResizeHandlers.onPointerDown
+								}
+							/>
+						)}
 					</Group>
 					{focusLayerEnabled && (
 						<FocusSceneSkiaLayer
@@ -607,7 +595,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			topLeftResizeHandlers,
 			width,
 			height,
-			hmrRenderVersion,
 	]);
 
 	if (width <= 0 || height <= 0) return null;

@@ -4,6 +4,7 @@ import { act, render, waitFor } from "@testing-library/react";
 import type { StudioProject, VideoCanvasNode } from "core/studio/types";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { NodeInteractionWrapper } from "./NodeInteractionWrapper";
 
@@ -205,7 +206,7 @@ const getLatestRenderTree = (): React.ReactNode => {
 };
 
 const collectAnchorGroups = (tree: React.ReactNode): AnyElement[] => {
-	return collectElements(
+	const directGroups = collectElements(
 		tree,
 		(element) =>
 			element.type === "group" &&
@@ -216,6 +217,28 @@ const collectAnchorGroups = (tree: React.ReactNode): AnyElement[] => {
 				(child) => child.type === "path",
 			).length > 0,
 	);
+	const overlayElement = collectElements(
+		tree,
+		(element) => element.type === CanvasNodeOverlayLayer,
+	)[0];
+	if (!overlayElement || typeof overlayElement.type !== "function") {
+		return directGroups;
+	}
+	const overlayTree = overlayElement.type(
+		overlayElement.props as Record<string, unknown>,
+	);
+	const overlayGroups = collectElements(
+		overlayTree,
+		(element) =>
+			element.type === "group" &&
+			Boolean(element.props.hitRect) &&
+			typeof element.props.onPointerDown === "function" &&
+			collectElements(
+				element.props.children as React.ReactNode,
+				(child) => child.type === "path",
+			).length > 0,
+	);
+	return [...directGroups, ...overlayGroups];
 };
 
 const createVideoNode = (

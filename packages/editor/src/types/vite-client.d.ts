@@ -3,21 +3,8 @@ interface ImportMetaEnv {
 	readonly [key: string]: string | boolean | undefined;
 }
 
-interface ViteHotContext {
-	readonly data: unknown;
-	on(
-		event: string,
-		cb: (payload: Record<string, unknown>) => void,
-	): void;
-	off(
-		event: string,
-		cb: (payload: Record<string, unknown>) => void,
-	): void;
-}
-
 interface ImportMeta {
 	readonly env: ImportMetaEnv;
-	readonly hot?: ViteHotContext;
 }
 
 declare module "*.wasm?url" {

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, createElement, type ReactNode } from "react";
 import type { OpaqueRoot } from "react-reconciler";
 import ReactReconciler from "react-reconciler";
 import { NodeType } from "../dom/types";
@@ -29,9 +29,49 @@ skiaReconciler.injectIntoDevTools({
 	rendererPackageName: "react-native-skia",
 });
 
+type ViteHotContext = {
+	on: (event: string, callback: (payload: unknown) => void) => void;
+	off: (event: string, callback: (payload: unknown) => void) => void;
+	dispose?: (callback: () => void) => void;
+};
+
+const getViteHotContext = (): ViteHotContext | null => {
+	const meta = import.meta as unknown as { hot?: ViteHotContext };
+	return meta.hot ?? null;
+};
+
+const rootRegistry = new Set<SkiaSGRoot>();
+let hmrListenerInstalled = false;
+let hmrAfterUpdateHandler: ((payload: unknown) => void) | null = null;
+
+const ensureHmrListener = () => {
+	if (hmrListenerInstalled) return;
+	const hot = getViteHotContext();
+	if (!hot) return;
+	const handler = () => {
+		// HMR 后统一触发所有 Skia root 的重渲染，覆盖手动 root.render 场景。
+		for (const root of rootRegistry) {
+			root.refreshForHmr();
+		}
+	};
+	hot.on("vite:afterUpdate", handler);
+	hot.dispose?.(() => {
+		hot.off("vite:afterUpdate", handler);
+		if (hmrAfterUpdateHandler === handler) {
+			hmrAfterUpdateHandler = null;
+			hmrListenerInstalled = false;
+		}
+	});
+	hmrAfterUpdateHandler = handler;
+	hmrListenerInstalled = true;
+};
+
 export class SkiaSGRoot {
 	private root: OpaqueRoot;
 	private container: Container;
+	private currentElement: ReactNode = null;
+	private hmrRefreshVersion = 0;
+	private unmounted = false;
 
 	constructor(
 		public Skia: Skia,
@@ -52,6 +92,8 @@ export class SkiaSGRoot {
 			() => {},
 			null,
 		);
+		rootRegistry.add(this);
+		ensureHmrListener();
 	}
 
 	get sg() {
@@ -66,8 +108,23 @@ export class SkiaSGRoot {
 	}
 
 	render(element: ReactNode) {
+		this.currentElement = element;
+		this.unmounted = false;
 		this.container.mount();
 		this.updateContainer(element);
+	}
+
+	refreshForHmr() {
+		if (this.unmounted) return;
+		this.container.mount();
+		this.hmrRefreshVersion += 1;
+		// 用 key 强制过一遍 reconciler，确保热更新后样式树立即重算。
+		const nextElement = createElement(
+			Fragment,
+			{ key: `skia-hmr-${this.hmrRefreshVersion}` },
+			this.currentElement,
+		);
+		this.updateContainer(nextElement);
 	}
 
 	drawOnCanvas(canvas: SkCanvas) {
@@ -82,6 +139,8 @@ export class SkiaSGRoot {
 	}
 
 	unmount() {
+		this.unmounted = true;
+		rootRegistry.delete(this);
 		this.container.unmount();
 		this.updateContainer(null, () => {
 			debug("unmountContainer");
