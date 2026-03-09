@@ -500,6 +500,19 @@ class NodeTransitionState {
 	private startTrackToTarget(key: string, target: number) {
 		const shared = this.sharedValues.get(key);
 		if (!shared) return;
+		const spec = resolveTransitionSpecForKey(this.transitionInput, key);
+		const durationMs = Math.max(0, spec.duration);
+		const easing = easingByName[spec.easing];
+		const existingTrack = this.tracks.get(key);
+		// 相同目标与参数的活跃轨道不重启，避免高频重渲染（如 camera pan）反复打断过渡。
+		if (
+			existingTrack?.active &&
+			isAlmostEqual(existingTrack.to, target) &&
+			isAlmostEqual(existingTrack.durationMs, durationMs) &&
+			existingTrack.easing === easing
+		) {
+			return;
+		}
 		const nowMs = resolveNow();
 		const currentValue = shared.value;
 		if (isAlmostEqual(currentValue, target)) {
@@ -511,8 +524,6 @@ class NodeTransitionState {
 			return;
 		}
 
-		const spec = resolveTransitionSpecForKey(this.transitionInput, key);
-		const durationMs = Math.max(0, spec.duration);
 		if (durationMs <= 0) {
 			shared.value = target;
 			let track = this.tracks.get(key);
@@ -522,7 +533,7 @@ class NodeTransitionState {
 					to: target,
 					startMs: nowMs,
 					durationMs: 0,
-					easing: easingByName[spec.easing],
+					easing,
 					active: false,
 				};
 				this.tracks.set(key, track);
@@ -531,7 +542,7 @@ class NodeTransitionState {
 				track.to = target;
 				track.startMs = nowMs;
 				track.durationMs = 0;
-				track.easing = easingByName[spec.easing];
+				track.easing = easing;
 				track.active = false;
 			}
 			return;
@@ -542,7 +553,7 @@ class NodeTransitionState {
 			to: target,
 			startMs: nowMs,
 			durationMs,
-			easing: easingByName[spec.easing],
+			easing,
 			active: true,
 		};
 		this.tracks.set(key, nextTrack);
