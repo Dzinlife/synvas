@@ -160,6 +160,20 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			!focusRuntime,
 	});
 	const focusLayerEnabled = Boolean(focusedSceneNode && focusRuntime);
+	const [hmrRenderVersion, setHmrRenderVersion] = useState(0);
+
+	useLayoutEffect(() => {
+		const hot = import.meta.hot;
+		if (!hot) return;
+		// 开发态 HMR 后强制触发一次重绘，避免样式改动需要手动刷新页面。
+		const handleHmrUpdate = () => {
+			setHmrRenderVersion((prev) => prev + 1);
+		};
+		hot.on("vite:afterUpdate", handleHmrUpdate);
+		return () => {
+			hot.off("vite:afterUpdate", handleHmrUpdate);
+		};
+	}, []);
 
 	useLayoutEffect(() => {
 		if (!suspendHover) return;
@@ -593,6 +607,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			topLeftResizeHandlers,
 			width,
 			height,
+			hmrRenderVersion,
 	]);
 
 	if (width <= 0 || height <= 0) return null;
