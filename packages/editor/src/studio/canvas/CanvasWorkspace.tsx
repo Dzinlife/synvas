@@ -1381,6 +1381,13 @@ const CanvasWorkspace = () => {
 			setActiveNode(null);
 		}
 	}, [activeNodeId, focusedNodeId, setActiveNode, setFocusedNode]);
+	const handleEditorMouseOverCapture = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			event.stopPropagation();
+			event.nativeEvent.stopImmediatePropagation?.();
+		},
+		[],
+	);
 
 	if (!currentProject) {
 		return (
@@ -1428,6 +1435,7 @@ const CanvasWorkspace = () => {
 			data-testid="canvas-workspace"
 			role="application"
 			className="relative h-full w-full overflow-hidden"
+			onMouseOverCapture={handleEditorMouseOverCapture}
 			onClick={handleCanvasClick}
 			onContextMenu={handleCanvasContextMenu}
 			onDragOver={(event) => {

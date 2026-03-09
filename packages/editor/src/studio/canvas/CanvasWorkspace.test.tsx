@@ -818,6 +818,18 @@ const clickSidebarNode = (nodeId: string): void => {
 };
 
 describe("CanvasWorkspace", () => {
+	it("编辑器区域 mouseover 不会冒泡到 document", () => {
+		const onDocumentMouseOver = vi.fn();
+		document.addEventListener("mouseover", onDocumentMouseOver);
+		try {
+			render(<CanvasWorkspace />);
+			fireEvent.mouseOver(screen.getByTestId("infinite-skia-canvas"));
+			expect(onDocumentMouseOver).not.toHaveBeenCalled();
+		} finally {
+			document.removeEventListener("mouseover", onDocumentMouseOver);
+		}
+	});
+
 	it("全局侧边栏展示所有节点并按 zIndex/createdAt 排序", () => {
 		render(<CanvasWorkspace />);
 		const nodeItems = screen.getAllByTestId(/canvas-sidebar-node-item-/);
