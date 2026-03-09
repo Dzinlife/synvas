@@ -91,6 +91,7 @@ export const CanvasNodeOverlayLayer = ({
 					const isActive = node.id === activeNodeId;
 					const isDimmed = Boolean(focusedNodeId) && !isFocused;
 					const isHovered = node.id === hoveredNodeId;
+					const isResizingNode = pressedResizeAnchor?.nodeId === node.id;
 					const borderStyle = resolveNodeInteractionBorderStyle({
 						isActive,
 						isHovered,
@@ -116,11 +117,17 @@ export const CanvasNodeOverlayLayer = ({
 								transform={[{ translateX: node.x }, { translateY: node.y }]}
 							>
 								<Rect
-									transition={NODE_OUTLINE_TRANSITION}
-									opacity={0}
-									animate={{
-										opacity: outlineOpacity,
-									}}
+									{...(isResizingNode
+										? {
+												opacity: outlineOpacity,
+											}
+										: {
+												transition: NODE_OUTLINE_TRANSITION,
+												opacity: 0,
+												animate: {
+													opacity: outlineOpacity,
+												},
+											})}
 									x={0}
 									y={0}
 									width={Math.max(1, node.width)}
