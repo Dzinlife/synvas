@@ -10,7 +10,7 @@ import type { SkiaPointerEvent } from "react-skia-lite";
 import { transformMetaToRenderLayout } from "@/element/layout";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { cloneValue, createCopySeed } from "@/scene-editor/utils/copyUtils";
-import type { CameraState } from "./canvasWorkspaceUtils";
+import type { CameraState } from "@/studio/canvas/canvasWorkspaceUtils";
 import {
 	buildFocusTransformHandleItems,
 	isRotateHandle,

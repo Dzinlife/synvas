@@ -130,40 +130,61 @@ vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", () => ({
 	useStudioRuntimeManager: () => ({}),
 }));
 
-vi.mock("./useFocusSceneTimelineElements", () => ({
-	useFocusSceneTimelineElements: ({ sceneId }: { sceneId: string | null }) => ({
-		runtime: sceneId ? ({ timelineStore: {} } as any) : null,
-		renderElements: [],
-		renderElementsRef: { current: [] },
-		sourceWidth: 1920,
-		sourceHeight: 1080,
-	}),
+vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
+	useSceneFocusEditorLayer: ({
+		width,
+		height,
+		focusedNode,
+		suspendHover,
+	}: {
+		width: number;
+		height: number;
+		focusedNode: { id: string; type: string } | null;
+		suspendHover?: boolean;
+	}) => {
+		const enabled = Boolean(focusedNode);
+		return {
+			enabled,
+			layerProps: enabled
+				? {
+						width,
+						height,
+						elements: [],
+						selectedIds: focusLayerMockState.selectedIds,
+						hoveredId: null,
+						draggingId: null,
+						selectionRectScreen: null,
+						snapGuidesScreen: { vertical: [], horizontal: [] },
+						selectionFrameScreen: focusLayerMockState.selectionFrameScreen,
+						handleItems: focusLayerMockState.handleItems,
+						activeHandle: focusLayerMockState.activeHandle,
+						disabled: suspendHover ?? false,
+						onLayerPointerDown: focusLayerPointerDownSpy,
+						onLayerPointerMove: focusLayerPointerMoveSpy,
+						onLayerPointerUp: focusLayerPointerUpSpy,
+						onLayerPointerLeave: focusLayerPointerLeaveSpy,
+					}
+				: null,
+			labelItems: [],
+		};
+	},
 }));
 
-vi.mock("./useFocusSceneSkiaInteractions", () => ({
-	useFocusSceneSkiaInteractions: () => ({
-		elementLayouts: [],
-		selectedIds: focusLayerMockState.selectedIds,
-		hoveredId: null,
-		draggingId: null,
-		selectionRectScreen: null,
-		snapGuidesScreen: { vertical: [], horizontal: [] },
-		selectionFrameScreen: focusLayerMockState.selectionFrameScreen,
-		handleItems: focusLayerMockState.handleItems,
-		activeHandle: focusLayerMockState.activeHandle,
-		labelItems: [],
-		onLayerPointerDown: focusLayerPointerDownSpy,
-		onLayerPointerMove: focusLayerPointerMoveSpy,
-		onLayerPointerUp: focusLayerPointerUpSpy,
-		onLayerPointerLeave: focusLayerPointerLeaveSpy,
-	}),
-}));
-
-vi.mock("./node-system/registry", () => ({
-	getCanvasNodeDefinition: () => ({
-		skiaRenderer: () => null,
-	}),
-}));
+vi.mock("./node-system/registry", async () => {
+	const { FocusSceneSkiaLayer } = await import(
+		"@/scene-editor/focus-editor/FocusSceneSkiaLayer"
+	);
+	const { SceneFocusEditorBridge } = await import(
+		"@/scene-editor/focus-editor/SceneFocusEditorBridge"
+	);
+	return {
+		getCanvasNodeDefinition: (type: string) => ({
+			skiaRenderer: () => null,
+			focusEditorLayer: type === "scene" ? FocusSceneSkiaLayer : undefined,
+			focusEditorBridge: type === "scene" ? SceneFocusEditorBridge : undefined,
+		}),
+	};
+});
 
 type AnyElement = React.ReactElement<Record<string, any>, any>;
 

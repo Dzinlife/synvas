@@ -1,7 +1,13 @@
 import type { SceneNode } from "core/studio/types";
+import type React from "react";
+import { SceneFocusEditorBridge } from "@/scene-editor/focus-editor/SceneFocusEditorBridge";
+import { FocusSceneSkiaLayer } from "@/scene-editor/focus-editor/FocusSceneSkiaLayer";
 import { wouldCreateSceneCompositionCycle } from "@/studio/scene/sceneComposition";
 import { registerCanvasNodeDefinition } from "../registryCore";
-import type { CanvasNodeDefinition } from "../types";
+import type {
+	CanvasNodeDefinition,
+	CanvasNodeFocusEditorBridgeProps,
+} from "../types";
 import { SceneNodeDrawer } from "./drawer";
 import { SceneNodeSkiaRenderer } from "./renderer";
 import { SceneNodeToolbar } from "./toolbar";
@@ -11,6 +17,11 @@ const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
 	title: "Scene",
 	create: () => ({ type: "scene" }),
 	skiaRenderer: SceneNodeSkiaRenderer,
+	focusEditorLayer: FocusSceneSkiaLayer as unknown as React.ComponentType<unknown>,
+	focusEditorBridge:
+		SceneFocusEditorBridge as unknown as React.FC<
+			CanvasNodeFocusEditorBridgeProps<SceneNode>
+		>,
 	toolbar: SceneNodeToolbar,
 	resolveResizeConstraints: ({ node, scene }) => {
 		const sourceWidth = scene?.timeline.canvas.width ?? node.width;

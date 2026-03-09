@@ -1,5 +1,5 @@
 import type { SceneNode } from "core/studio/types";
-import type { CameraState } from "./canvasWorkspaceUtils";
+import type { CameraState } from "@/studio/canvas/canvasWorkspaceUtils";
 
 export const FOCUS_SCENE_EPSILON = 1e-6;
 

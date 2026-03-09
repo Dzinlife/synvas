@@ -103,11 +103,34 @@ export interface CanvasExternalFileContext {
 
 export type CanvasExternalFileResult = CanvasNodeCreateInput | null;
 
+export interface CanvasNodeFocusEditorLayerState {
+	enabled: boolean;
+	layerProps: Record<string, unknown> | null;
+}
+
+export interface CanvasNodeFocusEditorBridgeProps<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	width: number;
+	height: number;
+	camera: {
+		x: number;
+		y: number;
+		zoom: number;
+	};
+	runtimeManager: StudioRuntimeManager;
+	focusedNode: TNode;
+	suspendHover?: boolean;
+	onLayerChange: (state: CanvasNodeFocusEditorLayerState) => void;
+}
+
 export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	type: TNode["type"];
 	title: string;
 	create: (input?: Record<string, unknown>) => CanvasNodeCreateInput;
 	skiaRenderer: React.FC<CanvasNodeSkiaRenderProps<TNode>>;
+	focusEditorLayer?: React.ComponentType<unknown>;
+	focusEditorBridge?: React.FC<CanvasNodeFocusEditorBridgeProps<TNode>>;
 	toolbar: React.FC<CanvasNodeToolbarProps<TNode>>;
 	focusable?: boolean;
 	drawer?: React.FC<CanvasNodeDrawerProps<TNode>>;

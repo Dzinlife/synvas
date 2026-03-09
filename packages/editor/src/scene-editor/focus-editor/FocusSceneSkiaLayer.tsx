@@ -1,11 +1,11 @@
 import { DashPathEffect, Group, Line, Rect } from "react-skia-lite";
-import type {
-	FocusSnapGuides,
-} from "./useFocusSceneSkiaInteractions";
 import {
 	FOCUS_SCENE_CORNER_HANDLE_SIZE_PX,
-	type FocusTransformHandle,
-	type FocusTransformHandleRenderItem,
+} from "./focusSceneHandleGeometry";
+import type { FocusSnapGuides } from "./useFocusSceneSkiaInteractions";
+import type {
+	FocusTransformHandle,
+	FocusTransformHandleRenderItem,
 } from "./focusSceneHandleGeometry";
 import type { FocusFrame, FocusRect } from "./focusSceneCoordinates";
 import type { SkiaPointerEvent } from "react-skia-lite";
@@ -15,7 +15,7 @@ interface FocusSceneSkiaLayerElement {
 	frameScreen: FocusFrame;
 }
 
-interface FocusSceneSkiaLayerProps {
+export interface FocusSceneSkiaLayerProps {
 	width: number;
 	height: number;
 	elements: FocusSceneSkiaLayerElement[];

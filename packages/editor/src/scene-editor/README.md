@@ -27,6 +27,10 @@ scene-editor/
 │   ├── TimelineContext.tsx       # 时间线状态与交互（Zustand）
 │   └── PreviewProvider.tsx       # 预览画布状态（缩放/平移/尺寸）
 │
+├── focus-editor/         # Focus Scene 编辑层与交互
+│   ├── FocusSceneSkiaLayer.tsx   # Focus Scene Skia 交互层
+│   └── useFocusSceneSkiaInteractions.ts # Focus Scene 选择/拖拽/变换
+│
 ├── drag/                 # 拖拽状态（跨组件共享）
 │   ├── dragStore.ts              # 全局拖拽状态与自动滚动
 │   ├── materialDnd.ts            # 素材拖拽行为封装
@@ -57,8 +61,7 @@ scene-editor/
 │   └── trackAssignment.ts        # 轨道分配/冲突检测
 │
 ├── TimelineEditor.tsx    # 时间线主视图
-├── PreviewEditor.tsx     # 预览画布主视图
-├── ViewportHost.tsx      # 预览/画布切换 + 常驻时间线容器
+├── ViewportHost.tsx      # 编辑器视口容器
 ├── index.tsx             # 组合入口
 ├── timeline.json         # 示例时间线数据（assetId 模型）
 └── ../studio/canvas/     # Canvas 工作区、节点导航与元素侧边栏
@@ -71,12 +74,6 @@ scene-editor/
 - 组合时间尺、工具栏、播放头、轨道元素。
 - 支持多选、拖拽、裁剪，并在拖拽时自动滚动。
 - 根据轨道分配与主轨波纹编辑结果重排时间线。
-
-### PreviewEditor.tsx
-
-- 使用 react-skia-lite 渲染时间点上的可见元素。
-- Konva 负责选择框、变换控件、辅助线渲染。
-- 支持缩放/平移、框选、多选与拖拽变换。
 
 ### CanvasWorkspace.tsx
 
