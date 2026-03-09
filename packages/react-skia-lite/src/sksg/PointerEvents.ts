@@ -14,6 +14,7 @@ import type {
 } from "../skia/types";
 import { processTransform3d, toMatrix3 } from "../skia/types";
 import type { Node } from "./Node";
+import { setNodeActiveState, setNodeHoverState } from "./InteractiveTransitions";
 
 type Matrix3x3 = [
 	number,
@@ -65,7 +66,33 @@ const HANDLER_BY_TYPE: Record<SkiaPointerEventType, PointerEventHandlerKey> = {
 const IDENTITY_MATRIX: Matrix3x3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
 const isFiniteNumber = (value: unknown): value is number => {
-	return typeof value === "number" && Number.isFinite(value);
+	const candidate =
+		typeof value === "object" &&
+		value !== null &&
+		"value" in value &&
+		Number.isFinite((value as { value: unknown }).value)
+			? (value as { value: unknown }).value
+			: value;
+	return typeof candidate === "number" && Number.isFinite(candidate);
+};
+
+const resolveNumericValue = (value: unknown): number | null => {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"value" in value &&
+		Number.isFinite((value as { value: unknown }).value)
+	) {
+		return Number((value as { value: unknown }).value);
+	}
+	if (!Number.isFinite(value)) return null;
+	return Number(value);
+};
+
+const resolveSharedValue = (value: unknown): unknown => {
+	if (!value || typeof value !== "object") return value;
+	if (!("value" in value)) return value;
+	return (value as { value: unknown }).value;
 };
 
 const getZIndex = (node: Node): number => {
@@ -208,9 +235,50 @@ const resolveLocalMatrix = (props: Partial<GroupProps>): Matrix3x3 => {
 	let base: Matrix3x3 = IDENTITY_MATRIX;
 	if (props.matrix) {
 		base = toMatrix3x3(props.matrix) ?? IDENTITY_MATRIX;
-	} else if (props.transform) {
+	} else {
+		const shorthandTransform: Transforms3d = [];
+		const translateX = resolveNumericValue(props.translateX);
+		if (translateX !== null && translateX !== 0) {
+			shorthandTransform.push({ translateX });
+		}
+		const translateY = resolveNumericValue(props.translateY);
+		if (translateY !== null && translateY !== 0) {
+			shorthandTransform.push({ translateY });
+		}
+		const scale = resolveNumericValue(props.scale);
+		if (scale !== null && scale !== 1) {
+			shorthandTransform.push({ scale });
+		}
+		const scaleX = resolveNumericValue(props.scaleX);
+		if (scaleX !== null && scaleX !== 1) {
+			shorthandTransform.push({ scaleX });
+		}
+		const scaleY = resolveNumericValue(props.scaleY);
+		if (scaleY !== null && scaleY !== 1) {
+			shorthandTransform.push({ scaleY });
+		}
+		const rotate = resolveNumericValue(props.rotate);
+		if (rotate !== null && rotate !== 0) {
+			shorthandTransform.push({ rotate });
+		}
+		const rotateZ = resolveNumericValue(props.rotateZ);
+		if (rotateZ !== null && rotateZ !== 0) {
+			shorthandTransform.push({ rotateZ });
+		}
+		const rawTransform = resolveSharedValue(props.transform);
+		const transform =
+			Array.isArray(rawTransform) && rawTransform.length > 0
+				? [...shorthandTransform, ...(rawTransform as Transforms3d)]
+				: shorthandTransform;
+		if (transform.length === 0) {
+			if (!hasOrigin) return base;
+			return multiplyMatrix(
+				multiplyMatrix(translateMatrix(originX, originY), base),
+				translateMatrix(-originX, -originY),
+			);
+		}
 		const transformed = toMatrix3(
-			processTransform3d(props.transform as Transforms3d),
+			processTransform3d(transform),
 		);
 		base = [
 			transformed[0],
@@ -437,12 +505,22 @@ const resolveCursorFromPath = (path: Node[] | null): string | null => {
 export class SkiaPointerEventManager {
 	private activeTargetPathByPointerId = new Map<number, Node[]>();
 	private hoverPathByPointerId = new Map<number, Node[]>();
+	private activeNodeByPointerId = new Map<number, Node>();
 
 	constructor(private getRootNodes: () => Node[]) {}
 
 	reset() {
+		for (const path of this.hoverPathByPointerId.values()) {
+			for (const node of path) {
+				setNodeHoverState(node, false);
+			}
+		}
+		for (const node of this.activeNodeByPointerId.values()) {
+			setNodeActiveState(node, false);
+		}
 		this.activeTargetPathByPointerId.clear();
 		this.hoverPathByPointerId.clear();
+		this.activeNodeByPointerId.clear();
 	}
 
 	dispatch(
@@ -456,6 +534,7 @@ export class SkiaPointerEventManager {
 
 		if (type === "pointerleave") {
 			this.updateHover(pointerId, null, event, point);
+			this.releaseActiveNode(pointerId);
 			this.applyHostCursor(hostElement, null);
 			return;
 		}
@@ -474,6 +553,19 @@ export class SkiaPointerEventManager {
 		this.applyHostCursor(hostElement, resolveCursorFromPath(cursorPath));
 
 		const dispatchPath = this.resolveDispatchPath(type, pointerId, hitPath);
+		if (type === "pointerdown") {
+			const activeTarget = dispatchPath?.[dispatchPath.length - 1] ?? null;
+			if (activeTarget) {
+				this.releaseActiveNode(pointerId);
+				this.activeNodeByPointerId.set(pointerId, activeTarget);
+				setNodeActiveState(activeTarget, true);
+			} else {
+				this.releaseActiveNode(pointerId);
+			}
+		}
+		if (type === "pointerup" || type === "pointercancel") {
+			this.releaseActiveNode(pointerId);
+		}
 		if (!dispatchPath || dispatchPath.length === 0) {
 			return;
 		}
@@ -571,9 +663,11 @@ export class SkiaPointerEventManager {
 		);
 
 		for (let i = previousPath.length - 1; i >= sharedPrefixLength; i--) {
+			setNodeHoverState(previousPath[i], false);
 			this.emitOnNode(previousPath[i], "pointerleave", event, point);
 		}
 		for (let i = sharedPrefixLength; i < safeNextPath.length; i++) {
+			setNodeHoverState(safeNextPath[i], true);
 			this.emitOnNode(safeNextPath[i], "pointerenter", event, point);
 		}
 
@@ -582,6 +676,13 @@ export class SkiaPointerEventManager {
 		} else {
 			this.hoverPathByPointerId.delete(pointerId);
 		}
+	}
+
+	private releaseActiveNode(pointerId: number) {
+		const activeNode = this.activeNodeByPointerId.get(pointerId);
+		if (!activeNode) return;
+		setNodeActiveState(activeNode, false);
+		this.activeNodeByPointerId.delete(pointerId);
 	}
 
 	private emitBubbling(

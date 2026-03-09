@@ -4,6 +4,7 @@ import { DefaultEventPriority } from "react-reconciler/constants";
 
 import type { NodeType } from "../dom/types";
 import { shallowEq } from "../renderer/typeddash";
+import { prepareInteractiveTransitionProps } from "./InteractiveTransitions";
 
 import type { Node } from "./Node";
 import type { Container } from "./StaticContainer";
@@ -105,18 +106,24 @@ export const sksgHostConfig: SkiaHostConfig = {
 	createInstance(
 		type: NodeType,
 		propsWithChildren: Props & { children?: unknown },
-		_container: Container,
+		container: Container,
 		_hostContext: HostContext,
 		_internalInstanceHandle: unknown,
 	) {
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const { children, ...props } = propsWithChildren as any;
 		debug("createInstance", type);
-		const instance = {
+		const instance: Node = {
 			type,
 			props,
 			children: [],
 		};
+		instance.props = prepareInteractiveTransitionProps({
+			node: instance,
+			previousNode: null,
+			props: instance.props as Record<string, unknown>,
+			container,
+		});
 		return instance;
 	},
 
@@ -196,11 +203,17 @@ export const sksgHostConfig: SkiaHostConfig = {
 		_recyclableInstance: Instance | null,
 	) {
 		debug("cloneInstance");
-		return {
+		const nextInstance: Node = {
 			type: instance.type,
 			props: { ...newProps },
 			children: keepChildren ? [...instance.children] : [],
 		};
+		nextInstance.props = prepareInteractiveTransitionProps({
+			node: nextInstance,
+			previousNode: instance,
+			props: nextInstance.props as Record<string, unknown>,
+		});
+		return nextInstance;
 	},
 
 	createContainerChildSet(): ChildSet {

@@ -32,19 +32,46 @@ const computeClip = (
 export const saveCTM = (ctx: DrawingContext, props: CTMProps) => {
   "worklet";
   const { canvas, Skia } = ctx;
-  const {
-    clip: rawClip,
-    invertClip,
-    matrix,
-    transform,
-    origin,
-    layer,
-  } = props as CTMProps;
-  const hasTransform = matrix !== undefined || transform !== undefined;
-  const clip = computeClip(Skia, rawClip);
-  const hasClip = clip !== undefined;
-  const op = invertClip ? ClipOp.Difference : ClipOp.Intersect;
-  const m3 = processTransformProps2(Skia, { matrix, transform, origin });
+	const {
+		clip: rawClip,
+		invertClip,
+		matrix,
+		transform,
+		origin,
+		translateX,
+		translateY,
+		scale,
+		scaleX,
+		scaleY,
+		rotate,
+		rotateZ,
+		layer,
+	} = props as CTMProps;
+	const hasTransform =
+		matrix !== undefined ||
+		transform !== undefined ||
+		translateX !== undefined ||
+		translateY !== undefined ||
+		scale !== undefined ||
+		scaleX !== undefined ||
+		scaleY !== undefined ||
+		rotate !== undefined ||
+		rotateZ !== undefined;
+	const clip = computeClip(Skia, rawClip);
+	const hasClip = clip !== undefined;
+	const op = invertClip ? ClipOp.Difference : ClipOp.Intersect;
+	const m3 = processTransformProps2(Skia, {
+		matrix,
+		transform,
+		origin,
+		translateX,
+		translateY,
+		scale,
+		scaleX,
+		scaleY,
+		rotate,
+		rotateZ,
+	});
   const shouldSave = hasTransform || hasClip || !!layer;
   if (shouldSave) {
     if (layer) {

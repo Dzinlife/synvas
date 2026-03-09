@@ -78,16 +78,23 @@ export const processPaint = ({
 };
 
 const processCTM = ({
-  clip,
-  invertClip,
-  transform,
-  origin,
-  matrix,
-  layer,
+	clip,
+	invertClip,
+	transform,
+	origin,
+	matrix,
+	translateX,
+	translateY,
+	scale,
+	scaleX,
+	scaleY,
+	rotate,
+	rotateZ,
+	layer,
 }: CTMProps) => {
-  const ctm: CTMProps = {};
-  if (clip) {
-    ctm.clip = clip;
+	const ctm: CTMProps = {};
+	if (clip) {
+		ctm.clip = clip;
   }
   if (invertClip) {
     ctm.invertClip = invertClip;
@@ -98,22 +105,50 @@ const processCTM = ({
   if (origin) {
     ctm.origin = origin;
   }
-  if (matrix) {
-    ctm.matrix = matrix;
-  }
-  if (layer) {
-    ctm.layer = layer;
-  }
-  if (
-    clip !== undefined ||
-    invertClip !== undefined ||
-    transform !== undefined ||
-    origin !== undefined ||
-    matrix !== undefined ||
-    layer !== undefined
-  ) {
-    return ctm;
-  }
+	if (matrix) {
+		ctm.matrix = matrix;
+	}
+	if (translateX !== undefined) {
+		ctm.translateX = translateX;
+	}
+	if (translateY !== undefined) {
+		ctm.translateY = translateY;
+	}
+	if (scale !== undefined) {
+		ctm.scale = scale;
+	}
+	if (scaleX !== undefined) {
+		ctm.scaleX = scaleX;
+	}
+	if (scaleY !== undefined) {
+		ctm.scaleY = scaleY;
+	}
+	if (rotate !== undefined) {
+		ctm.rotate = rotate;
+	}
+	if (rotateZ !== undefined) {
+		ctm.rotateZ = rotateZ;
+	}
+	if (layer) {
+		ctm.layer = layer;
+	}
+	if (
+		clip !== undefined ||
+		invertClip !== undefined ||
+		transform !== undefined ||
+		origin !== undefined ||
+		matrix !== undefined ||
+		translateX !== undefined ||
+		translateY !== undefined ||
+		scale !== undefined ||
+		scaleX !== undefined ||
+		scaleY !== undefined ||
+		rotate !== undefined ||
+		rotateZ !== undefined ||
+		layer !== undefined
+	) {
+		return ctm;
+	}
   return null;
 };
 

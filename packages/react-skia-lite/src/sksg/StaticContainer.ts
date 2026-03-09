@@ -1,5 +1,9 @@
 import type { SkCanvas, Skia, SkPaint } from "../skia/types";
 import { SkiaViewApi } from "../views/api";
+import {
+	handleContainerRedraw,
+	handleContainerUnmount,
+} from "./InteractiveTransitions";
 import type { Node } from "./Node";
 import { createDrawingContext } from "./Recorder/DrawingContext";
 import { replay } from "./Recorder/Player";
@@ -30,6 +34,7 @@ export abstract class Container {
 
 	unmount() {
 		this.unmounted = true;
+		handleContainerUnmount(this);
 		for (const paint of this.paintPool) {
 			try {
 				paint.dispose();
@@ -51,6 +56,10 @@ export abstract class Container {
 	}
 
 	abstract redraw(): void;
+
+	isUnmounted() {
+		return this.unmounted;
+	}
 }
 
 export class StaticContainer extends Container {
@@ -62,6 +71,7 @@ export class StaticContainer extends Container {
 	}
 
 	redraw() {
+		handleContainerRedraw(this, this.root);
 		const recorder = new Recorder();
 		visit(recorder, this.root);
 		this.recording = recorder.getRecording();
