@@ -1,5 +1,9 @@
 import type { CanvasNode } from "core/studio/types";
 import { Group, Path, Rect, type SkiaPointerEvent } from "react-skia-lite";
+import type {
+	CanvasNodeResizeAnchor,
+	CanvasNodeResizeAnchorState,
+} from "./canvasResizeAnchor";
 import {
 	CANVAS_RESIZE_ANCHOR_CORNER_RADIUS_PX,
 	CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
@@ -7,14 +11,20 @@ import {
 	CANVAS_RESIZE_ANCHOR_OFFSET_PX,
 	CANVAS_RESIZE_ANCHOR_STROKE_PX,
 } from "./canvasResizeAnchor";
-import type {
-	CanvasNodeResizeAnchor,
-	CanvasNodeResizeAnchorState,
-} from "./canvasResizeAnchor";
 import {
 	resolveNodeInteractionBorderStyle,
 	resolveNodeInteractionStrokeWidth,
 } from "./NodeInteractionWrapper";
+
+const RESIZE_ANCHOR_ENTER_OFFSET_PX = 8;
+const RESIZE_ANCHOR_ENTER_TRANSITION = {
+	duration: 180,
+	easing: "easeOutCubic",
+} as const;
+const NODE_OUTLINE_TRANSITION = {
+	duration: 300,
+	easing: "easeOutCubic",
+} as const;
 
 const buildTopLeftAnchorPath = (
 	offsetWorld: number,
@@ -81,7 +91,6 @@ export const CanvasNodeOverlayLayer = ({
 					const isActive = node.id === activeNodeId;
 					const isDimmed = Boolean(focusedNodeId) && !isFocused;
 					const isHovered = node.id === hoveredNodeId;
-					if (!isActive && !isHovered) return null;
 					const borderStyle = resolveNodeInteractionBorderStyle({
 						isActive,
 						isHovered,
@@ -90,6 +99,7 @@ export const CanvasNodeOverlayLayer = ({
 						borderStyle.baseStrokeWidthPx,
 						cameraZoom,
 					);
+					const outlineOpacity = isActive ? 1 : isHovered ? 0.85 : 0;
 
 					return (
 						<Group
@@ -106,6 +116,11 @@ export const CanvasNodeOverlayLayer = ({
 								transform={[{ translateX: node.x }, { translateY: node.y }]}
 							>
 								<Rect
+									transition={NODE_OUTLINE_TRANSITION}
+									opacity={0}
+									animate={{
+										opacity: outlineOpacity,
+									}}
 									x={0}
 									y={0}
 									width={Math.max(1, node.width)}
@@ -133,6 +148,7 @@ export const CanvasNodeOverlayLayer = ({
 					const hitSizeWorld = CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / safeZoom;
 					const cornerRadiusWorld =
 						CANVAS_RESIZE_ANCHOR_CORNER_RADIUS_PX / safeZoom;
+					const enterOffsetWorld = RESIZE_ANCHOR_ENTER_OFFSET_PX / safeZoom;
 					const topLeftCornerX = -offsetWorld;
 					const topLeftCornerY = -offsetWorld;
 					const bottomRightCornerX = node.width + offsetWorld;
@@ -149,6 +165,16 @@ export const CanvasNodeOverlayLayer = ({
 					const isBottomRightPressed =
 						pressedResizeAnchor?.nodeId === node.id &&
 						pressedResizeAnchor.anchor === "bottom-right";
+					const topLeftOpacity = isActive
+						? isTopLeftHovered || isTopLeftPressed
+							? 1
+							: 0.3
+						: 0;
+					const bottomRightOpacity = isActive
+						? isBottomRightHovered || isBottomRightPressed
+							? 1
+							: 0.3
+						: 0;
 
 					return (
 						<Group
@@ -157,23 +183,44 @@ export const CanvasNodeOverlayLayer = ({
 							opacity={isDimmed ? 0.35 : 1}
 						>
 							<Group
+								transition={RESIZE_ANCHOR_ENTER_TRANSITION}
+								translateX={-enterOffsetWorld}
+								translateY={-enterOffsetWorld}
+								animate={{
+									translateX: 0,
+									translateY: 0,
+									opacity: topLeftOpacity,
+								}}
 								hitRect={{
 									x: topLeftCornerX - hitSizeWorld / 2,
 									y: topLeftCornerY - hitSizeWorld / 2,
 									width: hitSizeWorld,
 									height: hitSizeWorld,
 								}}
-								opacity={isTopLeftHovered || isTopLeftPressed ? 1 : 0.3}
-								cursor="nwse-resize"
-								onPointerEnter={() => {
-									onResizeAnchorPointerEnter(node.id, "top-left");
-								}}
-								onPointerLeave={() => {
-									onResizeAnchorPointerLeave(node.id, "top-left");
-								}}
-								onPointerDown={(event) => {
-									onTopLeftResizePointerDown?.(event);
-								}}
+								opacity={0}
+								pointerEvents={isActive ? "auto" : "none"}
+								cursor={isActive ? "nwse-resize" : undefined}
+								onPointerEnter={
+									isActive
+										? () => {
+												onResizeAnchorPointerEnter(node.id, "top-left");
+											}
+										: undefined
+								}
+								onPointerLeave={
+									isActive
+										? () => {
+												onResizeAnchorPointerLeave(node.id, "top-left");
+											}
+										: undefined
+								}
+								onPointerDown={
+									isActive
+										? (event) => {
+												onTopLeftResizePointerDown?.(event);
+											}
+										: undefined
+								}
 							>
 								<Path
 									path={buildTopLeftAnchorPath(
@@ -189,23 +236,44 @@ export const CanvasNodeOverlayLayer = ({
 								/>
 							</Group>
 							<Group
+								transition={RESIZE_ANCHOR_ENTER_TRANSITION}
+								translateX={enterOffsetWorld}
+								translateY={enterOffsetWorld}
+								animate={{
+									translateX: 0,
+									translateY: 0,
+									opacity: bottomRightOpacity,
+								}}
 								hitRect={{
 									x: bottomRightCornerX - hitSizeWorld / 2,
 									y: bottomRightCornerY - hitSizeWorld / 2,
 									width: hitSizeWorld,
 									height: hitSizeWorld,
 								}}
-								opacity={isBottomRightHovered || isBottomRightPressed ? 1 : 0.3}
-								cursor="nwse-resize"
-								onPointerEnter={() => {
-									onResizeAnchorPointerEnter(node.id, "bottom-right");
-								}}
-								onPointerLeave={() => {
-									onResizeAnchorPointerLeave(node.id, "bottom-right");
-								}}
-								onPointerDown={(event) => {
-									onBottomRightResizePointerDown?.(event);
-								}}
+								opacity={0}
+								pointerEvents={isActive ? "auto" : "none"}
+								cursor={isActive ? "nwse-resize" : undefined}
+								onPointerEnter={
+									isActive
+										? () => {
+												onResizeAnchorPointerEnter(node.id, "bottom-right");
+											}
+										: undefined
+								}
+								onPointerLeave={
+									isActive
+										? () => {
+												onResizeAnchorPointerLeave(node.id, "bottom-right");
+											}
+										: undefined
+								}
+								onPointerDown={
+									isActive
+										? (event) => {
+												onBottomRightResizePointerDown?.(event);
+											}
+										: undefined
+								}
 							>
 								<Path
 									path={buildBottomRightAnchorPath(
