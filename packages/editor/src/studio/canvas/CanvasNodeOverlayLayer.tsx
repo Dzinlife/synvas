@@ -5,7 +5,6 @@ import type {
 	CanvasNodeResizeAnchorState,
 } from "./canvasResizeAnchor";
 import {
-	CANVAS_RESIZE_ANCHOR_CORNER_RADIUS_PX,
 	CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
 	CANVAS_RESIZE_ANCHOR_LEG_PX,
 	CANVAS_RESIZE_ANCHOR_OFFSET_PX,
@@ -18,23 +17,31 @@ import {
 
 const RESIZE_ANCHOR_ENTER_OFFSET_PX = 8;
 const RESIZE_ANCHOR_ENTER_TRANSITION = {
-	duration: 180,
+	duration: 200,
 	easing: "easeOutCubic",
 } as const;
 const NODE_OUTLINE_TRANSITION = {
-	duration: 300,
+	duration: 200,
 	easing: "easeOutCubic",
 } as const;
 
 const buildTopLeftAnchorPath = (
 	offsetWorld: number,
 	legWorld: number,
-	cornerRadiusWorld: number,
 ): string => {
 	const cornerX = -offsetWorld;
 	const cornerY = -offsetWorld;
-	const radius = Math.max(0, Math.min(cornerRadiusWorld, legWorld / 2));
-	return `M ${cornerX + legWorld} ${cornerY} L ${cornerX + radius} ${cornerY} Q ${cornerX} ${cornerY} ${cornerX} ${cornerY + radius} L ${cornerX} ${cornerY + legWorld}`;
+	return `M ${cornerX + legWorld} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY + legWorld}`;
+};
+
+const buildTopRightAnchorPath = (
+	width: number,
+	offsetWorld: number,
+	legWorld: number,
+): string => {
+	const cornerX = width + offsetWorld;
+	const cornerY = -offsetWorld;
+	return `M ${cornerX - legWorld} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY + legWorld}`;
 };
 
 const buildBottomRightAnchorPath = (
@@ -42,12 +49,20 @@ const buildBottomRightAnchorPath = (
 	height: number,
 	offsetWorld: number,
 	legWorld: number,
-	cornerRadiusWorld: number,
 ): string => {
 	const cornerX = width + offsetWorld;
 	const cornerY = height + offsetWorld;
-	const radius = Math.max(0, Math.min(cornerRadiusWorld, legWorld / 2));
-	return `M ${cornerX - legWorld} ${cornerY} L ${cornerX - radius} ${cornerY} Q ${cornerX} ${cornerY} ${cornerX} ${cornerY - radius} L ${cornerX} ${cornerY - legWorld}`;
+	return `M ${cornerX - legWorld} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY - legWorld}`;
+};
+
+const buildBottomLeftAnchorPath = (
+	height: number,
+	offsetWorld: number,
+	legWorld: number,
+): string => {
+	const cornerX = -offsetWorld;
+	const cornerY = height + offsetWorld;
+	return `M ${cornerX + legWorld} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY - legWorld}`;
 };
 
 interface CanvasNodeOverlayLayerProps {
@@ -67,7 +82,9 @@ interface CanvasNodeOverlayLayerProps {
 		anchor: CanvasNodeResizeAnchor,
 	) => void;
 	onTopLeftResizePointerDown?: (event: SkiaPointerEvent) => void;
+	onTopRightResizePointerDown?: (event: SkiaPointerEvent) => void;
 	onBottomRightResizePointerDown?: (event: SkiaPointerEvent) => void;
+	onBottomLeftResizePointerDown?: (event: SkiaPointerEvent) => void;
 }
 
 export const CanvasNodeOverlayLayer = ({
@@ -81,7 +98,9 @@ export const CanvasNodeOverlayLayer = ({
 	onResizeAnchorPointerEnter,
 	onResizeAnchorPointerLeave,
 	onTopLeftResizePointerDown,
+	onTopRightResizePointerDown,
 	onBottomRightResizePointerDown,
+	onBottomLeftResizePointerDown,
 }: CanvasNodeOverlayLayerProps) => {
 	return (
 		<>
@@ -105,12 +124,6 @@ export const CanvasNodeOverlayLayer = ({
 					return (
 						<Group
 							key={`canvas-node-outline-overlay-${node.id}`}
-							clip={{
-								x: node.x,
-								y: node.y,
-								width: node.width,
-								height: node.height,
-							}}
 							opacity={isDimmed ? 0.35 : 1}
 						>
 							<Group
@@ -153,32 +166,56 @@ export const CanvasNodeOverlayLayer = ({
 					const legWorld = CANVAS_RESIZE_ANCHOR_LEG_PX / safeZoom;
 					const strokeWorld = CANVAS_RESIZE_ANCHOR_STROKE_PX / safeZoom;
 					const hitSizeWorld = CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / safeZoom;
-					const cornerRadiusWorld =
-						CANVAS_RESIZE_ANCHOR_CORNER_RADIUS_PX / safeZoom;
 					const enterOffsetWorld = RESIZE_ANCHOR_ENTER_OFFSET_PX / safeZoom;
 					const topLeftCornerX = -offsetWorld;
 					const topLeftCornerY = -offsetWorld;
+					const topRightCornerX = node.width + offsetWorld;
+					const topRightCornerY = -offsetWorld;
 					const bottomRightCornerX = node.width + offsetWorld;
 					const bottomRightCornerY = node.height + offsetWorld;
+					const bottomLeftCornerX = -offsetWorld;
+					const bottomLeftCornerY = node.height + offsetWorld;
 					const isTopLeftHovered =
 						hoveredResizeAnchor?.nodeId === node.id &&
 						hoveredResizeAnchor.anchor === "top-left";
 					const isTopLeftPressed =
 						pressedResizeAnchor?.nodeId === node.id &&
 						pressedResizeAnchor.anchor === "top-left";
+					const isTopRightHovered =
+						hoveredResizeAnchor?.nodeId === node.id &&
+						hoveredResizeAnchor.anchor === "top-right";
+					const isTopRightPressed =
+						pressedResizeAnchor?.nodeId === node.id &&
+						pressedResizeAnchor.anchor === "top-right";
 					const isBottomRightHovered =
 						hoveredResizeAnchor?.nodeId === node.id &&
 						hoveredResizeAnchor.anchor === "bottom-right";
 					const isBottomRightPressed =
 						pressedResizeAnchor?.nodeId === node.id &&
 						pressedResizeAnchor.anchor === "bottom-right";
+					const isBottomLeftHovered =
+						hoveredResizeAnchor?.nodeId === node.id &&
+						hoveredResizeAnchor.anchor === "bottom-left";
+					const isBottomLeftPressed =
+						pressedResizeAnchor?.nodeId === node.id &&
+						pressedResizeAnchor.anchor === "bottom-left";
 					const topLeftOpacity = isActive
 						? isTopLeftHovered || isTopLeftPressed
 							? 1
 							: 0.3
 						: 0;
+					const topRightOpacity = isActive
+						? isTopRightHovered || isTopRightPressed
+							? 1
+							: 0.3
+						: 0;
 					const bottomRightOpacity = isActive
 						? isBottomRightHovered || isBottomRightPressed
+							? 1
+							: 0.3
+						: 0;
+					const bottomLeftOpacity = isActive
+						? isBottomLeftHovered || isBottomLeftPressed
 							? 1
 							: 0.3
 						: 0;
@@ -230,15 +267,62 @@ export const CanvasNodeOverlayLayer = ({
 								}
 							>
 								<Path
-									path={buildTopLeftAnchorPath(
-										offsetWorld,
-										legWorld,
-										cornerRadiusWorld,
-									)}
+									path={buildTopLeftAnchorPath(offsetWorld, legWorld)}
 									style="stroke"
 									strokeWidth={strokeWorld}
 									// strokeJoin="round"
 									// strokeCap="round"
+									color="rgba(255,255,255,1)"
+								/>
+							</Group>
+							<Group
+								transition={RESIZE_ANCHOR_ENTER_TRANSITION}
+								translateX={enterOffsetWorld}
+								translateY={-enterOffsetWorld}
+								animate={{
+									translateX: 0,
+									translateY: 0,
+									opacity: topRightOpacity,
+								}}
+								hitRect={{
+									x: topRightCornerX - hitSizeWorld / 2,
+									y: topRightCornerY - hitSizeWorld / 2,
+									width: hitSizeWorld,
+									height: hitSizeWorld,
+								}}
+								opacity={0}
+								pointerEvents={isActive ? "auto" : "none"}
+								cursor={isActive ? "nesw-resize" : undefined}
+								onPointerEnter={
+									isActive
+										? () => {
+												onResizeAnchorPointerEnter(node.id, "top-right");
+											}
+										: undefined
+								}
+								onPointerLeave={
+									isActive
+										? () => {
+												onResizeAnchorPointerLeave(node.id, "top-right");
+											}
+										: undefined
+								}
+								onPointerDown={
+									isActive
+										? (event) => {
+												onTopRightResizePointerDown?.(event);
+											}
+										: undefined
+								}
+							>
+								<Path
+									path={buildTopRightAnchorPath(
+										node.width,
+										offsetWorld,
+										legWorld,
+									)}
+									style="stroke"
+									strokeWidth={strokeWorld}
 									color="rgba(255,255,255,1)"
 								/>
 							</Group>
@@ -288,12 +372,60 @@ export const CanvasNodeOverlayLayer = ({
 										node.height,
 										offsetWorld,
 										legWorld,
-										cornerRadiusWorld,
 									)}
 									style="stroke"
 									strokeWidth={strokeWorld}
-									// strokeJoin="round"
-									// strokeCap="round"
+									color="rgba(255,255,255,1)"
+								/>
+							</Group>
+							<Group
+								transition={RESIZE_ANCHOR_ENTER_TRANSITION}
+								translateX={-enterOffsetWorld}
+								translateY={enterOffsetWorld}
+								animate={{
+									translateX: 0,
+									translateY: 0,
+									opacity: bottomLeftOpacity,
+								}}
+								hitRect={{
+									x: bottomLeftCornerX - hitSizeWorld / 2,
+									y: bottomLeftCornerY - hitSizeWorld / 2,
+									width: hitSizeWorld,
+									height: hitSizeWorld,
+								}}
+								opacity={0}
+								pointerEvents={isActive ? "auto" : "none"}
+								cursor={isActive ? "nesw-resize" : undefined}
+								onPointerEnter={
+									isActive
+										? () => {
+												onResizeAnchorPointerEnter(node.id, "bottom-left");
+											}
+										: undefined
+								}
+								onPointerLeave={
+									isActive
+										? () => {
+												onResizeAnchorPointerLeave(node.id, "bottom-left");
+											}
+										: undefined
+								}
+								onPointerDown={
+									isActive
+										? (event) => {
+												onBottomLeftResizePointerDown?.(event);
+											}
+										: undefined
+								}
+							>
+								<Path
+									path={buildBottomLeftAnchorPath(
+										node.height,
+										offsetWorld,
+										legWorld,
+									)}
+									style="stroke"
+									strokeWidth={strokeWorld}
 									color="rgba(255,255,255,1)"
 								/>
 							</Group>

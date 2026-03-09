@@ -423,6 +423,18 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			triggerAllEvents: true,
 		},
 	);
+	const bindTopRightResizeDrag = useDrag(
+		(state) => {
+			handleResizeDragGesture("top-right", state);
+		},
+		{
+			pointer: { capture: false },
+			keys: false,
+			filterTaps: false,
+			threshold: 0,
+			triggerAllEvents: true,
+		},
+	);
 	const bindBottomRightResizeDrag = useDrag(
 		(state) => {
 			handleResizeDragGesture("bottom-right", state);
@@ -435,10 +447,28 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			triggerAllEvents: true,
 		},
 	);
+	const bindBottomLeftResizeDrag = useDrag(
+		(state) => {
+			handleResizeDragGesture("bottom-left", state);
+		},
+		{
+			pointer: { capture: false },
+			keys: false,
+			filterTaps: false,
+			threshold: 0,
+			triggerAllEvents: true,
+		},
+	);
 	const topLeftResizeHandlers = bindTopLeftResizeDrag() as {
 		onPointerDown?: (event: SkiaPointerEvent) => void;
 	};
+	const topRightResizeHandlers = bindTopRightResizeDrag() as {
+		onPointerDown?: (event: SkiaPointerEvent) => void;
+	};
 	const bottomRightResizeHandlers = bindBottomRightResizeDrag() as {
+		onPointerDown?: (event: SkiaPointerEvent) => void;
+	};
+	const bottomLeftResizeHandlers = bindBottomLeftResizeDrag() as {
 		onPointerDown?: (event: SkiaPointerEvent) => void;
 	};
 
@@ -525,8 +555,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 								onResizeAnchorPointerEnter={handleResizeAnchorPointerEnter}
 								onResizeAnchorPointerLeave={handleResizeAnchorPointerLeave}
 								onTopLeftResizePointerDown={topLeftResizeHandlers.onPointerDown}
+								onTopRightResizePointerDown={
+									topRightResizeHandlers.onPointerDown
+								}
 								onBottomRightResizePointerDown={
 									bottomRightResizeHandlers.onPointerDown
+								}
+								onBottomLeftResizePointerDown={
+									bottomLeftResizeHandlers.onPointerDown
 								}
 							/>
 						)}
@@ -568,6 +604,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		handleResizeAnchorPointerEnter,
 		handleResizeAnchorPointerLeave,
 		bottomRightResizeHandlers,
+		bottomLeftResizeHandlers,
 		focusedNodeId,
 		hoveredNodeId,
 		hoveredResizeAnchor,
@@ -593,6 +630,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			scenes,
 			suspendHover,
 			topLeftResizeHandlers,
+			topRightResizeHandlers,
 			width,
 			height,
 	]);

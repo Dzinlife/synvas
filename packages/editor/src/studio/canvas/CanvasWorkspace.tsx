@@ -854,8 +854,14 @@ const CanvasWorkspace = () => {
 				startNodeY: node.y,
 				startNodeWidth: node.width,
 				startNodeHeight: node.height,
-				fixedCornerX: anchor === "bottom-right" ? node.x : node.x + node.width,
-				fixedCornerY: anchor === "bottom-right" ? node.y : node.y + node.height,
+				fixedCornerX:
+					anchor === "top-right" || anchor === "bottom-right"
+						? node.x
+						: node.x + node.width,
+				fixedCornerY:
+					anchor === "bottom-left" || anchor === "bottom-right"
+						? node.y
+						: node.y + node.height,
 				before: pickLayout(node),
 				moved: false,
 				constraints: resolveNodeResizeConstraints(node),
@@ -885,13 +891,16 @@ const CanvasWorkspace = () => {
 			const deltaX = event.movementX / safeZoom;
 			const deltaY = event.movementY / safeZoom;
 			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
+			const isRightAnchor = anchor === "top-right" || anchor === "bottom-right";
+			const isBottomAnchor =
+				anchor === "bottom-left" || anchor === "bottom-right";
 
 			const draftWidth =
-				anchor === "bottom-right"
+				isRightAnchor
 					? resizeSession.startNodeWidth + deltaX
 					: resizeSession.startNodeWidth - deltaX;
 			const draftHeight =
-				anchor === "bottom-right"
+				isBottomAnchor
 					? resizeSession.startNodeHeight + deltaY
 					: resizeSession.startNodeHeight - deltaY;
 			const globalMinSize = 32 / safeZoom;
@@ -947,11 +956,11 @@ const CanvasWorkspace = () => {
 			}
 
 			const nextX =
-				anchor === "bottom-right"
+				isRightAnchor
 					? resizeSession.fixedCornerX
 					: resizeSession.fixedCornerX - nextWidth;
 			const nextY =
-				anchor === "bottom-right"
+				isBottomAnchor
 					? resizeSession.fixedCornerY
 					: resizeSession.fixedCornerY - nextHeight;
 			const didLayoutChange =

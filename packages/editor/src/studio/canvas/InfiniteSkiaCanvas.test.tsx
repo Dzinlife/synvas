@@ -293,7 +293,7 @@ describe("InfiniteSkiaCanvas", () => {
 		focusLayerMockState.selectionFrameScreen = null;
 	});
 
-	it("active 节点渲染两个 resize anchor", async () => {
+	it("active 节点渲染四个 resize anchor", async () => {
 		render(
 			<InfiniteSkiaCanvas
 				width={800}
@@ -313,10 +313,10 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const tree = getLatestRenderTree();
 		const anchorGroups = collectAnchorGroups(tree);
-		expect(anchorGroups).toHaveLength(2);
-		expect(anchorGroups.every((group) => group.props.cursor === "nwse-resize")).toBe(
-			true,
-		);
+		expect(anchorGroups).toHaveLength(4);
+		const cursors = anchorGroups.map((group) => group.props.cursor);
+		expect(cursors.filter((cursor) => cursor === "nwse-resize")).toHaveLength(2);
+		expect(cursors.filter((cursor) => cursor === "nesw-resize")).toHaveLength(2);
 	});
 
 	it("locked active 节点不渲染 resize anchor", async () => {
@@ -654,7 +654,7 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const tree = getLatestRenderTree();
 		const anchorGroups = collectAnchorGroups(tree);
-		expect(anchorGroups).toHaveLength(2);
+		expect(anchorGroups).toHaveLength(4);
 
 		act(() => {
 			anchorGroups[0]?.props.onPointerDown?.({

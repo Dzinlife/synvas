@@ -43,17 +43,17 @@ interface MockInfiniteSkiaCanvasProps {
 	onNodeDragEnd?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
 	onNodeResizeStart?: (
 		node: CanvasNode,
-		anchor: "top-left" | "bottom-right",
+		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
 		event: MockCanvasNodeDragEvent,
 	) => void;
 	onNodeResize?: (
 		node: CanvasNode,
-		anchor: "top-left" | "bottom-right",
+		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
 		event: MockCanvasNodeDragEvent,
 	) => void;
 	onNodeResizeEnd?: (
 		node: CanvasNode,
-		anchor: "top-left" | "bottom-right",
+		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
 		event: MockCanvasNodeDragEvent,
 	) => void;
 }
@@ -767,7 +767,7 @@ const resizeNodeAt = (
 	startClientY: number,
 	endClientX: number,
 	endClientY: number,
-	anchor: "top-left" | "bottom-right",
+	anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
 ): void => {
 	const node = getTopVisibleNodeAt(startClientX, startClientY);
 	act(() => {
