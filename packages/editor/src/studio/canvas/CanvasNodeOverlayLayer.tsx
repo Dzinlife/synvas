@@ -120,6 +120,15 @@ export const CanvasNodeOverlayLayer = ({
 						cameraZoom,
 					);
 					const outlineOpacity = isActive ? 1 : isHovered ? 0.85 : 0;
+					const outlineTransition = isResizingNode
+						? {
+								default: NODE_OUTLINE_TRANSITION,
+								x: { duration: 0 },
+								y: { duration: 0 },
+								width: { duration: 0 },
+								height: { duration: 0 },
+							}
+						: NODE_OUTLINE_TRANSITION;
 
 					return (
 						<Group
@@ -130,17 +139,11 @@ export const CanvasNodeOverlayLayer = ({
 								transform={[{ translateX: node.x }, { translateY: node.y }]}
 							>
 								<Rect
-									{...(isResizingNode
-										? {
-												opacity: outlineOpacity,
-											}
-										: {
-												transition: NODE_OUTLINE_TRANSITION,
-												opacity: 0,
-												animate: {
-													opacity: outlineOpacity,
-												},
-											})}
+									transition={outlineTransition}
+									opacity={0}
+									animate={{
+										opacity: outlineOpacity,
+									}}
 									x={0}
 									y={0}
 									width={Math.max(1, node.width)}
