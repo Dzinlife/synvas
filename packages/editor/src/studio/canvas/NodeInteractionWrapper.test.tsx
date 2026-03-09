@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { CanvasNode } from "core/studio/types";
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,22 +21,23 @@ vi.mock("@use-gesture/react", () => ({
 vi.mock("react-skia-lite", () => ({
 	Group: ({
 		children,
+		onClick,
 		onPointerDown,
 		onPointerEnter,
 		onPointerLeave,
-		onClick,
 		onDoubleClick,
 		...props
 	}: {
 		children?: React.ReactNode;
+		onClick?: (event: unknown) => void;
 		onPointerDown?: unknown;
 		onPointerEnter?: unknown;
 		onPointerLeave?: unknown;
-		onClick?: unknown;
 		onDoubleClick?: unknown;
 		[key: string]: unknown;
 	}) => (
-		<div
+		<button
+			type="button"
 			data-testid="group"
 			data-props={JSON.stringify(props)}
 			data-has-on-pointer-down={String(typeof onPointerDown === "function")}
@@ -44,9 +45,10 @@ vi.mock("react-skia-lite", () => ({
 			data-has-on-pointer-leave={String(typeof onPointerLeave === "function")}
 			data-has-on-click={String(typeof onClick === "function")}
 			data-has-on-double-click={String(typeof onDoubleClick === "function")}
+			onClick={onClick}
 		>
 			{children}
-		</div>
+		</button>
 	),
 	Rect: (props: Record<string, unknown>) => (
 		<div data-testid="rect" data-props={JSON.stringify(props)} />
@@ -210,6 +212,48 @@ describe("NodeInteractionWrapper", () => {
 		expect(group.getAttribute("data-has-on-pointer-enter")).toBe("true");
 		expect(group.getAttribute("data-has-on-pointer-leave")).toBe("true");
 		expect(group.getAttribute("data-has-on-click")).toBe("true");
-		expect(group.getAttribute("data-has-on-double-click")).toBe("true");
+		expect(group.getAttribute("data-has-on-double-click")).toBe("false");
+	});
+
+	it("通过 click 定时器窗口识别双击", () => {
+		vi.useFakeTimers();
+		try {
+			const onClick = vi.fn();
+			const onDoubleClick = vi.fn();
+
+			render(
+				<NodeInteractionWrapper
+					node={createSceneNode()}
+					isActive={false}
+					isDimmed={false}
+					isHovered={false}
+					cameraZoom={1}
+					onPointerEnter={vi.fn()}
+					onPointerLeave={vi.fn()}
+					onClick={onClick}
+					onDoubleClick={onDoubleClick}
+				>
+					<div data-testid="child" />
+				</NodeInteractionWrapper>,
+			);
+
+			const group = screen.getByTestId("group");
+			fireEvent.click(group, {
+				clientX: 120,
+				clientY: 80,
+				timeStamp: 1000,
+			});
+			fireEvent.click(group, {
+				clientX: 123,
+				clientY: 83,
+				timeStamp: 1200,
+			});
+
+			expect(onClick).toHaveBeenCalledTimes(2);
+			expect(onDoubleClick).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.runOnlyPendingTimers();
+			vi.useRealTimers();
+		}
 	});
 });
