@@ -1,441 +1,558 @@
+import { useDrag } from "@use-gesture/react";
 import type { CanvasNode } from "core/studio/types";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Group, Path, Rect, type SkiaPointerEvent } from "react-skia-lite";
-import type {
-	CanvasNodeResizeAnchor,
-	CanvasNodeResizeAnchorState,
-} from "./canvasResizeAnchor";
+import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 import {
 	CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
 	CANVAS_RESIZE_ANCHOR_LEG_PX,
 	CANVAS_RESIZE_ANCHOR_OFFSET_PX,
 	CANVAS_RESIZE_ANCHOR_STROKE_PX,
+	resolveCanvasResizeAnchorAtWorldPoint,
 } from "./canvasResizeAnchor";
-import {
-	resolveNodeInteractionBorderStyle,
-	resolveNodeInteractionStrokeWidth,
-} from "./NodeInteractionWrapper";
+import type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
+import { resolveNodeInteractionBorderStyle } from "./NodeInteractionWrapper";
 
 const RESIZE_ANCHOR_ENTER_OFFSET_PX = 8;
 const RESIZE_ANCHOR_ENTER_TRANSITION = {
 	duration: 200,
 	easing: "easeOutCubic",
 } as const;
-const NODE_OUTLINE_TRANSITION = {
-	duration: 200,
-	easing: "easeOutCubic",
+
+const RESIZE_DRAG_CONFIG = {
+	pointer: { capture: false },
+	keys: false,
+	filterTaps: false,
+	threshold: 0,
+	triggerAllEvents: true,
 } as const;
 
-const buildTopLeftAnchorPath = (
-	offsetWorld: number,
-	legWorld: number,
-): string => {
-	const cornerX = -offsetWorld;
-	const cornerY = -offsetWorld;
-	return `M ${cornerX + legWorld} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY + legWorld}`;
+const buildTopLeftAnchorPath = (offsetPx: number, legPx: number): string => {
+	const cornerX = -offsetPx;
+	const cornerY = -offsetPx;
+	return `M ${cornerX + legPx} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY + legPx}`;
 };
 
 const buildTopRightAnchorPath = (
 	width: number,
-	offsetWorld: number,
-	legWorld: number,
+	offsetPx: number,
+	legPx: number,
 ): string => {
-	const cornerX = width + offsetWorld;
-	const cornerY = -offsetWorld;
-	return `M ${cornerX - legWorld} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY + legWorld}`;
+	const cornerX = width + offsetPx;
+	const cornerY = -offsetPx;
+	return `M ${cornerX - legPx} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY + legPx}`;
 };
 
 const buildBottomRightAnchorPath = (
 	width: number,
 	height: number,
-	offsetWorld: number,
-	legWorld: number,
+	offsetPx: number,
+	legPx: number,
 ): string => {
-	const cornerX = width + offsetWorld;
-	const cornerY = height + offsetWorld;
-	return `M ${cornerX - legWorld} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY - legWorld}`;
+	const cornerX = width + offsetPx;
+	const cornerY = height + offsetPx;
+	return `M ${cornerX - legPx} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY - legPx}`;
 };
 
 const buildBottomLeftAnchorPath = (
 	height: number,
-	offsetWorld: number,
-	legWorld: number,
+	offsetPx: number,
+	legPx: number,
 ): string => {
-	const cornerX = -offsetWorld;
-	const cornerY = height + offsetWorld;
-	return `M ${cornerX + legWorld} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY - legWorld}`;
+	const cornerX = -offsetPx;
+	const cornerY = height + offsetPx;
+	return `M ${cornerX + legPx} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY - legPx}`;
+};
+
+const resolvePointerField = (
+	event: unknown,
+	key: "button" | "buttons",
+): number => {
+	if (!event || typeof event !== "object") return 0;
+	if (!(key in event)) return 0;
+	const value = (event as Record<string, unknown>)[key];
+	if (!Number.isFinite(value)) return 0;
+	return Number(value);
+};
+
+const resolvePointerLocalPoint = (
+	event: unknown,
+): { x: number; y: number } | null => {
+	if (!event || typeof event !== "object") return null;
+	const x = (event as Record<string, unknown>).x;
+	const y = (event as Record<string, unknown>).y;
+	if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+	return {
+		x: Number(x),
+		y: Number(y),
+	};
+};
+
+const resolveNodeScreenFrame = (
+	node: CanvasNode,
+	camera: { x: number; y: number; zoom: number },
+) => {
+	const safeZoom = Math.max(camera.zoom, 1e-6);
+	return {
+		x: (node.x + camera.x) * safeZoom,
+		y: (node.y + camera.y) * safeZoom,
+		width: Math.max(1, node.width * safeZoom),
+		height: Math.max(1, node.height * safeZoom),
+	};
+};
+
+const resolveAnchorOpacity = (
+	anchor: CanvasNodeResizeAnchor,
+	hoveredResizeAnchor: CanvasNodeResizeAnchor | null,
+	pressedResizeAnchor: CanvasNodeResizeAnchor | null,
+): number => {
+	if (hoveredResizeAnchor === anchor || pressedResizeAnchor === anchor) {
+		return 1;
+	}
+	return 0.3;
 };
 
 interface CanvasNodeOverlayLayerProps {
-	nodes: CanvasNode[];
-	cameraZoom: number;
-	activeNodeId: string | null;
-	focusedNodeId: string | null;
-	hoveredNodeId: string | null;
-	hoveredResizeAnchor: CanvasNodeResizeAnchorState | null;
-	pressedResizeAnchor: CanvasNodeResizeAnchorState | null;
-	onResizeAnchorPointerEnter: (
-		nodeId: string,
-		anchor: CanvasNodeResizeAnchor,
-	) => void;
-	onResizeAnchorPointerLeave: (
-		nodeId: string,
-		anchor: CanvasNodeResizeAnchor,
-	) => void;
-	onTopLeftResizePointerDown?: (event: SkiaPointerEvent) => void;
-	onTopRightResizePointerDown?: (event: SkiaPointerEvent) => void;
-	onBottomRightResizePointerDown?: (event: SkiaPointerEvent) => void;
-	onBottomLeftResizePointerDown?: (event: SkiaPointerEvent) => void;
+	activeNode: CanvasNode | null;
+	hoverNode: CanvasNode | null;
+	camera: {
+		x: number;
+		y: number;
+		zoom: number;
+	};
+	onNodeResize?: (event: {
+		phase: "start" | "move" | "end";
+		node: CanvasNode;
+		anchor: CanvasNodeResizeAnchor;
+		event: CanvasNodeDragEvent;
+	}) => void;
 }
 
 export const CanvasNodeOverlayLayer = ({
-	nodes,
-	cameraZoom,
-	activeNodeId,
-	focusedNodeId,
-	hoveredNodeId,
-	hoveredResizeAnchor,
-	pressedResizeAnchor,
-	onResizeAnchorPointerEnter,
-	onResizeAnchorPointerLeave,
-	onTopLeftResizePointerDown,
-	onTopRightResizePointerDown,
-	onBottomRightResizePointerDown,
-	onBottomLeftResizePointerDown,
+	activeNode,
+	hoverNode,
+	camera,
+	onNodeResize,
 }: CanvasNodeOverlayLayerProps) => {
+	const resizingAnchorRef = useRef<CanvasNodeResizeAnchor | null>(null);
+	const previousActiveNodeIdRef = useRef<string | null>(activeNode?.id ?? null);
+	const [hoveredResizeAnchor, setHoveredResizeAnchor] =
+		useState<CanvasNodeResizeAnchor | null>(null);
+	const [pressedResizeAnchor, setPressedResizeAnchor] =
+		useState<CanvasNodeResizeAnchor | null>(null);
+
+	const activeNodeId = activeNode?.id ?? null;
+	const isResizeEnabled = Boolean(activeNode && !activeNode.locked);
+
+	useLayoutEffect(() => {
+		// active 节点切换后清理旧的 anchor 交互状态
+		if (previousActiveNodeIdRef.current === activeNodeId) return;
+		previousActiveNodeIdRef.current = activeNodeId;
+		resizingAnchorRef.current = null;
+		setHoveredResizeAnchor(null);
+		setPressedResizeAnchor(null);
+	}, [activeNodeId]);
+
+	useLayoutEffect(() => {
+		if (isResizeEnabled) return;
+		resizingAnchorRef.current = null;
+		setHoveredResizeAnchor(null);
+		setPressedResizeAnchor(null);
+	}, [isResizeEnabled]);
+
+	const handleResizeAnchorPointerEnter = useCallback(
+		(anchor: CanvasNodeResizeAnchor) => {
+			if (!isResizeEnabled) return;
+			if (resizingAnchorRef.current) return;
+			setHoveredResizeAnchor(anchor);
+		},
+		[isResizeEnabled],
+	);
+
+	const handleResizeAnchorPointerLeave = useCallback(
+		(anchor: CanvasNodeResizeAnchor) => {
+			if (!isResizeEnabled) return;
+			if (resizingAnchorRef.current) return;
+			setHoveredResizeAnchor((prev) => {
+				if (prev !== anchor) return prev;
+				return null;
+			});
+		},
+		[isResizeEnabled],
+	);
+
+	const handleResizeDragGesture = useCallback(
+		(
+			anchor: CanvasNodeResizeAnchor,
+			state: {
+				first: boolean;
+				last: boolean;
+				tap: boolean;
+				movement: [number, number];
+				xy: [number, number];
+				event: unknown;
+			},
+		) => {
+			if (!isResizeEnabled || !activeNode) return;
+
+			const dragEvent: CanvasNodeDragEvent = {
+				movementX: state.movement[0],
+				movementY: state.movement[1],
+				clientX: state.xy[0],
+				clientY: state.xy[1],
+				first: state.first,
+				last: state.last,
+				tap: state.tap,
+				button: resolvePointerField(state.event, "button"),
+				buttons: resolvePointerField(state.event, "buttons"),
+			};
+
+			if (state.first) {
+				if (dragEvent.button !== 0) return;
+				resizingAnchorRef.current = anchor;
+				setPressedResizeAnchor(anchor);
+				setHoveredResizeAnchor(anchor);
+				onNodeResize?.({
+					phase: "start",
+					node: activeNode,
+					anchor,
+					event: dragEvent,
+				});
+			}
+
+			if (resizingAnchorRef.current !== anchor) return;
+
+			if (!state.last) {
+				onNodeResize?.({
+					phase: "move",
+					node: activeNode,
+					anchor,
+					event: dragEvent,
+				});
+			}
+
+			if (!state.last) return;
+
+			resizingAnchorRef.current = null;
+			setPressedResizeAnchor(null);
+			const localPoint = resolvePointerLocalPoint(state.event);
+			if (!localPoint) {
+				setHoveredResizeAnchor(null);
+			} else {
+				const safeZoom = Math.max(camera.zoom, 1e-6);
+				const worldX = localPoint.x / safeZoom - camera.x;
+				const worldY = localPoint.y / safeZoom - camera.y;
+				setHoveredResizeAnchor(
+					resolveCanvasResizeAnchorAtWorldPoint({
+						node: activeNode,
+						worldX,
+						worldY,
+						cameraZoom: camera.zoom,
+					}),
+				);
+			}
+			onNodeResize?.({
+				phase: "end",
+				node: activeNode,
+				anchor,
+				event: dragEvent,
+			});
+		},
+		[
+			activeNode,
+			camera.x,
+			camera.y,
+			camera.zoom,
+			isResizeEnabled,
+			onNodeResize,
+		],
+	);
+
+	const bindTopLeftResizeDrag = useDrag((state) => {
+		handleResizeDragGesture("top-left", state);
+	}, RESIZE_DRAG_CONFIG);
+	const bindTopRightResizeDrag = useDrag((state) => {
+		handleResizeDragGesture("top-right", state);
+	}, RESIZE_DRAG_CONFIG);
+	const bindBottomRightResizeDrag = useDrag((state) => {
+		handleResizeDragGesture("bottom-right", state);
+	}, RESIZE_DRAG_CONFIG);
+	const bindBottomLeftResizeDrag = useDrag((state) => {
+		handleResizeDragGesture("bottom-left", state);
+	}, RESIZE_DRAG_CONFIG);
+
+	const topLeftResizeHandlers = bindTopLeftResizeDrag() as {
+		onPointerDown?: (event: SkiaPointerEvent) => void;
+	};
+	const topRightResizeHandlers = bindTopRightResizeDrag() as {
+		onPointerDown?: (event: SkiaPointerEvent) => void;
+	};
+	const bottomRightResizeHandlers = bindBottomRightResizeDrag() as {
+		onPointerDown?: (event: SkiaPointerEvent) => void;
+	};
+	const bottomLeftResizeHandlers = bindBottomLeftResizeDrag() as {
+		onPointerDown?: (event: SkiaPointerEvent) => void;
+	};
+
+	const activeNodeScreenFrame = activeNode
+		? resolveNodeScreenFrame(activeNode, camera)
+		: null;
+	const hoverBorderNode =
+		hoverNode && hoverNode.id !== activeNode?.id ? hoverNode : null;
+	const hoverNodeScreenFrame = hoverBorderNode
+		? resolveNodeScreenFrame(hoverBorderNode, camera)
+		: null;
+	if (!activeNodeScreenFrame && !hoverNodeScreenFrame) return null;
+
+	const hoverBorderStyle = resolveNodeInteractionBorderStyle({
+		isActive: false,
+		isHovered: true,
+	});
+	const activeBorderStyle = resolveNodeInteractionBorderStyle({
+		isActive: true,
+		isHovered: false,
+	});
+	const topLeftCornerX = -CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+	const topLeftCornerY = -CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+	const topRightCornerX =
+		(activeNodeScreenFrame?.width ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+	const topRightCornerY = -CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+	const bottomRightCornerX =
+		(activeNodeScreenFrame?.width ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+	const bottomRightCornerY =
+		(activeNodeScreenFrame?.height ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+	const bottomLeftCornerX = -CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+	const bottomLeftCornerY =
+		(activeNodeScreenFrame?.height ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+
 	return (
 		<>
 			<Group zIndex={1_000_000} pointerEvents="none">
-				{nodes.map((node) => {
-					const isFocused = node.id === focusedNodeId;
-					const isActive = node.id === activeNodeId;
-					const isDimmed = Boolean(focusedNodeId) && !isFocused;
-					const isHovered = node.id === hoveredNodeId;
-					const isResizingNode = pressedResizeAnchor?.nodeId === node.id;
-					const borderStyle = resolveNodeInteractionBorderStyle({
-						isActive,
-						isHovered,
-					});
-					const strokeWidth = resolveNodeInteractionStrokeWidth(
-						borderStyle.baseStrokeWidthPx,
-						cameraZoom,
-					);
-					const outlineOpacity = isActive ? 1 : isHovered ? 0.85 : 0;
-					const outlineTransition = isResizingNode
-						? {
-								default: NODE_OUTLINE_TRANSITION,
-								x: { duration: 0 },
-								y: { duration: 0 },
-								width: { duration: 0 },
-								height: { duration: 0 },
-							}
-						: NODE_OUTLINE_TRANSITION;
-
-					return (
-						<Group
-							key={`canvas-node-outline-overlay-${node.id}`}
-							opacity={isDimmed ? 0.35 : 1}
-						>
-							<Group
-								transform={[{ translateX: node.x }, { translateY: node.y }]}
-							>
-								<Rect
-									transition={outlineTransition}
-									opacity={0}
-									animate={{
-										opacity: outlineOpacity,
-									}}
-									x={0}
-									y={0}
-									width={Math.max(1, node.width)}
-									height={Math.max(1, node.height)}
-									style="stroke"
-									strokeWidth={strokeWidth}
-									color={borderStyle.color}
-								/>
-							</Group>
-						</Group>
-					);
-				})}
+				{hoverBorderNode && hoverNodeScreenFrame && (
+					<Group
+						key={`canvas-node-hover-outline-overlay-${hoverBorderNode.id}`}
+						transform={[
+							{ translateX: hoverNodeScreenFrame.x },
+							{ translateY: hoverNodeScreenFrame.y },
+						]}
+					>
+						<Rect
+							opacity={1}
+							x={0}
+							y={0}
+							width={hoverNodeScreenFrame.width}
+							height={hoverNodeScreenFrame.height}
+							style="stroke"
+							strokeWidth={hoverBorderStyle.baseStrokeWidthPx}
+							color={hoverBorderStyle.color}
+						/>
+					</Group>
+				)}
+				{activeNode && activeNodeScreenFrame && (
+					<Group
+						key={`canvas-node-active-outline-overlay-${activeNode.id}`}
+						transform={[
+							{ translateX: activeNodeScreenFrame.x },
+							{ translateY: activeNodeScreenFrame.y },
+						]}
+					>
+						<Rect
+							opacity={1}
+							x={0}
+							y={0}
+							width={activeNodeScreenFrame.width}
+							height={activeNodeScreenFrame.height}
+							style="stroke"
+							strokeWidth={activeBorderStyle.baseStrokeWidthPx}
+							color={activeBorderStyle.color}
+						/>
+					</Group>
+				)}
 			</Group>
-			<Group zIndex={1_000_001} pointerEvents="auto">
-				{nodes.map((node) => {
-					const isFocused = node.id === focusedNodeId;
-					const isActive = node.id === activeNodeId;
-					const isDimmed = Boolean(focusedNodeId) && !isFocused;
-					if (focusedNodeId || !isActive || node.locked) return null;
-
-					const safeZoom = Math.max(cameraZoom, 1e-6);
-					const offsetWorld = CANVAS_RESIZE_ANCHOR_OFFSET_PX / safeZoom;
-					const legWorld = CANVAS_RESIZE_ANCHOR_LEG_PX / safeZoom;
-					const strokeWorld = CANVAS_RESIZE_ANCHOR_STROKE_PX / safeZoom;
-					const hitSizeWorld = CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / safeZoom;
-					const enterOffsetWorld = RESIZE_ANCHOR_ENTER_OFFSET_PX / safeZoom;
-					const topLeftCornerX = -offsetWorld;
-					const topLeftCornerY = -offsetWorld;
-					const topRightCornerX = node.width + offsetWorld;
-					const topRightCornerY = -offsetWorld;
-					const bottomRightCornerX = node.width + offsetWorld;
-					const bottomRightCornerY = node.height + offsetWorld;
-					const bottomLeftCornerX = -offsetWorld;
-					const bottomLeftCornerY = node.height + offsetWorld;
-					const isTopLeftHovered =
-						hoveredResizeAnchor?.nodeId === node.id &&
-						hoveredResizeAnchor.anchor === "top-left";
-					const isTopLeftPressed =
-						pressedResizeAnchor?.nodeId === node.id &&
-						pressedResizeAnchor.anchor === "top-left";
-					const isTopRightHovered =
-						hoveredResizeAnchor?.nodeId === node.id &&
-						hoveredResizeAnchor.anchor === "top-right";
-					const isTopRightPressed =
-						pressedResizeAnchor?.nodeId === node.id &&
-						pressedResizeAnchor.anchor === "top-right";
-					const isBottomRightHovered =
-						hoveredResizeAnchor?.nodeId === node.id &&
-						hoveredResizeAnchor.anchor === "bottom-right";
-					const isBottomRightPressed =
-						pressedResizeAnchor?.nodeId === node.id &&
-						pressedResizeAnchor.anchor === "bottom-right";
-					const isBottomLeftHovered =
-						hoveredResizeAnchor?.nodeId === node.id &&
-						hoveredResizeAnchor.anchor === "bottom-left";
-					const isBottomLeftPressed =
-						pressedResizeAnchor?.nodeId === node.id &&
-						pressedResizeAnchor.anchor === "bottom-left";
-					const topLeftOpacity = isActive
-						? isTopLeftHovered || isTopLeftPressed
-							? 1
-							: 0.3
-						: 0;
-					const topRightOpacity = isActive
-						? isTopRightHovered || isTopRightPressed
-							? 1
-							: 0.3
-						: 0;
-					const bottomRightOpacity = isActive
-						? isBottomRightHovered || isBottomRightPressed
-							? 1
-							: 0.3
-						: 0;
-					const bottomLeftOpacity = isActive
-						? isBottomLeftHovered || isBottomLeftPressed
-							? 1
-							: 0.3
-						: 0;
-
-					return (
+			{activeNode && activeNodeScreenFrame && isResizeEnabled && (
+				<Group zIndex={1_000_001} pointerEvents="auto">
+					<Group
+						key={`canvas-node-resize-anchor-overlay-${activeNode.id}`}
+						transform={[
+							{ translateX: activeNodeScreenFrame.x },
+							{ translateY: activeNodeScreenFrame.y },
+						]}
+					>
 						<Group
-							key={`canvas-node-resize-anchor-overlay-${node.id}`}
-							transform={[{ translateX: node.x }, { translateY: node.y }]}
-							opacity={isDimmed ? 0.35 : 1}
+							transition={RESIZE_ANCHOR_ENTER_TRANSITION}
+							translateX={-RESIZE_ANCHOR_ENTER_OFFSET_PX}
+							translateY={-RESIZE_ANCHOR_ENTER_OFFSET_PX}
+							animate={{
+								translateX: 0,
+								translateY: 0,
+								opacity: resolveAnchorOpacity(
+									"top-left",
+									hoveredResizeAnchor,
+									pressedResizeAnchor,
+								),
+							}}
+							hitRect={{
+								x: topLeftCornerX - CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / 2,
+								y: topLeftCornerY - CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / 2,
+								width: CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
+								height: CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
+							}}
+							opacity={0}
+							pointerEvents="auto"
+							cursor="nwse-resize"
+							onPointerEnter={() => {
+								handleResizeAnchorPointerEnter("top-left");
+							}}
+							onPointerLeave={() => {
+								handleResizeAnchorPointerLeave("top-left");
+							}}
+							onPointerDown={(event) => {
+								topLeftResizeHandlers.onPointerDown?.(event);
+							}}
 						>
-							<Group
-								transition={RESIZE_ANCHOR_ENTER_TRANSITION}
-								translateX={-enterOffsetWorld}
-								translateY={-enterOffsetWorld}
-								animate={{
-									translateX: 0,
-									translateY: 0,
-									opacity: topLeftOpacity,
-								}}
-								hitRect={{
-									x: topLeftCornerX - hitSizeWorld / 2,
-									y: topLeftCornerY - hitSizeWorld / 2,
-									width: hitSizeWorld,
-									height: hitSizeWorld,
-								}}
-								opacity={0}
-								pointerEvents={isActive ? "auto" : "none"}
-								cursor={isActive ? "nwse-resize" : undefined}
-								onPointerEnter={
-									isActive
-										? () => {
-												onResizeAnchorPointerEnter(node.id, "top-left");
-											}
-										: undefined
-								}
-								onPointerLeave={
-									isActive
-										? () => {
-												onResizeAnchorPointerLeave(node.id, "top-left");
-											}
-										: undefined
-								}
-								onPointerDown={
-									isActive
-										? (event) => {
-												onTopLeftResizePointerDown?.(event);
-											}
-										: undefined
-								}
-							>
-								<Path
-									path={buildTopLeftAnchorPath(offsetWorld, legWorld)}
-									style="stroke"
-									strokeWidth={strokeWorld}
-									// strokeJoin="round"
-									// strokeCap="round"
-									color="rgba(255,255,255,1)"
-								/>
-							</Group>
-							<Group
-								transition={RESIZE_ANCHOR_ENTER_TRANSITION}
-								translateX={enterOffsetWorld}
-								translateY={-enterOffsetWorld}
-								animate={{
-									translateX: 0,
-									translateY: 0,
-									opacity: topRightOpacity,
-								}}
-								hitRect={{
-									x: topRightCornerX - hitSizeWorld / 2,
-									y: topRightCornerY - hitSizeWorld / 2,
-									width: hitSizeWorld,
-									height: hitSizeWorld,
-								}}
-								opacity={0}
-								pointerEvents={isActive ? "auto" : "none"}
-								cursor={isActive ? "nesw-resize" : undefined}
-								onPointerEnter={
-									isActive
-										? () => {
-												onResizeAnchorPointerEnter(node.id, "top-right");
-											}
-										: undefined
-								}
-								onPointerLeave={
-									isActive
-										? () => {
-												onResizeAnchorPointerLeave(node.id, "top-right");
-											}
-										: undefined
-								}
-								onPointerDown={
-									isActive
-										? (event) => {
-												onTopRightResizePointerDown?.(event);
-											}
-										: undefined
-								}
-							>
-								<Path
-									path={buildTopRightAnchorPath(
-										node.width,
-										offsetWorld,
-										legWorld,
-									)}
-									style="stroke"
-									strokeWidth={strokeWorld}
-									color="rgba(255,255,255,1)"
-								/>
-							</Group>
-							<Group
-								transition={RESIZE_ANCHOR_ENTER_TRANSITION}
-								translateX={enterOffsetWorld}
-								translateY={enterOffsetWorld}
-								animate={{
-									translateX: 0,
-									translateY: 0,
-									opacity: bottomRightOpacity,
-								}}
-								hitRect={{
-									x: bottomRightCornerX - hitSizeWorld / 2,
-									y: bottomRightCornerY - hitSizeWorld / 2,
-									width: hitSizeWorld,
-									height: hitSizeWorld,
-								}}
-								opacity={0}
-								pointerEvents={isActive ? "auto" : "none"}
-								cursor={isActive ? "nwse-resize" : undefined}
-								onPointerEnter={
-									isActive
-										? () => {
-												onResizeAnchorPointerEnter(node.id, "bottom-right");
-											}
-										: undefined
-								}
-								onPointerLeave={
-									isActive
-										? () => {
-												onResizeAnchorPointerLeave(node.id, "bottom-right");
-											}
-										: undefined
-								}
-								onPointerDown={
-									isActive
-										? (event) => {
-												onBottomRightResizePointerDown?.(event);
-											}
-										: undefined
-								}
-							>
-								<Path
-									path={buildBottomRightAnchorPath(
-										node.width,
-										node.height,
-										offsetWorld,
-										legWorld,
-									)}
-									style="stroke"
-									strokeWidth={strokeWorld}
-									color="rgba(255,255,255,1)"
-								/>
-							</Group>
-							<Group
-								transition={RESIZE_ANCHOR_ENTER_TRANSITION}
-								translateX={-enterOffsetWorld}
-								translateY={enterOffsetWorld}
-								animate={{
-									translateX: 0,
-									translateY: 0,
-									opacity: bottomLeftOpacity,
-								}}
-								hitRect={{
-									x: bottomLeftCornerX - hitSizeWorld / 2,
-									y: bottomLeftCornerY - hitSizeWorld / 2,
-									width: hitSizeWorld,
-									height: hitSizeWorld,
-								}}
-								opacity={0}
-								pointerEvents={isActive ? "auto" : "none"}
-								cursor={isActive ? "nesw-resize" : undefined}
-								onPointerEnter={
-									isActive
-										? () => {
-												onResizeAnchorPointerEnter(node.id, "bottom-left");
-											}
-										: undefined
-								}
-								onPointerLeave={
-									isActive
-										? () => {
-												onResizeAnchorPointerLeave(node.id, "bottom-left");
-											}
-										: undefined
-								}
-								onPointerDown={
-									isActive
-										? (event) => {
-												onBottomLeftResizePointerDown?.(event);
-											}
-										: undefined
-								}
-							>
-								<Path
-									path={buildBottomLeftAnchorPath(
-										node.height,
-										offsetWorld,
-										legWorld,
-									)}
-									style="stroke"
-									strokeWidth={strokeWorld}
-									color="rgba(255,255,255,1)"
-								/>
-							</Group>
+							<Path
+								path={buildTopLeftAnchorPath(
+									CANVAS_RESIZE_ANCHOR_OFFSET_PX,
+									CANVAS_RESIZE_ANCHOR_LEG_PX,
+								)}
+								style="stroke"
+								strokeWidth={CANVAS_RESIZE_ANCHOR_STROKE_PX}
+								color="rgba(255,255,255,1)"
+							/>
 						</Group>
-					);
-				})}
-			</Group>
+						<Group
+							transition={RESIZE_ANCHOR_ENTER_TRANSITION}
+							translateX={RESIZE_ANCHOR_ENTER_OFFSET_PX}
+							translateY={-RESIZE_ANCHOR_ENTER_OFFSET_PX}
+							animate={{
+								translateX: 0,
+								translateY: 0,
+								opacity: resolveAnchorOpacity(
+									"top-right",
+									hoveredResizeAnchor,
+									pressedResizeAnchor,
+								),
+							}}
+							hitRect={{
+								x: topRightCornerX - CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / 2,
+								y: topRightCornerY - CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / 2,
+								width: CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
+								height: CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
+							}}
+							opacity={0}
+							pointerEvents="auto"
+							cursor="nesw-resize"
+							onPointerEnter={() => {
+								handleResizeAnchorPointerEnter("top-right");
+							}}
+							onPointerLeave={() => {
+								handleResizeAnchorPointerLeave("top-right");
+							}}
+							onPointerDown={(event) => {
+								topRightResizeHandlers.onPointerDown?.(event);
+							}}
+						>
+							<Path
+								path={buildTopRightAnchorPath(
+									activeNodeScreenFrame.width,
+									CANVAS_RESIZE_ANCHOR_OFFSET_PX,
+									CANVAS_RESIZE_ANCHOR_LEG_PX,
+								)}
+								style="stroke"
+								strokeWidth={CANVAS_RESIZE_ANCHOR_STROKE_PX}
+								color="rgba(255,255,255,1)"
+							/>
+						</Group>
+						<Group
+							transition={RESIZE_ANCHOR_ENTER_TRANSITION}
+							translateX={RESIZE_ANCHOR_ENTER_OFFSET_PX}
+							translateY={RESIZE_ANCHOR_ENTER_OFFSET_PX}
+							animate={{
+								translateX: 0,
+								translateY: 0,
+								opacity: resolveAnchorOpacity(
+									"bottom-right",
+									hoveredResizeAnchor,
+									pressedResizeAnchor,
+								),
+							}}
+							hitRect={{
+								x: bottomRightCornerX - CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / 2,
+								y: bottomRightCornerY - CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / 2,
+								width: CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
+								height: CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
+							}}
+							opacity={0}
+							pointerEvents="auto"
+							cursor="nwse-resize"
+							onPointerEnter={() => {
+								handleResizeAnchorPointerEnter("bottom-right");
+							}}
+							onPointerLeave={() => {
+								handleResizeAnchorPointerLeave("bottom-right");
+							}}
+							onPointerDown={(event) => {
+								bottomRightResizeHandlers.onPointerDown?.(event);
+							}}
+						>
+							<Path
+								path={buildBottomRightAnchorPath(
+									activeNodeScreenFrame.width,
+									activeNodeScreenFrame.height,
+									CANVAS_RESIZE_ANCHOR_OFFSET_PX,
+									CANVAS_RESIZE_ANCHOR_LEG_PX,
+								)}
+								style="stroke"
+								strokeWidth={CANVAS_RESIZE_ANCHOR_STROKE_PX}
+								color="rgba(255,255,255,1)"
+							/>
+						</Group>
+						<Group
+							transition={RESIZE_ANCHOR_ENTER_TRANSITION}
+							translateX={-RESIZE_ANCHOR_ENTER_OFFSET_PX}
+							translateY={RESIZE_ANCHOR_ENTER_OFFSET_PX}
+							animate={{
+								translateX: 0,
+								translateY: 0,
+								opacity: resolveAnchorOpacity(
+									"bottom-left",
+									hoveredResizeAnchor,
+									pressedResizeAnchor,
+								),
+							}}
+							hitRect={{
+								x: bottomLeftCornerX - CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / 2,
+								y: bottomLeftCornerY - CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX / 2,
+								width: CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
+								height: CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
+							}}
+							opacity={0}
+							pointerEvents="auto"
+							cursor="nesw-resize"
+							onPointerEnter={() => {
+								handleResizeAnchorPointerEnter("bottom-left");
+							}}
+							onPointerLeave={() => {
+								handleResizeAnchorPointerLeave("bottom-left");
+							}}
+							onPointerDown={(event) => {
+								bottomLeftResizeHandlers.onPointerDown?.(event);
+							}}
+						>
+							<Path
+								path={buildBottomLeftAnchorPath(
+									activeNodeScreenFrame.height,
+									CANVAS_RESIZE_ANCHOR_OFFSET_PX,
+									CANVAS_RESIZE_ANCHOR_LEG_PX,
+								)}
+								style="stroke"
+								strokeWidth={CANVAS_RESIZE_ANCHOR_STROKE_PX}
+								color="rgba(255,255,255,1)"
+							/>
+						</Group>
+					</Group>
+				</Group>
+			)}
 		</>
 	);
 };

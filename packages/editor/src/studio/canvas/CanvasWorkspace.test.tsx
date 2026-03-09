@@ -41,21 +41,12 @@ interface MockInfiniteSkiaCanvasProps {
 	onNodeDragStart?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
 	onNodeDrag?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
 	onNodeDragEnd?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
-	onNodeResizeStart?: (
-		node: CanvasNode,
-		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
-		event: MockCanvasNodeDragEvent,
-	) => void;
-	onNodeResize?: (
-		node: CanvasNode,
-		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
-		event: MockCanvasNodeDragEvent,
-	) => void;
-	onNodeResizeEnd?: (
-		node: CanvasNode,
-		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
-		event: MockCanvasNodeDragEvent,
-	) => void;
+	onNodeResize?: (event: {
+		phase: "start" | "move" | "end";
+		node: CanvasNode;
+		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left";
+		event: MockCanvasNodeDragEvent;
+	}) => void;
 }
 
 vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
@@ -782,12 +773,12 @@ const resizeNodeAt = (
 			button: 0,
 			buttons: 1,
 		};
-		getLatestInfiniteSkiaCanvasProps().onNodeResizeStart?.(
+		getLatestInfiniteSkiaCanvasProps().onNodeResize?.({
+			phase: "start",
 			node,
 			anchor,
-			startEvent,
-		);
-		getLatestInfiniteSkiaCanvasProps().onNodeResize?.(node, anchor, startEvent);
+			event: startEvent,
+		});
 		const moveEvent: MockCanvasNodeDragEvent = {
 			movementX: endClientX - startClientX,
 			movementY: endClientY - startClientY,
@@ -799,17 +790,23 @@ const resizeNodeAt = (
 			button: 0,
 			buttons: 1,
 		};
-		getLatestInfiniteSkiaCanvasProps().onNodeResize?.(node, anchor, moveEvent);
+		getLatestInfiniteSkiaCanvasProps().onNodeResize?.({
+			phase: "move",
+			node,
+			anchor,
+			event: moveEvent,
+		});
 		const endEvent: MockCanvasNodeDragEvent = {
 			...moveEvent,
 			last: true,
 			buttons: 0,
 		};
-		getLatestInfiniteSkiaCanvasProps().onNodeResizeEnd?.(
+		getLatestInfiniteSkiaCanvasProps().onNodeResize?.({
+			phase: "end",
 			node,
 			anchor,
-			endEvent,
-		);
+			event: endEvent,
+		});
 	});
 };
 

@@ -74,6 +74,7 @@ import {
 import type {
 	CanvasNodeDragEvent,
 	CanvasNodeResizeAnchor,
+	CanvasNodeResizeEvent,
 } from "./InfiniteSkiaCanvas";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { useCanvasCameraController } from "./useCanvasCameraController";
@@ -876,7 +877,7 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const handleSkiaNodeResize = useCallback(
+	const handleSkiaNodeResizeMove = useCallback(
 		(
 			node: CanvasNode,
 			anchor: CanvasNodeResizeAnchor,
@@ -895,14 +896,12 @@ const CanvasWorkspace = () => {
 			const isBottomAnchor =
 				anchor === "bottom-left" || anchor === "bottom-right";
 
-			const draftWidth =
-				isRightAnchor
-					? resizeSession.startNodeWidth + deltaX
-					: resizeSession.startNodeWidth - deltaX;
-			const draftHeight =
-				isBottomAnchor
-					? resizeSession.startNodeHeight + deltaY
-					: resizeSession.startNodeHeight - deltaY;
+			const draftWidth = isRightAnchor
+				? resizeSession.startNodeWidth + deltaX
+				: resizeSession.startNodeWidth - deltaX;
+			const draftHeight = isBottomAnchor
+				? resizeSession.startNodeHeight + deltaY
+				: resizeSession.startNodeHeight - deltaY;
 			const globalMinSize = 32 / safeZoom;
 			const minWidth = Math.max(
 				globalMinSize,
@@ -955,14 +954,12 @@ const CanvasWorkspace = () => {
 				nextHeight = clampSize(draftHeight, minHeight, maxHeight);
 			}
 
-			const nextX =
-				isRightAnchor
-					? resizeSession.fixedCornerX
-					: resizeSession.fixedCornerX - nextWidth;
-			const nextY =
-				isBottomAnchor
-					? resizeSession.fixedCornerY
-					: resizeSession.fixedCornerY - nextHeight;
+			const nextX = isRightAnchor
+				? resizeSession.fixedCornerX
+				: resizeSession.fixedCornerX - nextWidth;
+			const nextY = isBottomAnchor
+				? resizeSession.fixedCornerY
+				: resizeSession.fixedCornerY - nextHeight;
 			const didLayoutChange =
 				Math.abs(nextX - resizeSession.startNodeX) > 1e-6 ||
 				Math.abs(nextY - resizeSession.startNodeY) > 1e-6 ||
@@ -1006,6 +1003,26 @@ const CanvasWorkspace = () => {
 			});
 		},
 		[pushHistory],
+	);
+
+	const handleSkiaNodeResize = useCallback(
+		(resizeEvent: CanvasNodeResizeEvent) => {
+			const { phase, node, anchor, event } = resizeEvent;
+			if (phase === "start") {
+				handleSkiaNodeResizeStart(node, anchor, event);
+				return;
+			}
+			if (phase === "move") {
+				handleSkiaNodeResizeMove(node, anchor, event);
+				return;
+			}
+			handleSkiaNodeResizeEnd(node, anchor);
+		},
+		[
+			handleSkiaNodeResizeEnd,
+			handleSkiaNodeResizeMove,
+			handleSkiaNodeResizeStart,
+		],
 	);
 
 	const handleSkiaNodeDragStart = useCallback(
@@ -1457,9 +1474,7 @@ const CanvasWorkspace = () => {
 				onNodeDragStart={handleSkiaNodeDragStart}
 				onNodeDrag={handleSkiaNodeDrag}
 				onNodeDragEnd={handleSkiaNodeDragEnd}
-				onNodeResizeStart={handleSkiaNodeResizeStart}
 				onNodeResize={handleSkiaNodeResize}
-				onNodeResizeEnd={handleSkiaNodeResizeEnd}
 				onNodeClick={handleSkiaNodeClick}
 				onNodeDoubleClick={handleSkiaNodeDoubleClick}
 			/>

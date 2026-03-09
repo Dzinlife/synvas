@@ -205,40 +205,13 @@ const getLatestRenderTree = (): React.ReactNode => {
 	return latestCall[0] as React.ReactNode;
 };
 
-const collectAnchorGroups = (tree: React.ReactNode): AnyElement[] => {
-	const directGroups = collectElements(
-		tree,
-		(element) =>
-			element.type === "group" &&
-			Boolean(element.props.hitRect) &&
-			typeof element.props.onPointerDown === "function" &&
-			collectElements(
-				element.props.children as React.ReactNode,
-				(child) => child.type === "path",
-			).length > 0,
+const getOverlayElement = (tree: React.ReactNode): AnyElement | null => {
+	return (
+		collectElements(
+			tree,
+			(element) => element.type === CanvasNodeOverlayLayer,
+		)[0] ?? null
 	);
-	const overlayElement = collectElements(
-		tree,
-		(element) => element.type === CanvasNodeOverlayLayer,
-	)[0];
-	if (!overlayElement || typeof overlayElement.type !== "function") {
-		return directGroups;
-	}
-	const overlayTree = overlayElement.type(
-		overlayElement.props as Record<string, unknown>,
-	);
-	const overlayGroups = collectElements(
-		overlayTree,
-		(element) =>
-			element.type === "group" &&
-			Boolean(element.props.hitRect) &&
-			typeof element.props.onPointerDown === "function" &&
-			collectElements(
-				element.props.children as React.ReactNode,
-				(child) => child.type === "path",
-			).length > 0,
-	);
-	return [...directGroups, ...overlayGroups];
 };
 
 const createVideoNode = (
@@ -312,11 +285,55 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const anchorGroups = collectAnchorGroups(tree);
-		expect(anchorGroups).toHaveLength(4);
-		const cursors = anchorGroups.map((group) => group.props.cursor);
-		expect(cursors.filter((cursor) => cursor === "nwse-resize")).toHaveLength(2);
-		expect(cursors.filter((cursor) => cursor === "nesw-resize")).toHaveLength(2);
+		const overlayElement = getOverlayElement(tree);
+		expect(overlayElement).toBeTruthy();
+		expect(overlayElement?.props.activeNode?.id).toBe("node-a");
+		expect(overlayElement?.props.hoverNode).toBeNull();
+	});
+
+	it("hover 节点会透传到 overlay", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createVideoNode("node-a", 0), createVideoNode("node-b", 1)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				focusedNodeId={null}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		const initialRenderCount = rootRenderSpy.mock.calls.length;
+		const tree = getLatestRenderTree();
+		const wrappers = collectElements(
+			tree,
+			(element) => element.type === NodeInteractionWrapper,
+		);
+		const targetWrapper = wrappers.find(
+			(wrapper) => wrapper.props.node?.id === "node-b",
+		);
+		expect(targetWrapper).toBeTruthy();
+
+		act(() => {
+			targetWrapper?.props.onPointerEnter?.("node-b");
+		});
+
+		await waitFor(() => {
+			expect(rootRenderSpy.mock.calls.length).toBeGreaterThan(
+				initialRenderCount,
+			);
+		});
+
+		const nextTree = getLatestRenderTree();
+		const overlayElement = getOverlayElement(nextTree);
+		expect(overlayElement).toBeTruthy();
+		expect(overlayElement?.props.activeNode?.id).toBe("node-a");
+		expect(overlayElement?.props.hoverNode?.id).toBe("node-b");
 	});
 
 	it("locked active 节点不渲染 resize anchor", async () => {
@@ -338,11 +355,12 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const anchorGroups = collectAnchorGroups(tree);
-		expect(anchorGroups).toHaveLength(0);
+		const overlayElement = getOverlayElement(tree);
+		expect(overlayElement).toBeTruthy();
+		expect(overlayElement?.props.activeNode?.locked).toBe(true);
 	});
 
-	it("focus 状态下不显示 resize anchor", async () => {
+	it("focus 状态下不挂载 overlay", async () => {
 		render(
 			<InfiniteSkiaCanvas
 				width={800}
@@ -361,8 +379,8 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const anchorGroups = collectAnchorGroups(tree);
-		expect(anchorGroups).toHaveLength(0);
+		const overlayElement = getOverlayElement(tree);
+		expect(overlayElement).toBeNull();
 	});
 
 	it("focus scene 模式会抑制普通 node 交互并接管 Focus 层事件", async () => {
@@ -371,7 +389,10 @@ describe("InfiniteSkiaCanvas", () => {
 				width={800}
 				height={600}
 				camera={{ x: 0, y: 0, zoom: 1 }}
-				nodes={[createSceneNode("node-scene", 0), createVideoNode("node-video", 1)]}
+				nodes={[
+					createSceneNode("node-scene", 0),
+					createVideoNode("node-video", 1),
+				]}
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-scene"
@@ -395,7 +416,8 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const focusLayer = collectElements(
 			tree,
-			(element) => element.props.onLayerPointerDown === focusLayerPointerDownSpy,
+			(element) =>
+				element.props.onLayerPointerDown === focusLayerPointerDownSpy,
 		)[0];
 		expect(focusLayer).toBeTruthy();
 
@@ -562,7 +584,8 @@ describe("InfiniteSkiaCanvas", () => {
 		const tree = getLatestRenderTree();
 		const focusLayerElement = collectElements(
 			tree,
-			(element) => element.props.onLayerPointerDown === focusLayerPointerDownSpy,
+			(element) =>
+				element.props.onLayerPointerDown === focusLayerPointerDownSpy,
 		)[0];
 		expect(focusLayerElement).toBeTruthy();
 		if (!focusLayerElement) return;
@@ -620,17 +643,17 @@ describe("InfiniteSkiaCanvas", () => {
 			cursorByAnchorId.get("rotate-bottom-right"),
 			cursorByAnchorId.get("rotate-bottom-left"),
 		];
-		expect(rotateCursors.every((cursor) => typeof cursor === "string")).toBe(true);
+		expect(rotateCursors.every((cursor) => typeof cursor === "string")).toBe(
+			true,
+		);
 		expect(new Set(rotateCursors).size).toBe(4);
 		expect(
 			rotateCursors.some((cursor) => /grab|hand/i.test(String(cursor))),
 		).toBe(false);
 	});
 
-	it("anchor pointer down 会透传 resize start/drag/end 回调并包含 anchor", async () => {
-		const onNodeResizeStart = vi.fn();
+	it("会把 resize 回调透传到 overlay", async () => {
 		const onNodeResize = vi.fn();
-		const onNodeResizeEnd = vi.fn();
 
 		render(
 			<InfiniteSkiaCanvas
@@ -642,9 +665,7 @@ describe("InfiniteSkiaCanvas", () => {
 				assets={[]}
 				activeNodeId="node-a"
 				focusedNodeId={null}
-				onNodeResizeStart={onNodeResizeStart}
 				onNodeResize={onNodeResize}
-				onNodeResizeEnd={onNodeResizeEnd}
 			/>,
 		);
 
@@ -653,23 +674,8 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const anchorGroups = collectAnchorGroups(tree);
-		expect(anchorGroups).toHaveLength(4);
-
-		act(() => {
-			anchorGroups[0]?.props.onPointerDown?.({
-				button: 0,
-				buttons: 1,
-				clientX: 120,
-				clientY: 80,
-			});
-		});
-
-		expect(onNodeResizeStart).toHaveBeenCalled();
-		expect(onNodeResize).toHaveBeenCalled();
-		expect(onNodeResizeEnd).toHaveBeenCalled();
-		expect(onNodeResizeStart.mock.calls[0]?.[0]?.id).toBe("node-a");
-		expect(onNodeResizeStart.mock.calls[0]?.[1]).toBe("top-left");
+		const overlayElement = getOverlayElement(tree);
+		expect(overlayElement).toBeTruthy();
+		expect(overlayElement?.props.onNodeResize).toBe(onNodeResize);
 	});
-
 });
