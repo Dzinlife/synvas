@@ -2,21 +2,29 @@ import { useDrag } from "@use-gesture/react";
 import type { CanvasNode } from "core/studio/types";
 import { Group, Rect, type SkiaPointerEvent } from "react-skia-lite";
 
-export interface CanvasNodeDragEvent {
-	movementX: number;
-	movementY: number;
+export interface CanvasNodePointerEvent {
 	clientX: number;
 	clientY: number;
+	button: number;
+	buttons: number;
+	shiftKey: boolean;
+	altKey: boolean;
+	metaKey: boolean;
+	ctrlKey: boolean;
+}
+
+export interface CanvasNodeDragEvent extends CanvasNodePointerEvent {
+	movementX: number;
+	movementY: number;
 	first: boolean;
 	last: boolean;
 	tap: boolean;
-	button: number;
-	buttons: number;
 }
 
 interface NodeInteractionWrapperProps {
 	node: CanvasNode;
 	isActive: boolean;
+	isSelected: boolean;
 	isDimmed: boolean;
 	isHovered: boolean;
 	cameraZoom: number;
@@ -27,8 +35,8 @@ interface NodeInteractionWrapperProps {
 	onDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onDrag?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onDragEnd?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
-	onClick?: (node: CanvasNode) => void;
-	onDoubleClick?: (node: CanvasNode) => void;
+	onClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
+	onDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	children: React.ReactNode;
 }
 
@@ -48,16 +56,63 @@ const resolvePointerField = (
 	return Number(value);
 };
 
+const resolveBooleanField = (
+	event: unknown,
+	key: "shiftKey" | "altKey" | "metaKey" | "ctrlKey",
+): boolean => {
+	if (!event || typeof event !== "object") return false;
+	if (!(key in event)) return false;
+	return Boolean((event as Record<string, unknown>)[key]);
+};
+
+const resolveClientField = (
+	event: unknown,
+	key: "clientX" | "clientY" | "x" | "y",
+): number => {
+	if (!event || typeof event !== "object") return 0;
+	if (!(key in event)) return 0;
+	const value = (event as Record<string, unknown>)[key];
+	if (!Number.isFinite(value)) return 0;
+	return Number(value);
+};
+
+export const resolvePointerEventMeta = (
+	event: unknown,
+	fallbackClientX = 0,
+	fallbackClientY = 0,
+): CanvasNodePointerEvent => {
+	return {
+		clientX:
+			resolveClientField(event, "clientX") || resolveClientField(event, "x") || fallbackClientX,
+		clientY:
+			resolveClientField(event, "clientY") || resolveClientField(event, "y") || fallbackClientY,
+		button: resolvePointerField(event, "button"),
+		buttons: resolvePointerField(event, "buttons"),
+		shiftKey: resolveBooleanField(event, "shiftKey"),
+		altKey: resolveBooleanField(event, "altKey"),
+		metaKey: resolveBooleanField(event, "metaKey"),
+		ctrlKey: resolveBooleanField(event, "ctrlKey"),
+	};
+};
+
 export const resolveNodeInteractionBorderStyle = ({
 	isActive,
+	isSelected,
 	isHovered,
 }: {
 	isActive: boolean;
+	isSelected: boolean;
 	isHovered: boolean;
 }): NodeInteractionBorderStyle => {
 	if (isActive) {
 		return {
 			color: "rgba(251,146,60,1)",
+			baseStrokeWidthPx: 2,
+		};
+	}
+	if (isSelected) {
+		return {
+			color: "rgba(56,189,248,1)",
 			baseStrokeWidthPx: 2,
 		};
 	}
@@ -84,6 +139,7 @@ export const resolveNodeInteractionStrokeWidth = (
 export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	node,
 	isActive,
+	isSelected,
 	isDimmed,
 	isHovered,
 	cameraZoom,
@@ -100,6 +156,7 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 }) => {
 	const borderStyle = resolveNodeInteractionBorderStyle({
 		isActive,
+		isSelected,
 		isHovered,
 	});
 	const borderWidth = resolveNodeInteractionStrokeWidth(
@@ -116,15 +173,12 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 			event,
 		}) => {
 			const dragEvent: CanvasNodeDragEvent = {
+				...resolvePointerEventMeta(event, clientX, clientY),
 				movementX: mx,
 				movementY: my,
-				clientX,
-				clientY,
 				first,
 				last,
 				tap,
-				button: resolvePointerField(event, "button"),
-				buttons: resolvePointerField(event, "buttons"),
 			};
 			if (first) {
 				onDragStart?.(node, dragEvent);
@@ -168,11 +222,11 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 			onPointerDown={disabled ? undefined : (event) => {
 				dragHandlers.onPointerDown?.(event);
 			}}
-			onClick={disabled ? undefined : () => {
-				onClick?.(node);
+			onClick={disabled ? undefined : (event) => {
+				onClick?.(node, resolvePointerEventMeta(event));
 			}}
-			onDoubleClick={disabled ? undefined : () => {
-				onDoubleClick?.(node);
+			onDoubleClick={disabled ? undefined : (event) => {
+				onDoubleClick?.(node, resolvePointerEventMeta(event));
 			}}
 		>
 			{children}

@@ -1,6 +1,6 @@
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
 import type { TimelineElement } from "core/element/types";
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import type React from "react";
 import {
 	useCallback,
@@ -62,8 +62,10 @@ import {
 	isCanvasSurfaceTarget,
 	isLayoutEqual,
 	isOverlayWheelTarget,
+	isWorldPointInBounds,
 	isWorldPointInNode,
 	pickLayout,
+	resolveCanvasNodeBounds,
 	type ResolvedCanvasDrawerOptions,
 	resolveDrawerOptions,
 	resolveDroppedFiles,
@@ -73,10 +75,16 @@ import {
 } from "./canvasWorkspaceUtils";
 import type {
 	CanvasNodeDragEvent,
+	CanvasNodePointerEvent,
 	CanvasNodeResizeAnchor,
 	CanvasNodeResizeEvent,
+	CanvasSelectionResizeEvent,
 } from "./InfiniteSkiaCanvas";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
+import {
+	resolveCanvasResizeAnchorAtRectWorldPoint,
+	resolveCanvasResizeAnchorAtWorldPoint,
+} from "./canvasResizeAnchor";
 import { useCanvasCameraController } from "./useCanvasCameraController";
 
 type CanvasContextMenuState =
@@ -98,11 +106,40 @@ type CanvasContextMenuState =
 	  };
 
 interface NodeDragSession {
-	nodeId: string;
-	startNodeX: number;
-	startNodeY: number;
-	before: CanvasNodeLayoutSnapshot;
+	origin: "node" | "selection";
+	anchorNodeId: string | null;
+	pendingSelectedNodeIds: string[];
+	dragNodeIds: string[];
+	snapshots: Record<
+		string,
+		{
+			nodeId: string;
+			startNodeX: number;
+			startNodeY: number;
+			before: CanvasNodeLayoutSnapshot;
+		}
+	>;
+	copyEntries: Array<{ node: CanvasNode; scene?: SceneDocument }>;
+	activated: boolean;
 	moved: boolean;
+	axisLock: "x" | "y" | null;
+	copyMode: boolean;
+}
+
+interface CanvasMarqueeRect {
+	visible: boolean;
+	x1: number;
+	y1: number;
+	x2: number;
+	y2: number;
+}
+
+interface CanvasMarqueeSession {
+	additive: boolean;
+	initialSelectedNodeIds: string[];
+	startLocalX: number;
+	startLocalY: number;
+	activated: boolean;
 }
 
 interface ResolvedCanvasNodeResizeConstraints {
@@ -127,6 +164,88 @@ interface NodeResizeSession {
 	moved: boolean;
 	constraints: ResolvedCanvasNodeResizeConstraints;
 }
+
+interface SelectionResizeSession {
+	anchor: CanvasNodeResizeAnchor;
+	startBoundsLeft: number;
+	startBoundsTop: number;
+	startBoundsWidth: number;
+	startBoundsHeight: number;
+	fixedCornerX: number;
+	fixedCornerY: number;
+	snapshots: Record<
+		string,
+		{
+			nodeId: string;
+			startNodeX: number;
+			startNodeY: number;
+			startNodeWidth: number;
+			startNodeHeight: number;
+			before: CanvasNodeLayoutSnapshot;
+		}
+	>;
+	moved: boolean;
+}
+
+const CANVAS_MARQUEE_ACTIVATION_PX = 3;
+const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
+
+const createCanvasEntityId = (prefix: string): string => {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return `${prefix}-${crypto.randomUUID()}`;
+	}
+	return `${prefix}-${Date.now().toString(36)}-${Math.random()
+		.toString(36)
+		.slice(2, 8)}`;
+};
+
+const cloneTimelineJson = <T,>(value: T): T => {
+	return JSON.parse(JSON.stringify(value)) as T;
+};
+
+const getPrimarySelectedNodeId = (selectedNodeIds: string[]): string | null => {
+	return selectedNodeIds.at(-1) ?? null;
+};
+
+const normalizeSelectedNodeIds = (
+	selectedNodeIds: string[],
+	nodeIdSet: Set<string>,
+): string[] => {
+	const seen = new Set<string>();
+	const result: string[] = [];
+	for (const nodeId of selectedNodeIds) {
+		if (!nodeIdSet.has(nodeId) || seen.has(nodeId)) continue;
+		seen.add(nodeId);
+		result.push(nodeId);
+	}
+	return result;
+};
+
+const toggleSelectedNodeIds = (
+	selectedNodeIds: string[],
+	nodeId: string,
+): string[] => {
+	if (selectedNodeIds.includes(nodeId)) {
+		return selectedNodeIds.filter((selectedId) => selectedId !== nodeId);
+	}
+	return [...selectedNodeIds, nodeId];
+};
+
+const isNodeIntersectRect = (
+	node: CanvasNode,
+	rect: { left: number; right: number; top: number; bottom: number },
+): boolean => {
+	const nodeLeft = Math.min(node.x, node.x + node.width);
+	const nodeRight = Math.max(node.x, node.x + node.width);
+	const nodeTop = Math.min(node.y, node.y + node.height);
+	const nodeBottom = Math.max(node.y, node.y + node.height);
+	return (
+		rect.left < nodeRight &&
+		rect.right > nodeLeft &&
+		rect.top < nodeBottom &&
+		rect.bottom > nodeTop
+	);
+};
 
 const resolvePositiveNumber = (value: unknown): number | null => {
 	if (typeof value !== "number" || !Number.isFinite(value)) return null;
@@ -181,6 +300,12 @@ const CanvasWorkspace = () => {
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
 	const setActiveNode = useProjectStore((state) => state.setActiveNode);
 	const setCanvasCamera = useProjectStore((state) => state.setCanvasCamera);
+	const appendCanvasGraphBatch = useProjectStore(
+		(state) => state.appendCanvasGraphBatch,
+	);
+	const removeCanvasGraphBatch = useProjectStore(
+		(state) => state.removeCanvasGraphBatch,
+	);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 	const runtime = useContext(EditorRuntimeContext);
 	const runtimeManager = useMemo<StudioRuntimeManager | null>(() => {
@@ -203,12 +328,30 @@ const CanvasWorkspace = () => {
 	const [isCameraAnimating, setIsCameraAnimating] = useState(false);
 	const [contextMenuState, setContextMenuState] =
 		useState<CanvasContextMenuState>({ open: false });
+	const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+	const [marqueeRect, setMarqueeRect] = useState<CanvasMarqueeRect>({
+		visible: false,
+		x1: 0,
+		y1: 0,
+		x2: 0,
+		y2: 0,
+	});
 	const containerRef = useRef<HTMLDivElement | null>(null);
+	const marqueeRectRef = useRef<CanvasMarqueeRect>({
+		visible: false,
+		x1: 0,
+		y1: 0,
+		x2: 0,
+		y2: 0,
+	});
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
 	const nodeDragSessionRef = useRef<NodeDragSession | null>(null);
 	const nodeResizeSessionRef = useRef<NodeResizeSession | null>(null);
+	const selectionResizeSessionRef = useRef<SelectionResizeSession | null>(null);
+	const marqueeSessionRef = useRef<CanvasMarqueeSession | null>(null);
 	const suppressNextNodeClickRef = useRef(false);
+	const suppressNextCanvasClickRef = useRef(false);
 	const { getCamera, applyCamera } = useCanvasCameraController({
 		camera,
 		onChange: setCanvasCamera,
@@ -224,6 +367,15 @@ const CanvasWorkspace = () => {
 				return a.createdAt - b.createdAt;
 			});
 	}, [currentProject]);
+	const currentNodeIdSet = useMemo(() => {
+		return new Set(currentProject?.canvas.nodes.map((node) => node.id) ?? []);
+	}, [currentProject]);
+	const normalizedSelectedNodeIds = useMemo(() => {
+		return normalizeSelectedNodeIds(selectedNodeIds, currentNodeIdSet);
+	}, [currentNodeIdSet, selectedNodeIds]);
+	const selectedNodeIdSet = useMemo(() => {
+		return new Set(normalizedSelectedNodeIds);
+	}, [normalizedSelectedNodeIds]);
 
 	const focusedNode = useMemo(() => {
 		if (!focusedNodeId) return null;
@@ -240,6 +392,25 @@ const CanvasWorkspace = () => {
 			null
 		);
 	}, [activeNodeId, currentProject]);
+	const selectedNodes = useMemo(() => {
+		if (!currentProject || normalizedSelectedNodeIds.length === 0) return [];
+		return normalizedSelectedNodeIds
+			.map((nodeId) =>
+				currentProject.canvas.nodes.find((node) => node.id === nodeId) ?? null,
+			)
+			.filter((node): node is CanvasNode => Boolean(node));
+	}, [currentProject, normalizedSelectedNodeIds]);
+	const selectedBounds = useMemo(() => {
+		if (selectedNodes.length <= 1) return null;
+		return resolveCanvasNodeBounds(selectedNodes);
+	}, [selectedNodes]);
+	const isSingleSelection = useMemo(() => {
+		return (
+			Boolean(activeNode) &&
+			(selectedNodes.length === 0 ||
+				(selectedNodes.length === 1 && selectedNodes[0]?.id === activeNode?.id))
+		);
+	}, [activeNode, selectedNodes]);
 
 	const contextMenuSceneOptions = useMemo(() => {
 		if (!currentProject) return [];
@@ -581,6 +752,94 @@ const CanvasWorkspace = () => {
 		},
 		[camera],
 	);
+	const resolveLocalPoint = useCallback((clientX: number, clientY: number) => {
+		const container = containerRef.current;
+		if (!container) return { x: 0, y: 0 };
+		const rect = container.getBoundingClientRect();
+		return {
+			x: clientX - rect.left,
+			y: clientY - rect.top,
+		};
+	}, []);
+	const updateMarqueeRectState = useCallback((nextRect: CanvasMarqueeRect) => {
+		marqueeRectRef.current = nextRect;
+		setMarqueeRect(nextRect);
+	}, []);
+	const clearCanvasMarquee = useCallback(() => {
+		marqueeSessionRef.current = null;
+		updateMarqueeRectState({
+			visible: false,
+			x1: marqueeRectRef.current.x1,
+			y1: marqueeRectRef.current.y1,
+			x2: marqueeRectRef.current.x2,
+			y2: marqueeRectRef.current.y2,
+		});
+	}, [updateMarqueeRectState]);
+	const isResizeAnchorHitAtWorldPoint = useCallback(
+		(worldX: number, worldY: number) => {
+			if (activeNode && !activeNode.locked && isSingleSelection) {
+				const hitAnchor = resolveCanvasResizeAnchorAtWorldPoint({
+					node: activeNode,
+					worldX,
+					worldY,
+					cameraZoom: camera.zoom,
+				});
+				if (hitAnchor) return true;
+			}
+			if (
+				selectedBounds &&
+				selectedNodes.length > 1 &&
+				selectedNodes.some((node) => !node.locked)
+			) {
+				const hitAnchor = resolveCanvasResizeAnchorAtRectWorldPoint({
+					x: selectedBounds.left,
+					y: selectedBounds.top,
+					width: selectedBounds.width,
+					height: selectedBounds.height,
+					worldX,
+					worldY,
+					cameraZoom: camera.zoom,
+				});
+				if (hitAnchor) return true;
+			}
+			return false;
+		},
+		[
+			activeNode,
+			camera.zoom,
+			isSingleSelection,
+			selectedBounds,
+			selectedNodes,
+		],
+	);
+
+	const commitSelectedNodeIds = useCallback(
+		(nextSelectedNodeIds: string[]) => {
+			const latestProject =
+				useProjectStore.getState().currentProject ?? currentProject;
+			const latestNodeIdSet = new Set(
+				latestProject?.canvas.nodes.map((node) => node.id) ?? [],
+			);
+			const normalized = normalizeSelectedNodeIds(
+				nextSelectedNodeIds,
+				latestNodeIdSet,
+			);
+			setSelectedNodeIds(normalized);
+			const nextPrimaryNodeId = getPrimarySelectedNodeId(normalized);
+			if (nextPrimaryNodeId) {
+				const primaryNode =
+					latestProject?.canvas.nodes.find(
+						(node) => node.id === nextPrimaryNodeId,
+					) ??
+					null;
+				if (primaryNode?.type === "scene") {
+					setActiveScene(primaryNode.sceneId);
+				}
+			}
+			setActiveNode(nextPrimaryNodeId);
+		},
+		[currentProject, setActiveNode, setActiveScene],
+	);
 
 	useEffect(() => {
 		const container = containerRef.current;
@@ -599,6 +858,49 @@ const CanvasWorkspace = () => {
 		observer.observe(container);
 		return () => observer.disconnect();
 	}, []);
+
+	useEffect(() => {
+		if (focusedNodeId) {
+			const nextSelected =
+				currentNodeIdSet.has(focusedNodeId) ? [focusedNodeId] : [];
+			if (
+				nextSelected.length !== normalizedSelectedNodeIds.length ||
+				nextSelected[0] !== normalizedSelectedNodeIds[0]
+			) {
+				setSelectedNodeIds(nextSelected);
+			}
+			return;
+		}
+		const filteredSelected = normalizeSelectedNodeIds(
+			selectedNodeIds,
+			currentNodeIdSet,
+		);
+		const primarySelectedNodeId = getPrimarySelectedNodeId(filteredSelected);
+		if (primarySelectedNodeId === activeNodeId) {
+			if (filteredSelected.length !== selectedNodeIds.length) {
+				setSelectedNodeIds(filteredSelected);
+			}
+			return;
+		}
+		if (!activeNodeId || !currentNodeIdSet.has(activeNodeId)) {
+			if (filteredSelected.length > 0) {
+				setSelectedNodeIds([]);
+			}
+			return;
+		}
+		if (
+			filteredSelected.length !== 1 ||
+			filteredSelected[0] !== activeNodeId
+		) {
+			setSelectedNodeIds([activeNodeId]);
+		}
+	}, [
+		activeNodeId,
+		currentNodeIdSet,
+		focusedNodeId,
+		normalizedSelectedNodeIds,
+		selectedNodeIds,
+	]);
 
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -777,12 +1079,68 @@ const CanvasWorkspace = () => {
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
-			setActiveNode(node.id);
-			if (node.type === "scene") {
-				setActiveScene(node.sceneId);
-			}
+			commitSelectedNodeIds([node.id]);
 		},
-		[focusedNodeId, isCanvasInteractionLocked, setActiveNode, setActiveScene],
+		[commitSelectedNodeIds, focusedNodeId, isCanvasInteractionLocked],
+	);
+
+	const handleToggleNodeSelection = useCallback(
+		(node: CanvasNode) => {
+			const canInteractNode =
+				!isCanvasInteractionLocked || node.id === focusedNodeId;
+			if (!canInteractNode) return;
+			commitSelectedNodeIds(
+				toggleSelectedNodeIds(normalizedSelectedNodeIds, node.id),
+			);
+		},
+		[
+			commitSelectedNodeIds,
+			focusedNodeId,
+			isCanvasInteractionLocked,
+			normalizedSelectedNodeIds,
+		],
+	);
+
+	const collectIntersectedNodeIds = useCallback(
+		(rect: CanvasMarqueeRect): string[] => {
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const left = Math.min(rect.x1, rect.x2) / safeZoom - camera.x;
+			const right = Math.max(rect.x1, rect.x2) / safeZoom - camera.x;
+			const top = Math.min(rect.y1, rect.y2) / safeZoom - camera.y;
+			const bottom = Math.max(rect.y1, rect.y2) / safeZoom - camera.y;
+			return sortedNodes
+				.filter((node) =>
+					isNodeIntersectRect(node, {
+						left,
+						right,
+						top,
+						bottom,
+					}),
+				)
+				.map((node) => node.id);
+		},
+		[camera.x, camera.y, camera.zoom, sortedNodes],
+	);
+
+	const applyMarqueeSelection = useCallback(
+		(rect: CanvasMarqueeRect) => {
+			const marqueeSession = marqueeSessionRef.current;
+			if (!marqueeSession) return;
+			const hitNodeIds = collectIntersectedNodeIds(rect);
+			if (marqueeSession.additive) {
+				let nextSelectedNodeIds = [...marqueeSession.initialSelectedNodeIds];
+				for (const nodeId of hitNodeIds) {
+					nextSelectedNodeIds = toggleSelectedNodeIds(
+						nextSelectedNodeIds,
+						nodeId,
+					);
+				}
+				commitSelectedNodeIds(nextSelectedNodeIds);
+				return;
+			}
+			commitSelectedNodeIds(hitNodeIds);
+		},
+		[collectIntersectedNodeIds, commitSelectedNodeIds],
 	);
 
 	const resolveNodeResizeConstraints = useCallback(
@@ -831,6 +1189,66 @@ const CanvasWorkspace = () => {
 		[currentProject],
 	);
 
+	const buildCanvasCopyEntries = useCallback((nodeIds: string[]) => {
+		const latestProject = useProjectStore.getState().currentProject;
+		if (!latestProject || nodeIds.length === 0) return [];
+		const sourceNodes = latestProject.canvas.nodes
+			.filter((node) => nodeIds.includes(node.id))
+			.sort((left, right) => {
+				if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
+				return left.createdAt - right.createdAt;
+			});
+		if (sourceNodes.length === 0) return [];
+		const maxZIndex = latestProject.canvas.nodes.reduce((maxValue, node) => {
+			return Math.max(maxValue, node.zIndex);
+		}, -1);
+		const now = Date.now();
+		return sourceNodes
+			.map((sourceNode, index) => {
+				const createdAt = now + index;
+				const copyName = sourceNode.name.trim()
+					? `${sourceNode.name}副本`
+					: "副本";
+				const baseNode = {
+					...sourceNode,
+					id: createCanvasEntityId("node"),
+					name: copyName,
+					zIndex: maxZIndex + index + 1,
+					createdAt,
+					updatedAt: createdAt,
+				};
+				if (sourceNode.type === "scene") {
+					const sourceScene = latestProject.scenes[sourceNode.sceneId];
+					if (!sourceScene) return null;
+					const sceneId = createCanvasEntityId("scene");
+					const scene: SceneDocument = {
+						...cloneTimelineJson(sourceScene),
+						id: sceneId,
+						name: copyName,
+						createdAt,
+						updatedAt: createdAt,
+					};
+					const node: SceneNode = {
+						...baseNode,
+						type: "scene",
+						sceneId,
+					};
+					return { node, scene };
+				}
+				return {
+					node: baseNode as CanvasNode,
+				};
+			})
+			.filter(
+				(
+					entry,
+				): entry is {
+					node: CanvasNode;
+					scene?: SceneDocument;
+				} => Boolean(entry),
+			);
+	}, []);
+
 	const handleSkiaNodeResizeStart = useCallback(
 		(
 			node: CanvasNode,
@@ -838,16 +1256,18 @@ const CanvasWorkspace = () => {
 			event: CanvasNodeDragEvent,
 		) => {
 			if (event.button !== 0) return;
+			if (normalizedSelectedNodeIds.length > 1) return;
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
+			clearCanvasMarquee();
 			if (node.locked) {
 				handleNodeActivate(node);
 				return;
 			}
 			nodeDragSessionRef.current = null;
 			suppressNextNodeClickRef.current = false;
-			setActiveNode(node.id);
+			commitSelectedNodeIds([node.id]);
 			nodeResizeSessionRef.current = {
 				nodeId: node.id,
 				anchor,
@@ -869,11 +1289,13 @@ const CanvasWorkspace = () => {
 			};
 		},
 		[
+			clearCanvasMarquee,
 			focusedNodeId,
+			commitSelectedNodeIds,
 			handleNodeActivate,
 			isCanvasInteractionLocked,
+			normalizedSelectedNodeIds.length,
 			resolveNodeResizeConstraints,
-			setActiveNode,
 		],
 	);
 
@@ -986,6 +1408,7 @@ const CanvasWorkspace = () => {
 			if (resizeSession.anchor !== anchor) return;
 			if (!resizeSession.moved) return;
 			suppressNextNodeClickRef.current = true;
+			suppressNextCanvasClickRef.current = true;
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			const latestNode = latestProject.canvas.nodes.find(
@@ -1009,112 +1432,555 @@ const CanvasWorkspace = () => {
 		(resizeEvent: CanvasNodeResizeEvent) => {
 			const { phase, node, anchor, event } = resizeEvent;
 			if (phase === "start") {
-				handleSkiaNodeResizeStart(node, anchor, event);
+			handleSkiaNodeResizeStart(node, anchor, event);
+			return;
+		}
+		if (phase === "move") {
+			handleSkiaNodeResizeMove(node, anchor, event);
+			return;
+		}
+		handleSkiaNodeResizeEnd(node, anchor);
+	},
+	[
+		handleSkiaNodeResizeEnd,
+		handleSkiaNodeResizeMove,
+		handleSkiaNodeResizeStart,
+	],
+	);
+
+	const beginCanvasDragSession = useCallback(
+		(input: {
+			origin: "node" | "selection";
+			anchorNodeId: string | null;
+			pendingSelectedNodeIds: string[];
+			copyMode: boolean;
+		}) => {
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return false;
+			const dragNodes = input.pendingSelectedNodeIds
+				.map((nodeId) =>
+					latestProject.canvas.nodes.find((item) => item.id === nodeId) ?? null,
+				)
+				.filter((item): item is CanvasNode => Boolean(item))
+				.filter((item) => !item.locked);
+			if (dragNodes.length === 0) return false;
+			nodeDragSessionRef.current = {
+				origin: input.origin,
+				anchorNodeId: input.anchorNodeId,
+				pendingSelectedNodeIds: input.pendingSelectedNodeIds,
+				dragNodeIds: dragNodes.map((item) => item.id),
+				snapshots: Object.fromEntries(
+					dragNodes.map((dragNode) => [
+						dragNode.id,
+						{
+							nodeId: dragNode.id,
+							startNodeX: dragNode.x,
+							startNodeY: dragNode.y,
+							before: pickLayout(dragNode),
+						},
+					]),
+				),
+				copyEntries: [],
+				activated: false,
+				moved: false,
+				axisLock: null,
+				copyMode: input.copyMode,
+			};
+			return true;
+		},
+		[],
+	);
+
+	const applyCanvasDragEvent = useCallback(
+		(event: CanvasNodeDragEvent) => {
+			const dragSession = nodeDragSessionRef.current;
+			if (!dragSession) return;
+			if (
+				Math.abs(event.movementX) + Math.abs(event.movementY) <
+				CANVAS_MARQUEE_ACTIVATION_PX
+			) {
 				return;
 			}
-			if (phase === "move") {
-				handleSkiaNodeResizeMove(node, anchor, event);
-				return;
+			if (!dragSession.activated) {
+				commitSelectedNodeIds(dragSession.pendingSelectedNodeIds);
+				dragSession.activated = true;
+				if (dragSession.copyMode) {
+					const copyEntries = buildCanvasCopyEntries(dragSession.dragNodeIds);
+					if (copyEntries.length > 0) {
+						appendCanvasGraphBatch(copyEntries);
+						dragSession.copyEntries = copyEntries;
+						for (const entry of copyEntries) {
+							dragSession.snapshots[entry.node.id] = {
+								nodeId: entry.node.id,
+								startNodeX: entry.node.x,
+								startNodeY: entry.node.y,
+								before: pickLayout(entry.node),
+							};
+						}
+					}
+				}
 			}
-			handleSkiaNodeResizeEnd(node, anchor);
+			const targetNodeIds =
+				dragSession.copyEntries.length > 0
+					? dragSession.copyEntries.map((entry) => entry.node.id)
+					: dragSession.dragNodeIds;
+			if (targetNodeIds.length === 0) return;
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			let deltaX = event.movementX / safeZoom;
+			let deltaY = event.movementY / safeZoom;
+			if (
+				dragSession.axisLock === null &&
+				event.shiftKey &&
+				(Math.abs(event.movementX) >= CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX ||
+					Math.abs(event.movementY) >= CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX)
+			) {
+				dragSession.axisLock =
+					Math.abs(event.movementX) >= Math.abs(event.movementY) ? "x" : "y";
+			}
+			if (dragSession.axisLock === "x") {
+				deltaY = 0;
+			}
+			if (dragSession.axisLock === "y") {
+				deltaX = 0;
+			}
+			let didMove = false;
+			for (const targetNodeId of targetNodeIds) {
+				const snapshot = dragSession.snapshots[targetNodeId];
+				if (!snapshot) continue;
+				const nextX = Math.round(snapshot.startNodeX + deltaX);
+				const nextY = Math.round(snapshot.startNodeY + deltaY);
+				if (nextX !== snapshot.startNodeX || nextY !== snapshot.startNodeY) {
+					didMove = true;
+				}
+				updateCanvasNodeLayout(targetNodeId, {
+					x: nextX,
+					y: nextY,
+				});
+			}
+			dragSession.moved = dragSession.moved || didMove;
 		},
 		[
-			handleSkiaNodeResizeEnd,
-			handleSkiaNodeResizeMove,
-			handleSkiaNodeResizeStart,
+			appendCanvasGraphBatch,
+			buildCanvasCopyEntries,
+			camera.zoom,
+			commitSelectedNodeIds,
+			updateCanvasNodeLayout,
 		],
 	);
 
+	const finishCanvasDragSession = useCallback(() => {
+		const dragSession = nodeDragSessionRef.current;
+		nodeDragSessionRef.current = null;
+		if (!dragSession) return;
+		if (!dragSession.activated || !dragSession.moved) {
+			if (dragSession.copyEntries.length > 0) {
+				removeCanvasGraphBatch(
+					dragSession.copyEntries.map((entry) => entry.node.id),
+				);
+			}
+			return;
+		}
+		suppressNextNodeClickRef.current = true;
+		suppressNextCanvasClickRef.current = true;
+		const latestProject = useProjectStore.getState().currentProject;
+		if (!latestProject) return;
+		if (dragSession.copyEntries.length > 0) {
+			const nextEntries = dragSession.copyEntries
+				.map((entry) => {
+					const latestNode =
+						latestProject.canvas.nodes.find((item) => item.id === entry.node.id) ??
+						null;
+					if (!latestNode) return null;
+					return {
+						node: latestNode,
+						scene:
+							latestNode.type === "scene"
+								? (latestProject.scenes[latestNode.sceneId] ?? entry.scene)
+								: undefined,
+					};
+				})
+				.filter(
+					(
+						entry,
+					): entry is {
+						node: CanvasNode;
+						scene?: SceneDocument;
+					} => Boolean(entry),
+				);
+			if (nextEntries.length === 0) return;
+			pushHistory({
+				kind: "canvas.node-create.batch",
+				entries: nextEntries,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+			commitSelectedNodeIds(nextEntries.map((entry) => entry.node.id));
+			return;
+		}
+		const nextEntries = dragSession.dragNodeIds
+			.map((nodeId) => {
+				const snapshot = dragSession.snapshots[nodeId];
+				const latestNode =
+					latestProject.canvas.nodes.find((item) => item.id === nodeId) ?? null;
+				if (!snapshot || !latestNode) return null;
+				const after = pickLayout(latestNode);
+				if (isLayoutEqual(snapshot.before, after)) return null;
+				return {
+					nodeId,
+					before: snapshot.before,
+					after,
+				};
+			})
+			.filter(
+				(
+					entry,
+				): entry is {
+					nodeId: string;
+					before: CanvasNodeLayoutSnapshot;
+					after: CanvasNodeLayoutSnapshot;
+				} => Boolean(entry),
+			);
+		if (nextEntries.length === 0) return;
+		if (nextEntries.length === 1) {
+			const entry = nextEntries[0];
+			pushHistory({
+				kind: "canvas.node-layout",
+				nodeId: entry.nodeId,
+				before: entry.before,
+				after: entry.after,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+			return;
+		}
+		pushHistory({
+			kind: "canvas.node-layout.batch",
+			entries: nextEntries,
+			focusNodeId: latestProject.ui.focusedNodeId,
+		});
+	}, [commitSelectedNodeIds, pushHistory, removeCanvasGraphBatch]);
+
 	const handleSkiaNodeDragStart = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
-			if (nodeResizeSessionRef.current) return;
+			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
+				return;
+			}
 			if (event.button !== 0) return;
+			clearCanvasMarquee();
 			suppressNextNodeClickRef.current = false;
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
 			if (node.locked) {
-				handleNodeActivate(node);
+				if (!event.shiftKey) {
+					handleNodeActivate(node);
+				}
 				return;
 			}
-			setActiveNode(node.id);
-			nodeDragSessionRef.current = {
-				nodeId: node.id,
-				startNodeX: node.x,
-				startNodeY: node.y,
-				before: pickLayout(node),
-				moved: false,
-			};
+			const isNodeSelected = normalizedSelectedNodeIds.includes(node.id);
+			const pendingSelectedNodeIds = isNodeSelected
+				? normalizedSelectedNodeIds
+				: event.shiftKey
+					? [...normalizedSelectedNodeIds, node.id]
+					: [node.id];
+			beginCanvasDragSession({
+				origin: "node",
+				anchorNodeId: node.id,
+				pendingSelectedNodeIds,
+				copyMode: event.altKey,
+			});
 		},
 		[
+			beginCanvasDragSession,
+			clearCanvasMarquee,
 			focusedNodeId,
 			handleNodeActivate,
 			isCanvasInteractionLocked,
-			setActiveNode,
+			normalizedSelectedNodeIds,
 		],
 	);
 
 	const handleSkiaNodeDrag = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
-			if (nodeResizeSessionRef.current) return;
+			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
+				return;
+			}
 			const dragSession = nodeDragSessionRef.current;
 			if (!dragSession) return;
-			if (dragSession.nodeId !== node.id) return;
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-			const nextX = Math.round(
-				dragSession.startNodeX + event.movementX / safeZoom,
-			);
-			const nextY = Math.round(
-				dragSession.startNodeY + event.movementY / safeZoom,
-			);
-			dragSession.moved =
-				dragSession.moved ||
-				Math.abs(event.movementX) + Math.abs(event.movementY) > 2;
-			updateCanvasNodeLayout(dragSession.nodeId, {
-				x: nextX,
-				y: nextY,
-			});
+			if (dragSession.origin !== "node" || dragSession.anchorNodeId !== node.id) {
+				return;
+			}
+			applyCanvasDragEvent(event);
 		},
-		[camera.zoom, updateCanvasNodeLayout],
+		[applyCanvasDragEvent],
 	);
 
 	const handleSkiaNodeDragEnd = useCallback(
 		(node: CanvasNode) => {
-			if (nodeResizeSessionRef.current) return;
+			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
+				return;
+			}
 			const dragSession = nodeDragSessionRef.current;
-			nodeDragSessionRef.current = null;
 			if (!dragSession) return;
-			if (dragSession.nodeId !== node.id) return;
-			if (!dragSession.moved) return;
-			suppressNextNodeClickRef.current = true;
-			const latestProject = useProjectStore.getState().currentProject;
-			if (!latestProject) return;
-			const latestNode = latestProject.canvas.nodes.find(
-				(item) => item.id === dragSession.nodeId,
-			);
-			if (!latestNode) return;
-			const after = pickLayout(latestNode);
-			if (isLayoutEqual(dragSession.before, after)) return;
-			pushHistory({
-				kind: "canvas.node-layout",
-				nodeId: latestNode.id,
-				before: dragSession.before,
-				after,
-				focusNodeId: latestProject.ui.focusedNodeId,
+			if (dragSession.origin !== "node" || dragSession.anchorNodeId !== node.id) {
+				return;
+			}
+			finishCanvasDragSession();
+		},
+		[finishCanvasDragSession],
+	);
+
+	const handleSelectionBoundsDragStart = useCallback(
+		(event: CanvasNodeDragEvent) => {
+			if (
+				nodeResizeSessionRef.current ||
+				selectionResizeSessionRef.current ||
+				event.button !== 0 ||
+				isCanvasInteractionLocked ||
+				normalizedSelectedNodeIds.length <= 1
+			) {
+				return;
+			}
+			clearCanvasMarquee();
+			suppressNextCanvasClickRef.current = true;
+			suppressNextNodeClickRef.current = false;
+			beginCanvasDragSession({
+				origin: "selection",
+				anchorNodeId: null,
+				pendingSelectedNodeIds: normalizedSelectedNodeIds,
+				copyMode: event.altKey,
 			});
 		},
-		[pushHistory],
+		[
+			beginCanvasDragSession,
+			clearCanvasMarquee,
+			isCanvasInteractionLocked,
+			normalizedSelectedNodeIds,
+		],
+	);
+
+	const handleSelectionBoundsDrag = useCallback(
+		(event: CanvasNodeDragEvent) => {
+			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
+				return;
+			}
+			const dragSession = nodeDragSessionRef.current;
+			if (!dragSession || dragSession.origin !== "selection") return;
+			applyCanvasDragEvent(event);
+		},
+		[applyCanvasDragEvent],
+	);
+
+	const handleSelectionBoundsDragEnd = useCallback(() => {
+		if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) return;
+		const dragSession = nodeDragSessionRef.current;
+		if (!dragSession || dragSession.origin !== "selection") return;
+		finishCanvasDragSession();
+	}, [finishCanvasDragSession]);
+
+	const handleSelectionResizeStart = useCallback(
+		(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
+			if (nodeResizeSessionRef.current || nodeDragSessionRef.current) return;
+			if (event.button !== 0) return;
+			if (isCanvasInteractionLocked) return;
+			if (!selectedBounds || selectedNodes.length <= 1) return;
+			clearCanvasMarquee();
+			const resizeNodes = selectedNodes.filter((node) => !node.locked);
+			if (resizeNodes.length === 0) return;
+			suppressNextCanvasClickRef.current = true;
+			suppressNextNodeClickRef.current = false;
+			selectionResizeSessionRef.current = {
+				anchor,
+				startBoundsLeft: selectedBounds.left,
+				startBoundsTop: selectedBounds.top,
+				startBoundsWidth: selectedBounds.width,
+				startBoundsHeight: selectedBounds.height,
+				fixedCornerX:
+					anchor === "top-right" || anchor === "bottom-right"
+						? selectedBounds.left
+						: selectedBounds.right,
+				fixedCornerY:
+					anchor === "bottom-left" || anchor === "bottom-right"
+						? selectedBounds.top
+						: selectedBounds.bottom,
+				snapshots: Object.fromEntries(
+					resizeNodes.map((node) => [
+						node.id,
+						{
+							nodeId: node.id,
+							startNodeX: node.x,
+							startNodeY: node.y,
+							startNodeWidth: node.width,
+							startNodeHeight: node.height,
+							before: pickLayout(node),
+						},
+					]),
+				),
+				moved: false,
+			};
+		},
+		[clearCanvasMarquee, isCanvasInteractionLocked, selectedBounds, selectedNodes],
+	);
+
+	const handleSelectionResizeMove = useCallback(
+		(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
+			const resizeSession = selectionResizeSessionRef.current;
+			if (!resizeSession) return;
+			if (resizeSession.anchor !== anchor) return;
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const deltaX = event.movementX / safeZoom;
+			const deltaY = event.movementY / safeZoom;
+			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
+			const isRightAnchor = anchor === "top-right" || anchor === "bottom-right";
+			const isBottomAnchor =
+				anchor === "bottom-left" || anchor === "bottom-right";
+			const globalMinSize = 32 / safeZoom;
+			const nextWidth = clampSize(
+				isRightAnchor
+					? resizeSession.startBoundsWidth + deltaX
+					: resizeSession.startBoundsWidth - deltaX,
+				globalMinSize,
+			);
+			const nextHeight = clampSize(
+				isBottomAnchor
+					? resizeSession.startBoundsHeight + deltaY
+					: resizeSession.startBoundsHeight - deltaY,
+				globalMinSize,
+			);
+			const nextLeft = isRightAnchor
+				? resizeSession.fixedCornerX
+				: resizeSession.fixedCornerX - nextWidth;
+			const nextTop = isBottomAnchor
+				? resizeSession.fixedCornerY
+				: resizeSession.fixedCornerY - nextHeight;
+			const safeStartWidth = Math.max(
+				resizeSession.startBoundsWidth,
+				CAMERA_ZOOM_EPSILON,
+			);
+			const safeStartHeight = Math.max(
+				resizeSession.startBoundsHeight,
+				CAMERA_ZOOM_EPSILON,
+			);
+			const scaleX = nextWidth / safeStartWidth;
+			const scaleY = nextHeight / safeStartHeight;
+			let didMove = false;
+			for (const snapshot of Object.values(resizeSession.snapshots)) {
+				const nextNodeX =
+					nextLeft +
+					(snapshot.startNodeX - resizeSession.startBoundsLeft) * scaleX;
+				const nextNodeY =
+					nextTop +
+					(snapshot.startNodeY - resizeSession.startBoundsTop) * scaleY;
+				const nextNodeWidth = Math.max(
+					CAMERA_ZOOM_EPSILON,
+					snapshot.startNodeWidth * scaleX,
+				);
+				const nextNodeHeight = Math.max(
+					CAMERA_ZOOM_EPSILON,
+					snapshot.startNodeHeight * scaleY,
+				);
+				if (
+					Math.abs(nextNodeX - snapshot.startNodeX) > 1e-6 ||
+					Math.abs(nextNodeY - snapshot.startNodeY) > 1e-6 ||
+					Math.abs(nextNodeWidth - snapshot.startNodeWidth) > 1e-6 ||
+					Math.abs(nextNodeHeight - snapshot.startNodeHeight) > 1e-6
+				) {
+					didMove = true;
+				}
+				updateCanvasNodeLayout(snapshot.nodeId, {
+					x: nextNodeX,
+					y: nextNodeY,
+					width: nextNodeWidth,
+					height: nextNodeHeight,
+				});
+			}
+			resizeSession.moved = resizeSession.moved || didMove;
+		},
+		[camera.zoom, updateCanvasNodeLayout],
+	);
+
+	const handleSelectionResizeEnd = useCallback(() => {
+		const resizeSession = selectionResizeSessionRef.current;
+		selectionResizeSessionRef.current = null;
+		if (!resizeSession) return;
+		suppressNextCanvasClickRef.current = true;
+		suppressNextNodeClickRef.current = true;
+		if (!resizeSession.moved) return;
+		const latestProject = useProjectStore.getState().currentProject;
+		if (!latestProject) return;
+		const nextEntries = Object.keys(resizeSession.snapshots)
+			.map((nodeId) => {
+				const snapshot = resizeSession.snapshots[nodeId];
+				const latestNode =
+					latestProject.canvas.nodes.find((item) => item.id === nodeId) ?? null;
+				if (!snapshot || !latestNode) return null;
+				const after = pickLayout(latestNode);
+				if (isLayoutEqual(snapshot.before, after)) return null;
+				return {
+					nodeId,
+					before: snapshot.before,
+					after,
+				};
+			})
+			.filter(
+				(
+					entry,
+				): entry is {
+					nodeId: string;
+					before: CanvasNodeLayoutSnapshot;
+					after: CanvasNodeLayoutSnapshot;
+				} => Boolean(entry),
+			);
+		if (nextEntries.length === 0) return;
+		if (nextEntries.length === 1) {
+			const entry = nextEntries[0];
+			pushHistory({
+				kind: "canvas.node-layout",
+				nodeId: entry.nodeId,
+				before: entry.before,
+				after: entry.after,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+			return;
+		}
+		pushHistory({
+			kind: "canvas.node-layout.batch",
+			entries: nextEntries,
+			focusNodeId: latestProject.ui.focusedNodeId,
+		});
+	}, [pushHistory]);
+
+	const handleSelectionResize = useCallback(
+		(resizeEvent: CanvasSelectionResizeEvent) => {
+			const { phase, anchor, event } = resizeEvent;
+			if (phase === "start") {
+				handleSelectionResizeStart(anchor, event);
+				return;
+			}
+			if (phase === "move") {
+				handleSelectionResizeMove(anchor, event);
+				return;
+			}
+			handleSelectionResizeEnd();
+		},
+		[
+			handleSelectionResizeEnd,
+			handleSelectionResizeMove,
+			handleSelectionResizeStart,
+		],
 	);
 
 	const handleSkiaNodeClick = useCallback(
-		(node: CanvasNode) => {
+		(node: CanvasNode, event: CanvasNodePointerEvent) => {
 			if (suppressNextNodeClickRef.current) {
 				suppressNextNodeClickRef.current = false;
 				return;
 			}
+			if (event.shiftKey) {
+				handleToggleNodeSelection(node);
+				return;
+			}
 			handleNodeActivate(node);
 		},
-		[handleNodeActivate],
+		[handleNodeActivate, handleToggleNodeSelection],
 	);
 
 	const handleSkiaNodeDoubleClick = useCallback(
@@ -1122,6 +1988,7 @@ const CanvasWorkspace = () => {
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
+			commitSelectedNodeIds([node.id]);
 			if (isCanvasNodeFocusable(node, getCanvasNodeDefinition)) {
 				setFocusedNode(node.id);
 				return;
@@ -1149,6 +2016,7 @@ const CanvasWorkspace = () => {
 		[
 			applyCamera,
 			cameraSafeInsets,
+			commitSelectedNodeIds,
 			focusedNodeId,
 			getCamera,
 			isCanvasInteractionLocked,
@@ -1232,25 +2100,148 @@ const CanvasWorkspace = () => {
 		],
 	);
 
+	const finishCanvasMarquee = useCallback(() => {
+		const marqueeSession = marqueeSessionRef.current;
+		if (!marqueeSession) return;
+		marqueeSessionRef.current = null;
+		if (!marqueeSession.activated) {
+			updateMarqueeRectState({
+				visible: false,
+				x1: marqueeRectRef.current.x1,
+				y1: marqueeRectRef.current.y1,
+				x2: marqueeRectRef.current.x2,
+				y2: marqueeRectRef.current.y2,
+			});
+			return;
+		}
+		suppressNextCanvasClickRef.current = true;
+		suppressNextNodeClickRef.current = true;
+		applyMarqueeSelection(marqueeRectRef.current);
+		updateMarqueeRectState({
+			visible: false,
+			x1: marqueeRectRef.current.x1,
+			y1: marqueeRectRef.current.y1,
+			x2: marqueeRectRef.current.x2,
+			y2: marqueeRectRef.current.y2,
+		});
+	}, [applyMarqueeSelection, updateMarqueeRectState]);
+
+	const handleCanvasMouseDown = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			if (event.button !== 0) return;
+			if (!isCanvasSurfaceTarget(event.target)) return;
+			if (isOverlayWheelTarget(event.target)) return;
+			if (isCanvasInteractionLocked) return;
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) return;
+			const node = getTopHitNode(world.x, world.y);
+			if (node) return;
+			if (
+				selectedBounds &&
+				normalizedSelectedNodeIds.length > 1 &&
+				isWorldPointInBounds(selectedBounds, world.x, world.y)
+			) {
+				return;
+			}
+			const local = resolveLocalPoint(event.clientX, event.clientY);
+			marqueeSessionRef.current = {
+				additive: event.shiftKey,
+				initialSelectedNodeIds: normalizedSelectedNodeIds,
+				startLocalX: local.x,
+				startLocalY: local.y,
+				activated: false,
+			};
+			updateMarqueeRectState({
+				visible: false,
+				x1: local.x,
+				y1: local.y,
+				x2: local.x,
+				y2: local.y,
+			});
+		},
+		[
+			getTopHitNode,
+			isResizeAnchorHitAtWorldPoint,
+			isCanvasInteractionLocked,
+			normalizedSelectedNodeIds,
+			resolveLocalPoint,
+			resolveWorldPoint,
+			selectedBounds,
+			updateMarqueeRectState,
+		],
+	);
+
+	const handleCanvasMouseMove = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			const marqueeSession = marqueeSessionRef.current;
+			if (!marqueeSession) return;
+			const local = resolveLocalPoint(event.clientX, event.clientY);
+			const deltaX = local.x - marqueeSession.startLocalX;
+			const deltaY = local.y - marqueeSession.startLocalY;
+			const hasActivated =
+				marqueeSession.activated ||
+				Math.abs(deltaX) >= CANVAS_MARQUEE_ACTIVATION_PX ||
+				Math.abs(deltaY) >= CANVAS_MARQUEE_ACTIVATION_PX;
+			marqueeSession.activated = hasActivated;
+			const nextRect: CanvasMarqueeRect = {
+				visible: hasActivated,
+				x1: marqueeSession.startLocalX,
+				y1: marqueeSession.startLocalY,
+				x2: local.x,
+				y2: local.y,
+			};
+			updateMarqueeRectState(nextRect);
+			if (!hasActivated) return;
+			applyMarqueeSelection(nextRect);
+		},
+		[applyMarqueeSelection, resolveLocalPoint, updateMarqueeRectState],
+	);
+
+	useEffect(() => {
+		const handleWindowMouseUp = () => {
+			finishCanvasMarquee();
+		};
+		window.addEventListener("mouseup", handleWindowMouseUp);
+		return () => {
+			window.removeEventListener("mouseup", handleWindowMouseUp);
+		};
+	}, [finishCanvasMarquee]);
+
 	const handleCanvasClick = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
 			if (suppressNextNodeClickRef.current) {
 				suppressNextNodeClickRef.current = false;
 				return;
 			}
+			if (suppressNextCanvasClickRef.current) {
+				suppressNextCanvasClickRef.current = false;
+				return;
+			}
 			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
 			if (isCanvasInteractionLocked) return;
+			if (event.shiftKey) return;
 			const world = resolveWorldPoint(event.clientX, event.clientY);
+			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) return;
 			const node = getTopHitNode(world.x, world.y);
 			if (node) return;
-			setActiveNode(null);
+			if (
+				selectedBounds &&
+				normalizedSelectedNodeIds.length > 1 &&
+				isWorldPointInBounds(selectedBounds, world.x, world.y)
+			) {
+				return;
+			}
+			commitSelectedNodeIds([]);
 		},
 		[
+			commitSelectedNodeIds,
 			getTopHitNode,
+			isResizeAnchorHitAtWorldPoint,
 			isCanvasInteractionLocked,
+			normalizedSelectedNodeIds.length,
 			resolveWorldPoint,
-			setActiveNode,
+			selectedBounds,
 		],
 	);
 
@@ -1453,6 +2444,8 @@ const CanvasWorkspace = () => {
 			role="application"
 			className="relative h-full w-full overflow-hidden"
 			onMouseOverCapture={handleEditorMouseOverCapture}
+			onMouseDown={handleCanvasMouseDown}
+			onMouseMove={handleCanvasMouseMove}
 			onClick={handleCanvasClick}
 			onContextMenu={handleCanvasContextMenu}
 			onDragOver={(event) => {
@@ -1469,15 +2462,32 @@ const CanvasWorkspace = () => {
 				scenes={currentProject.scenes}
 				assets={currentProject.assets}
 				activeNodeId={activeNodeId}
+				selectedNodeIds={normalizedSelectedNodeIds}
 				focusedNodeId={focusedNodeId}
 				suspendHover={isCameraAnimating}
 				onNodeDragStart={handleSkiaNodeDragStart}
 				onNodeDrag={handleSkiaNodeDrag}
 				onNodeDragEnd={handleSkiaNodeDragEnd}
 				onNodeResize={handleSkiaNodeResize}
+				onSelectionDragStart={handleSelectionBoundsDragStart}
+				onSelectionDrag={handleSelectionBoundsDrag}
+				onSelectionDragEnd={handleSelectionBoundsDragEnd}
+				onSelectionResize={handleSelectionResize}
 				onNodeClick={handleSkiaNodeClick}
 				onNodeDoubleClick={handleSkiaNodeDoubleClick}
 			/>
+			{marqueeRect.visible && (
+				<div
+					data-testid="canvas-selection-rect"
+					className="pointer-events-none absolute z-20 border border-sky-300/70 bg-sky-400/10"
+					style={{
+						left: Math.min(marqueeRect.x1, marqueeRect.x2),
+						top: Math.min(marqueeRect.y1, marqueeRect.y2),
+						width: Math.abs(marqueeRect.x2 - marqueeRect.x1),
+						height: Math.abs(marqueeRect.y2 - marqueeRect.y1),
+					}}
+				/>
+			)}
 
 			<CanvasWorkspaceOverlay
 				toolbarLeftOffset={toolbarLeftOffset}

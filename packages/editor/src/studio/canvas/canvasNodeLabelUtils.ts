@@ -25,6 +25,15 @@ export interface CanvasViewportRect {
 	height: number;
 }
 
+export interface CanvasWorldRect {
+	left: number;
+	top: number;
+	right: number;
+	bottom: number;
+	width: number;
+	height: number;
+}
+
 export interface CanvasNodeLabelLayoutInput {
 	frame: CanvasScreenRect;
 	badgeHeight: number;
@@ -53,19 +62,15 @@ export const resolveCanvasViewportRect = (
 	};
 };
 
-export const resolveCanvasNodeScreenFrame = (
-	node: CanvasNode,
+export const resolveCanvasWorldRectScreenFrame = (
+	rect: CanvasWorldRect,
 	camera: CanvasCameraState,
 ): CanvasScreenRect => {
 	const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-	const nodeLeft = Math.min(node.x, node.x + node.width);
-	const nodeRight = Math.max(node.x, node.x + node.width);
-	const nodeTop = Math.min(node.y, node.y + node.height);
-	const nodeBottom = Math.max(node.y, node.y + node.height);
-	const x = (nodeLeft + camera.x) * safeZoom;
-	const y = (nodeTop + camera.y) * safeZoom;
-	const width = Math.max(1, (nodeRight - nodeLeft) * safeZoom);
-	const height = Math.max(1, (nodeBottom - nodeTop) * safeZoom);
+	const x = (rect.left + camera.x) * safeZoom;
+	const y = (rect.top + camera.y) * safeZoom;
+	const width = Math.max(1, rect.width * safeZoom);
+	const height = Math.max(1, rect.height * safeZoom);
 	return {
 		x,
 		y,
@@ -74,6 +79,27 @@ export const resolveCanvasNodeScreenFrame = (
 		right: x + width,
 		bottom: y + height,
 	};
+};
+
+export const resolveCanvasNodeScreenFrame = (
+	node: CanvasNode,
+	camera: CanvasCameraState,
+): CanvasScreenRect => {
+	const nodeLeft = Math.min(node.x, node.x + node.width);
+	const nodeRight = Math.max(node.x, node.x + node.width);
+	const nodeTop = Math.min(node.y, node.y + node.height);
+	const nodeBottom = Math.max(node.y, node.y + node.height);
+	return resolveCanvasWorldRectScreenFrame(
+		{
+			left: nodeLeft,
+			top: nodeTop,
+			right: nodeRight,
+			bottom: nodeBottom,
+			width: Math.max(1, nodeRight - nodeLeft),
+			height: Math.max(1, nodeBottom - nodeTop),
+		},
+		camera,
+	);
 };
 
 export const isCanvasScreenRectVisible = (

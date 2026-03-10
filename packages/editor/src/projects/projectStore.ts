@@ -135,6 +135,10 @@ interface ProjectStoreState {
 	flushFocusedSceneDraft: () => void;
 	removeCanvasNodeForHistory: (nodeId: string) => void;
 	restoreCanvasNodeForHistory: (node: CanvasNode) => void;
+	appendCanvasGraphBatch: (
+		entries: Array<{ node: CanvasNode; scene?: SceneDocument }>,
+	) => void;
+	removeCanvasGraphBatch: (nodeIds: string[]) => void;
 	removeSceneGraphForHistory: (sceneId: string, nodeId: string) => void;
 	restoreSceneGraphForHistory: (scene: SceneDocument, node: SceneNode) => void;
 }
@@ -947,6 +951,98 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			return {
 				currentProject: nextProject,
+			};
+		});
+	},
+	appendCanvasGraphBatch: (entries) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			if (entries.length === 0) return state;
+			const currentProject = state.currentProject;
+			const nodeIdSet = new Set(currentProject.canvas.nodes.map((node) => node.id));
+			const nextScenes = { ...currentProject.scenes };
+			const nextNodes = [...currentProject.canvas.nodes];
+			let didAppend = false;
+
+			for (const entry of entries) {
+				if (nodeIdSet.has(entry.node.id)) continue;
+				if (entry.node.type === "scene" && entry.scene) {
+					nextScenes[entry.scene.id] = entry.scene;
+				}
+				nextNodes.push(entry.node);
+				nodeIdSet.add(entry.node.id);
+				didAppend = true;
+			}
+
+			if (!didAppend) return state;
+			const nextProject = withProjectRevision({
+				...currentProject,
+				scenes: nextScenes,
+				canvas: {
+					nodes: nextNodes,
+				},
+			});
+			return {
+				currentProject: nextProject,
+			};
+		});
+	},
+	removeCanvasGraphBatch: (nodeIds) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			if (nodeIds.length === 0) return state;
+			const currentProject = state.currentProject;
+			const nodeIdSet = new Set(nodeIds);
+			const removedNodes = currentProject.canvas.nodes.filter((node) =>
+				nodeIdSet.has(node.id),
+			);
+			if (removedNodes.length === 0) return state;
+			const removedSceneIdSet = new Set(
+				removedNodes
+					.filter((node): node is SceneNode => node.type === "scene")
+					.map((node) => node.sceneId),
+			);
+			const nextScenes = { ...currentProject.scenes };
+			for (const sceneId of removedSceneIdSet) {
+				delete nextScenes[sceneId];
+			}
+			const nextNodes = currentProject.canvas.nodes.filter(
+				(node) => !nodeIdSet.has(node.id),
+			);
+			const fallbackSceneId = Object.keys(nextScenes)[0] ?? null;
+			const activeSceneRemoved =
+				currentProject.ui.activeSceneId !== null &&
+				removedSceneIdSet.has(currentProject.ui.activeSceneId);
+			const { ...nextMutationOpIds } = state.sceneTimelineMutationOpIds;
+			for (const sceneId of removedSceneIdSet) {
+				delete nextMutationOpIds[sceneId];
+			}
+			const nextProject = withProjectRevision({
+				...currentProject,
+				scenes: nextScenes,
+				canvas: {
+					nodes: nextNodes,
+				},
+				ui: {
+					...currentProject.ui,
+					activeSceneId: activeSceneRemoved
+						? fallbackSceneId
+						: currentProject.ui.activeSceneId,
+					focusedNodeId:
+						currentProject.ui.focusedNodeId &&
+						nodeIdSet.has(currentProject.ui.focusedNodeId)
+							? null
+							: currentProject.ui.focusedNodeId,
+					activeNodeId:
+						currentProject.ui.activeNodeId &&
+						nodeIdSet.has(currentProject.ui.activeNodeId)
+							? null
+							: currentProject.ui.activeNodeId,
+				},
+			});
+			return {
+				currentProject: nextProject,
+				sceneTimelineMutationOpIds: nextMutationOpIds,
 			};
 		});
 	},

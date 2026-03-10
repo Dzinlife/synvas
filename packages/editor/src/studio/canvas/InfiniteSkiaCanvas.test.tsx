@@ -336,6 +336,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
 			/>,
 		);
@@ -365,6 +366,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
 			/>,
 		);
@@ -409,6 +411,58 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(overlayProps?.hoverNode?.id).toBe("node-b");
 	});
 
+	it("多选状态会透传到 wrapper 与 overlay", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[
+					createVideoNode("node-a", 0),
+					createVideoNode("node-b", 1),
+					createVideoNode("node-c", 2),
+				]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-b"
+				selectedNodeIds={["node-a", "node-b"]}
+				focusedNodeId={null}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const wrappers = collectElements(
+			tree,
+			(element) => element.type === NodeInteractionWrapper,
+		);
+		const selectedById = Object.fromEntries(
+			wrappers.map((wrapper) => {
+				const props = getElementProps<{
+					node?: { id: string };
+					isSelected?: boolean;
+				}>(wrapper);
+				return [props?.node?.id ?? "", props?.isSelected ?? false];
+			}),
+		);
+		expect(selectedById).toMatchObject({
+			"node-a": true,
+			"node-b": true,
+			"node-c": false,
+		});
+
+		const overlayProps = getElementProps<{
+			selectedNodes?: Array<{ id: string }>;
+		}>(getOverlayElement(tree));
+		expect(overlayProps?.selectedNodes?.map((node) => node.id)).toEqual([
+			"node-a",
+			"node-b",
+		]);
+	});
+
 	it("locked active 节点不渲染 resize anchor", async () => {
 		render(
 			<InfiniteSkiaCanvas
@@ -419,6 +473,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
 			/>,
 		);
@@ -446,6 +501,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
 				focusedNodeId="node-a"
 			/>,
 		);
@@ -469,6 +525,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
 			/>,
 		);
@@ -503,6 +560,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-scene"
+				selectedNodeIds={["node-scene"]}
 				focusedNodeId="node-scene"
 			/>,
 		);
@@ -687,6 +745,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-scene"
+				selectedNodeIds={["node-scene"]}
 				focusedNodeId="node-scene"
 			/>,
 		);
@@ -748,6 +807,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-scene"
+				selectedNodeIds={["node-scene"]}
 				focusedNodeId="node-scene"
 			/>,
 		);
@@ -774,6 +834,7 @@ describe("InfiniteSkiaCanvas", () => {
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
 				onNodeResize={onNodeResize}
 			/>,

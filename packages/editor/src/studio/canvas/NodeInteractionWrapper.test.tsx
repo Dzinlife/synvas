@@ -11,9 +11,56 @@ const { mockDragPointerDown } = vi.hoisted(() => ({
 }));
 
 vi.mock("@use-gesture/react", () => ({
-	useDrag: () => {
+	useDrag: (handler: (state: Record<string, unknown>) => void) => {
 		return () => ({
-			onPointerDown: mockDragPointerDown,
+			onPointerDown: (event: Record<string, unknown>) => {
+				mockDragPointerDown(event);
+				const clientX = Number(event.clientX ?? 0);
+				const clientY = Number(event.clientY ?? 0);
+				const baseEvent = {
+					clientX,
+					clientY,
+					button: Number(event.button ?? 0),
+					buttons: Number(event.buttons ?? 1),
+					shiftKey: Boolean(event.shiftKey),
+					altKey: Boolean(event.altKey),
+					metaKey: Boolean(event.metaKey),
+					ctrlKey: Boolean(event.ctrlKey),
+				};
+				handler({
+					first: true,
+					last: false,
+					tap: false,
+					movement: [0, 0],
+					xy: [clientX, clientY],
+					event: baseEvent,
+				});
+				handler({
+					first: false,
+					last: false,
+					tap: false,
+					movement: [12, 8],
+					xy: [clientX + 12, clientY + 8],
+					event: {
+						...baseEvent,
+						clientX: clientX + 12,
+						clientY: clientY + 8,
+					},
+				});
+				handler({
+					first: false,
+					last: true,
+					tap: false,
+					movement: [12, 8],
+					xy: [clientX + 12, clientY + 8],
+					event: {
+						...baseEvent,
+						clientX: clientX + 12,
+						clientY: clientY + 8,
+						buttons: 0,
+					},
+				});
+			},
 		});
 	},
 }));
@@ -44,6 +91,11 @@ vi.mock("react-skia-lite", () => ({
 			data-has-on-pointer-leave={String(typeof onPointerLeave === "function")}
 			data-has-on-click={String(typeof onClick === "function")}
 			data-has-on-double-click={String(typeof onDoubleClick === "function")}
+			onPointerDown={onPointerDown as React.PointerEventHandler<HTMLDivElement>}
+			onPointerEnter={onPointerEnter as React.PointerEventHandler<HTMLDivElement>}
+			onPointerLeave={onPointerLeave as React.PointerEventHandler<HTMLDivElement>}
+			onClick={onClick as React.MouseEventHandler<HTMLDivElement>}
+			onDoubleClick={onDoubleClick as React.MouseEventHandler<HTMLDivElement>}
 		>
 			{children}
 		</div>
@@ -98,6 +150,7 @@ describe("NodeInteractionWrapper", () => {
 			<NodeInteractionWrapper
 				node={node}
 				isActive={false}
+				isSelected={false}
 				isDimmed={false}
 				isHovered={false}
 				cameraZoom={2}
@@ -117,6 +170,7 @@ describe("NodeInteractionWrapper", () => {
 			<NodeInteractionWrapper
 				node={node}
 				isActive={false}
+				isSelected={false}
 				isDimmed={false}
 				isHovered={true}
 				cameraZoom={2}
@@ -135,6 +189,7 @@ describe("NodeInteractionWrapper", () => {
 			<NodeInteractionWrapper
 				node={node}
 				isActive={true}
+				isSelected={true}
 				isDimmed={false}
 				isHovered={false}
 				cameraZoom={2}
@@ -159,6 +214,7 @@ describe("NodeInteractionWrapper", () => {
 			<NodeInteractionWrapper
 				node={node}
 				isActive={false}
+				isSelected={false}
 				isDimmed={false}
 				isHovered={false}
 				cameraZoom={0.5}
@@ -174,6 +230,7 @@ describe("NodeInteractionWrapper", () => {
 			<NodeInteractionWrapper
 				node={node}
 				isActive={true}
+				isSelected={true}
 				isDimmed={false}
 				isHovered={false}
 				cameraZoom={0.5}
@@ -191,6 +248,7 @@ describe("NodeInteractionWrapper", () => {
 			<NodeInteractionWrapper
 				node={createSceneNode()}
 				isActive={false}
+				isSelected={false}
 				isDimmed={false}
 				isHovered={false}
 				cameraZoom={1}
@@ -211,5 +269,69 @@ describe("NodeInteractionWrapper", () => {
 		expect(group.getAttribute("data-has-on-pointer-leave")).toBe("true");
 		expect(group.getAttribute("data-has-on-click")).toBe("true");
 		expect(group.getAttribute("data-has-on-double-click")).toBe("true");
+	});
+
+	it("拖拽事件会透传修饰键和指针坐标", async () => {
+		const onDragStart = vi.fn();
+		const onDrag = vi.fn();
+		const onDragEnd = vi.fn();
+		render(
+			<NodeInteractionWrapper
+				node={createSceneNode()}
+				isActive={false}
+				isSelected={true}
+				isDimmed={false}
+				isHovered={false}
+				cameraZoom={1}
+				onPointerEnter={vi.fn()}
+				onPointerLeave={vi.fn()}
+				onDragStart={onDragStart}
+				onDrag={onDrag}
+				onDragEnd={onDragEnd}
+			>
+				<div data-testid="child" />
+			</NodeInteractionWrapper>,
+		);
+
+		screen.getByTestId("group").dispatchEvent(
+			new PointerEvent("pointerdown", {
+				bubbles: true,
+				clientX: 24,
+				clientY: 36,
+				button: 0,
+				buttons: 1,
+				shiftKey: true,
+				altKey: true,
+				metaKey: true,
+				ctrlKey: true,
+			}),
+		);
+
+		expect(onDragStart).toHaveBeenCalledTimes(1);
+		expect(onDrag).toHaveBeenCalledTimes(2);
+		expect(onDragEnd).toHaveBeenCalledTimes(1);
+		expect(onDragStart.mock.calls[0]?.[1]).toMatchObject({
+			clientX: 24,
+			clientY: 36,
+			shiftKey: true,
+			altKey: true,
+			metaKey: true,
+			ctrlKey: true,
+			movementX: 0,
+			movementY: 0,
+			first: true,
+			last: false,
+		});
+		expect(onDragEnd.mock.calls[0]?.[1]).toMatchObject({
+			clientX: 36,
+			clientY: 44,
+			shiftKey: true,
+			altKey: true,
+			metaKey: true,
+			ctrlKey: true,
+			movementX: 12,
+			movementY: 8,
+			last: true,
+		});
 	});
 });

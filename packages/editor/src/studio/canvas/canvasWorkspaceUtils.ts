@@ -31,6 +31,15 @@ export interface CameraState {
 	zoom: number;
 }
 
+export interface CanvasWorldBounds {
+	left: number;
+	top: number;
+	right: number;
+	bottom: number;
+	width: number;
+	height: number;
+}
+
 export type CameraTransitionMode = "smooth" | "instant";
 
 export interface ApplyCameraOptions {
@@ -215,6 +224,55 @@ export const pickLayout = (node: CanvasNode): CanvasNodeLayoutSnapshot => ({
 	hidden: node.hidden,
 	locked: node.locked,
 });
+
+export const resolveCanvasNodeBounds = (
+	nodes: CanvasNode[],
+): CanvasWorldBounds | null => {
+	if (nodes.length === 0) return null;
+	let left = Number.POSITIVE_INFINITY;
+	let top = Number.POSITIVE_INFINITY;
+	let right = Number.NEGATIVE_INFINITY;
+	let bottom = Number.NEGATIVE_INFINITY;
+	for (const node of nodes) {
+		const nodeLeft = Math.min(node.x, node.x + node.width);
+		const nodeRight = Math.max(node.x, node.x + node.width);
+		const nodeTop = Math.min(node.y, node.y + node.height);
+		const nodeBottom = Math.max(node.y, node.y + node.height);
+		left = Math.min(left, nodeLeft);
+		top = Math.min(top, nodeTop);
+		right = Math.max(right, nodeRight);
+		bottom = Math.max(bottom, nodeBottom);
+	}
+	if (
+		!Number.isFinite(left) ||
+		!Number.isFinite(top) ||
+		!Number.isFinite(right) ||
+		!Number.isFinite(bottom)
+	) {
+		return null;
+	}
+	return {
+		left,
+		top,
+		right,
+		bottom,
+		width: Math.max(1, right - left),
+		height: Math.max(1, bottom - top),
+	};
+};
+
+export const isWorldPointInBounds = (
+	bounds: CanvasWorldBounds,
+	worldX: number,
+	worldY: number,
+): boolean => {
+	return (
+		worldX >= bounds.left &&
+		worldX <= bounds.right &&
+		worldY >= bounds.top &&
+		worldY <= bounds.bottom
+	);
+};
 
 export const isLayoutEqual = (
 	before: CanvasNodeLayoutSnapshot,

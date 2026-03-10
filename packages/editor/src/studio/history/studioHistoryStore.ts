@@ -18,6 +18,11 @@ export type CanvasNodeLayoutSnapshot = Pick<
 	"x" | "y" | "width" | "height" | "zIndex" | "hidden" | "locked"
 >;
 
+type CanvasGraphHistoryItem = {
+	node: CanvasNode;
+	scene?: SceneDocument;
+};
+
 type SceneTimelineHistoryItem = {
 	timelineRef?: TimelineRef;
 	/**
@@ -52,9 +57,23 @@ export type StudioHistoryEntry =
 			focusNodeId: string | null;
 	  }
 	| {
+			kind: "canvas.node-layout.batch";
+			entries: Array<{
+				nodeId: string;
+				before: CanvasNodeLayoutSnapshot;
+				after: CanvasNodeLayoutSnapshot;
+			}>;
+			focusNodeId: string | null;
+	  }
+	| {
 			kind: "canvas.node-create";
 			node: CanvasNode;
 			scene?: SceneDocument;
+			focusNodeId: string | null;
+	  }
+	| {
+			kind: "canvas.node-create.batch";
+			entries: CanvasGraphHistoryItem[];
 			focusNodeId: string | null;
 	  };
 
@@ -226,6 +245,13 @@ const applyEntry = (
 		projectStore.updateCanvasNodeLayout(entry.nodeId, patch);
 		return;
 	}
+	if (entry.kind === "canvas.node-layout.batch") {
+		for (const layoutEntry of entry.entries) {
+			const patch = mode === "undo" ? layoutEntry.before : layoutEntry.after;
+			projectStore.updateCanvasNodeLayout(layoutEntry.nodeId, patch);
+		}
+		return;
+	}
 	if (entry.kind === "canvas.node-create") {
 		if (entry.node.type === "scene" && entry.scene) {
 			if (mode === "undo") {
@@ -240,6 +266,14 @@ const applyEntry = (
 			return;
 		}
 		projectStore.restoreCanvasNodeForHistory(entry.node);
+		return;
+	}
+	if (entry.kind === "canvas.node-create.batch") {
+		if (mode === "undo") {
+			projectStore.removeCanvasGraphBatch(entry.entries.map((item) => item.node.id));
+			return;
+		}
+		projectStore.appendCanvasGraphBatch(entry.entries);
 	}
 };
 

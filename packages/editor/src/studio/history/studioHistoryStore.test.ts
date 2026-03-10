@@ -263,6 +263,176 @@ describe("studioHistoryStore", () => {
 		).toBe(3);
 	});
 
+	it("canvas.node-layout.batch 可撤销和重做", () => {
+		useProjectStore.getState().updateCanvasNodeLayout("node-1", {
+			x: 120,
+			y: 80,
+		});
+		useProjectStore.getState().updateCanvasNodeLayout("node-2", {
+			x: 360,
+			y: 240,
+		});
+		useStudioHistoryStore.getState().push({
+			kind: "canvas.node-layout.batch",
+			entries: [
+				{
+					nodeId: "node-1",
+					before: {
+						x: 0,
+						y: 0,
+						width: 960,
+						height: 540,
+						zIndex: 0,
+						hidden: false,
+						locked: false,
+					},
+					after: {
+						x: 120,
+						y: 80,
+						width: 960,
+						height: 540,
+						zIndex: 0,
+						hidden: false,
+						locked: false,
+					},
+				},
+				{
+					nodeId: "node-2",
+					before: {
+						x: 200,
+						y: 120,
+						width: 960,
+						height: 540,
+						zIndex: 1,
+						hidden: false,
+						locked: false,
+					},
+					after: {
+						x: 360,
+						y: 240,
+						width: 960,
+						height: 540,
+						zIndex: 1,
+						hidden: false,
+						locked: false,
+					},
+				},
+			],
+			focusNodeId: "node-2",
+		});
+
+		useStudioHistoryStore.getState().undo();
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.find(
+				(node) => node.id === "node-1",
+			)?.x,
+		).toBe(0);
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.find(
+				(node) => node.id === "node-2",
+			)?.x,
+		).toBe(200);
+
+		useStudioHistoryStore.getState().redo();
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.find(
+				(node) => node.id === "node-1",
+			)?.x,
+		).toBe(120);
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.find(
+				(node) => node.id === "node-2",
+			)?.x,
+		).toBe(360);
+	});
+
+	it("canvas.node-create.batch 可撤销和重做", () => {
+		const scene = {
+			id: "scene-3",
+			name: "Scene 3",
+			timeline: createTimeline(2),
+			posterFrame: 0,
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		const sceneNode = {
+			id: "node-3",
+			type: "scene" as const,
+			sceneId: "scene-3",
+			name: "Scene 3",
+			x: 480,
+			y: 320,
+			width: 960,
+			height: 540,
+			zIndex: 2,
+			locked: false,
+			hidden: false,
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		const videoNode = {
+			id: "node-4",
+			type: "video" as const,
+			assetId: "asset-1",
+			name: "Video 4",
+			x: 1280,
+			y: 320,
+			width: 320,
+			height: 180,
+			zIndex: 3,
+			locked: false,
+			hidden: false,
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		const entries = [{ node: sceneNode, scene }, { node: videoNode }];
+		useStudioHistoryStore.getState().push({
+			kind: "canvas.node-create.batch",
+			entries,
+			focusNodeId: null,
+		});
+
+		useProjectStore.getState().appendCanvasGraphBatch(entries);
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.some(
+				(node) => node.id === "node-3",
+			),
+		).toBe(true);
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-3"],
+		).toBeTruthy();
+
+		useStudioHistoryStore.getState().undo();
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.some(
+				(node) => node.id === "node-3",
+			),
+		).toBe(false);
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.some(
+				(node) => node.id === "node-4",
+			),
+		).toBe(false);
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-3"],
+		).toBeUndefined();
+
+		useStudioHistoryStore.getState().redo();
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.some(
+				(node) => node.id === "node-3",
+			),
+		).toBe(true);
+		expect(
+			useProjectStore.getState().currentProject?.canvas.nodes.some(
+				(node) => node.id === "node-4",
+			),
+		).toBe(true);
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-3"],
+		).toBeTruthy();
+	});
+
 	it("canvas.node-create(scene) 可撤销和重做", () => {
 		const scene = {
 			id: "scene-3",

@@ -1,15 +1,19 @@
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import type React from "react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Canvas, type CanvasRef, Group } from "react-skia-lite";
+import { useDrag } from "@use-gesture/react";
+import { Canvas, type CanvasRef, Group, Rect, type SkiaPointerEvent } from "react-skia-lite";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
+import { resolveCanvasNodeBounds } from "./canvasWorkspaceUtils";
 import {
 	type CanvasNodeDragEvent,
+	type CanvasNodePointerEvent,
 	NodeInteractionWrapper,
+	resolvePointerEventMeta,
 } from "./NodeInteractionWrapper";
 import { getCanvasNodeDefinition } from "./node-system/registry";
 import type {
@@ -18,11 +22,20 @@ import type {
 } from "./node-system/types";
 
 export type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
-export type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
+export type {
+	CanvasNodeDragEvent,
+	CanvasNodePointerEvent,
+} from "./NodeInteractionWrapper";
 
 export interface CanvasNodeResizeEvent {
 	phase: "start" | "move" | "end";
 	node: CanvasNode;
+	anchor: CanvasNodeResizeAnchor;
+	event: CanvasNodeDragEvent;
+}
+
+export interface CanvasSelectionResizeEvent {
+	phase: "start" | "move" | "end";
 	anchor: CanvasNodeResizeAnchor;
 	event: CanvasNodeDragEvent;
 }
@@ -39,15 +52,97 @@ interface InfiniteSkiaCanvasProps {
 	scenes: StudioProject["scenes"];
 	assets: StudioProject["assets"];
 	activeNodeId: string | null;
+	selectedNodeIds: string[];
 	focusedNodeId: string | null;
 	suspendHover?: boolean;
-	onNodeClick?: (node: CanvasNode) => void;
-	onNodeDoubleClick?: (node: CanvasNode) => void;
+	onNodeClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
+	onNodeDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onNodeDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onNodeDrag?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onNodeDragEnd?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onNodeResize?: (event: CanvasNodeResizeEvent) => void;
+	onSelectionDragStart?: (event: CanvasNodeDragEvent) => void;
+	onSelectionDrag?: (event: CanvasNodeDragEvent) => void;
+	onSelectionDragEnd?: (event: CanvasNodeDragEvent) => void;
+	onSelectionResize?: (event: CanvasSelectionResizeEvent) => void;
 }
+
+const SELECTION_DRAG_CONFIG = {
+	pointer: { capture: false },
+	keys: false,
+	filterTaps: false,
+	threshold: 0,
+	triggerAllEvents: true,
+} as const;
+
+interface SelectionBoundsInteractionLayerProps {
+	bounds: {
+		left: number;
+		top: number;
+		width: number;
+		height: number;
+	};
+	onDragStart?: (event: CanvasNodeDragEvent) => void;
+	onDrag?: (event: CanvasNodeDragEvent) => void;
+	onDragEnd?: (event: CanvasNodeDragEvent) => void;
+}
+
+const SelectionBoundsInteractionLayer: React.FC<
+	SelectionBoundsInteractionLayerProps
+> = ({ bounds, onDragStart, onDrag, onDragEnd }) => {
+	const bindDrag = useDrag(
+		({ first, last, tap, movement: [mx, my], xy: [clientX, clientY], event }) => {
+			const dragEvent: CanvasNodeDragEvent = {
+				...resolvePointerEventMeta(event, clientX, clientY),
+				movementX: mx,
+				movementY: my,
+				first,
+				last,
+				tap,
+			};
+			if (first) {
+				onDragStart?.(dragEvent);
+			}
+			if (!last) {
+				onDrag?.(dragEvent);
+			}
+			if (last) {
+				onDragEnd?.(dragEvent);
+			}
+		},
+		SELECTION_DRAG_CONFIG,
+	);
+	const dragHandlers = bindDrag() as {
+		onPointerDown?: (event: SkiaPointerEvent) => void;
+	};
+
+	return (
+		<Group
+			transform={[
+				{ translateX: bounds.left },
+				{ translateY: bounds.top },
+			]}
+			hitRect={{
+				x: 0,
+				y: 0,
+				width: Math.max(1, bounds.width),
+				height: Math.max(1, bounds.height),
+			}}
+			pointerEvents="auto"
+			onPointerDown={(event) => {
+				dragHandlers.onPointerDown?.(event);
+			}}
+		>
+			<Rect
+				x={0}
+				y={0}
+				width={Math.max(1, bounds.width)}
+				height={Math.max(1, bounds.height)}
+				color="rgba(255,255,255,0.001)"
+			/>
+		</Group>
+	);
+};
 
 const isLayerValueEqual = (left: unknown, right: unknown): boolean => {
 	if (left === right) return true;
@@ -88,6 +183,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	scenes,
 	assets,
 	activeNodeId,
+	selectedNodeIds,
 	focusedNodeId,
 	suspendHover = false,
 	onNodeClick,
@@ -96,6 +192,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	onNodeDrag,
 	onNodeDragEnd,
 	onNodeResize,
+	onSelectionDragStart,
+	onSelectionDrag,
+	onSelectionDragEnd,
+	onSelectionResize,
 }) => {
 	const runtimeManager = useStudioRuntimeManager();
 	const canvasRef = useRef<CanvasRef>(null);
@@ -116,6 +216,17 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (!activeNodeId) return null;
 		return nodes.find((node) => node.id === activeNodeId) ?? null;
 	}, [activeNodeId, nodes]);
+	const selectedNodeIdSet = useMemo(() => {
+		return new Set(selectedNodeIds);
+	}, [selectedNodeIds]);
+	const selectedNodes = useMemo(() => {
+		if (selectedNodeIdSet.size === 0) return [];
+		return nodes.filter((node) => selectedNodeIdSet.has(node.id));
+	}, [nodes, selectedNodeIdSet]);
+	const selectionBounds = useMemo(() => {
+		if (selectedNodes.length <= 1) return null;
+		return resolveCanvasNodeBounds(selectedNodes);
+	}, [selectedNodes]);
 	const hoverNode = useMemo(() => {
 		if (!hoveredNodeId) return null;
 		return nodes.find((node) => node.id === hoveredNodeId) ?? null;
@@ -267,6 +378,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						{ translateY: camera.y },
 					]}
 				>
+					{selectionBounds && !disableBaseNodeInteraction && (
+						<SelectionBoundsInteractionLayer
+							bounds={selectionBounds}
+							onDragStart={onSelectionDragStart}
+							onDrag={onSelectionDrag}
+							onDragEnd={onSelectionDragEnd}
+						/>
+					)}
 					{nodes.map((node) => {
 						const definition = getCanvasNodeDefinition(node.type);
 						const Renderer = definition.skiaRenderer;
@@ -276,6 +395,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							"assetId" in node ? (assetById.get(node.assetId) ?? null) : null;
 						const isFocused = node.id === focusedNodeId;
 						const isActive = node.id === activeNodeId;
+						const isSelected = selectedNodeIdSet.has(node.id);
 						const isDimmed = Boolean(focusedNodeId) && !isFocused;
 						const isHovered =
 							!disableBaseNodeInteraction && node.id === hoveredNodeId;
@@ -293,6 +413,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 								<NodeInteractionWrapper
 									node={node}
 									isActive={isActive}
+									isSelected={isSelected}
 									isDimmed={isDimmed}
 									isHovered={isHovered}
 									cameraZoom={camera.zoom}
@@ -330,9 +451,11 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				{!disableBaseNodeInteraction && !focusedNodeId && (
 					<CanvasNodeOverlayLayer
 						activeNode={activeNode}
+						selectedNodes={selectedNodes}
 						hoverNode={hoverNode}
 						camera={camera}
 						onNodeResize={onNodeResize}
+						onSelectionResize={onSelectionResize}
 					/>
 				)}
 				{focusLayerEnabled &&
@@ -363,8 +486,15 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		onNodeClick,
 		onNodeDoubleClick,
 		onNodeResize,
+		onSelectionDrag,
+		onSelectionDragEnd,
+		onSelectionDragStart,
+		onSelectionResize,
 		runtimeManager,
 		scenes,
+		selectionBounds,
+		selectedNodeIdSet,
+		selectedNodes,
 		FocusEditorLayer,
 		width,
 	]);

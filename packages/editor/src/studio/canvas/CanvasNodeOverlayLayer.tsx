@@ -2,17 +2,25 @@ import { useDrag } from "@use-gesture/react";
 import type { CanvasNode } from "core/studio/types";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Group, Path, Rect, type SkiaPointerEvent } from "react-skia-lite";
-import { resolveCanvasNodeScreenFrame } from "./canvasNodeLabelUtils";
+import {
+	resolveCanvasNodeScreenFrame,
+	resolveCanvasWorldRectScreenFrame,
+} from "./canvasNodeLabelUtils";
 import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 import {
 	CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
 	CANVAS_RESIZE_ANCHOR_LEG_PX,
 	CANVAS_RESIZE_ANCHOR_OFFSET_PX,
 	CANVAS_RESIZE_ANCHOR_STROKE_PX,
+	resolveCanvasResizeAnchorAtRectWorldPoint,
 	resolveCanvasResizeAnchorAtWorldPoint,
 } from "./canvasResizeAnchor";
+import { resolveCanvasNodeBounds } from "./canvasWorkspaceUtils";
 import type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
-import { resolveNodeInteractionBorderStyle } from "./NodeInteractionWrapper";
+import {
+	resolveNodeInteractionBorderStyle,
+	resolvePointerEventMeta,
+} from "./NodeInteractionWrapper";
 
 const RESIZE_ANCHOR_ENTER_OFFSET_PX = 8;
 const RESIZE_ANCHOR_ENTER_TRANSITION = {
@@ -65,17 +73,6 @@ const buildBottomLeftAnchorPath = (
 	return `M ${cornerX + legPx} ${cornerY} L ${cornerX} ${cornerY} L ${cornerX} ${cornerY - legPx}`;
 };
 
-const resolvePointerField = (
-	event: unknown,
-	key: "button" | "buttons",
-): number => {
-	if (!event || typeof event !== "object") return 0;
-	if (!(key in event)) return 0;
-	const value = (event as Record<string, unknown>)[key];
-	if (!Number.isFinite(value)) return 0;
-	return Number(value);
-};
-
 const resolvePointerLocalPoint = (
 	event: unknown,
 ): { x: number; y: number } | null => {
@@ -102,6 +99,7 @@ const resolveAnchorOpacity = (
 
 interface CanvasNodeOverlayLayerProps {
 	activeNode: CanvasNode | null;
+	selectedNodes: CanvasNode[];
 	hoverNode: CanvasNode | null;
 	camera: {
 		x: number;
@@ -114,32 +112,89 @@ interface CanvasNodeOverlayLayerProps {
 		anchor: CanvasNodeResizeAnchor;
 		event: CanvasNodeDragEvent;
 	}) => void;
+	onSelectionResize?: (event: {
+		phase: "start" | "move" | "end";
+		anchor: CanvasNodeResizeAnchor;
+		event: CanvasNodeDragEvent;
+	}) => void;
 }
 
 export const CanvasNodeOverlayLayer = ({
 	activeNode,
+	selectedNodes,
 	hoverNode,
 	camera,
 	onNodeResize,
+	onSelectionResize,
 }: CanvasNodeOverlayLayerProps) => {
 	const resizingAnchorRef = useRef<CanvasNodeResizeAnchor | null>(null);
-	const previousActiveNodeIdRef = useRef<string | null>(activeNode?.id ?? null);
+	const previousResizeTargetKeyRef = useRef<string | null>(null);
 	const [hoveredResizeAnchor, setHoveredResizeAnchor] =
 		useState<CanvasNodeResizeAnchor | null>(null);
 	const [pressedResizeAnchor, setPressedResizeAnchor] =
 		useState<CanvasNodeResizeAnchor | null>(null);
 
-	const activeNodeId = activeNode?.id ?? null;
-	const isResizeEnabled = Boolean(activeNode && !activeNode.locked);
+	const selectedNodeIdSet = useRef(new Set<string>());
+	selectedNodeIdSet.current = new Set(selectedNodes.map((node) => node.id));
+	const isSingleSelection =
+		Boolean(activeNode) &&
+		(selectedNodes.length === 0 ||
+			(selectedNodes.length === 1 && selectedNodes[0]?.id === activeNode?.id));
+	const activeNodeScreenFrame = activeNode
+		? resolveCanvasNodeScreenFrame(activeNode, camera)
+		: null;
+	const selectionBounds =
+		selectedNodes.length > 1 ? resolveCanvasNodeBounds(selectedNodes) : null;
+	const selectionScreenFrame = selectionBounds
+		? resolveCanvasWorldRectScreenFrame(selectionBounds, camera)
+		: null;
+	const isNodeResizeEnabled = Boolean(
+		activeNode && !activeNode.locked && isSingleSelection && activeNodeScreenFrame,
+	);
+	const isSelectionResizeEnabled = Boolean(
+		selectionBounds &&
+			selectionScreenFrame &&
+			selectedNodes.length > 1 &&
+			selectedNodes.some((node) => !node.locked),
+	);
+	const resizeTarget = isNodeResizeEnabled
+		? {
+				kind: "node" as const,
+				key: `node:${activeNode?.id ?? ""}`,
+				frame: activeNodeScreenFrame,
+				worldRect: activeNode
+					? {
+							x: activeNode.x,
+							y: activeNode.y,
+							width: activeNode.width,
+							height: activeNode.height,
+					  }
+					: null,
+		  }
+		: isSelectionResizeEnabled && selectionBounds && selectionScreenFrame
+			? {
+					kind: "selection" as const,
+					key: `selection:${selectedNodes.map((node) => node.id).join(",")}`,
+					frame: selectionScreenFrame,
+					worldRect: {
+						x: selectionBounds.left,
+						y: selectionBounds.top,
+						width: selectionBounds.width,
+						height: selectionBounds.height,
+					},
+			  }
+			: null;
+	const isResizeEnabled = Boolean(resizeTarget?.frame && resizeTarget.worldRect);
 
 	useLayoutEffect(() => {
-		// active 节点切换后清理旧的 anchor 交互状态
-		if (previousActiveNodeIdRef.current === activeNodeId) return;
-		previousActiveNodeIdRef.current = activeNodeId;
+		// resize 目标切换后清理旧的 anchor 交互状态
+		const resizeTargetKey = resizeTarget?.key ?? null;
+		if (previousResizeTargetKeyRef.current === resizeTargetKey) return;
+		previousResizeTargetKeyRef.current = resizeTargetKey;
 		resizingAnchorRef.current = null;
 		setHoveredResizeAnchor(null);
 		setPressedResizeAnchor(null);
-	}, [activeNodeId]);
+	}, [resizeTarget?.key]);
 
 	useLayoutEffect(() => {
 		if (isResizeEnabled) return;
@@ -181,18 +236,15 @@ export const CanvasNodeOverlayLayer = ({
 				event: unknown;
 			},
 		) => {
-			if (!isResizeEnabled || !activeNode) return;
+			if (!isResizeEnabled || !resizeTarget || !resizeTarget.worldRect) return;
 
 			const dragEvent: CanvasNodeDragEvent = {
+				...resolvePointerEventMeta(state.event, state.xy[0], state.xy[1]),
 				movementX: state.movement[0],
 				movementY: state.movement[1],
-				clientX: state.xy[0],
-				clientY: state.xy[1],
 				first: state.first,
 				last: state.last,
 				tap: state.tap,
-				button: resolvePointerField(state.event, "button"),
-				buttons: resolvePointerField(state.event, "buttons"),
 			};
 
 			if (state.first) {
@@ -200,23 +252,39 @@ export const CanvasNodeOverlayLayer = ({
 				resizingAnchorRef.current = anchor;
 				setPressedResizeAnchor(anchor);
 				setHoveredResizeAnchor(anchor);
-				onNodeResize?.({
-					phase: "start",
-					node: activeNode,
-					anchor,
-					event: dragEvent,
-				});
+				if (resizeTarget.kind === "node" && activeNode) {
+					onNodeResize?.({
+						phase: "start",
+						node: activeNode,
+						anchor,
+						event: dragEvent,
+					});
+				} else {
+					onSelectionResize?.({
+						phase: "start",
+						anchor,
+						event: dragEvent,
+					});
+				}
 			}
 
 			if (resizingAnchorRef.current !== anchor) return;
 
 			if (!state.last) {
-				onNodeResize?.({
-					phase: "move",
-					node: activeNode,
-					anchor,
-					event: dragEvent,
-				});
+				if (resizeTarget.kind === "node" && activeNode) {
+					onNodeResize?.({
+						phase: "move",
+						node: activeNode,
+						anchor,
+						event: dragEvent,
+					});
+				} else {
+					onSelectionResize?.({
+						phase: "move",
+						anchor,
+						event: dragEvent,
+					});
+				}
 			}
 
 			if (!state.last) return;
@@ -231,20 +299,38 @@ export const CanvasNodeOverlayLayer = ({
 				const worldX = localPoint.x / safeZoom - camera.x;
 				const worldY = localPoint.y / safeZoom - camera.y;
 				setHoveredResizeAnchor(
-					resolveCanvasResizeAnchorAtWorldPoint({
-						node: activeNode,
-						worldX,
-						worldY,
-						cameraZoom: camera.zoom,
-					}),
+					resizeTarget.kind === "node" && activeNode
+						? resolveCanvasResizeAnchorAtWorldPoint({
+								node: activeNode,
+								worldX,
+								worldY,
+								cameraZoom: camera.zoom,
+						  })
+						: resolveCanvasResizeAnchorAtRectWorldPoint({
+								x: resizeTarget.worldRect.x,
+								y: resizeTarget.worldRect.y,
+								width: resizeTarget.worldRect.width,
+								height: resizeTarget.worldRect.height,
+								worldX,
+								worldY,
+								cameraZoom: camera.zoom,
+						  }),
 				);
 			}
-			onNodeResize?.({
-				phase: "end",
-				node: activeNode,
-				anchor,
-				event: dragEvent,
-			});
+			if (resizeTarget.kind === "node" && activeNode) {
+				onNodeResize?.({
+					phase: "end",
+					node: activeNode,
+					anchor,
+					event: dragEvent,
+				});
+			} else {
+				onSelectionResize?.({
+					phase: "end",
+					anchor,
+					event: dragEvent,
+				});
+			}
 		},
 		[
 			activeNode,
@@ -253,6 +339,8 @@ export const CanvasNodeOverlayLayer = ({
 			camera.zoom,
 			isResizeEnabled,
 			onNodeResize,
+			onSelectionResize,
+			resizeTarget,
 		],
 	);
 
@@ -282,36 +370,62 @@ export const CanvasNodeOverlayLayer = ({
 		onPointerDown?: (event: SkiaPointerEvent) => void;
 	};
 
-	const activeNodeScreenFrame = activeNode
-		? resolveCanvasNodeScreenFrame(activeNode, camera)
-		: null;
+	const selectedNodeScreenFrames = selectedNodes
+		.filter((node) => node.id !== activeNode?.id)
+		.map((node) => ({
+			node,
+			frame: resolveCanvasNodeScreenFrame(node, camera),
+		}));
 	const hoverBorderNode =
-		hoverNode && hoverNode.id !== activeNode?.id ? hoverNode : null;
+		hoverNode &&
+		hoverNode.id !== activeNode?.id &&
+		!selectedNodeIdSet.current.has(hoverNode.id)
+			? hoverNode
+			: null;
 	const hoverNodeScreenFrame = hoverBorderNode
 		? resolveCanvasNodeScreenFrame(hoverBorderNode, camera)
 		: null;
-	if (!activeNodeScreenFrame && !hoverNodeScreenFrame) return null;
+	if (
+		!activeNodeScreenFrame &&
+		!hoverNodeScreenFrame &&
+		selectedNodeScreenFrames.length === 0 &&
+		!selectionScreenFrame
+	) {
+		return null;
+	}
 
 	const hoverBorderStyle = resolveNodeInteractionBorderStyle({
 		isActive: false,
+		isSelected: false,
 		isHovered: true,
+	});
+	const selectedBorderStyle = resolveNodeInteractionBorderStyle({
+		isActive: false,
+		isSelected: true,
+		isHovered: false,
 	});
 	const activeBorderStyle = resolveNodeInteractionBorderStyle({
 		isActive: true,
+		isSelected: true,
 		isHovered: false,
 	});
+	const groupBorderStyle = {
+		...activeBorderStyle,
+		color: "rgba(251,146,60,0.72)",
+	};
+	const resizeFrame = resizeTarget?.frame ?? null;
 	const topLeftCornerX = -CANVAS_RESIZE_ANCHOR_OFFSET_PX;
 	const topLeftCornerY = -CANVAS_RESIZE_ANCHOR_OFFSET_PX;
 	const topRightCornerX =
-		(activeNodeScreenFrame?.width ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+		(resizeFrame?.width ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
 	const topRightCornerY = -CANVAS_RESIZE_ANCHOR_OFFSET_PX;
 	const bottomRightCornerX =
-		(activeNodeScreenFrame?.width ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+		(resizeFrame?.width ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
 	const bottomRightCornerY =
-		(activeNodeScreenFrame?.height ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+		(resizeFrame?.height ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
 	const bottomLeftCornerX = -CANVAS_RESIZE_ANCHOR_OFFSET_PX;
 	const bottomLeftCornerY =
-		(activeNodeScreenFrame?.height ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
+		(resizeFrame?.height ?? 0) + CANVAS_RESIZE_ANCHOR_OFFSET_PX;
 
 	return (
 		<>
@@ -336,6 +450,23 @@ export const CanvasNodeOverlayLayer = ({
 						/>
 					</Group>
 				)}
+				{selectedNodeScreenFrames.map(({ node, frame }) => (
+					<Group
+						key={`canvas-node-selected-outline-overlay-${node.id}`}
+						transform={[{ translateX: frame.x }, { translateY: frame.y }]}
+					>
+						<Rect
+							opacity={1}
+							x={0}
+							y={0}
+							width={frame.width}
+							height={frame.height}
+							style="stroke"
+							strokeWidth={selectedBorderStyle.baseStrokeWidthPx}
+							color={selectedBorderStyle.color}
+						/>
+					</Group>
+				))}
 				{activeNode && activeNodeScreenFrame && (
 					<Group
 						key={`canvas-node-active-outline-overlay-${activeNode.id}`}
@@ -356,14 +487,34 @@ export const CanvasNodeOverlayLayer = ({
 						/>
 					</Group>
 				)}
+				{selectionScreenFrame && (
+					<Group
+						key="canvas-selection-bounds-overlay"
+						transform={[
+							{ translateX: selectionScreenFrame.x },
+							{ translateY: selectionScreenFrame.y },
+						]}
+					>
+						<Rect
+							opacity={1}
+							x={0}
+							y={0}
+							width={selectionScreenFrame.width}
+							height={selectionScreenFrame.height}
+							style="stroke"
+							strokeWidth={groupBorderStyle.baseStrokeWidthPx}
+							color={groupBorderStyle.color}
+						/>
+					</Group>
+				)}
 			</Group>
-			{activeNode && activeNodeScreenFrame && isResizeEnabled && (
+			{resizeFrame && isResizeEnabled && (
 				<Group zIndex={1_000_001} pointerEvents="auto">
 					<Group
-						key={`canvas-node-resize-anchor-overlay-${activeNode.id}`}
+						key={`canvas-resize-anchor-overlay-${resizeTarget?.key ?? "none"}`}
 						transform={[
-							{ translateX: activeNodeScreenFrame.x },
-							{ translateY: activeNodeScreenFrame.y },
+							{ translateX: resizeFrame.x },
+							{ translateY: resizeFrame.y },
 						]}
 					>
 						<Group
@@ -442,7 +593,7 @@ export const CanvasNodeOverlayLayer = ({
 						>
 							<Path
 								path={buildTopRightAnchorPath(
-									activeNodeScreenFrame.width,
+									resizeFrame.width,
 									CANVAS_RESIZE_ANCHOR_OFFSET_PX,
 									CANVAS_RESIZE_ANCHOR_LEG_PX,
 								)}
@@ -485,8 +636,8 @@ export const CanvasNodeOverlayLayer = ({
 						>
 							<Path
 								path={buildBottomRightAnchorPath(
-									activeNodeScreenFrame.width,
-									activeNodeScreenFrame.height,
+									resizeFrame.width,
+									resizeFrame.height,
 									CANVAS_RESIZE_ANCHOR_OFFSET_PX,
 									CANVAS_RESIZE_ANCHOR_LEG_PX,
 								)}
@@ -529,7 +680,7 @@ export const CanvasNodeOverlayLayer = ({
 						>
 							<Path
 								path={buildBottomLeftAnchorPath(
-									activeNodeScreenFrame.height,
+									resizeFrame.height,
 									CANVAS_RESIZE_ANCHOR_OFFSET_PX,
 									CANVAS_RESIZE_ANCHOR_LEG_PX,
 								)}

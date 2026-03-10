@@ -20,30 +20,49 @@ let rafCounter = 1;
 let nativeRequestAnimationFrame: typeof window.requestAnimationFrame;
 let nativeCancelAnimationFrame: typeof window.cancelAnimationFrame;
 
-interface MockCanvasNodeDragEvent {
-	movementX: number;
-	movementY: number;
+interface MockCanvasNodePointerEvent {
 	clientX: number;
 	clientY: number;
+	button: number;
+	buttons: number;
+	shiftKey: boolean;
+	altKey: boolean;
+	metaKey: boolean;
+	ctrlKey: boolean;
+}
+
+interface MockCanvasNodeDragEvent extends MockCanvasNodePointerEvent {
+	movementX: number;
+	movementY: number;
 	first: boolean;
 	last: boolean;
 	tap: boolean;
-	button: number;
-	buttons: number;
 }
 
 interface MockInfiniteSkiaCanvasProps {
 	width: number;
 	height: number;
 	focusedNodeId?: string | null;
-	onNodeClick?: (node: CanvasNode) => void;
-	onNodeDoubleClick?: (node: CanvasNode) => void;
+	selectedNodeIds?: string[];
+	onNodeClick?: (node: CanvasNode, event: MockCanvasNodePointerEvent) => void;
+	onNodeDoubleClick?: (
+		node: CanvasNode,
+		event: MockCanvasNodePointerEvent,
+	) => void;
 	onNodeDragStart?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
 	onNodeDrag?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
 	onNodeDragEnd?: (node: CanvasNode, event: MockCanvasNodeDragEvent) => void;
+	onSelectionDragStart?: (event: MockCanvasNodeDragEvent) => void;
+	onSelectionDrag?: (event: MockCanvasNodeDragEvent) => void;
+	onSelectionDragEnd?: (event: MockCanvasNodeDragEvent) => void;
 	onNodeResize?: (event: {
 		phase: "start" | "move" | "end";
 		node: CanvasNode;
+		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left";
+		event: MockCanvasNodeDragEvent;
+	}) => void;
+	onSelectionResize?: (event: {
+		phase: "start" | "move" | "end";
 		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left";
 		event: MockCanvasNodeDragEvent;
 	}) => void;
@@ -690,10 +709,33 @@ const clickCanvasAt = (clientX: number, clientY: number): void => {
 	});
 };
 
-const clickNodeAt = (clientX: number, clientY: number): void => {
+const createPointerMeta = (
+	clientX: number,
+	clientY: number,
+	patch: Partial<MockCanvasNodePointerEvent> = {},
+): MockCanvasNodePointerEvent => ({
+	clientX,
+	clientY,
+	button: 0,
+	buttons: 1,
+	shiftKey: false,
+	altKey: false,
+	metaKey: false,
+	ctrlKey: false,
+	...patch,
+});
+
+const clickNodeAt = (
+	clientX: number,
+	clientY: number,
+	patch: Partial<MockCanvasNodePointerEvent> = {},
+): void => {
 	const node = getTopVisibleNodeAt(clientX, clientY);
 	act(() => {
-		getLatestInfiniteSkiaCanvasProps().onNodeClick?.(node);
+		getLatestInfiniteSkiaCanvasProps().onNodeClick?.(
+			node,
+			createPointerMeta(clientX, clientY, patch),
+		);
 	});
 };
 
@@ -704,10 +746,17 @@ const rightClickNodeAt = (clientX: number, clientY: number): void => {
 	});
 };
 
-const doubleClickNodeAt = (clientX: number, clientY: number): void => {
+const doubleClickNodeAt = (
+	clientX: number,
+	clientY: number,
+	patch: Partial<MockCanvasNodePointerEvent> = {},
+): void => {
 	const node = getTopVisibleNodeAt(clientX, clientY);
 	act(() => {
-		getLatestInfiniteSkiaCanvasProps().onNodeDoubleClick?.(node);
+		getLatestInfiniteSkiaCanvasProps().onNodeDoubleClick?.(
+			node,
+			createPointerMeta(clientX, clientY, patch),
+		);
 	});
 };
 
@@ -716,32 +765,27 @@ const dragNodeAt = (
 	startClientY: number,
 	endClientX: number,
 	endClientY: number,
+	patch: Partial<MockCanvasNodePointerEvent> = {},
 ): void => {
 	const node = getTopVisibleNodeAt(startClientX, startClientY);
 	act(() => {
 		const startEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(startClientX, startClientY, patch),
 			movementX: 0,
 			movementY: 0,
-			clientX: startClientX,
-			clientY: startClientY,
 			first: true,
 			last: false,
 			tap: false,
-			button: 0,
-			buttons: 1,
 		};
 		getLatestInfiniteSkiaCanvasProps().onNodeDragStart?.(node, startEvent);
 		getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, startEvent);
 		const moveEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(endClientX, endClientY, patch),
 			movementX: endClientX - startClientX,
 			movementY: endClientY - startClientY,
-			clientX: endClientX,
-			clientY: endClientY,
 			first: false,
 			last: false,
 			tap: false,
-			button: 0,
-			buttons: 1,
 		};
 		getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, moveEvent);
 		const endEvent: MockCanvasNodeDragEvent = {
@@ -750,6 +794,42 @@ const dragNodeAt = (
 			buttons: 0,
 		};
 		getLatestInfiniteSkiaCanvasProps().onNodeDragEnd?.(node, endEvent);
+	});
+};
+
+const dragSelectionBoundsAt = (
+	startClientX: number,
+	startClientY: number,
+	endClientX: number,
+	endClientY: number,
+	patch: Partial<MockCanvasNodePointerEvent> = {},
+): void => {
+	act(() => {
+		const startEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(startClientX, startClientY, patch),
+			movementX: 0,
+			movementY: 0,
+			first: true,
+			last: false,
+			tap: false,
+		};
+		getLatestInfiniteSkiaCanvasProps().onSelectionDragStart?.(startEvent);
+		getLatestInfiniteSkiaCanvasProps().onSelectionDrag?.(startEvent);
+		const moveEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(endClientX, endClientY, patch),
+			movementX: endClientX - startClientX,
+			movementY: endClientY - startClientY,
+			first: false,
+			last: false,
+			tap: false,
+		};
+		getLatestInfiniteSkiaCanvasProps().onSelectionDrag?.(moveEvent);
+		const endEvent: MockCanvasNodeDragEvent = {
+			...moveEvent,
+			last: true,
+			buttons: 0,
+		};
+		getLatestInfiniteSkiaCanvasProps().onSelectionDragEnd?.(endEvent);
 	});
 };
 
@@ -763,15 +843,12 @@ const resizeNodeAt = (
 	const node = getTopVisibleNodeAt(startClientX, startClientY);
 	act(() => {
 		const startEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(startClientX, startClientY),
 			movementX: 0,
 			movementY: 0,
-			clientX: startClientX,
-			clientY: startClientY,
 			first: true,
 			last: false,
 			tap: false,
-			button: 0,
-			buttons: 1,
 		};
 		getLatestInfiniteSkiaCanvasProps().onNodeResize?.({
 			phase: "start",
@@ -780,15 +857,12 @@ const resizeNodeAt = (
 			event: startEvent,
 		});
 		const moveEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(endClientX, endClientY),
 			movementX: endClientX - startClientX,
 			movementY: endClientY - startClientY,
-			clientX: endClientX,
-			clientY: endClientY,
 			first: false,
 			last: false,
 			tap: false,
-			button: 0,
-			buttons: 1,
 		};
 		getLatestInfiniteSkiaCanvasProps().onNodeResize?.({
 			phase: "move",
@@ -807,6 +881,140 @@ const resizeNodeAt = (
 			anchor,
 			event: endEvent,
 		});
+	});
+};
+
+const resizeSelectionBoundsAt = (
+	startClientX: number,
+	startClientY: number,
+	endClientX: number,
+	endClientY: number,
+	anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
+	patch: Partial<MockCanvasNodePointerEvent> = {},
+): void => {
+	act(() => {
+		const startEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(startClientX, startClientY, patch),
+			movementX: 0,
+			movementY: 0,
+			first: true,
+			last: false,
+			tap: false,
+		};
+		getLatestInfiniteSkiaCanvasProps().onSelectionResize?.({
+			phase: "start",
+			anchor,
+			event: startEvent,
+		});
+		const moveEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(endClientX, endClientY, patch),
+			movementX: endClientX - startClientX,
+			movementY: endClientY - startClientY,
+			first: false,
+			last: false,
+			tap: false,
+		};
+		getLatestInfiniteSkiaCanvasProps().onSelectionResize?.({
+			phase: "move",
+			anchor,
+			event: moveEvent,
+		});
+		const endEvent: MockCanvasNodeDragEvent = {
+			...moveEvent,
+			last: true,
+			buttons: 0,
+		};
+		getLatestInfiniteSkiaCanvasProps().onSelectionResize?.({
+			phase: "end",
+			anchor,
+			event: endEvent,
+		});
+	});
+};
+
+const resizeNodeByIdAt = (
+	nodeId: string,
+	startClientX: number,
+	startClientY: number,
+	endClientX: number,
+	endClientY: number,
+	anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left",
+	patch: Partial<MockCanvasNodePointerEvent> = {},
+): void => {
+	const node = useProjectStore
+		.getState()
+		.currentProject?.canvas.nodes.find((item) => item.id === nodeId);
+	if (!node) {
+		throw new Error(`未找到节点: ${nodeId}`);
+	}
+	act(() => {
+		const startEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(startClientX, startClientY, patch),
+			movementX: 0,
+			movementY: 0,
+			first: true,
+			last: false,
+			tap: false,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeResize?.({
+			phase: "start",
+			node,
+			anchor,
+			event: startEvent,
+		});
+		const moveEvent: MockCanvasNodeDragEvent = {
+			...createPointerMeta(endClientX, endClientY, patch),
+			movementX: endClientX - startClientX,
+			movementY: endClientY - startClientY,
+			first: false,
+			last: false,
+			tap: false,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeResize?.({
+			phase: "move",
+			node,
+			anchor,
+			event: moveEvent,
+		});
+		const endEvent: MockCanvasNodeDragEvent = {
+			...moveEvent,
+			last: true,
+			buttons: 0,
+		};
+		getLatestInfiniteSkiaCanvasProps().onNodeResize?.({
+			phase: "end",
+			node,
+			anchor,
+			event: endEvent,
+		});
+	});
+};
+
+const marqueeCanvasAt = (
+	startClientX: number,
+	startClientY: number,
+	endClientX: number,
+	endClientY: number,
+	options: { shiftKey?: boolean } = {},
+): void => {
+	const canvas = screen.getByTestId("infinite-skia-canvas");
+	fireEvent.mouseDown(canvas, {
+		button: 0,
+		clientX: startClientX,
+		clientY: startClientY,
+		shiftKey: options.shiftKey ?? false,
+	});
+	fireEvent.mouseMove(canvas, {
+		buttons: 1,
+		clientX: endClientX,
+		clientY: endClientY,
+		shiftKey: options.shiftKey ?? false,
+	});
+	fireEvent.mouseUp(window, {
+		button: 0,
+		clientX: endClientX,
+		clientY: endClientY,
+		shiftKey: options.shiftKey ?? false,
 	});
 };
 
@@ -1505,6 +1713,64 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("Shift 点击可多选和反选，主选中随最后一个选中节点切换", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-video-1",
+			"node-image-1",
+		]);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-image-1",
+		);
+
+		clickNodeAt(720, 360, { shiftKey: true });
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-video-1",
+		]);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-video-1",
+		);
+	});
+
+	it("框选会替换选择，dragend 落在 node 上也不会被尾随 click 覆盖", () => {
+		render(<CanvasWorkspace />);
+		marqueeCanvasAt(1000, 100, 300, 160);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-scene-1",
+			"node-video-1",
+		]);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-video-1",
+		);
+
+		const hitNode = getTopVisibleNodeAt(300, 160);
+		act(() => {
+			getLatestInfiniteSkiaCanvasProps().onNodeClick?.(
+				hitNode,
+				createPointerMeta(300, 160),
+			);
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-scene-1",
+			"node-video-1",
+		]);
+	});
+
+	it("Shift 框选会基于初始选择做 toggle", () => {
+		render(<CanvasWorkspace />);
+		marqueeCanvasAt(1000, 100, 300, 160);
+		marqueeCanvasAt(1000, 520, 650, 300, { shiftKey: true });
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-video-1",
+			"node-image-1",
+		]);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-image-1",
+		);
+	});
+
 	it("节点拖拽会更新位置并保持 active", () => {
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 420, 260);
@@ -1517,12 +1783,267 @@ describe("CanvasWorkspace", () => {
 		expect(project?.ui.activeNodeId).toBe("node-video-1");
 	});
 
+	it("多选组拖拽会整体移动并只写入一条 batch 历史", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		dragNodeAt(720, 360, 820, 420);
+
+		const project = useProjectStore.getState().currentProject;
+		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const image = project?.canvas.nodes.find((item) => item.id === "node-image-1");
+		expect(video?.x).toBe(340);
+		expect(video?.y).toBe(180);
+		expect(image?.x).toBe(780);
+		expect(image?.y).toBe(380);
+		const past = useStudioHistoryStore.getState().past;
+		expect(past).toHaveLength(1);
+		expect(past[0]?.kind).toBe("canvas.node-layout.batch");
+	});
+
+	it("多选 bbox 内点击空白区域不会清空选择", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		clickCanvasAt(600, 200);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-video-1",
+			"node-image-1",
+		]);
+	});
+
+	it("多选 bbox 拖拽会在空白区域整体移动", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		dragSelectionBoundsAt(600, 200, 700, 260);
+
+		const project = useProjectStore.getState().currentProject;
+		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const image = project?.canvas.nodes.find((item) => item.id === "node-image-1");
+		expect(video?.x).toBe(340);
+		expect(video?.y).toBe(180);
+		expect(image?.x).toBe(780);
+		expect(image?.y).toBe(380);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-layout.batch",
+		);
+	});
+
+	it("Shift 拖拽会锁定主导轴", () => {
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 420, 200, { shiftKey: true });
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		expect(node?.x).toBe(360);
+		expect(node?.y).toBe(120);
+	});
+
+	it("Alt 拖拽会复制节点并在结束后切换选择到副本", () => {
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 420, 260, { altKey: true });
+
+		const project = useProjectStore.getState().currentProject;
+		const original = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		const copyIds = getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
+		const copiedNode =
+			project?.canvas.nodes.find((item) => item.id === copyIds[0]) ?? null;
+		expect(original?.x).toBe(240);
+		expect(original?.y).toBe(120);
+		expect(copyIds).toHaveLength(1);
+		expect(copiedNode?.type).toBe("video");
+		expect(copiedNode?.name).toContain("副本");
+		expect(copiedNode?.x).toBe(360);
+		expect(copiedNode?.y).toBe(220);
+		expect(copyIds).toEqual([copiedNode?.id]);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-create.batch",
+		);
+	});
+
+	it("多选 bbox Alt 拖拽会复制整组并切换到副本选择", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		dragSelectionBoundsAt(600, 200, 720, 260, { altKey: true });
+
+		const project = useProjectStore.getState().currentProject;
+		const selectedIds = getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
+		const copiedNodes = selectedIds
+			.map((nodeId) => project?.canvas.nodes.find((item) => item.id === nodeId) ?? null)
+			.filter((node): node is CanvasNode => Boolean(node));
+		expect(selectedIds).toHaveLength(2);
+		expect(copiedNodes.map((node) => node.name)).toEqual([
+			"Video 1副本",
+			"Image 1副本",
+		]);
+		expect(
+			project?.canvas.nodes.find((item) => item.id === "node-video-1")?.x,
+		).toBe(240);
+		expect(
+			project?.canvas.nodes.find((item) => item.id === "node-image-1")?.x,
+		).toBe(680);
+		expect(copiedNodes[0]?.x).toBe(360);
+		expect(copiedNodes[0]?.y).toBe(180);
+		expect(copiedNodes[1]?.x).toBe(800);
+		expect(copiedNodes[1]?.y).toBe(380);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-create.batch",
+		);
+	});
+
+	it("Alt 拖拽无位移时会取消复制", () => {
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 300, 160, { altKey: true });
+		const project = useProjectStore.getState().currentProject;
+		expect(
+			project?.canvas.nodes.filter((item) => item.id !== "node-video-1")
+				.length,
+		).toBe(5);
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+	});
+
+	it("Alt 拖拽 Scene 会深拷贝 scene，并支持 undo/redo", () => {
+		render(<CanvasWorkspace />);
+		dragNodeAt(80, 80, 180, 120, { altKey: true });
+
+		const afterCopy = useProjectStore.getState().currentProject;
+		const copyIds = getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
+		const copiedSceneNode =
+			afterCopy?.canvas.nodes.find((node) => node.id === copyIds[0]) ?? null;
+		expect(copiedSceneNode).toBeTruthy();
+		if (!copiedSceneNode || copiedSceneNode.type !== "scene") return;
+		expect(copyIds).toEqual([copiedSceneNode.id]);
+		expect(copiedSceneNode.sceneId).not.toBe("scene-1");
+		expect(afterCopy?.scenes[copiedSceneNode.sceneId]).toBeTruthy();
+
+		useStudioHistoryStore.getState().undo();
+		expect(
+			useProjectStore.getState().currentProject?.scenes[copiedSceneNode.sceneId],
+		).toBeUndefined();
+
+		useStudioHistoryStore.getState().redo();
+		expect(
+			useProjectStore.getState().currentProject?.scenes[copiedSceneNode.sceneId],
+		).toBeTruthy();
+	});
+
+	it("多选时 resize 不生效", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		resizeNodeAt(300, 160, 420, 260, "bottom-right");
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		expect(node?.width).toBe(320);
+		expect(node?.height).toBe(180);
+	});
+
+	it("多选 bbox resize 会按整体 bounding box 缩放全部节点", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		resizeSelectionBoundsAt(940, 480, 1080, 552, "bottom-right");
+		const project = useProjectStore.getState().currentProject;
+		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const image = project?.canvas.nodes.find((item) => item.id === "node-image-1");
+		expect(video?.x).toBeCloseTo(240);
+		expect(video?.y).toBeCloseTo(120);
+		expect(video?.width).toBeCloseTo(384);
+		expect(video?.height).toBeCloseTo(216);
+		expect(image?.x).toBeCloseTo(768);
+		expect(image?.y).toBeCloseTo(360);
+		expect(image?.width).toBeCloseTo(312);
+		expect(image?.height).toBeCloseTo(192);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-layout.batch",
+		);
+	});
+
+	it("resize anchor 落在 node rect 外侧时不会误触发框选，也不会卡死后续拖拽", () => {
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+		const workspace = screen.getByTestId("canvas-workspace");
+
+		fireEvent.mouseDown(canvas, {
+			button: 0,
+			clientX: 236,
+			clientY: 116,
+		});
+		fireEvent.mouseMove(workspace, {
+			buttons: 1,
+			clientX: 200,
+			clientY: 90,
+		});
+		resizeNodeByIdAt(
+			"node-video-1",
+			236,
+			116,
+			200,
+			90,
+			"top-left",
+		);
+		fireEvent.mouseUp(window, {
+			button: 0,
+			clientX: 200,
+			clientY: 90,
+		});
+
+		expect(screen.queryByTestId("canvas-selection-rect")).toBeNull();
+
+		dragNodeAt(720, 360, 820, 420);
+		const image = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((item) => item.id === "node-image-1");
+		expect(image?.x).toBe(780);
+		expect(image?.y).toBe(380);
+	});
+
+	it("组拖拽时锁定节点保持原位", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: project.canvas.nodes.map((node) =>
+							node.id === "node-image-1" ? { ...node, locked: true } : node,
+						),
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		dragNodeAt(300, 160, 420, 260);
+		const project = useProjectStore.getState().currentProject;
+		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
+		const image = project?.canvas.nodes.find((item) => item.id === "node-image-1");
+		expect(video?.x).toBe(360);
+		expect(video?.y).toBe(220);
+		expect(image?.x).toBe(680);
+		expect(image?.y).toBe(320);
+	});
+
 	it("拖拽结束后的首个 click 会被抑制，避免 active 误切换", () => {
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 420, 260);
 		const otherNode = getTopVisibleNodeAt(720, 360);
 		act(() => {
-			getLatestInfiniteSkiaCanvasProps().onNodeClick?.(otherNode);
+			getLatestInfiniteSkiaCanvasProps().onNodeClick?.(
+				otherNode,
+				createPointerMeta(720, 360),
+			);
 		});
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
 			"node-video-1",
@@ -1651,7 +2172,10 @@ describe("CanvasWorkspace", () => {
 		resizeNodeAt(300, 160, 360, 220, "bottom-right");
 		const otherNode = getTopVisibleNodeAt(720, 360);
 		act(() => {
-			getLatestInfiniteSkiaCanvasProps().onNodeClick?.(otherNode);
+			getLatestInfiniteSkiaCanvasProps().onNodeClick?.(
+				otherNode,
+				createPointerMeta(720, 360),
+			);
 		});
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
 			"node-video-1",
