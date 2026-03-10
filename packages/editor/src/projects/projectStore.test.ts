@@ -92,6 +92,7 @@ const createProject = (): StudioProject => ({
 		activeSceneId: "scene-1",
 		focusedNodeId: null,
 		activeNodeId: "node-1",
+		canvasSnapEnabled: true,
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,
@@ -287,6 +288,17 @@ describe("projectStore", () => {
 		expect(ui?.focusedNodeId).toBe("node-1");
 		expect(ui?.activeNodeId).toBe("node-1");
 		expect(ui?.activeSceneId).toBe("scene-1");
+	});
+
+	it("setCanvasSnapEnabled 会更新项目级画布吸附开关", () => {
+		useProjectStore.getState().setCanvasSnapEnabled(false);
+		expect(
+			useProjectStore.getState().currentProject?.ui.canvasSnapEnabled,
+		).toBe(false);
+		useProjectStore.getState().setCanvasSnapEnabled(true);
+		expect(
+			useProjectStore.getState().currentProject?.ui.canvasSnapEnabled,
+		).toBe(true);
 	});
 
 	it("setFocusedNode(non-focusable) 会忽略 focus 写入", () => {

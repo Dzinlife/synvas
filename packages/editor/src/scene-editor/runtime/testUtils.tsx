@@ -2,10 +2,12 @@ import type React from "react";
 import { TimelineProvider } from "@/scene-editor/contexts/TimelineContext";
 import { EditorRuntimeProvider } from "./EditorRuntimeProvider";
 import { createEditorRuntime } from "./createEditorRuntime";
-import type { EditorRuntime } from "./types";
+import type { EditorRuntime, StudioRuntimeManager } from "./types";
 
-export const createTestEditorRuntime = (id = "test-runtime"): EditorRuntime => {
-	return createEditorRuntime({ id });
+export const createTestEditorRuntime = (
+	id = "test-runtime",
+): EditorRuntime & StudioRuntimeManager => {
+	return createEditorRuntime({ id }) as EditorRuntime & StudioRuntimeManager;
 };
 
 export const createEditorRuntimeWrapper = (

@@ -356,6 +356,38 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(overlayProps?.hoverNode ?? null).toBeNull();
 	});
 
+	it("会把 snapGuidesScreen 透传给 overlay", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createVideoNode("node-a", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId={null}
+				snapGuidesScreen={{ vertical: [320], horizontal: [180] }}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const overlayProps = getElementProps<{
+			snapGuidesScreen?: {
+				vertical: number[];
+				horizontal: number[];
+			};
+		}>(getOverlayElement(getLatestRenderTree()));
+		expect(overlayProps?.snapGuidesScreen).toEqual({
+			vertical: [320],
+			horizontal: [180],
+		});
+	});
+
 	it("hover 节点会透传到 overlay", async () => {
 		render(
 			<InfiniteSkiaCanvas

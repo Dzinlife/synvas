@@ -120,6 +120,7 @@ interface ProjectStoreState {
 	) => void;
 	setFocusedNode: (nodeId: string | null) => void;
 	setActiveScene: (sceneId: string | null) => void;
+	setCanvasSnapEnabled: (enabled: boolean) => void;
 	setCanvasCamera: (camera: CameraState) => void;
 	updateSceneTimeline: (
 		sceneId: string,
@@ -800,6 +801,24 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					...state.currentProject.ui,
 					activeSceneId: sceneId,
 					activeNodeId: sceneNode?.id ?? state.currentProject.ui.activeNodeId,
+				},
+			};
+			return {
+				currentProject: nextProject,
+			};
+		});
+	},
+	setCanvasSnapEnabled: (enabled) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			if (state.currentProject.ui.canvasSnapEnabled === enabled) {
+				return state;
+			}
+			const nextProject = {
+				...state.currentProject,
+				ui: {
+					...state.currentProject.ui,
+					canvasSnapEnabled: enabled,
 				},
 			};
 			return {

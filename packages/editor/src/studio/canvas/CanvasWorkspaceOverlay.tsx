@@ -3,6 +3,7 @@ import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
 import { useMemo } from "react";
+import { SnapIcon } from "@/components/icons";
 import { useProjectStore } from "@/projects/projectStore";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
@@ -98,8 +99,12 @@ const CanvasWorkspaceOverlay = ({
 	const updateCanvasNode = useProjectStore((state) => state.updateCanvasNode);
 	const setFocusedNode = useProjectStore((state) => state.setFocusedNode);
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
+	const setCanvasSnapEnabled = useProjectStore(
+		(state) => state.setCanvasSnapEnabled,
+	);
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
+	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
 	const cameraZoom = currentProject?.ui.camera.zoom ?? 1;
 	const sidebarNodes = useMemo(() => {
 		if (!currentProject) return [];
@@ -171,6 +176,18 @@ const CanvasWorkspaceOverlay = ({
 					>
 						<Plus className="size-3" />
 						<span>新建 Scene</span>
+					</button>
+					<button
+						type="button"
+						onClick={() => setCanvasSnapEnabled(!canvasSnapEnabled)}
+						aria-label="画布吸附"
+						className={`rounded p-1 transition ${
+							canvasSnapEnabled
+								? "bg-white/10 text-orange-400 hover:bg-white/20"
+								: "bg-white/5 text-white/55 hover:bg-white/10"
+						}`}
+					>
+						<SnapIcon className="size-4" />
 					</button>
 					<button
 						type="button"

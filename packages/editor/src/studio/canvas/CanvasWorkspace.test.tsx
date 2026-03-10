@@ -48,6 +48,10 @@ interface MockInfiniteSkiaCanvasProps {
 	height: number;
 	focusedNodeId?: string | null;
 	selectedNodeIds?: string[];
+	snapGuidesScreen?: {
+		vertical: number[];
+		horizontal: number[];
+	};
 	onNodeClick?: (node: CanvasNode, event: MockCanvasNodePointerEvent) => void;
 	onNodeDoubleClick?: (
 		node: CanvasNode,
@@ -617,6 +621,7 @@ const createProject = (): StudioProject => ({
 		activeSceneId: "scene-1",
 		focusedNodeId: null,
 		activeNodeId: "node-scene-1",
+		canvasSnapEnabled: true,
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,
@@ -1994,6 +1999,57 @@ describe("CanvasWorkspace", () => {
 		expect(project?.ui.activeNodeId).toBe("node-video-1");
 	});
 
+	it("节点拖拽吸附时会显示 guide，并在 dragEnd 后清空", () => {
+		render(<CanvasWorkspace />);
+		const node = getTopVisibleNodeAt(720, 360);
+		act(() => {
+			const startEvent: MockCanvasNodeDragEvent = {
+				...createPointerMeta(720, 360),
+				movementX: 0,
+				movementY: 0,
+				first: true,
+				last: false,
+				tap: false,
+			};
+			getLatestInfiniteSkiaCanvasProps().onNodeDragStart?.(node, startEvent);
+			getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, startEvent);
+			const moveEvent: MockCanvasNodeDragEvent = {
+				...createPointerMeta(603, 360),
+				movementX: -117,
+				movementY: 0,
+				first: false,
+				last: false,
+				tap: false,
+			};
+			getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, moveEvent);
+		});
+		const draggingProject = useProjectStore.getState().currentProject;
+		const draggingNode = draggingProject?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
+		expect(draggingNode?.x).toBe(560);
+		expect(getLatestInfiniteSkiaCanvasProps().snapGuidesScreen?.vertical).toContain(
+			560,
+		);
+
+		act(() => {
+			const endEvent: MockCanvasNodeDragEvent = {
+				...createPointerMeta(603, 360),
+				movementX: -117,
+				movementY: 0,
+				first: false,
+				last: true,
+				tap: false,
+				buttons: 0,
+			};
+			getLatestInfiniteSkiaCanvasProps().onNodeDragEnd?.(node, endEvent);
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().snapGuidesScreen).toEqual({
+			vertical: [],
+			horizontal: [],
+		});
+	});
+
 	it("多选组拖拽会整体移动并只写入一条 batch 历史", () => {
 		render(<CanvasWorkspace />);
 		clickNodeAt(300, 160);
@@ -2014,6 +2070,23 @@ describe("CanvasWorkspace", () => {
 		const past = useStudioHistoryStore.getState().past;
 		expect(past).toHaveLength(1);
 		expect(past[0]?.kind).toBe("canvas.node-layout.batch");
+	});
+
+	it("多选组拖拽会按 bbox 吸附到其他节点边线", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		dragSelectionBoundsAt(600, 200, 618, 200);
+
+		const project = useProjectStore.getState().currentProject;
+		const video = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		const image = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
+		expect(video?.x).toBe(260);
+		expect(image?.x).toBe(700);
 	});
 
 	it("多选 bbox 内点击空白区域不会清空选择", () => {
@@ -2082,6 +2155,38 @@ describe("CanvasWorkspace", () => {
 		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
 			"canvas.node-create.batch",
 		);
+	});
+
+	it("Alt 拖拽副本时会保留原节点作为吸附参考线", () => {
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 618, 160, { altKey: true });
+
+		const project = useProjectStore.getState().currentProject;
+		const copyIds = getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
+		const copiedNode =
+			project?.canvas.nodes.find((item) => item.id === copyIds[0]) ?? null;
+		expect(copiedNode?.type).toBe("video");
+		expect(copiedNode?.x).toBe(560);
+	});
+
+	it("关闭画布吸附后拖拽不会吸附，也不会透传 guide", () => {
+		render(<CanvasWorkspace />);
+		fireEvent.click(screen.getByRole("button", { name: "画布吸附" }));
+		expect(
+			useProjectStore.getState().currentProject?.ui.canvasSnapEnabled,
+		).toBe(false);
+
+		dragNodeAt(720, 360, 603, 360);
+
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
+		expect(node?.x).toBe(563);
+		expect(getLatestInfiniteSkiaCanvasProps().snapGuidesScreen).toEqual({
+			vertical: [],
+			horizontal: [],
+		});
 	});
 
 	it("多选 bbox Alt 拖拽会复制整组并切换到副本选择", () => {
@@ -2203,6 +2308,16 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("单节点 resize 会吸附到其他节点边线", () => {
+		render(<CanvasWorkspace />);
+		resizeNodeAt(720, 360, 482, 360, "top-left");
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
+		expect(node?.x).toBe(560);
+	});
+
 	it("多选横向拖拽时受约束 node 会联动另一轴，text 仍保持自由缩放", () => {
 		setAssetSceneSourceSize(400, 300);
 		const textId = useProjectStore.getState().createCanvasNode({
@@ -2278,6 +2393,47 @@ describe("CanvasWorkspace", () => {
 		expect(secondText?.y).toBeCloseTo(620);
 		expect(secondText?.width).toBeCloseTo(250);
 		expect(secondText?.height).toBeCloseTo(80);
+	});
+
+	it("多选 bbox resize 会按外框吸附并保留自由缩放结果", () => {
+		const firstTextId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			name: "Snap Text A",
+			text: "A",
+			fontSize: 24,
+			x: 760,
+			y: 520,
+			width: 120,
+			height: 60,
+		});
+		const secondTextId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			name: "Snap Text B",
+			text: "B",
+			fontSize: 24,
+			x: 980,
+			y: 620,
+			width: 200,
+			height: 80,
+		});
+		render(<CanvasWorkspace />);
+		clickNodeAt(780, 540);
+		clickNodeAt(1000, 640, { shiftKey: true });
+		resizeSelectionBoundsAt(1180, 700, 1596, 700, "bottom-right");
+		const project = useProjectStore.getState().currentProject;
+		const firstText = project?.canvas.nodes.find(
+			(item) => item.id === firstTextId,
+		);
+		const secondText = project?.canvas.nodes.find(
+			(item) => item.id === secondTextId,
+		);
+		expect(firstText?.x).toBeCloseTo(760);
+		expect(firstText?.width).toBeCloseTo(240);
+		expect(secondText?.x).toBeCloseTo(1200);
+		expect(secondText?.width).toBeCloseTo(400);
+		expect(
+			(secondText?.x ?? 0) + (secondText?.width ?? 0),
+		).toBeCloseTo(1600);
 	});
 
 	it("resize anchor 落在 node rect 外侧时不会误触发框选，也不会卡死后续拖拽", () => {

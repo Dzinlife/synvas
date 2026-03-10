@@ -124,6 +124,7 @@ const createValidProject = () => ({
 		activeSceneId: "scene-1",
 		focusedNodeId: null,
 		activeNodeId: "node-1",
+		canvasSnapEnabled: true,
 		camera: {
 			x: 0,
 			y: 0,
@@ -143,6 +144,13 @@ describe("studio schema", () => {
 		const invalid = createValidProject();
 		delete (invalid.ui as { camera?: unknown }).camera;
 		expect(() => parseStudioProject(invalid)).toThrow();
+	});
+
+	it("缺失 canvasSnapEnabled 时应回填默认值", () => {
+		const legacy = createValidProject();
+		delete (legacy.ui as { canvasSnapEnabled?: unknown }).canvasSnapEnabled;
+		const parsed = parseStudioProject(legacy);
+		expect(parsed.ui.canvasSnapEnabled).toBe(true);
 	});
 
 	it("使用 focusedSceneId 旧字段时应报错", () => {

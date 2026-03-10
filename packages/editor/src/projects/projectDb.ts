@@ -107,6 +107,7 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 			activeSceneId: sceneId,
 			focusedNodeId: null,
 			activeNodeId: nodeId,
+			canvasSnapEnabled: true,
 			camera: {
 				x: 0,
 				y: 0,

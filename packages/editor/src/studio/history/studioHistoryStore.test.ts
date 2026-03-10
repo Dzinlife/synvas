@@ -119,6 +119,7 @@ const createProject = (): StudioProject => ({
 		activeSceneId: "scene-1",
 		focusedNodeId: "node-1",
 		activeNodeId: "node-1",
+		canvasSnapEnabled: true,
 		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,

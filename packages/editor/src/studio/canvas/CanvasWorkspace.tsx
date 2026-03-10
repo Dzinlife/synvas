@@ -44,6 +44,17 @@ import CanvasWorkspaceOverlay, {
 	type DrawerViewData,
 } from "./CanvasWorkspaceOverlay";
 import {
+	collectCanvasSnapGuideValues,
+	EMPTY_CANVAS_SNAP_GUIDES_SCREEN,
+	projectCanvasSnapGuidesToScreen,
+	resolveCanvasRectSnap,
+	resolveCanvasSnapThresholdWorld,
+	type CanvasSnapGuideValues,
+	type CanvasSnapGuidesScreen,
+	type CanvasSnapGuidesWorld,
+	type CanvasSnapRect,
+} from "./canvasSnapUtils";
+import {
 	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
 	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
 	resolveCanvasOverlayLayout,
@@ -110,6 +121,7 @@ interface NodeDragSession {
 	anchorNodeId: string | null;
 	pendingSelectedNodeIds: string[];
 	dragNodeIds: string[];
+	initialBounds: CanvasSnapRect;
 	snapshots: Record<
 		string,
 		{
@@ -119,7 +131,7 @@ interface NodeDragSession {
 			before: CanvasNodeLayoutSnapshot;
 		}
 	>;
-	copyEntries: Array<{ node: CanvasNode; scene?: SceneDocument }>;
+	copyEntries: CanvasGraphHistoryEntry[];
 	activated: boolean;
 	moved: boolean;
 	axisLock: "x" | "y" | null;
@@ -191,6 +203,11 @@ interface PendingCanvasClickSuppression {
 	suppressNode: boolean;
 	suppressCanvas: boolean;
 }
+
+type CanvasGraphHistoryEntry = {
+	node: CanvasNode;
+	scene: SceneDocument | undefined;
+};
 
 const CANVAS_MARQUEE_ACTIVATION_PX = 3;
 const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
@@ -289,6 +306,99 @@ const isBottomResizeAnchor = (anchor: CanvasNodeResizeAnchor): boolean => {
 	return anchor === "bottom-left" || anchor === "bottom-right";
 };
 
+const resolveResizeBox = ({
+	anchor,
+	fixedCornerX,
+	fixedCornerY,
+	width,
+	height,
+}: {
+	anchor: CanvasNodeResizeAnchor;
+	fixedCornerX: number;
+	fixedCornerY: number;
+	width: number;
+	height: number;
+}): CanvasSnapRect => {
+	const safeWidth = Math.max(CAMERA_ZOOM_EPSILON, width);
+	const safeHeight = Math.max(CAMERA_ZOOM_EPSILON, height);
+	return {
+		x: isRightResizeAnchor(anchor) ? fixedCornerX : fixedCornerX - safeWidth,
+		y: isBottomResizeAnchor(anchor) ? fixedCornerY : fixedCornerY - safeHeight,
+		width: safeWidth,
+		height: safeHeight,
+	};
+};
+
+const applyResizeSnapDeltaToBox = (
+	box: CanvasSnapRect,
+	anchor: CanvasNodeResizeAnchor,
+	deltaX: number,
+	deltaY: number,
+): CanvasSnapRect => {
+	let nextX = box.x;
+	let nextY = box.y;
+	let nextWidth = box.width;
+	let nextHeight = box.height;
+	if (deltaX !== 0) {
+		if (isRightResizeAnchor(anchor)) {
+			nextWidth += deltaX;
+		} else {
+			nextX += deltaX;
+			nextWidth -= deltaX;
+		}
+	}
+	if (deltaY !== 0) {
+		if (isBottomResizeAnchor(anchor)) {
+			nextHeight += deltaY;
+		} else {
+			nextY += deltaY;
+			nextHeight -= deltaY;
+		}
+	}
+	return {
+		x: nextX,
+		y: nextY,
+		width: Math.max(CAMERA_ZOOM_EPSILON, nextWidth),
+		height: Math.max(CAMERA_ZOOM_EPSILON, nextHeight),
+	};
+};
+
+const selectCornerResizeSnap = ({
+	deltaX,
+	deltaY,
+	guidesWorld,
+}: {
+	deltaX: number;
+	deltaY: number;
+	guidesWorld: CanvasSnapGuidesWorld;
+}) => {
+	if (deltaX !== 0 && deltaY !== 0) {
+		if (Math.abs(deltaX) <= Math.abs(deltaY)) {
+			return {
+				deltaX,
+				deltaY: 0,
+				guidesWorld: {
+					vertical: guidesWorld.vertical,
+					horizontal: [],
+				},
+			};
+		}
+		return {
+			deltaX: 0,
+			deltaY,
+			guidesWorld: {
+				vertical: [],
+				horizontal: guidesWorld.horizontal,
+			},
+		};
+	}
+	return {
+		deltaX,
+		deltaY,
+		guidesWorld,
+	};
+};
+
 const resolveConstrainedResizeLayout = ({
 	anchor,
 	fixedCornerX,
@@ -299,6 +409,7 @@ const resolveConstrainedResizeLayout = ({
 	draftHeight,
 	constraints,
 	globalMinSize,
+	preferredAxis = null,
 }: {
 	anchor: CanvasNodeResizeAnchor;
 	fixedCornerX: number;
@@ -309,6 +420,7 @@ const resolveConstrainedResizeLayout = ({
 	draftHeight: number;
 	constraints: ResolvedCanvasNodeResizeConstraints;
 	globalMinSize: number;
+	preferredAxis?: "x" | "y" | null;
 }): { x: number; y: number; width: number; height: number } => {
 	const isRightAnchor = isRightResizeAnchor(anchor);
 	const isBottomAnchor = isBottomResizeAnchor(anchor);
@@ -323,7 +435,12 @@ const resolveConstrainedResizeLayout = ({
 		const aspectRatio = constraints.aspectRatio;
 		const scaleX = draftWidth / Math.max(startWidth, CAMERA_ZOOM_EPSILON);
 		const scaleY = draftHeight / Math.max(startHeight, CAMERA_ZOOM_EPSILON);
-		let scale = (scaleX + scaleY) / 2;
+		let scale =
+			preferredAxis === "x"
+				? scaleX
+				: preferredAxis === "y"
+					? scaleY
+					: (scaleX + scaleY) / 2;
 		if (!Number.isFinite(scale) || scale <= 0) {
 			scale = minWidth / Math.max(startWidth, CAMERA_ZOOM_EPSILON);
 		}
@@ -414,6 +531,7 @@ const CanvasWorkspace = () => {
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
+	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
 	const camera = currentProject?.ui.camera ?? DEFAULT_CAMERA;
 	const isCanvasInteractionLocked = Boolean(focusedNodeId);
 	const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
@@ -431,6 +549,8 @@ const CanvasWorkspace = () => {
 		x2: 0,
 		y2: 0,
 	});
+	const [snapGuidesScreen, setSnapGuidesScreen] =
+		useState<CanvasSnapGuidesScreen>(EMPTY_CANVAS_SNAP_GUIDES_SCREEN);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const marqueeRectRef = useRef<CanvasMarqueeRect>({
 		visible: false,
@@ -859,6 +979,33 @@ const CanvasWorkspace = () => {
 		marqueeRectRef.current = nextRect;
 		setMarqueeRect(nextRect);
 	}, []);
+	const clearCanvasSnapGuides = useCallback(() => {
+		setSnapGuidesScreen(EMPTY_CANVAS_SNAP_GUIDES_SCREEN);
+	}, []);
+	const setCanvasSnapGuides = useCallback(
+		(guidesWorld: CanvasSnapGuidesWorld) => {
+			if (
+				guidesWorld.vertical.length === 0 &&
+				guidesWorld.horizontal.length === 0
+			) {
+				clearCanvasSnapGuides();
+				return;
+			}
+			setSnapGuidesScreen(projectCanvasSnapGuidesToScreen(guidesWorld, camera));
+		},
+		[camera, clearCanvasSnapGuides],
+	);
+	const resolveCanvasGuideValues = useCallback(
+		(excludeNodeIds: string[]): CanvasSnapGuideValues => {
+			const latestProject =
+				useProjectStore.getState().currentProject ?? currentProject;
+			return collectCanvasSnapGuideValues({
+				nodes: latestProject?.canvas.nodes ?? [],
+				excludeNodeIds,
+			});
+		},
+		[currentProject],
+	);
 	const clearCanvasMarquee = useCallback(() => {
 		marqueeSessionRef.current = null;
 		updateMarqueeRectState({
@@ -885,6 +1032,11 @@ const CanvasWorkspace = () => {
 		// 只有没被新的 mousedown 打断时，才把它视为上一轮手势的尾随 click。
 		return pendingSuppression;
 	}, [clearPendingClickSuppression]);
+
+	useEffect(() => {
+		if (canvasSnapEnabled) return;
+		clearCanvasSnapGuides();
+	}, [canvasSnapEnabled, clearCanvasSnapGuides]);
 	const isResizeAnchorHitAtWorldPoint = useCallback(
 		(worldX: number, worldY: number) => {
 			if (activeNode && !activeNode.locked && isSingleSelection) {
@@ -1304,8 +1456,8 @@ const CanvasWorkspace = () => {
 			return Math.max(maxValue, node.zIndex);
 		}, -1);
 		const now = Date.now();
-		return sourceNodes
-			.map((sourceNode, index) => {
+		return sourceNodes.reduce<CanvasGraphHistoryEntry[]>(
+			(entries, sourceNode, index) => {
 				const createdAt = now + index;
 				const copyName = sourceNode.name.trim()
 					? `${sourceNode.name}副本`
@@ -1320,7 +1472,7 @@ const CanvasWorkspace = () => {
 				};
 				if (sourceNode.type === "scene") {
 					const sourceScene = latestProject.scenes[sourceNode.sceneId];
-					if (!sourceScene) return null;
+					if (!sourceScene) return entries;
 					const sceneId = createCanvasEntityId("scene");
 					const scene: SceneDocument = {
 						...cloneTimelineJson(sourceScene),
@@ -1334,21 +1486,18 @@ const CanvasWorkspace = () => {
 						type: "scene",
 						sceneId,
 					};
-					return { node, scene };
+					entries.push({ node, scene });
+					return entries;
 				}
-				return {
+				entries.push({
 					node: baseNode as CanvasNode,
-				};
-			})
-			.filter(
-				(
-					entry,
-				): entry is {
-					node: CanvasNode;
-					scene?: SceneDocument;
-				} => Boolean(entry),
-			);
-	}, []);
+					scene: undefined,
+				});
+				return entries;
+			},
+			[],
+		);
+		}, []);
 
 	const handleSkiaNodeResizeStart = useCallback(
 		(
@@ -1362,6 +1511,7 @@ const CanvasWorkspace = () => {
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
 			clearCanvasMarquee();
+			clearCanvasSnapGuides();
 			if (node.locked) {
 				handleNodeActivate(node);
 				return;
@@ -1392,6 +1542,7 @@ const CanvasWorkspace = () => {
 		[
 			clearPendingClickSuppression,
 			clearCanvasMarquee,
+			clearCanvasSnapGuides,
 			focusedNodeId,
 			commitSelectedNodeIds,
 			handleNodeActivate,
@@ -1426,7 +1577,7 @@ const CanvasWorkspace = () => {
 				? resizeSession.startNodeHeight + deltaY
 				: resizeSession.startNodeHeight - deltaY;
 			const globalMinSize = 32 / safeZoom;
-			const nextLayout = resolveConstrainedResizeLayout({
+			let nextLayout = resolveConstrainedResizeLayout({
 				anchor,
 				fixedCornerX: resizeSession.fixedCornerX,
 				fixedCornerY: resizeSession.fixedCornerY,
@@ -1437,6 +1588,57 @@ const CanvasWorkspace = () => {
 				constraints: resizeSession.constraints,
 				globalMinSize,
 			});
+			if (canvasSnapEnabled) {
+				const guideValues = resolveCanvasGuideValues([resizeSession.nodeId]);
+				const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
+				const candidateBox = {
+					x: nextLayout.x,
+					y: nextLayout.y,
+					width: nextLayout.width,
+					height: nextLayout.height,
+				};
+				const snapResult = resolveCanvasRectSnap({
+					guideValues,
+					threshold: snapThreshold,
+					movingX: [isRightAnchor ? candidateBox.x + candidateBox.width : candidateBox.x],
+					movingY: [isBottomAnchor ? candidateBox.y + candidateBox.height : candidateBox.y],
+				});
+				const selectedSnap = selectCornerResizeSnap({
+					deltaX: snapResult.deltaX,
+					deltaY: snapResult.deltaY,
+					guidesWorld: snapResult.guidesWorld,
+				});
+				if (selectedSnap.deltaX !== 0 || selectedSnap.deltaY !== 0) {
+					const snappedBox = applyResizeSnapDeltaToBox(
+						candidateBox,
+						anchor,
+						selectedSnap.deltaX,
+						selectedSnap.deltaY,
+					);
+					nextLayout = resolveConstrainedResizeLayout({
+						anchor,
+						fixedCornerX: resizeSession.fixedCornerX,
+						fixedCornerY: resizeSession.fixedCornerY,
+						startWidth: resizeSession.startNodeWidth,
+						startHeight: resizeSession.startNodeHeight,
+						draftWidth: snappedBox.width,
+						draftHeight: snappedBox.height,
+						constraints: resizeSession.constraints,
+						globalMinSize,
+						preferredAxis:
+							selectedSnap.deltaX !== 0
+								? "x"
+								: selectedSnap.deltaY !== 0
+									? "y"
+									: null,
+					});
+					setCanvasSnapGuides(selectedSnap.guidesWorld);
+				} else {
+					clearCanvasSnapGuides();
+				}
+			} else {
+				clearCanvasSnapGuides();
+			}
 			const didLayoutChange =
 				Math.abs(nextLayout.x - resizeSession.startNodeX) > 1e-6 ||
 				Math.abs(nextLayout.y - resizeSession.startNodeY) > 1e-6 ||
@@ -1446,7 +1648,14 @@ const CanvasWorkspace = () => {
 			resizeSession.moved = resizeSession.moved || didLayoutChange;
 			updateCanvasNodeLayout(resizeSession.nodeId, nextLayout);
 		},
-		[camera.zoom, updateCanvasNodeLayout],
+		[
+			canvasSnapEnabled,
+			camera.zoom,
+			clearCanvasSnapGuides,
+			resolveCanvasGuideValues,
+			setCanvasSnapGuides,
+			updateCanvasNodeLayout,
+		],
 	);
 
 	const handleSkiaNodeResizeEnd = useCallback(
@@ -1457,6 +1666,7 @@ const CanvasWorkspace = () => {
 		) => {
 			const resizeSession = nodeResizeSessionRef.current;
 			nodeResizeSessionRef.current = null;
+			clearCanvasSnapGuides();
 			if (!resizeSession) return;
 			if (resizeSession.nodeId !== node.id) return;
 			if (resizeSession.anchor !== anchor) return;
@@ -1481,7 +1691,7 @@ const CanvasWorkspace = () => {
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
 		},
-		[pushHistory, setPendingClickSuppression],
+		[clearCanvasSnapGuides, pushHistory, setPendingClickSuppression],
 	);
 
 	const handleSkiaNodeResize = useCallback(
@@ -1522,11 +1732,19 @@ const CanvasWorkspace = () => {
 				.filter((item): item is CanvasNode => Boolean(item))
 				.filter((item) => !item.locked);
 			if (dragNodes.length === 0) return false;
+			const initialBounds = resolveCanvasNodeBounds(dragNodes);
+			if (!initialBounds) return false;
 			nodeDragSessionRef.current = {
 				origin: input.origin,
 				anchorNodeId: input.anchorNodeId,
 				pendingSelectedNodeIds: input.pendingSelectedNodeIds,
 				dragNodeIds: dragNodes.map((item) => item.id),
+				initialBounds: {
+					x: initialBounds.left,
+					y: initialBounds.top,
+					width: initialBounds.width,
+					height: initialBounds.height,
+				},
 				snapshots: Object.fromEntries(
 					dragNodes.map((dragNode) => [
 						dragNode.id,
@@ -1602,6 +1820,41 @@ const CanvasWorkspace = () => {
 			if (dragSession.axisLock === "y") {
 				deltaX = 0;
 			}
+			if (canvasSnapEnabled) {
+				const guideValues = resolveCanvasGuideValues(targetNodeIds);
+				const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
+				const movingBox = {
+					x: dragSession.initialBounds.x + deltaX,
+					y: dragSession.initialBounds.y + deltaY,
+					width: dragSession.initialBounds.width,
+					height: dragSession.initialBounds.height,
+				};
+				const snapResult = resolveCanvasRectSnap({
+					guideValues,
+					threshold: snapThreshold,
+					movingX:
+						dragSession.axisLock === "y"
+							? []
+							: [
+									movingBox.x,
+									movingBox.x + movingBox.width / 2,
+									movingBox.x + movingBox.width,
+								],
+					movingY:
+						dragSession.axisLock === "x"
+							? []
+							: [
+									movingBox.y,
+									movingBox.y + movingBox.height / 2,
+									movingBox.y + movingBox.height,
+								],
+				});
+				deltaX += snapResult.deltaX;
+				deltaY += snapResult.deltaY;
+				setCanvasSnapGuides(snapResult.guidesWorld);
+			} else {
+				clearCanvasSnapGuides();
+			}
 			let didMove = false;
 			for (const targetNodeId of targetNodeIds) {
 				const snapshot = dragSession.snapshots[targetNodeId];
@@ -1621,8 +1874,12 @@ const CanvasWorkspace = () => {
 		[
 			appendCanvasGraphBatch,
 			buildCanvasCopyEntries,
+			canvasSnapEnabled,
 			camera.zoom,
+			clearCanvasSnapGuides,
 			commitSelectedNodeIds,
+			resolveCanvasGuideValues,
+			setCanvasSnapGuides,
 			updateCanvasNodeLayout,
 		],
 	);
@@ -1631,6 +1888,7 @@ const CanvasWorkspace = () => {
 		(_event: CanvasNodeDragEvent) => {
 			const dragSession = nodeDragSessionRef.current;
 			nodeDragSessionRef.current = null;
+			clearCanvasSnapGuides();
 			if (!dragSession) return;
 			if (!dragSession.activated || !dragSession.moved) {
 				if (dragSession.copyEntries.length > 0) {
@@ -1661,15 +1919,12 @@ const CanvasWorkspace = () => {
 									? (latestProject.scenes[latestNode.sceneId] ?? entry.scene)
 									: undefined,
 						};
-					})
-					.filter(
-						(
-							entry,
-						): entry is {
-							node: CanvasNode;
-							scene?: SceneDocument;
-						} => Boolean(entry),
-					);
+						})
+						.filter(
+							(
+								entry,
+							): entry is CanvasGraphHistoryEntry => entry !== null,
+						);
 				if (nextEntries.length === 0) return;
 				pushHistory({
 					kind: "canvas.node-create.batch",
@@ -1722,6 +1977,7 @@ const CanvasWorkspace = () => {
 			});
 		},
 		[
+			clearCanvasSnapGuides,
 			commitSelectedNodeIds,
 			pushHistory,
 			removeCanvasGraphBatch,
@@ -1736,6 +1992,7 @@ const CanvasWorkspace = () => {
 			}
 			if (event.button !== 0) return;
 			clearCanvasMarquee();
+			clearCanvasSnapGuides();
 			clearPendingClickSuppression();
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
@@ -1763,6 +2020,7 @@ const CanvasWorkspace = () => {
 			beginCanvasDragSession,
 			clearPendingClickSuppression,
 			clearCanvasMarquee,
+			clearCanvasSnapGuides,
 			focusedNodeId,
 			handleNodeActivate,
 			isCanvasInteractionLocked,
@@ -1818,6 +2076,7 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			clearCanvasMarquee();
+			clearCanvasSnapGuides();
 			setPendingClickSuppression({
 				suppressNode: false,
 				suppressCanvas: true,
@@ -1832,6 +2091,7 @@ const CanvasWorkspace = () => {
 		[
 			beginCanvasDragSession,
 			clearCanvasMarquee,
+			clearCanvasSnapGuides,
 			isCanvasInteractionLocked,
 			normalizedSelectedNodeIds,
 			setPendingClickSuppression,
@@ -1868,6 +2128,7 @@ const CanvasWorkspace = () => {
 			if (isCanvasInteractionLocked) return;
 			if (!selectedBounds || selectedNodes.length <= 1) return;
 			clearCanvasMarquee();
+			clearCanvasSnapGuides();
 			const resizeNodes = selectedNodes.filter((node) => !node.locked);
 			if (resizeNodes.length === 0) return;
 			setPendingClickSuppression({
@@ -1907,6 +2168,7 @@ const CanvasWorkspace = () => {
 		},
 		[
 			clearCanvasMarquee,
+			clearCanvasSnapGuides,
 			isCanvasInteractionLocked,
 			resolveNodeResizeConstraints,
 			selectedBounds,
@@ -1939,12 +2201,53 @@ const CanvasWorkspace = () => {
 					: resizeSession.startBoundsHeight - deltaY,
 				globalMinSize,
 			);
-			const nextLeft = isRightAnchor
-				? resizeSession.fixedCornerX
-				: resizeSession.fixedCornerX - nextWidth;
-			const nextTop = isBottomAnchor
-				? resizeSession.fixedCornerY
-				: resizeSession.fixedCornerY - nextHeight;
+			let nextBoundsBox = resolveResizeBox({
+				anchor,
+				fixedCornerX: resizeSession.fixedCornerX,
+				fixedCornerY: resizeSession.fixedCornerY,
+				width: nextWidth,
+				height: nextHeight,
+			});
+			if (canvasSnapEnabled) {
+				const guideValues = resolveCanvasGuideValues(
+					Object.keys(resizeSession.snapshots),
+				);
+				const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
+				const snapResult = resolveCanvasRectSnap({
+					guideValues,
+					threshold: snapThreshold,
+					movingX: [
+						isRightAnchor
+							? nextBoundsBox.x + nextBoundsBox.width
+							: nextBoundsBox.x,
+					],
+					movingY: [
+						isBottomAnchor
+							? nextBoundsBox.y + nextBoundsBox.height
+							: nextBoundsBox.y,
+					],
+				});
+				const selectedSnap = selectCornerResizeSnap({
+					deltaX: snapResult.deltaX,
+					deltaY: snapResult.deltaY,
+					guidesWorld: snapResult.guidesWorld,
+				});
+				if (selectedSnap.deltaX !== 0 || selectedSnap.deltaY !== 0) {
+					nextBoundsBox = applyResizeSnapDeltaToBox(
+						nextBoundsBox,
+						anchor,
+						selectedSnap.deltaX,
+						selectedSnap.deltaY,
+					);
+					setCanvasSnapGuides(selectedSnap.guidesWorld);
+				} else {
+					clearCanvasSnapGuides();
+				}
+			} else {
+				clearCanvasSnapGuides();
+			}
+			const nextLeft = nextBoundsBox.x;
+			const nextTop = nextBoundsBox.y;
 			const safeStartWidth = Math.max(
 				resizeSession.startBoundsWidth,
 				CAMERA_ZOOM_EPSILON,
@@ -1953,8 +2256,8 @@ const CanvasWorkspace = () => {
 				resizeSession.startBoundsHeight,
 				CAMERA_ZOOM_EPSILON,
 			);
-			const scaleX = nextWidth / safeStartWidth;
-			const scaleY = nextHeight / safeStartHeight;
+			const scaleX = nextBoundsBox.width / safeStartWidth;
+			const scaleY = nextBoundsBox.height / safeStartHeight;
 			let didMove = false;
 			for (const snapshot of Object.values(resizeSession.snapshots)) {
 				const candidateNodeX =
@@ -2000,13 +2303,21 @@ const CanvasWorkspace = () => {
 			}
 			resizeSession.moved = resizeSession.moved || didMove;
 		},
-		[camera.zoom, updateCanvasNodeLayout],
+		[
+			canvasSnapEnabled,
+			camera.zoom,
+			clearCanvasSnapGuides,
+			resolveCanvasGuideValues,
+			setCanvasSnapGuides,
+			updateCanvasNodeLayout,
+		],
 	);
 
 	const handleSelectionResizeEnd = useCallback(
 		(_event: CanvasNodeDragEvent) => {
 			const resizeSession = selectionResizeSessionRef.current;
 			selectionResizeSessionRef.current = null;
+			clearCanvasSnapGuides();
 			if (!resizeSession) return;
 			setPendingClickSuppression({
 				suppressNode: true,
@@ -2057,7 +2368,7 @@ const CanvasWorkspace = () => {
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
 		},
-		[pushHistory, setPendingClickSuppression],
+		[clearCanvasSnapGuides, pushHistory, setPendingClickSuppression],
 	);
 
 	const handleSelectionResize = useCallback(
@@ -2208,15 +2519,12 @@ const CanvasWorkspace = () => {
 								? (latestProject.scenes[node.sceneId] ?? undefined)
 								: undefined,
 					};
-				})
-				.filter(
-					(
-						entry,
-					): entry is {
-						node: CanvasNode;
-						scene?: SceneDocument;
-					} => Boolean(entry),
-				);
+					})
+					.filter(
+						(
+							entry,
+						): entry is CanvasGraphHistoryEntry => entry !== null,
+					);
 			if (entries.length === 0) return;
 			if (entries.length === 1) {
 				const entry = entries[0];
@@ -2354,6 +2662,7 @@ const CanvasWorkspace = () => {
 	const handleCanvasMouseDown = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
 			clearPendingClickSuppression();
+			clearCanvasSnapGuides();
 			if (event.button !== 0) return;
 			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
@@ -2386,6 +2695,7 @@ const CanvasWorkspace = () => {
 			});
 		},
 		[
+			clearCanvasSnapGuides,
 			getTopHitNode,
 			isResizeAnchorHitAtWorldPoint,
 			isCanvasInteractionLocked,
@@ -2752,6 +3062,7 @@ const CanvasWorkspace = () => {
 				activeNodeId={activeNodeId}
 				selectedNodeIds={normalizedSelectedNodeIds}
 				focusedNodeId={focusedNodeId}
+				snapGuidesScreen={snapGuidesScreen}
 				suspendHover={isCameraAnimating}
 				onNodeDragStart={handleSkiaNodeDragStart}
 				onNodeDrag={handleSkiaNodeDrag}

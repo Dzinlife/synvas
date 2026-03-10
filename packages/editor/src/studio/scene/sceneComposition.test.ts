@@ -77,6 +77,7 @@ const createProject = (
 			activeSceneId: null,
 			focusedNodeId: null,
 			activeNodeId: null,
+			canvasSnapEnabled: true,
 			camera: { x: 0, y: 0, zoom: 1 },
 		},
 		createdAt: now,

@@ -79,6 +79,7 @@ export interface StudioProject {
 		activeSceneId: string | null;
 		focusedNodeId: string | null;
 		activeNodeId: string | null;
+		canvasSnapEnabled: boolean;
 		camera: {
 			x: number;
 			y: number;

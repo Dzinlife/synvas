@@ -1,7 +1,15 @@
 import { useDrag } from "@use-gesture/react";
 import type { CanvasNode } from "core/studio/types";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { Group, Path, Rect, type SkiaPointerEvent } from "react-skia-lite";
+import {
+	DashPathEffect,
+	Group,
+	Line,
+	Path,
+	Rect,
+	type SkiaPointerEvent,
+} from "react-skia-lite";
+import type { CanvasSnapGuidesScreen } from "./canvasSnapUtils";
 import {
 	resolveCanvasNodeScreenFrame,
 	resolveCanvasWorldRectScreenFrame,
@@ -98,9 +106,12 @@ const resolveAnchorOpacity = (
 };
 
 interface CanvasNodeOverlayLayerProps {
+	width: number;
+	height: number;
 	activeNode: CanvasNode | null;
 	selectedNodes: CanvasNode[];
 	hoverNode: CanvasNode | null;
+	snapGuidesScreen: CanvasSnapGuidesScreen;
 	camera: {
 		x: number;
 		y: number;
@@ -120,9 +131,12 @@ interface CanvasNodeOverlayLayerProps {
 }
 
 export const CanvasNodeOverlayLayer = ({
+	width,
+	height,
 	activeNode,
 	selectedNodes,
 	hoverNode,
+	snapGuidesScreen,
 	camera,
 	onNodeResize,
 	onSelectionResize,
@@ -430,6 +444,30 @@ export const CanvasNodeOverlayLayer = ({
 	return (
 		<>
 			<Group zIndex={1_000_000} pointerEvents="none">
+				{snapGuidesScreen.vertical.map((x) => (
+					<Line
+						key={`canvas-snap-v-${x}`}
+						p1={{ x, y: 0 }}
+						p2={{ x, y: height }}
+						style="stroke"
+						strokeWidth={1}
+						color="rgba(59,130,246,0.8)"
+					>
+						<DashPathEffect intervals={[4, 4]} phase={0} />
+					</Line>
+				))}
+				{snapGuidesScreen.horizontal.map((y) => (
+					<Line
+						key={`canvas-snap-h-${y}`}
+						p1={{ x: 0, y }}
+						p2={{ x: width, y }}
+						style="stroke"
+						strokeWidth={1}
+						color="rgba(59,130,246,0.8)"
+					>
+						<DashPathEffect intervals={[4, 4]} phase={0} />
+					</Line>
+				))}
 				{hoverBorderNode && hoverNodeScreenFrame && (
 					<Group
 						key={`canvas-node-hover-outline-overlay-${hoverBorderNode.id}`}

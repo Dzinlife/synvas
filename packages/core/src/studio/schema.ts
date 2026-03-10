@@ -88,6 +88,7 @@ const studioProjectSchema = z.object({
 		activeSceneId: nonEmptyStringSchema.nullable(),
 		focusedNodeId: nonEmptyStringSchema.nullable(),
 		activeNodeId: nonEmptyStringSchema.nullable(),
+		canvasSnapEnabled: z.boolean().default(true),
 		camera: z.object({
 			x: finiteNumberSchema,
 			y: finiteNumberSchema,

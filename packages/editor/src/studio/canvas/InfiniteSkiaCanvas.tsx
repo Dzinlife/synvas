@@ -7,6 +7,7 @@ import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimePro
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
+import type { CanvasSnapGuidesScreen } from "./canvasSnapUtils";
 import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 import { resolveCanvasNodeBounds } from "./canvasWorkspaceUtils";
 import {
@@ -54,6 +55,7 @@ interface InfiniteSkiaCanvasProps {
 	activeNodeId: string | null;
 	selectedNodeIds: string[];
 	focusedNodeId: string | null;
+	snapGuidesScreen?: CanvasSnapGuidesScreen;
 	suspendHover?: boolean;
 	onNodeClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onNodeDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
@@ -185,6 +187,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	activeNodeId,
 	selectedNodeIds,
 	focusedNodeId,
+	snapGuidesScreen = { vertical: [], horizontal: [] },
 	suspendHover = false,
 	onNodeClick,
 	onNodeDoubleClick,
@@ -450,9 +453,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				/>
 				{!disableBaseNodeInteraction && !focusedNodeId && (
 					<CanvasNodeOverlayLayer
+						width={width}
+						height={height}
 						activeNode={activeNode}
 						selectedNodes={selectedNodes}
 						hoverNode={hoverNode}
+						snapGuidesScreen={snapGuidesScreen}
 						camera={camera}
 						onNodeResize={onNodeResize}
 						onSelectionResize={onSelectionResize}
@@ -490,6 +496,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		onSelectionDragEnd,
 		onSelectionDragStart,
 		onSelectionResize,
+		snapGuidesScreen,
 		runtimeManager,
 		scenes,
 		selectionBounds,
