@@ -116,12 +116,30 @@ vi.mock("react-skia-lite", async () => {
 		Canvas,
 		Group: "group",
 		Rect: "rect",
+		RoundedRect: "rrect",
+		Text: "text",
 		Path: "path",
 		Shader: "shader",
+		useFont: () => ({
+			getTextWidth: (text: string) => text.length * 6,
+			getMetrics: () => ({
+				ascent: -9,
+				descent: 2,
+				leading: 0,
+			}),
+		}),
 		Skia: {
 			RuntimeEffect: {
 				Make: () => ({ type: "runtime-effect" }),
 			},
+			Font: () => ({
+				getTextWidth: (text: string) => text.length * 6,
+				getMetrics: () => ({
+					ascent: -9,
+					descent: 2,
+					leading: 0,
+				}),
+			}),
 		},
 	};
 });
@@ -158,6 +176,7 @@ vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
 						selectionFrameScreen: focusLayerMockState.selectionFrameScreen,
 						handleItems: focusLayerMockState.handleItems,
 						activeHandle: focusLayerMockState.activeHandle,
+						labelItems: [],
 						disabled: suspendHover ?? false,
 						onLayerPointerDown: focusLayerPointerDownSpy,
 						onLayerPointerMove: focusLayerPointerMoveSpy,
@@ -165,7 +184,6 @@ vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
 						onLayerPointerLeave: focusLayerPointerLeaveSpy,
 					}
 				: null,
-			labelItems: [],
 		};
 	},
 }));

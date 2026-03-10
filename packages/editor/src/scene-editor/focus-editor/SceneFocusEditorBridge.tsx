@@ -1,6 +1,5 @@
 import type { SceneNode } from "core/studio/types";
 import { useEffect } from "react";
-import { FocusSceneLabelLayer } from "./FocusSceneLabelLayer";
 import { useSceneFocusEditorLayer } from "./useSceneFocusEditorLayer";
 import type { CanvasNodeFocusEditorBridgeProps } from "@/studio/canvas/node-system/types";
 
@@ -37,8 +36,5 @@ export const SceneFocusEditorBridge = ({
 			});
 		};
 	}, [onLayerChange]);
-
-	if (!focusEditor.enabled) return null;
-
-	return <FocusSceneLabelLayer labels={focusEditor.labelItems} />;
+	return null;
 };

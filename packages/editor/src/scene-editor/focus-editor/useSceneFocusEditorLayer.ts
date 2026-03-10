@@ -18,7 +18,6 @@ interface UseSceneFocusEditorLayerOptions {
 export interface SceneFocusEditorLayerResult {
 	enabled: boolean;
 	layerProps: FocusSceneSkiaLayerProps | null;
-	labelItems: ReturnType<typeof useFocusSceneSkiaInteractions>["labelItems"];
 }
 
 export const useSceneFocusEditorLayer = ({
@@ -66,6 +65,7 @@ export const useSceneFocusEditorLayer = ({
 			selectionFrameScreen: focusInteractions.selectionFrameScreen,
 			handleItems: focusInteractions.handleItems,
 			activeHandle: focusInteractions.activeHandle,
+			labelItems: focusInteractions.labelItems,
 			disabled: suspendHover,
 			onLayerPointerDown: focusInteractions.onLayerPointerDown,
 			onLayerPointerMove: focusInteractions.onLayerPointerMove,
@@ -79,6 +79,7 @@ export const useSceneFocusEditorLayer = ({
 		focusInteractions.elementLayouts,
 		focusInteractions.handleItems,
 		focusInteractions.hoveredId,
+		focusInteractions.labelItems,
 		focusInteractions.onLayerPointerDown,
 		focusInteractions.onLayerPointerLeave,
 		focusInteractions.onLayerPointerMove,
@@ -95,6 +96,5 @@ export const useSceneFocusEditorLayer = ({
 	return {
 		enabled,
 		layerProps,
-		labelItems: focusInteractions.labelItems,
 	};
 };
