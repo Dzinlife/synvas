@@ -165,6 +165,16 @@ interface NodeResizeSession {
 	constraints: ResolvedCanvasNodeResizeConstraints;
 }
 
+interface SelectionResizeSnapshot {
+	nodeId: string;
+	startNodeX: number;
+	startNodeY: number;
+	startNodeWidth: number;
+	startNodeHeight: number;
+	before: CanvasNodeLayoutSnapshot;
+	constraints: ResolvedCanvasNodeResizeConstraints;
+}
+
 interface SelectionResizeSession {
 	anchor: CanvasNodeResizeAnchor;
 	startBoundsLeft: number;
@@ -173,17 +183,7 @@ interface SelectionResizeSession {
 	startBoundsHeight: number;
 	fixedCornerX: number;
 	fixedCornerY: number;
-	snapshots: Record<
-		string,
-		{
-			nodeId: string;
-			startNodeX: number;
-			startNodeY: number;
-			startNodeWidth: number;
-			startNodeHeight: number;
-			before: CanvasNodeLayoutSnapshot;
-		}
-	>;
+	snapshots: Record<string, SelectionResizeSnapshot>;
 	moved: boolean;
 }
 
@@ -279,6 +279,81 @@ const clampSize = (
 		return Math.min(Math.max(value, minValue), maxValue);
 	}
 	return Math.max(value, minValue);
+};
+
+const isRightResizeAnchor = (anchor: CanvasNodeResizeAnchor): boolean => {
+	return anchor === "top-right" || anchor === "bottom-right";
+};
+
+const isBottomResizeAnchor = (anchor: CanvasNodeResizeAnchor): boolean => {
+	return anchor === "bottom-left" || anchor === "bottom-right";
+};
+
+const resolveConstrainedResizeLayout = ({
+	anchor,
+	fixedCornerX,
+	fixedCornerY,
+	startWidth,
+	startHeight,
+	draftWidth,
+	draftHeight,
+	constraints,
+	globalMinSize,
+}: {
+	anchor: CanvasNodeResizeAnchor;
+	fixedCornerX: number;
+	fixedCornerY: number;
+	startWidth: number;
+	startHeight: number;
+	draftWidth: number;
+	draftHeight: number;
+	constraints: ResolvedCanvasNodeResizeConstraints;
+	globalMinSize: number;
+}): { x: number; y: number; width: number; height: number } => {
+	const isRightAnchor = isRightResizeAnchor(anchor);
+	const isBottomAnchor = isBottomResizeAnchor(anchor);
+	const minWidth = Math.max(globalMinSize, constraints.minWidth ?? 0);
+	const minHeight = Math.max(globalMinSize, constraints.minHeight ?? 0);
+	const maxWidth = constraints.maxWidth ?? undefined;
+	const maxHeight = constraints.maxHeight ?? undefined;
+
+	let nextWidth: number;
+	let nextHeight: number;
+	if (constraints.lockAspectRatio && constraints.aspectRatio) {
+		const aspectRatio = constraints.aspectRatio;
+		const scaleX = draftWidth / Math.max(startWidth, CAMERA_ZOOM_EPSILON);
+		const scaleY = draftHeight / Math.max(startHeight, CAMERA_ZOOM_EPSILON);
+		let scale = (scaleX + scaleY) / 2;
+		if (!Number.isFinite(scale) || scale <= 0) {
+			scale = minWidth / Math.max(startWidth, CAMERA_ZOOM_EPSILON);
+		}
+		const minWidthByHeight = minHeight * aspectRatio;
+		const minWidthWithAspect = Math.max(minWidth, minWidthByHeight);
+		const maxWidthByHeight =
+			maxHeight !== undefined ? maxHeight * aspectRatio : undefined;
+		const maxWidthWithAspect =
+			maxWidthByHeight !== undefined
+				? maxWidth !== undefined
+					? Math.min(maxWidth, maxWidthByHeight)
+					: maxWidthByHeight
+				: maxWidth;
+		nextWidth = clampSize(
+			startWidth * scale,
+			minWidthWithAspect,
+			maxWidthWithAspect,
+		);
+		nextHeight = nextWidth / aspectRatio;
+	} else {
+		nextWidth = clampSize(draftWidth, minWidth, maxWidth);
+		nextHeight = clampSize(draftHeight, minHeight, maxHeight);
+	}
+
+	return {
+		x: isRightAnchor ? fixedCornerX : fixedCornerX - nextWidth,
+		y: isBottomAnchor ? fixedCornerY : fixedCornerY - nextHeight,
+		width: nextWidth,
+		height: nextHeight,
+	};
 };
 
 type AnyCanvasDrawer = React.FC<CanvasNodeDrawerProps<CanvasNode>>;
@@ -412,8 +487,10 @@ const CanvasWorkspace = () => {
 	const selectedNodes = useMemo(() => {
 		if (!currentProject || normalizedSelectedNodeIds.length === 0) return [];
 		return normalizedSelectedNodeIds
-			.map((nodeId) =>
-				currentProject.canvas.nodes.find((node) => node.id === nodeId) ?? null,
+			.map(
+				(nodeId) =>
+					currentProject.canvas.nodes.find((node) => node.id === nodeId) ??
+					null,
 			)
 			.filter((node): node is CanvasNode => Boolean(node));
 	}, [currentProject, normalizedSelectedNodeIds]);
@@ -801,16 +878,13 @@ const CanvasWorkspace = () => {
 		},
 		[],
 	);
-	const resolvePendingClickSuppression = useCallback(
-		() => {
-			const pendingSuppression = pendingClickSuppressionRef.current;
-			if (!pendingSuppression) return null;
-			clearPendingClickSuppression();
-			// 只有没被新的 mousedown 打断时，才把它视为上一轮手势的尾随 click。
-			return pendingSuppression;
-		},
-		[clearPendingClickSuppression],
-	);
+	const resolvePendingClickSuppression = useCallback(() => {
+		const pendingSuppression = pendingClickSuppressionRef.current;
+		if (!pendingSuppression) return null;
+		clearPendingClickSuppression();
+		// 只有没被新的 mousedown 打断时，才把它视为上一轮手势的尾随 click。
+		return pendingSuppression;
+	}, [clearPendingClickSuppression]);
 	const isResizeAnchorHitAtWorldPoint = useCallback(
 		(worldX: number, worldY: number) => {
 			if (activeNode && !activeNode.locked && isSingleSelection) {
@@ -840,13 +914,7 @@ const CanvasWorkspace = () => {
 			}
 			return false;
 		},
-		[
-			activeNode,
-			camera.zoom,
-			isSingleSelection,
-			selectedBounds,
-			selectedNodes,
-		],
+		[activeNode, camera.zoom, isSingleSelection, selectedBounds, selectedNodes],
 	);
 
 	const commitSelectedNodeIds = useCallback(
@@ -866,8 +934,7 @@ const CanvasWorkspace = () => {
 				const primaryNode =
 					latestProject?.canvas.nodes.find(
 						(node) => node.id === nextPrimaryNodeId,
-					) ??
-					null;
+					) ?? null;
 				if (primaryNode?.type === "scene") {
 					setActiveScene(primaryNode.sceneId);
 				}
@@ -897,8 +964,9 @@ const CanvasWorkspace = () => {
 
 	useEffect(() => {
 		if (focusedNodeId) {
-			const nextSelected =
-				currentNodeIdSet.has(focusedNodeId) ? [focusedNodeId] : [];
+			const nextSelected = currentNodeIdSet.has(focusedNodeId)
+				? [focusedNodeId]
+				: [];
 			if (
 				nextSelected.length !== normalizedSelectedNodeIds.length ||
 				nextSelected[0] !== normalizedSelectedNodeIds[0]
@@ -924,10 +992,7 @@ const CanvasWorkspace = () => {
 			}
 			return;
 		}
-		if (
-			filteredSelected.length !== 1 ||
-			filteredSelected[0] !== activeNodeId
-		) {
+		if (filteredSelected.length !== 1 || filteredSelected[0] !== activeNodeId) {
 			setSelectedNodeIds([activeNodeId]);
 		}
 	}, [
@@ -1351,9 +1416,8 @@ const CanvasWorkspace = () => {
 			const deltaX = event.movementX / safeZoom;
 			const deltaY = event.movementY / safeZoom;
 			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
-			const isRightAnchor = anchor === "top-right" || anchor === "bottom-right";
-			const isBottomAnchor =
-				anchor === "bottom-left" || anchor === "bottom-right";
+			const isRightAnchor = isRightResizeAnchor(anchor);
+			const isBottomAnchor = isBottomResizeAnchor(anchor);
 
 			const draftWidth = isRightAnchor
 				? resizeSession.startNodeWidth + deltaX
@@ -1362,76 +1426,25 @@ const CanvasWorkspace = () => {
 				? resizeSession.startNodeHeight + deltaY
 				: resizeSession.startNodeHeight - deltaY;
 			const globalMinSize = 32 / safeZoom;
-			const minWidth = Math.max(
+			const nextLayout = resolveConstrainedResizeLayout({
+				anchor,
+				fixedCornerX: resizeSession.fixedCornerX,
+				fixedCornerY: resizeSession.fixedCornerY,
+				startWidth: resizeSession.startNodeWidth,
+				startHeight: resizeSession.startNodeHeight,
+				draftWidth,
+				draftHeight,
+				constraints: resizeSession.constraints,
 				globalMinSize,
-				resizeSession.constraints.minWidth ?? 0,
-			);
-			const minHeight = Math.max(
-				globalMinSize,
-				resizeSession.constraints.minHeight ?? 0,
-			);
-			const maxWidth = resizeSession.constraints.maxWidth ?? undefined;
-			const maxHeight = resizeSession.constraints.maxHeight ?? undefined;
-
-			let nextWidth: number;
-			let nextHeight: number;
-			if (
-				resizeSession.constraints.lockAspectRatio &&
-				resizeSession.constraints.aspectRatio
-			) {
-				const aspectRatio = resizeSession.constraints.aspectRatio;
-				const scaleX =
-					draftWidth /
-					Math.max(resizeSession.startNodeWidth, CAMERA_ZOOM_EPSILON);
-				const scaleY =
-					draftHeight /
-					Math.max(resizeSession.startNodeHeight, CAMERA_ZOOM_EPSILON);
-				let scale = (scaleX + scaleY) / 2;
-				if (!Number.isFinite(scale) || scale <= 0) {
-					scale =
-						minWidth /
-						Math.max(resizeSession.startNodeWidth, CAMERA_ZOOM_EPSILON);
-				}
-				const minWidthByHeight = minHeight * aspectRatio;
-				const minWidthWithAspect = Math.max(minWidth, minWidthByHeight);
-				const maxWidthByHeight =
-					maxHeight !== undefined ? maxHeight * aspectRatio : undefined;
-				const maxWidthWithAspect =
-					maxWidthByHeight !== undefined
-						? maxWidth !== undefined
-							? Math.min(maxWidth, maxWidthByHeight)
-							: maxWidthByHeight
-						: maxWidth;
-				nextWidth = clampSize(
-					resizeSession.startNodeWidth * scale,
-					minWidthWithAspect,
-					maxWidthWithAspect,
-				);
-				nextHeight = nextWidth / aspectRatio;
-			} else {
-				nextWidth = clampSize(draftWidth, minWidth, maxWidth);
-				nextHeight = clampSize(draftHeight, minHeight, maxHeight);
-			}
-
-			const nextX = isRightAnchor
-				? resizeSession.fixedCornerX
-				: resizeSession.fixedCornerX - nextWidth;
-			const nextY = isBottomAnchor
-				? resizeSession.fixedCornerY
-				: resizeSession.fixedCornerY - nextHeight;
+			});
 			const didLayoutChange =
-				Math.abs(nextX - resizeSession.startNodeX) > 1e-6 ||
-				Math.abs(nextY - resizeSession.startNodeY) > 1e-6 ||
-				Math.abs(nextWidth - resizeSession.startNodeWidth) > 1e-6 ||
-				Math.abs(nextHeight - resizeSession.startNodeHeight) > 1e-6;
+				Math.abs(nextLayout.x - resizeSession.startNodeX) > 1e-6 ||
+				Math.abs(nextLayout.y - resizeSession.startNodeY) > 1e-6 ||
+				Math.abs(nextLayout.width - resizeSession.startNodeWidth) > 1e-6 ||
+				Math.abs(nextLayout.height - resizeSession.startNodeHeight) > 1e-6;
 
 			resizeSession.moved = resizeSession.moved || didLayoutChange;
-			updateCanvasNodeLayout(resizeSession.nodeId, {
-				x: nextX,
-				y: nextY,
-				width: nextWidth,
-				height: nextHeight,
-			});
+			updateCanvasNodeLayout(resizeSession.nodeId, nextLayout);
 		},
 		[camera.zoom, updateCanvasNodeLayout],
 	);
@@ -1475,20 +1488,20 @@ const CanvasWorkspace = () => {
 		(resizeEvent: CanvasNodeResizeEvent) => {
 			const { phase, node, anchor, event } = resizeEvent;
 			if (phase === "start") {
-			handleSkiaNodeResizeStart(node, anchor, event);
-			return;
-		}
-		if (phase === "move") {
-			handleSkiaNodeResizeMove(node, anchor, event);
-			return;
-		}
-		handleSkiaNodeResizeEnd(node, anchor, event);
-	},
-	[
-		handleSkiaNodeResizeEnd,
-		handleSkiaNodeResizeMove,
-		handleSkiaNodeResizeStart,
-	],
+				handleSkiaNodeResizeStart(node, anchor, event);
+				return;
+			}
+			if (phase === "move") {
+				handleSkiaNodeResizeMove(node, anchor, event);
+				return;
+			}
+			handleSkiaNodeResizeEnd(node, anchor, event);
+		},
+		[
+			handleSkiaNodeResizeEnd,
+			handleSkiaNodeResizeMove,
+			handleSkiaNodeResizeStart,
+		],
 	);
 
 	const beginCanvasDragSession = useCallback(
@@ -1501,8 +1514,10 @@ const CanvasWorkspace = () => {
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return false;
 			const dragNodes = input.pendingSelectedNodeIds
-				.map((nodeId) =>
-					latestProject.canvas.nodes.find((item) => item.id === nodeId) ?? null,
+				.map(
+					(nodeId) =>
+						latestProject.canvas.nodes.find((item) => item.id === nodeId) ??
+						null,
 				)
 				.filter((item): item is CanvasNode => Boolean(item))
 				.filter((item) => !item.locked);
@@ -1574,7 +1589,8 @@ const CanvasWorkspace = () => {
 			if (
 				dragSession.axisLock === null &&
 				event.shiftKey &&
-				(Math.abs(event.movementX) >= CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX ||
+				(Math.abs(event.movementX) >=
+					CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX ||
 					Math.abs(event.movementY) >= CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX)
 			) {
 				dragSession.axisLock =
@@ -1611,102 +1627,107 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const finishCanvasDragSession = useCallback((_event: CanvasNodeDragEvent) => {
-		const dragSession = nodeDragSessionRef.current;
-		nodeDragSessionRef.current = null;
-		if (!dragSession) return;
-		if (!dragSession.activated || !dragSession.moved) {
-			if (dragSession.copyEntries.length > 0) {
-				removeCanvasGraphBatch(
-					dragSession.copyEntries.map((entry) => entry.node.id),
-				);
+	const finishCanvasDragSession = useCallback(
+		(_event: CanvasNodeDragEvent) => {
+			const dragSession = nodeDragSessionRef.current;
+			nodeDragSessionRef.current = null;
+			if (!dragSession) return;
+			if (!dragSession.activated || !dragSession.moved) {
+				if (dragSession.copyEntries.length > 0) {
+					removeCanvasGraphBatch(
+						dragSession.copyEntries.map((entry) => entry.node.id),
+					);
+				}
+				return;
 			}
-			return;
-		}
-		setPendingClickSuppression({
-			suppressNode: true,
-			suppressCanvas: true,
-		});
-		const latestProject = useProjectStore.getState().currentProject;
-		if (!latestProject) return;
-		if (dragSession.copyEntries.length > 0) {
-			const nextEntries = dragSession.copyEntries
-				.map((entry) => {
+			setPendingClickSuppression({
+				suppressNode: true,
+				suppressCanvas: true,
+			});
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			if (dragSession.copyEntries.length > 0) {
+				const nextEntries = dragSession.copyEntries
+					.map((entry) => {
+						const latestNode =
+							latestProject.canvas.nodes.find(
+								(item) => item.id === entry.node.id,
+							) ?? null;
+						if (!latestNode) return null;
+						return {
+							node: latestNode,
+							scene:
+								latestNode.type === "scene"
+									? (latestProject.scenes[latestNode.sceneId] ?? entry.scene)
+									: undefined,
+						};
+					})
+					.filter(
+						(
+							entry,
+						): entry is {
+							node: CanvasNode;
+							scene?: SceneDocument;
+						} => Boolean(entry),
+					);
+				if (nextEntries.length === 0) return;
+				pushHistory({
+					kind: "canvas.node-create.batch",
+					entries: nextEntries,
+					focusNodeId: latestProject.ui.focusedNodeId,
+				});
+				commitSelectedNodeIds(nextEntries.map((entry) => entry.node.id));
+				return;
+			}
+			const nextEntries = dragSession.dragNodeIds
+				.map((nodeId) => {
+					const snapshot = dragSession.snapshots[nodeId];
 					const latestNode =
-						latestProject.canvas.nodes.find((item) => item.id === entry.node.id) ??
+						latestProject.canvas.nodes.find((item) => item.id === nodeId) ??
 						null;
-					if (!latestNode) return null;
+					if (!snapshot || !latestNode) return null;
+					const after = pickLayout(latestNode);
+					if (isLayoutEqual(snapshot.before, after)) return null;
 					return {
-						node: latestNode,
-						scene:
-							latestNode.type === "scene"
-								? (latestProject.scenes[latestNode.sceneId] ?? entry.scene)
-								: undefined,
+						nodeId,
+						before: snapshot.before,
+						after,
 					};
 				})
 				.filter(
 					(
 						entry,
 					): entry is {
-						node: CanvasNode;
-						scene?: SceneDocument;
+						nodeId: string;
+						before: CanvasNodeLayoutSnapshot;
+						after: CanvasNodeLayoutSnapshot;
 					} => Boolean(entry),
 				);
 			if (nextEntries.length === 0) return;
+			if (nextEntries.length === 1) {
+				const entry = nextEntries[0];
+				pushHistory({
+					kind: "canvas.node-layout",
+					nodeId: entry.nodeId,
+					before: entry.before,
+					after: entry.after,
+					focusNodeId: latestProject.ui.focusedNodeId,
+				});
+				return;
+			}
 			pushHistory({
-				kind: "canvas.node-create.batch",
+				kind: "canvas.node-layout.batch",
 				entries: nextEntries,
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
-			commitSelectedNodeIds(nextEntries.map((entry) => entry.node.id));
-			return;
-		}
-		const nextEntries = dragSession.dragNodeIds
-			.map((nodeId) => {
-				const snapshot = dragSession.snapshots[nodeId];
-				const latestNode =
-					latestProject.canvas.nodes.find((item) => item.id === nodeId) ?? null;
-				if (!snapshot || !latestNode) return null;
-				const after = pickLayout(latestNode);
-				if (isLayoutEqual(snapshot.before, after)) return null;
-				return {
-					nodeId,
-					before: snapshot.before,
-					after,
-				};
-			})
-			.filter(
-				(
-					entry,
-				): entry is {
-					nodeId: string;
-					before: CanvasNodeLayoutSnapshot;
-					after: CanvasNodeLayoutSnapshot;
-				} => Boolean(entry),
-			);
-		if (nextEntries.length === 0) return;
-		if (nextEntries.length === 1) {
-			const entry = nextEntries[0];
-			pushHistory({
-				kind: "canvas.node-layout",
-				nodeId: entry.nodeId,
-				before: entry.before,
-				after: entry.after,
-				focusNodeId: latestProject.ui.focusedNodeId,
-			});
-			return;
-		}
-		pushHistory({
-			kind: "canvas.node-layout.batch",
-			entries: nextEntries,
-			focusNodeId: latestProject.ui.focusedNodeId,
-		});
-	}, [
-		commitSelectedNodeIds,
-		pushHistory,
-		removeCanvasGraphBatch,
-		setPendingClickSuppression,
-	]);
+		},
+		[
+			commitSelectedNodeIds,
+			pushHistory,
+			removeCanvasGraphBatch,
+			setPendingClickSuppression,
+		],
+	);
 
 	const handleSkiaNodeDragStart = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
@@ -1756,7 +1777,10 @@ const CanvasWorkspace = () => {
 			}
 			const dragSession = nodeDragSessionRef.current;
 			if (!dragSession) return;
-			if (dragSession.origin !== "node" || dragSession.anchorNodeId !== node.id) {
+			if (
+				dragSession.origin !== "node" ||
+				dragSession.anchorNodeId !== node.id
+			) {
 				return;
 			}
 			applyCanvasDragEvent(event);
@@ -1771,7 +1795,10 @@ const CanvasWorkspace = () => {
 			}
 			const dragSession = nodeDragSessionRef.current;
 			if (!dragSession) return;
-			if (dragSession.origin !== "node" || dragSession.anchorNodeId !== node.id) {
+			if (
+				dragSession.origin !== "node" ||
+				dragSession.anchorNodeId !== node.id
+			) {
 				return;
 			}
 			finishCanvasDragSession(event);
@@ -1823,12 +1850,16 @@ const CanvasWorkspace = () => {
 		[applyCanvasDragEvent],
 	);
 
-	const handleSelectionBoundsDragEnd = useCallback((event: CanvasNodeDragEvent) => {
-		if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) return;
-		const dragSession = nodeDragSessionRef.current;
-		if (!dragSession || dragSession.origin !== "selection") return;
-		finishCanvasDragSession(event);
-	}, [finishCanvasDragSession]);
+	const handleSelectionBoundsDragEnd = useCallback(
+		(event: CanvasNodeDragEvent) => {
+			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current)
+				return;
+			const dragSession = nodeDragSessionRef.current;
+			if (!dragSession || dragSession.origin !== "selection") return;
+			finishCanvasDragSession(event);
+		},
+		[finishCanvasDragSession],
+	);
 
 	const handleSelectionResizeStart = useCallback(
 		(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
@@ -1867,6 +1898,7 @@ const CanvasWorkspace = () => {
 							startNodeWidth: node.width,
 							startNodeHeight: node.height,
 							before: pickLayout(node),
+							constraints: resolveNodeResizeConstraints(node),
 						},
 					]),
 				),
@@ -1876,6 +1908,7 @@ const CanvasWorkspace = () => {
 		[
 			clearCanvasMarquee,
 			isCanvasInteractionLocked,
+			resolveNodeResizeConstraints,
 			selectedBounds,
 			selectedNodes,
 			setPendingClickSuppression,
@@ -1891,9 +1924,8 @@ const CanvasWorkspace = () => {
 			const deltaX = event.movementX / safeZoom;
 			const deltaY = event.movementY / safeZoom;
 			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
-			const isRightAnchor = anchor === "top-right" || anchor === "bottom-right";
-			const isBottomAnchor =
-				anchor === "bottom-left" || anchor === "bottom-right";
+			const isRightAnchor = isRightResizeAnchor(anchor);
+			const isBottomAnchor = isBottomResizeAnchor(anchor);
 			const globalMinSize = 32 / safeZoom;
 			const nextWidth = clampSize(
 				isRightAnchor
@@ -1925,92 +1957,108 @@ const CanvasWorkspace = () => {
 			const scaleY = nextHeight / safeStartHeight;
 			let didMove = false;
 			for (const snapshot of Object.values(resizeSession.snapshots)) {
-				const nextNodeX =
+				const candidateNodeX =
 					nextLeft +
 					(snapshot.startNodeX - resizeSession.startBoundsLeft) * scaleX;
-				const nextNodeY =
+				const candidateNodeY =
 					nextTop +
 					(snapshot.startNodeY - resizeSession.startBoundsTop) * scaleY;
-				const nextNodeWidth = Math.max(
+				const candidateNodeWidth = Math.max(
 					CAMERA_ZOOM_EPSILON,
 					snapshot.startNodeWidth * scaleX,
 				);
-				const nextNodeHeight = Math.max(
+				const candidateNodeHeight = Math.max(
 					CAMERA_ZOOM_EPSILON,
 					snapshot.startNodeHeight * scaleY,
 				);
+				const candidateFixedCornerX = isRightAnchor
+					? candidateNodeX
+					: candidateNodeX + candidateNodeWidth;
+				const candidateFixedCornerY = isBottomAnchor
+					? candidateNodeY
+					: candidateNodeY + candidateNodeHeight;
+				const nextLayout = resolveConstrainedResizeLayout({
+					anchor,
+					fixedCornerX: candidateFixedCornerX,
+					fixedCornerY: candidateFixedCornerY,
+					startWidth: snapshot.startNodeWidth,
+					startHeight: snapshot.startNodeHeight,
+					draftWidth: candidateNodeWidth,
+					draftHeight: candidateNodeHeight,
+					constraints: snapshot.constraints,
+					globalMinSize,
+				});
 				if (
-					Math.abs(nextNodeX - snapshot.startNodeX) > 1e-6 ||
-					Math.abs(nextNodeY - snapshot.startNodeY) > 1e-6 ||
-					Math.abs(nextNodeWidth - snapshot.startNodeWidth) > 1e-6 ||
-					Math.abs(nextNodeHeight - snapshot.startNodeHeight) > 1e-6
+					Math.abs(nextLayout.x - snapshot.startNodeX) > 1e-6 ||
+					Math.abs(nextLayout.y - snapshot.startNodeY) > 1e-6 ||
+					Math.abs(nextLayout.width - snapshot.startNodeWidth) > 1e-6 ||
+					Math.abs(nextLayout.height - snapshot.startNodeHeight) > 1e-6
 				) {
 					didMove = true;
 				}
-				updateCanvasNodeLayout(snapshot.nodeId, {
-					x: nextNodeX,
-					y: nextNodeY,
-					width: nextNodeWidth,
-					height: nextNodeHeight,
-				});
+				updateCanvasNodeLayout(snapshot.nodeId, nextLayout);
 			}
 			resizeSession.moved = resizeSession.moved || didMove;
 		},
 		[camera.zoom, updateCanvasNodeLayout],
 	);
 
-	const handleSelectionResizeEnd = useCallback((_event: CanvasNodeDragEvent) => {
-		const resizeSession = selectionResizeSessionRef.current;
-		selectionResizeSessionRef.current = null;
-		if (!resizeSession) return;
-		setPendingClickSuppression({
-			suppressNode: true,
-			suppressCanvas: true,
-		});
-		if (!resizeSession.moved) return;
-		const latestProject = useProjectStore.getState().currentProject;
-		if (!latestProject) return;
-		const nextEntries = Object.keys(resizeSession.snapshots)
-			.map((nodeId) => {
-				const snapshot = resizeSession.snapshots[nodeId];
-				const latestNode =
-					latestProject.canvas.nodes.find((item) => item.id === nodeId) ?? null;
-				if (!snapshot || !latestNode) return null;
-				const after = pickLayout(latestNode);
-				if (isLayoutEqual(snapshot.before, after)) return null;
-				return {
-					nodeId,
-					before: snapshot.before,
-					after,
-				};
-			})
-			.filter(
-				(
-					entry,
-				): entry is {
-					nodeId: string;
-					before: CanvasNodeLayoutSnapshot;
-					after: CanvasNodeLayoutSnapshot;
-				} => Boolean(entry),
-			);
-		if (nextEntries.length === 0) return;
-		if (nextEntries.length === 1) {
-			const entry = nextEntries[0];
+	const handleSelectionResizeEnd = useCallback(
+		(_event: CanvasNodeDragEvent) => {
+			const resizeSession = selectionResizeSessionRef.current;
+			selectionResizeSessionRef.current = null;
+			if (!resizeSession) return;
+			setPendingClickSuppression({
+				suppressNode: true,
+				suppressCanvas: true,
+			});
+			if (!resizeSession.moved) return;
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const nextEntries = Object.keys(resizeSession.snapshots)
+				.map((nodeId) => {
+					const snapshot = resizeSession.snapshots[nodeId];
+					const latestNode =
+						latestProject.canvas.nodes.find((item) => item.id === nodeId) ??
+						null;
+					if (!snapshot || !latestNode) return null;
+					const after = pickLayout(latestNode);
+					if (isLayoutEqual(snapshot.before, after)) return null;
+					return {
+						nodeId,
+						before: snapshot.before,
+						after,
+					};
+				})
+				.filter(
+					(
+						entry,
+					): entry is {
+						nodeId: string;
+						before: CanvasNodeLayoutSnapshot;
+						after: CanvasNodeLayoutSnapshot;
+					} => Boolean(entry),
+				);
+			if (nextEntries.length === 0) return;
+			if (nextEntries.length === 1) {
+				const entry = nextEntries[0];
+				pushHistory({
+					kind: "canvas.node-layout",
+					nodeId: entry.nodeId,
+					before: entry.before,
+					after: entry.after,
+					focusNodeId: latestProject.ui.focusedNodeId,
+				});
+				return;
+			}
 			pushHistory({
-				kind: "canvas.node-layout",
-				nodeId: entry.nodeId,
-				before: entry.before,
-				after: entry.after,
+				kind: "canvas.node-layout.batch",
+				entries: nextEntries,
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
-			return;
-		}
-		pushHistory({
-			kind: "canvas.node-layout.batch",
-			entries: nextEntries,
-			focusNodeId: latestProject.ui.focusedNodeId,
-		});
-	}, [pushHistory, setPendingClickSuppression]);
+		},
+		[pushHistory, setPendingClickSuppression],
+	);
 
 	const handleSelectionResize = useCallback(
 		(resizeEvent: CanvasSelectionResizeEvent) => {
@@ -2149,8 +2197,9 @@ const CanvasWorkspace = () => {
 			const entries = targetIds
 				.map((nodeId) => {
 					const node =
-						latestProject.canvas.nodes.find((candidate) => candidate.id === nodeId) ??
-						null;
+						latestProject.canvas.nodes.find(
+							(candidate) => candidate.id === nodeId,
+						) ?? null;
 					if (!node) return null;
 					return {
 						node,
@@ -2238,7 +2287,7 @@ const CanvasWorkspace = () => {
 						onInsertNodeToScene: (sceneId) => {
 							insertNodeToScene(node, sceneId);
 						},
-				  })
+					})
 				: [];
 			const actions = [
 				...toTimelineContextMenuActions(nodeActions),
@@ -2271,11 +2320,26 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const finishCanvasMarquee = useCallback((_event: MouseEvent) => {
-		const marqueeSession = marqueeSessionRef.current;
-		if (!marqueeSession) return;
-		marqueeSessionRef.current = null;
-		if (!marqueeSession.activated) {
+	const finishCanvasMarquee = useCallback(
+		(_event: MouseEvent) => {
+			const marqueeSession = marqueeSessionRef.current;
+			if (!marqueeSession) return;
+			marqueeSessionRef.current = null;
+			if (!marqueeSession.activated) {
+				updateMarqueeRectState({
+					visible: false,
+					x1: marqueeRectRef.current.x1,
+					y1: marqueeRectRef.current.y1,
+					x2: marqueeRectRef.current.x2,
+					y2: marqueeRectRef.current.y2,
+				});
+				return;
+			}
+			setPendingClickSuppression({
+				suppressNode: true,
+				suppressCanvas: true,
+			});
+			applyMarqueeSelection(marqueeRectRef.current);
 			updateMarqueeRectState({
 				visible: false,
 				x1: marqueeRectRef.current.x1,
@@ -2283,25 +2347,9 @@ const CanvasWorkspace = () => {
 				x2: marqueeRectRef.current.x2,
 				y2: marqueeRectRef.current.y2,
 			});
-			return;
-		}
-		setPendingClickSuppression({
-			suppressNode: true,
-			suppressCanvas: true,
-		});
-		applyMarqueeSelection(marqueeRectRef.current);
-		updateMarqueeRectState({
-			visible: false,
-			x1: marqueeRectRef.current.x1,
-			y1: marqueeRectRef.current.y1,
-			x2: marqueeRectRef.current.x2,
-			y2: marqueeRectRef.current.y2,
-		});
-	}, [
-		applyMarqueeSelection,
-		setPendingClickSuppression,
-		updateMarqueeRectState,
-	]);
+		},
+		[applyMarqueeSelection, setPendingClickSuppression, updateMarqueeRectState],
+	);
 
 	const handleCanvasMouseDown = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
@@ -2486,8 +2534,9 @@ const CanvasWorkspace = () => {
 			if (event.metaKey || event.ctrlKey || event.altKey) return;
 			if (isEditableKeyboardTarget(event.target)) return;
 			if (normalizedSelectedNodeIds.length === 0) return;
-			const activeTimelineState =
-				runtimeManager?.getActiveEditTimelineRuntime()?.timelineStore.getState();
+			const activeTimelineState = runtimeManager
+				?.getActiveEditTimelineRuntime()
+				?.timelineStore.getState();
 			if (
 				activeTimelineState?.isTimelineEditorMounted &&
 				(activeTimelineState.selectedIds.length > 0 ||

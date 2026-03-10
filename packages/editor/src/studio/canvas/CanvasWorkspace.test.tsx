@@ -685,6 +685,32 @@ const createCanvasWorkspaceRuntime = () => {
 	return runtime;
 };
 
+const setAssetSceneSourceSize = (width: number, height: number): void => {
+	useProjectStore.setState((state) => {
+		const project = state.currentProject;
+		if (!project) return state;
+		return {
+			...state,
+			currentProject: {
+				...project,
+				assets: project.assets.map((asset) => {
+					if (asset.id !== "asset-scene") return asset;
+					return {
+						...asset,
+						meta: {
+							...(asset.meta ?? {}),
+							sourceSize: {
+								width,
+								height,
+							},
+						},
+					};
+				}),
+			},
+		};
+	});
+};
+
 const isPointInNode = (node: CanvasNode, x: number, y: number): boolean => {
 	const left = Math.min(node.x, node.x + node.width);
 	const right = Math.max(node.x, node.x + node.width);
@@ -1660,7 +1686,9 @@ describe("CanvasWorkspace", () => {
 		expect(
 			useProjectStore
 				.getState()
-				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+				.currentProject?.canvas.nodes.some(
+					(node) => node.id === "node-video-1",
+				),
 		).toBe(false);
 		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
 			"canvas.node-delete",
@@ -1670,7 +1698,9 @@ describe("CanvasWorkspace", () => {
 		expect(
 			useProjectStore
 				.getState()
-				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+				.currentProject?.canvas.nodes.some(
+					(node) => node.id === "node-video-1",
+				),
 		).toBe(true);
 	});
 
@@ -1692,7 +1722,9 @@ describe("CanvasWorkspace", () => {
 		expect(
 			useProjectStore
 				.getState()
-				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+				.currentProject?.canvas.nodes.some(
+					(node) => node.id === "node-video-1",
+				),
 		).toBe(true);
 		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
 	});
@@ -1715,7 +1747,9 @@ describe("CanvasWorkspace", () => {
 		expect(
 			useProjectStore
 				.getState()
-				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+				.currentProject?.canvas.nodes.some(
+					(node) => node.id === "node-video-1",
+				),
 		).toBe(true);
 		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
 	});
@@ -1738,7 +1772,9 @@ describe("CanvasWorkspace", () => {
 		expect(
 			useProjectStore
 				.getState()
-				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+				.currentProject?.canvas.nodes.some(
+					(node) => node.id === "node-video-1",
+				),
 		).toBe(false);
 		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
 			"canvas.node-delete",
@@ -1928,7 +1964,9 @@ describe("CanvasWorkspace", () => {
 
 		clickCanvasAt(1120, 700);
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([]);
-		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.activeNodeId,
+		).toBeNull();
 	});
 
 	it("Shift 框选会基于初始选择做 toggle", () => {
@@ -1963,8 +2001,12 @@ describe("CanvasWorkspace", () => {
 		dragNodeAt(720, 360, 820, 420);
 
 		const project = useProjectStore.getState().currentProject;
-		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
-		const image = project?.canvas.nodes.find((item) => item.id === "node-image-1");
+		const video = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		const image = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
 		expect(video?.x).toBe(340);
 		expect(video?.y).toBe(180);
 		expect(image?.x).toBe(780);
@@ -1992,8 +2034,12 @@ describe("CanvasWorkspace", () => {
 		dragSelectionBoundsAt(600, 200, 700, 260);
 
 		const project = useProjectStore.getState().currentProject;
-		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
-		const image = project?.canvas.nodes.find((item) => item.id === "node-image-1");
+		const video = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		const image = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
 		expect(video?.x).toBe(340);
 		expect(video?.y).toBe(180);
 		expect(image?.x).toBe(780);
@@ -2045,9 +2091,13 @@ describe("CanvasWorkspace", () => {
 		dragSelectionBoundsAt(600, 200, 720, 260, { altKey: true });
 
 		const project = useProjectStore.getState().currentProject;
-		const selectedIds = getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
+		const selectedIds =
+			getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
 		const copiedNodes = selectedIds
-			.map((nodeId) => project?.canvas.nodes.find((item) => item.id === nodeId) ?? null)
+			.map(
+				(nodeId) =>
+					project?.canvas.nodes.find((item) => item.id === nodeId) ?? null,
+			)
 			.filter((node): node is CanvasNode => Boolean(node));
 		expect(selectedIds).toHaveLength(2);
 		expect(copiedNodes.map((node) => node.name)).toEqual([
@@ -2074,8 +2124,7 @@ describe("CanvasWorkspace", () => {
 		dragNodeAt(300, 160, 300, 160, { altKey: true });
 		const project = useProjectStore.getState().currentProject;
 		expect(
-			project?.canvas.nodes.filter((item) => item.id !== "node-video-1")
-				.length,
+			project?.canvas.nodes.filter((item) => item.id !== "node-video-1").length,
 		).toBe(5);
 		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
 	});
@@ -2096,12 +2145,16 @@ describe("CanvasWorkspace", () => {
 
 		useStudioHistoryStore.getState().undo();
 		expect(
-			useProjectStore.getState().currentProject?.scenes[copiedSceneNode.sceneId],
+			useProjectStore.getState().currentProject?.scenes[
+				copiedSceneNode.sceneId
+			],
 		).toBeUndefined();
 
 		useStudioHistoryStore.getState().redo();
 		expect(
-			useProjectStore.getState().currentProject?.scenes[copiedSceneNode.sceneId],
+			useProjectStore.getState().currentProject?.scenes[
+				copiedSceneNode.sceneId
+			],
 		).toBeTruthy();
 	});
 
@@ -2118,25 +2171,113 @@ describe("CanvasWorkspace", () => {
 		expect(node?.height).toBe(180);
 	});
 
-	it("多选 bbox resize 会按整体 bounding box 缩放全部节点", () => {
+	it("多选 bbox resize 会对每个受约束 node 独立求解最终 rect", () => {
+		setAssetSceneSourceSize(400, 300);
 		render(<CanvasWorkspace />);
 		clickNodeAt(300, 160);
 		clickNodeAt(720, 360, { shiftKey: true });
-		resizeSelectionBoundsAt(940, 480, 1080, 552, "bottom-right");
+		resizeSelectionBoundsAt(940, 480, 1080, 480, "bottom-right");
 		const project = useProjectStore.getState().currentProject;
-		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
-		const image = project?.canvas.nodes.find((item) => item.id === "node-image-1");
+		const video = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		const image = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
 		expect(video?.x).toBeCloseTo(240);
 		expect(video?.y).toBeCloseTo(120);
-		expect(video?.width).toBeCloseTo(384);
-		expect(video?.height).toBeCloseTo(216);
+		expect(video?.width).toBeCloseTo(352);
+		expect(video?.height).toBeCloseTo(264);
 		expect(image?.x).toBeCloseTo(768);
-		expect(image?.y).toBeCloseTo(360);
-		expect(image?.width).toBeCloseTo(312);
-		expect(image?.height).toBeCloseTo(192);
+		expect(image?.y).toBeCloseTo(320);
+		expect(image?.width).toBeCloseTo(286);
+		expect(image?.height).toBeCloseTo(214.5);
+		expect(
+			Math.abs((video?.width ?? 0) / Math.max(video?.height ?? 1, 1) - 4 / 3),
+		).toBeLessThan(1e-6);
+		expect(
+			Math.abs((image?.width ?? 0) / Math.max(image?.height ?? 1, 1) - 4 / 3),
+		).toBeLessThan(1e-6);
 		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
 			"canvas.node-layout.batch",
 		);
+	});
+
+	it("多选横向拖拽时受约束 node 会联动另一轴，text 仍保持自由缩放", () => {
+		setAssetSceneSourceSize(400, 300);
+		const textId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			name: "Free Text",
+			text: "free",
+			fontSize: 24,
+			x: 980,
+			y: 340,
+			width: 200,
+			height: 80,
+		});
+		render(<CanvasWorkspace />);
+		clickNodeAt(720, 360);
+		clickNodeAt(1000, 360, { shiftKey: true });
+		resizeSelectionBoundsAt(1180, 480, 1280, 480, "bottom-right");
+		const project = useProjectStore.getState().currentProject;
+		const image = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
+		const text = project?.canvas.nodes.find((item) => item.id === textId);
+		expect(image).toBeTruthy();
+		expect(text).toBeTruthy();
+		if (!image || !text) return;
+		expect(image.x).toBeCloseTo(680);
+		expect(image.y).toBeCloseTo(320);
+		expect(image.width).toBeCloseTo(286);
+		expect(image.height).toBeCloseTo(214.5);
+		expect(Math.abs(image.width / image.height - 4 / 3)).toBeLessThan(1e-6);
+		expect(text.x).toBeCloseTo(1040);
+		expect(text.y).toBeCloseTo(340);
+		expect(text.width).toBeCloseTo(240);
+		expect(text.height).toBeCloseTo(80);
+	});
+
+	it("无约束 node 的多选 resize 仍保持普通比例缩放", () => {
+		const firstTextId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			name: "Text A",
+			text: "A",
+			fontSize: 24,
+			x: 760,
+			y: 520,
+			width: 120,
+			height: 60,
+		});
+		const secondTextId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			name: "Text B",
+			text: "B",
+			fontSize: 24,
+			x: 980,
+			y: 620,
+			width: 200,
+			height: 80,
+		});
+		render(<CanvasWorkspace />);
+		clickNodeAt(780, 540);
+		clickNodeAt(1000, 640, { shiftKey: true });
+		resizeSelectionBoundsAt(1180, 700, 1285, 700, "bottom-right");
+		const project = useProjectStore.getState().currentProject;
+		const firstText = project?.canvas.nodes.find(
+			(item) => item.id === firstTextId,
+		);
+		const secondText = project?.canvas.nodes.find(
+			(item) => item.id === secondTextId,
+		);
+		expect(firstText?.x).toBeCloseTo(760);
+		expect(firstText?.y).toBeCloseTo(520);
+		expect(firstText?.width).toBeCloseTo(150);
+		expect(firstText?.height).toBeCloseTo(60);
+		expect(secondText?.x).toBeCloseTo(1035);
+		expect(secondText?.y).toBeCloseTo(620);
+		expect(secondText?.width).toBeCloseTo(250);
+		expect(secondText?.height).toBeCloseTo(80);
 	});
 
 	it("resize anchor 落在 node rect 外侧时不会误触发框选，也不会卡死后续拖拽", () => {
@@ -2154,14 +2295,7 @@ describe("CanvasWorkspace", () => {
 			clientX: 200,
 			clientY: 90,
 		});
-		resizeNodeByIdAt(
-			"node-video-1",
-			236,
-			116,
-			200,
-			90,
-			"top-left",
-		);
+		resizeNodeByIdAt("node-video-1", 236, 116, 200, 90, "top-left");
 		fireEvent.mouseUp(window, {
 			button: 0,
 			clientX: 200,
@@ -2200,8 +2334,12 @@ describe("CanvasWorkspace", () => {
 		clickNodeAt(720, 360, { shiftKey: true });
 		dragNodeAt(300, 160, 420, 260);
 		const project = useProjectStore.getState().currentProject;
-		const video = project?.canvas.nodes.find((item) => item.id === "node-video-1");
-		const image = project?.canvas.nodes.find((item) => item.id === "node-image-1");
+		const video = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		const image = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
 		expect(video?.x).toBe(360);
 		expect(video?.y).toBe(220);
 		expect(image?.x).toBe(680);
@@ -2257,29 +2395,7 @@ describe("CanvasWorkspace", () => {
 	});
 
 	it("scene/video/image 等比缩放，text 保持自由缩放", () => {
-		useProjectStore.setState((state) => {
-			const project = state.currentProject;
-			if (!project) return state;
-			return {
-				...state,
-				currentProject: {
-					...project,
-					assets: project.assets.map((asset) => {
-						if (asset.id !== "asset-scene") return asset;
-						return {
-							...asset,
-							meta: {
-								...(asset.meta ?? {}),
-								sourceSize: {
-									width: 400,
-									height: 300,
-								},
-							},
-						};
-					}),
-				},
-			};
-		});
+		setAssetSceneSourceSize(400, 300);
 		const textId = useProjectStore.getState().createCanvasNode({
 			type: "text",
 			name: "Resizable Text",
