@@ -3,6 +3,7 @@ import type React from "react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, type CanvasRef, Group } from "react-skia-lite";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
@@ -138,6 +139,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const disableBaseNodeInteraction = Boolean(
 		focusedNode && (focusEditorLayer || focusEditorBridge),
 	);
+	const focusLayerResetKey = `${focusedNodeId ?? ""}:${focusEditorLayer ? "1" : "0"}:${focusEditorBridge ? "1" : "0"}`;
 	const focusLayerEnabled = Boolean(
 		FocusEditorLayer &&
 			focusEditorLayerState.enabled &&
@@ -160,11 +162,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	);
 
 	useLayoutEffect(() => {
+		void focusLayerResetKey;
 		setFocusEditorLayerState({
 			enabled: false,
 			layerProps: null,
 		});
-	}, [focusedNodeId, focusEditorLayer, focusEditorBridge]);
+	}, [focusLayerResetKey]);
 
 	useLayoutEffect(() => {
 		if (!suspendHover) return;
@@ -317,6 +320,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						);
 					})}
 				</Group>
+				<CanvasNodeLabelLayer
+					width={width}
+					height={height}
+					camera={camera}
+					nodes={nodes}
+					focusedNodeId={focusedNodeId}
+				/>
 				{!disableBaseNodeInteraction && !focusedNodeId && (
 					<CanvasNodeOverlayLayer
 						activeNode={activeNode}
@@ -325,9 +335,11 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						onNodeResize={onNodeResize}
 					/>
 				)}
-				{focusLayerEnabled && FocusEditorLayer && focusEditorLayerState.layerProps && (
-					<FocusEditorLayer {...focusEditorLayerState.layerProps} />
-				)}
+				{focusLayerEnabled &&
+					FocusEditorLayer &&
+					focusEditorLayerState.layerProps && (
+						<FocusEditorLayer {...focusEditorLayerState.layerProps} />
+					)}
 			</Group>,
 		);
 	}, [
@@ -337,7 +349,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		camera,
 		disableBaseNodeInteraction,
 		focusedNodeId,
-		focusEditorLayerState.enabled,
 		focusEditorLayerState.layerProps,
 		focusLayerEnabled,
 		handleNodeDrag,

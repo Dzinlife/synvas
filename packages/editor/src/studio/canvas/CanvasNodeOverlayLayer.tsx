@@ -2,6 +2,7 @@ import { useDrag } from "@use-gesture/react";
 import type { CanvasNode } from "core/studio/types";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Group, Path, Rect, type SkiaPointerEvent } from "react-skia-lite";
+import { resolveCanvasNodeScreenFrame } from "./canvasNodeLabelUtils";
 import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 import {
 	CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
@@ -85,19 +86,6 @@ const resolvePointerLocalPoint = (
 	return {
 		x: Number(x),
 		y: Number(y),
-	};
-};
-
-const resolveNodeScreenFrame = (
-	node: CanvasNode,
-	camera: { x: number; y: number; zoom: number },
-) => {
-	const safeZoom = Math.max(camera.zoom, 1e-6);
-	return {
-		x: (node.x + camera.x) * safeZoom,
-		y: (node.y + camera.y) * safeZoom,
-		width: Math.max(1, node.width * safeZoom),
-		height: Math.max(1, node.height * safeZoom),
 	};
 };
 
@@ -295,12 +283,12 @@ export const CanvasNodeOverlayLayer = ({
 	};
 
 	const activeNodeScreenFrame = activeNode
-		? resolveNodeScreenFrame(activeNode, camera)
+		? resolveCanvasNodeScreenFrame(activeNode, camera)
 		: null;
 	const hoverBorderNode =
 		hoverNode && hoverNode.id !== activeNode?.id ? hoverNode : null;
 	const hoverNodeScreenFrame = hoverBorderNode
-		? resolveNodeScreenFrame(hoverBorderNode, camera)
+		? resolveCanvasNodeScreenFrame(hoverBorderNode, camera)
 		: null;
 	if (!activeNodeScreenFrame && !hoverNodeScreenFrame) return null;
 

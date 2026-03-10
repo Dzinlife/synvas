@@ -1,14 +1,14 @@
-import type { SkFont, SkiaPointerEvent } from "react-skia-lite";
+import { useMemo } from "react";
+import type { SkiaPointerEvent } from "react-skia-lite";
 import {
 	DashPathEffect,
 	Group,
+	Image,
 	Line,
 	Rect,
 	RoundedRect,
-	Skia,
-	Text,
-	useFont,
 } from "react-skia-lite";
+import { useSkiaUiTextSprites } from "@/studio/canvas/skia-text";
 import type { FocusFrame, FocusRect } from "./focusSceneCoordinates";
 import type {
 	FocusTransformHandle,
@@ -50,8 +50,12 @@ const LABEL_FONT_SIZE_PX = 12;
 const LABEL_HORIZONTAL_PADDING_PX = 12;
 const LABEL_VERTICAL_PADDING_PX = 4;
 const LABEL_GAP_PX = 20;
-const LABEL_FONT_URI = "/Roboto-Medium.ttf";
-let cachedLabelFont: ReturnType<typeof Skia.Font> | null = null;
+const LABEL_TEXT_COLOR = "rgba(239,68,68,1)";
+const LABEL_CANVAS_TEXT_PADDING_PX = 1;
+const LABEL_LINE_HEIGHT_MULTIPLIER = 1.2;
+const LABEL_FONT_WEIGHT = 300;
+const LABEL_FONT_FAMILY =
+	'-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif';
 
 const normalizeLabelRotationDeg = (rotationDeg: number): number => {
 	let normalizedRotation = rotationDeg % 90;
@@ -73,56 +77,6 @@ const resolveLabelTranslateY = (
 		return screenWidth / 2 + LABEL_GAP_PX;
 	}
 	return screenHeight / 2 + LABEL_GAP_PX;
-};
-
-const resolveLabelFont = () => {
-	if (cachedLabelFont) return cachedLabelFont;
-	cachedLabelFont = Skia.Font(undefined, LABEL_FONT_SIZE_PX);
-	return cachedLabelFont;
-};
-
-const estimateTextWidth = (text: string): number => {
-	let units = 0;
-	for (const char of text) {
-		const code = char.codePointAt(0) ?? 0;
-		if (code <= 0x7f) {
-			units += 0.6;
-			continue;
-		}
-		if (code >= 0x4e00 && code <= 0x9fff) {
-			units += 1;
-			continue;
-		}
-		units += 0.8;
-	}
-	return Math.max(LABEL_FONT_SIZE_PX * 2, units * LABEL_FONT_SIZE_PX);
-};
-
-const resolveTextMetrics = (font: SkFont | null, text: string) => {
-	const fallbackAscent = -LABEL_FONT_SIZE_PX * 0.78;
-	const fallbackHeight = LABEL_FONT_SIZE_PX;
-	const widthFromFont = font ? font.getTextWidth(text) : 0;
-	const textWidth =
-		Number.isFinite(widthFromFont) && widthFromFont > 0
-			? widthFromFont
-			: estimateTextWidth(text);
-	const metrics = font?.getMetrics();
-	const heightFromFont = metrics
-		? metrics.descent - metrics.ascent
-		: Number.NaN;
-	const textHeight =
-		Number.isFinite(heightFromFont) && heightFromFont > 0
-			? heightFromFont
-			: fallbackHeight;
-	const ascent =
-		metrics && Number.isFinite(metrics.ascent) && metrics.ascent < 0
-			? metrics.ascent
-			: fallbackAscent;
-	return {
-		textWidth,
-		textHeight,
-		ascent,
-	};
 };
 
 const resolveAnchorHitDrawPriority = (
@@ -159,9 +113,37 @@ export const FocusSceneSkiaLayer = ({
 	onLayerPointerUp,
 	onLayerPointerLeave,
 }: FocusSceneSkiaLayerProps) => {
+	const labelTextRequests = useMemo(
+		() =>
+			labelItems.map((label) => ({
+				slotKey: label.id,
+				text: `${Math.round(label.canvasWidth)} × ${Math.round(label.canvasHeight)}`,
+				style: {
+					fontFamily: LABEL_FONT_FAMILY,
+					fontSizePx: LABEL_FONT_SIZE_PX,
+					fontWeight: LABEL_FONT_WEIGHT,
+					lineHeightPx: LABEL_FONT_SIZE_PX * LABEL_LINE_HEIGHT_MULTIPLIER,
+					color: LABEL_TEXT_COLOR,
+					paddingPx: LABEL_CANVAS_TEXT_PADDING_PX,
+				},
+			})),
+		[labelItems],
+	);
+	const labelSprites = useSkiaUiTextSprites(labelTextRequests);
+
+	const labelRenderItems = useMemo(() => {
+		return labelItems.map((label, index) => {
+			const sprite = labelSprites[index];
+			return {
+				label,
+				image: sprite?.image ?? null,
+				textWidth: sprite?.textWidth ?? LABEL_FONT_SIZE_PX * 2,
+				textHeight: sprite?.textHeight ?? LABEL_FONT_SIZE_PX,
+			};
+		});
+	}, [labelItems, labelSprites]);
+
 	if (width <= 0 || height <= 0) return null;
-	const loadedLabelFont = useFont(LABEL_FONT_URI, LABEL_FONT_SIZE_PX);
-	const labelFont = loadedLabelFont ?? resolveLabelFont();
 
 	return (
 		<Group zIndex={2_000_000} pointerEvents={disabled ? "none" : "auto"}>
@@ -345,69 +327,64 @@ export const FocusSceneSkiaLayer = ({
 						</Group>
 					</Group>
 				)}
-				{labelFont &&
-					labelItems.map((label) => {
-						const text = `${Math.round(label.canvasWidth)} × ${Math.round(
-							label.canvasHeight,
-						)}`;
-						const { textWidth, textHeight, ascent } = resolveTextMetrics(
-							labelFont,
-							text,
-						);
-						const badgeWidth = textWidth + LABEL_HORIZONTAL_PADDING_PX * 2;
-						const badgeHeight = textHeight + LABEL_VERTICAL_PADDING_PX * 2;
-						const normalizedRotationDeg = normalizeLabelRotationDeg(
-							label.rotationDeg,
-						);
-						const normalizedRotationRad =
-							(normalizedRotationDeg * Math.PI) / 180;
-						const translateY = resolveLabelTranslateY(
-							label.rotationDeg,
-							label.screenWidth,
-							label.screenHeight,
-						);
-						return (
-							<Group
-								key={`focus-scene-size-label-${label.id}`}
+				{labelRenderItems.map((item) => {
+					const { label, image, textWidth, textHeight } = item;
+					const badgeWidth = textWidth + LABEL_HORIZONTAL_PADDING_PX * 2;
+					const badgeHeight = textHeight + LABEL_VERTICAL_PADDING_PX * 2;
+					const normalizedRotationDeg = normalizeLabelRotationDeg(
+						label.rotationDeg,
+					);
+					const normalizedRotationRad = (normalizedRotationDeg * Math.PI) / 180;
+					const translateY = resolveLabelTranslateY(
+						label.rotationDeg,
+						label.screenWidth,
+						label.screenHeight,
+					);
+					return (
+						<Group
+							key={`focus-scene-size-label-${label.id}`}
+							pointerEvents="none"
+							transform={[
+								{ translateX: label.screenX },
+								{ translateY: label.screenY },
+								{ rotate: normalizedRotationRad },
+								{ translateY },
+							]}
+						>
+							<RoundedRect
+								x={-badgeWidth / 2}
+								y={-badgeHeight / 2}
+								width={badgeWidth}
+								height={badgeHeight}
+								r={badgeHeight / 2}
+								color="rgba(0,0,0,0.8)"
 								pointerEvents="none"
-								transform={[
-									{ translateX: label.screenX },
-									{ translateY: label.screenY },
-									{ rotate: normalizedRotationRad },
-									{ translateY },
-								]}
-							>
-								<RoundedRect
-									x={-badgeWidth / 2}
-									y={-badgeHeight / 2}
-									width={badgeWidth}
-									height={badgeHeight}
-									r={badgeHeight / 2}
-									color="rgba(0,0,0,0.8)"
-									pointerEvents="none"
-								/>
-								<RoundedRect
-									x={-badgeWidth / 2}
-									y={-badgeHeight / 2}
-									width={badgeWidth}
-									height={badgeHeight}
-									r={badgeHeight / 2}
-									style="stroke"
-									strokeWidth={1}
-									color="rgba(239,68,68,0.7)"
-									pointerEvents="none"
-								/>
-								<Text
-									text={text}
-									font={labelFont}
+							/>
+							<RoundedRect
+								x={-badgeWidth / 2}
+								y={-badgeHeight / 2}
+								width={badgeWidth}
+								height={badgeHeight}
+								r={badgeHeight / 2}
+								style="stroke"
+								strokeWidth={1}
+								color="rgba(239,68,68,0.7)"
+								pointerEvents="none"
+							/>
+							{image && (
+								<Image
+									image={image}
 									x={-textWidth / 2}
-									y={-textHeight / 2 - ascent}
-									color="rgba(239,68,68,1)"
+									y={-textHeight / 2}
+									width={textWidth}
+									height={textHeight}
+									fit="fill"
 									pointerEvents="none"
 								/>
-							</Group>
-						);
-					})}
+							)}
+						</Group>
+					);
+				})}
 			</Group>
 		</Group>
 	);

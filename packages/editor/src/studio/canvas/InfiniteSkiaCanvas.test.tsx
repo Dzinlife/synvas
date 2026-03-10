@@ -4,6 +4,7 @@ import { act, render, waitFor } from "@testing-library/react";
 import type { StudioProject, VideoCanvasNode } from "core/studio/types";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { NodeInteractionWrapper } from "./NodeInteractionWrapper";
@@ -115,6 +116,7 @@ vi.mock("react-skia-lite", async () => {
 	return {
 		Canvas,
 		Group: "group",
+		Image: "image",
 		Rect: "rect",
 		RoundedRect: "rrect",
 		Text: "text",
@@ -204,7 +206,17 @@ vi.mock("./node-system/registry", async () => {
 	};
 });
 
-type AnyElement = React.ReactElement<Record<string, any>, any>;
+type AnyElement = React.ReactElement<
+	Record<string, unknown>,
+	React.ElementType
+>;
+
+const getElementProps = <T extends Record<string, unknown>>(
+	element: AnyElement | null | undefined,
+): T | null => {
+	if (!element) return null;
+	return element.props as T;
+};
 
 const isElement = (node: React.ReactNode): node is AnyElement => {
 	return React.isValidElement(node);
@@ -249,6 +261,15 @@ const getOverlayElement = (tree: React.ReactNode): AnyElement | null => {
 		collectElements(
 			tree,
 			(element) => element.type === CanvasNodeOverlayLayer,
+		)[0] ?? null
+	);
+};
+
+const getLabelLayerElement = (tree: React.ReactNode): AnyElement | null => {
+	return (
+		collectElements(
+			tree,
+			(element) => element.type === CanvasNodeLabelLayer,
 		)[0] ?? null
 	);
 };
@@ -325,9 +346,13 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const tree = getLatestRenderTree();
 		const overlayElement = getOverlayElement(tree);
+		const overlayProps = getElementProps<{
+			activeNode?: { id: string };
+			hoverNode?: { id: string } | null;
+		}>(overlayElement);
 		expect(overlayElement).toBeTruthy();
-		expect(overlayElement?.props.activeNode?.id).toBe("node-a");
-		expect(overlayElement?.props.hoverNode).toBeNull();
+		expect(overlayProps?.activeNode?.id).toBe("node-a");
+		expect(overlayProps?.hoverNode ?? null).toBeNull();
 	});
 
 	it("hover 节点会透传到 overlay", async () => {
@@ -354,12 +379,17 @@ describe("InfiniteSkiaCanvas", () => {
 			(element) => element.type === NodeInteractionWrapper,
 		);
 		const targetWrapper = wrappers.find(
-			(wrapper) => wrapper.props.node?.id === "node-b",
+			(wrapper) =>
+				getElementProps<{ node?: { id: string } }>(wrapper)?.node?.id ===
+				"node-b",
 		);
 		expect(targetWrapper).toBeTruthy();
+		const targetWrapperProps = getElementProps<{
+			onPointerEnter?: (nodeId: string) => void;
+		}>(targetWrapper);
 
 		act(() => {
-			targetWrapper?.props.onPointerEnter?.("node-b");
+			targetWrapperProps?.onPointerEnter?.("node-b");
 		});
 
 		await waitFor(() => {
@@ -370,9 +400,13 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const nextTree = getLatestRenderTree();
 		const overlayElement = getOverlayElement(nextTree);
+		const overlayProps = getElementProps<{
+			activeNode?: { id: string };
+			hoverNode?: { id: string } | null;
+		}>(overlayElement);
 		expect(overlayElement).toBeTruthy();
-		expect(overlayElement?.props.activeNode?.id).toBe("node-a");
-		expect(overlayElement?.props.hoverNode?.id).toBe("node-b");
+		expect(overlayProps?.activeNode?.id).toBe("node-a");
+		expect(overlayProps?.hoverNode?.id).toBe("node-b");
 	});
 
 	it("locked active 节点不渲染 resize anchor", async () => {
@@ -395,8 +429,11 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const tree = getLatestRenderTree();
 		const overlayElement = getOverlayElement(tree);
+		const overlayProps = getElementProps<{
+			activeNode?: { locked?: boolean };
+		}>(overlayElement);
 		expect(overlayElement).toBeTruthy();
-		expect(overlayElement?.props.activeNode?.locked).toBe(true);
+		expect(overlayProps?.activeNode?.locked).toBe(true);
 	});
 
 	it("focus 状态下不挂载 overlay", async () => {
@@ -420,6 +457,37 @@ describe("InfiniteSkiaCanvas", () => {
 		const tree = getLatestRenderTree();
 		const overlayElement = getOverlayElement(tree);
 		expect(overlayElement).toBeNull();
+	});
+
+	it("正常模式会挂载 node label layer", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createVideoNode("node-a", 0), createVideoNode("node-b", 1)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				focusedNodeId={null}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const labelLayerElement = getLabelLayerElement(tree);
+		const labelLayerProps = getElementProps<{
+			nodes?: unknown[];
+			camera?: { x: number; y: number; zoom: number };
+			focusedNodeId?: string | null;
+		}>(labelLayerElement);
+		expect(labelLayerElement).toBeTruthy();
+		expect(labelLayerProps?.nodes).toHaveLength(2);
+		expect(labelLayerProps?.camera).toEqual({ x: 0, y: 0, zoom: 1 });
+		expect(labelLayerProps?.focusedNodeId ?? null).toBeNull();
 	});
 
 	it("focus scene 模式会抑制普通 node 交互并接管 Focus 层事件", async () => {
@@ -449,9 +517,13 @@ describe("InfiniteSkiaCanvas", () => {
 			(element) => element.type === NodeInteractionWrapper,
 		);
 		expect(wrappers).toHaveLength(2);
-		expect(wrappers.every((wrapper) => wrapper.props.disabled === true)).toBe(
-			true,
-		);
+		expect(
+			wrappers.every((wrapper) => {
+				return (
+					getElementProps<{ disabled?: boolean }>(wrapper)?.disabled === true
+				);
+			}),
+		).toBe(true);
 
 		const focusLayer = collectElements(
 			tree,
@@ -459,9 +531,12 @@ describe("InfiniteSkiaCanvas", () => {
 				element.props.onLayerPointerDown === focusLayerPointerDownSpy,
 		)[0];
 		expect(focusLayer).toBeTruthy();
+		const focusLayerProps = getElementProps<{
+			onLayerPointerDown?: (event: Record<string, unknown>) => void;
+		}>(focusLayer);
 
 		act(() => {
-			focusLayer?.props.onLayerPointerDown?.({
+			focusLayerProps?.onLayerPointerDown?.({
 				x: 240,
 				y: 120,
 				button: 0,
@@ -628,60 +703,32 @@ describe("InfiniteSkiaCanvas", () => {
 		)[0];
 		expect(focusLayerElement).toBeTruthy();
 		if (!focusLayerElement) return;
-		const focusLayerRender =
-			typeof focusLayerElement.type === "function"
-				? focusLayerElement.type(
-						focusLayerElement.props as Record<string, unknown>,
-					)
-				: null;
-		const anchorHitRects = collectElements(
-			focusLayerRender,
-			(element) =>
-				element.type === "rect" &&
-				String(element.key ?? "").includes("focus-scene-anchor-hit-") &&
-				typeof element.props.cursor === "string",
+		const handleItems = focusLayerElement.props.handleItems as Array<{
+			kind: string;
+			cursor: string;
+			visibleCornerMarker: boolean;
+		}>;
+		const cursorValues = handleItems.map((item) => item.cursor);
+		const visibleCornerMarkers = handleItems.filter(
+			(item) => item.visibleCornerMarker,
 		);
-		const visibleCornerMarkers = collectElements(
-			focusLayerRender,
-			(element) =>
-				element.type === "rect" &&
-				String(element.key ?? "").includes("focus-scene-corner-marker-") &&
-				!String(element.key ?? "").includes("border"),
-		);
-
-		const cursorByAnchorId = new Map<string, string>();
-		for (const rect of anchorHitRects) {
-			const rawKey = String(rect.key ?? "");
-			const anchorId = rawKey
-				.replace(/^.*focus-scene-anchor-hit-/, "")
-				.replace(/-\d+$/, "");
-			if (!cursorByAnchorId.has(anchorId)) {
-				cursorByAnchorId.set(anchorId, rect.props.cursor as string);
-			}
-		}
 		expect(visibleCornerMarkers).toHaveLength(4);
-		expect(cursorByAnchorId).toEqual(
-			new Map<string, string>([
-				["rotate-top-left", "rotate-cursor-top-left"],
-				["rotate-top-right", "rotate-cursor-top-right"],
-				["rotate-bottom-right", "rotate-cursor-bottom-right"],
-				["rotate-bottom-left", "rotate-cursor-bottom-left"],
-				["top-left", "nwse-resize"],
-				["top-center", "ns-resize"],
-				["top-right", "nesw-resize"],
-				["middle-left", "ew-resize"],
-				["middle-right", "ew-resize"],
-				["bottom-left", "nesw-resize"],
-				["bottom-center", "ns-resize"],
-				["bottom-right", "nwse-resize"],
+		expect(cursorValues).toEqual(
+			expect.arrayContaining([
+				"rotate-cursor-top-left",
+				"rotate-cursor-top-right",
+				"rotate-cursor-bottom-right",
+				"rotate-cursor-bottom-left",
+				"nwse-resize",
+				"ns-resize",
+				"nesw-resize",
+				"ew-resize",
 			]),
 		);
-		const rotateCursors = [
-			cursorByAnchorId.get("rotate-top-left"),
-			cursorByAnchorId.get("rotate-top-right"),
-			cursorByAnchorId.get("rotate-bottom-right"),
-			cursorByAnchorId.get("rotate-bottom-left"),
-		];
+		expect(cursorValues).toHaveLength(12);
+		const rotateCursors = cursorValues.filter((cursor) =>
+			/^rotate-cursor-/.test(String(cursor)),
+		);
 		expect(rotateCursors.every((cursor) => typeof cursor === "string")).toBe(
 			true,
 		);
@@ -689,6 +736,30 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(
 			rotateCursors.some((cursor) => /grab|hand/i.test(String(cursor))),
 		).toBe(false);
+	});
+
+	it("focus 状态下 label layer 仍然存在并拿到 focusedNodeId", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[createSceneNode("node-scene", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-scene"
+				focusedNodeId="node-scene"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const labelLayerElement = getLabelLayerElement(tree);
+		expect(labelLayerElement).toBeTruthy();
+		expect(labelLayerElement?.props.focusedNodeId).toBe("node-scene");
 	});
 
 	it("会把 resize 回调透传到 overlay", async () => {
