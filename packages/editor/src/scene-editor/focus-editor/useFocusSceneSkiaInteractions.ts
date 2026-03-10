@@ -10,6 +10,8 @@ import type { SkiaPointerEvent } from "react-skia-lite";
 import { transformMetaToRenderLayout } from "@/element/layout";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { cloneValue, createCopySeed } from "@/scene-editor/utils/copyUtils";
+import { reflowInsertedElementsOnTracks } from "@/scene-editor/utils/insertedTrackReflow";
+import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
 import type { CameraState } from "@/studio/canvas/canvasWorkspaceUtils";
 import {
 	buildFocusTransformHandleItems,
@@ -758,6 +760,36 @@ export const useFocusSceneSkiaInteractions = ({
 			timelineStore.getState().setSelectedIds(ids, primaryId);
 		},
 		[timelineStore],
+	);
+
+	const reconcileCopyDragElements = useCallback(
+		(copyIds: string[]) => {
+			if (!timelineStore || copyIds.length === 0) return;
+			const copyIdSet = new Set(copyIds);
+			const state = timelineStore.getState();
+			const baseElements = state.elements.filter(
+				(element) => !copyIdSet.has(element.id),
+			);
+			const copiedElements = state.elements.filter((element) =>
+				copyIdSet.has(element.id),
+			);
+			if (copiedElements.length === 0) return;
+
+			// 复制拖拽提交时，副本需要按插入元素规则重新分配轨道，避免与源元素时间重叠。
+			const reflowedCopies = reflowInsertedElementsOnTracks(
+				baseElements,
+				copiedElements,
+			);
+			const finalized = finalizeTimelineElements(
+				[...baseElements, ...reflowedCopies],
+				{
+					rippleEditingEnabled: state.rippleEditingEnabled,
+					fps: state.fps,
+				},
+			);
+			setElementsWithoutHistory(finalized);
+		},
+		[setElementsWithoutHistory, timelineStore],
 	);
 
 	const modelCenterToSceneCenter = useCallback(
@@ -1760,6 +1792,7 @@ export const useFocusSceneSkiaInteractions = ({
 						);
 						setSelection(session.sourceIds, session.sourceIds[0] ?? null);
 					} else {
+						reconcileCopyDragElements(session.copyIds);
 						setSelection(session.copyIds, session.copyIds[0] ?? null);
 						session.changed = true;
 					}
@@ -1792,6 +1825,7 @@ export const useFocusSceneSkiaInteractions = ({
 		applySelectionFrameOverride,
 		timelineStore,
 		modelCenterToSceneCenter,
+		reconcileCopyDragElements,
 		setElementsWithoutHistory,
 		setSelection,
 		pushHistorySnapshot,

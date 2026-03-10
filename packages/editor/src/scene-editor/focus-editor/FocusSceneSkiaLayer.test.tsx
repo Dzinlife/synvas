@@ -742,6 +742,7 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		const copyCenter = resolveSceneCenter(copyElement);
 		expect(copyCenter.x).toBeCloseTo(340, 2);
 		expect(copyCenter.y).toBeCloseTo(320, 2);
+		expect(copyElement.timeline.trackIndex).toBe(1);
 		expect(result.current.selectedIds).toEqual([copyElement.id]);
 	});
 });
