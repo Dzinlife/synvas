@@ -75,6 +75,17 @@ export type StudioHistoryEntry =
 			kind: "canvas.node-create.batch";
 			entries: CanvasGraphHistoryItem[];
 			focusNodeId: string | null;
+	  }
+	| {
+			kind: "canvas.node-delete";
+			node: CanvasNode;
+			scene?: SceneDocument;
+			focusNodeId: string | null;
+	  }
+	| {
+			kind: "canvas.node-delete.batch";
+			entries: CanvasGraphHistoryItem[];
+			focusNodeId: string | null;
 	  };
 
 interface StudioHistoryState {
@@ -274,6 +285,30 @@ const applyEntry = (
 			return;
 		}
 		projectStore.appendCanvasGraphBatch(entry.entries);
+		return;
+	}
+	if (entry.kind === "canvas.node-delete") {
+		if (entry.node.type === "scene" && entry.scene) {
+			if (mode === "undo") {
+				projectStore.restoreSceneGraphForHistory(entry.scene, entry.node);
+				return;
+			}
+			projectStore.removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+			return;
+		}
+		if (mode === "undo") {
+			projectStore.restoreCanvasNodeForHistory(entry.node);
+			return;
+		}
+		projectStore.removeCanvasNodeForHistory(entry.node.id);
+		return;
+	}
+	if (entry.kind === "canvas.node-delete.batch") {
+		if (mode === "undo") {
+			projectStore.appendCanvasGraphBatch(entry.entries);
+			return;
+		}
+		projectStore.removeCanvasGraphBatch(entry.entries.map((item) => item.node.id));
 	}
 };
 

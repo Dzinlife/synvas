@@ -1470,8 +1470,8 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 
 		fireEvent.contextMenu(screen.getByTestId("infinite-skia-canvas"), {
-			clientX: 420,
-			clientY: 260,
+			clientX: 1040,
+			clientY: 640,
 		});
 		fireEvent.click(screen.getByRole("menuitem", { name: "新建文本节点" }));
 
@@ -1480,8 +1480,8 @@ describe("CanvasWorkspace", () => {
 				.getState()
 				.currentProject?.canvas.nodes.find((node) => node.type === "text");
 			expect(textNode).toBeTruthy();
-			expect(textNode?.x).toBe(420);
-			expect(textNode?.y).toBe(260);
+			expect(textNode?.x).toBe(1040);
+			expect(textNode?.y).toBe(640);
 		});
 	});
 
@@ -1621,11 +1621,76 @@ describe("CanvasWorkspace", () => {
 		expect(scene2Compositions).toHaveLength(0);
 	});
 
-	it("右键非 image 节点会回退到画布菜单", () => {
+	it("右键普通节点会显示删除菜单", () => {
 		render(<CanvasWorkspace />);
 		rightClickNodeAt(300, 160);
-		expect(screen.getByRole("menuitem", { name: "新建文本节点" })).toBeTruthy();
-		expect(screen.queryByRole("menuitem", { name: "插入到 Scene" })).toBeNull();
+		expect(screen.getByRole("menuitem", { name: "删除" })).toBeTruthy();
+		expect(screen.queryByRole("menuitem", { name: "新建文本节点" })).toBeNull();
+	});
+
+	it("Delete 键可删除单选节点并支持 undo", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+
+		fireEvent.keyDown(window, { key: "Delete" });
+
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+		).toBe(false);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-delete",
+		);
+
+		useStudioHistoryStore.getState().undo();
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+		).toBe(true);
+	});
+
+	it("Backspace 键可删除多选节点并写入 batch 历史", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+
+		fireEvent.keyDown(window, { key: "Backspace" });
+
+		const project = useProjectStore.getState().currentProject;
+		expect(
+			project?.canvas.nodes.some((node) => node.id === "node-video-1"),
+		).toBe(false);
+		expect(
+			project?.canvas.nodes.some((node) => node.id === "node-image-1"),
+		).toBe(false);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-delete.batch",
+		);
+	});
+
+	it("右键多选 bbox 空白区域可删除整组选区", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+
+		fireEvent.contextMenu(screen.getByTestId("infinite-skia-canvas"), {
+			clientX: 600,
+			clientY: 200,
+		});
+		fireEvent.click(screen.getByRole("menuitem", { name: "删除" }));
+
+		const project = useProjectStore.getState().currentProject;
+		expect(
+			project?.canvas.nodes.some((node) => node.id === "node-video-1"),
+		).toBe(false);
+		expect(
+			project?.canvas.nodes.some((node) => node.id === "node-image-1"),
+		).toBe(false);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-delete.batch",
+		);
 	});
 
 	it("外部文件 drop 可创建多类型节点并按 4 列网格偏移", async () => {

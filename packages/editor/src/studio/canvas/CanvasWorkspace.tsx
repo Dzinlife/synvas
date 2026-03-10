@@ -203,6 +203,15 @@ const cloneTimelineJson = <T,>(value: T): T => {
 	return JSON.parse(JSON.stringify(value)) as T;
 };
 
+const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
+	return (
+		target instanceof HTMLInputElement ||
+		target instanceof HTMLTextAreaElement ||
+		target instanceof HTMLSelectElement ||
+		(target as HTMLElement | null)?.isContentEditable === true
+	);
+};
+
 const getPrimarySelectedNodeId = (selectedNodeIds: string[]): string | null => {
 	return selectedNodeIds.at(-1) ?? null;
 };
@@ -305,6 +314,12 @@ const CanvasWorkspace = () => {
 	);
 	const removeCanvasGraphBatch = useProjectStore(
 		(state) => state.removeCanvasGraphBatch,
+	);
+	const removeCanvasNodeForHistory = useProjectStore(
+		(state) => state.removeCanvasNodeForHistory,
+	);
+	const removeSceneGraphForHistory = useProjectStore(
+		(state) => state.removeSceneGraphForHistory,
 	);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 	const runtime = useContext(EditorRuntimeContext);
@@ -2069,33 +2084,136 @@ const CanvasWorkspace = () => {
 		[resolveWorldPoint],
 	);
 
-	const openNodeContextMenuAt = useCallback(
-		(node: CanvasNode, clientX: number, clientY: number): boolean => {
-			if (!currentProject) return false;
-			const definition = getCanvasNodeDefinition(node.type);
-			if (!definition.contextMenu) return false;
-			const nodeActions = definition.contextMenu({
-				node,
-				project: currentProject,
-				sceneOptions: contextMenuSceneOptions,
-				onInsertNodeToScene: (sceneId) => {
-					insertNodeToScene(node, sceneId);
-				},
+	const deleteCanvasNodes = useCallback(
+		(nodeIds: string[]) => {
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const targetIds = normalizeSelectedNodeIds(
+				nodeIds,
+				new Set(latestProject.canvas.nodes.map((node) => node.id)),
+			);
+			if (targetIds.length === 0) return;
+			const entries = targetIds
+				.map((nodeId) => {
+					const node =
+						latestProject.canvas.nodes.find((candidate) => candidate.id === nodeId) ??
+						null;
+					if (!node) return null;
+					return {
+						node,
+						scene:
+							node.type === "scene"
+								? (latestProject.scenes[node.sceneId] ?? undefined)
+								: undefined,
+					};
+				})
+				.filter(
+					(
+						entry,
+					): entry is {
+						node: CanvasNode;
+						scene?: SceneDocument;
+					} => Boolean(entry),
+				);
+			if (entries.length === 0) return;
+			if (entries.length === 1) {
+				const entry = entries[0];
+				pushHistory({
+					kind: "canvas.node-delete",
+					node: entry.node,
+					scene: entry.scene,
+					focusNodeId: latestProject.ui.focusedNodeId,
+				});
+				if (entry.node.type === "scene" && entry.scene) {
+					removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+				} else {
+					removeCanvasNodeForHistory(entry.node.id);
+				}
+				return;
+			}
+			pushHistory({
+				kind: "canvas.node-delete.batch",
+				entries,
+				focusNodeId: latestProject.ui.focusedNodeId,
 			});
-			if (nodeActions.length === 0) return false;
+			removeCanvasGraphBatch(entries.map((entry) => entry.node.id));
+		},
+		[
+			pushHistory,
+			removeCanvasGraphBatch,
+			removeCanvasNodeForHistory,
+			removeSceneGraphForHistory,
+		],
+	);
+
+	const openDeleteContextMenuAt = useCallback(
+		(targetNodeIds: string[], clientX: number, clientY: number) => {
 			setContextMenuState({
 				open: true,
 				scope: "node",
 				x: clientX,
 				y: clientY,
-				actions: toTimelineContextMenuActions(nodeActions),
+				actions: [
+					{
+						key: "delete",
+						label: "删除",
+						danger: true,
+						onSelect: () => {
+							deleteCanvasNodes(targetNodeIds);
+						},
+					},
+				],
+			});
+		},
+		[deleteCanvasNodes],
+	);
+
+	const openNodeContextMenuAt = useCallback(
+		(node: CanvasNode, clientX: number, clientY: number): boolean => {
+			if (!currentProject) return false;
+			const targetNodeIds =
+				normalizedSelectedNodeIds.includes(node.id) &&
+				normalizedSelectedNodeIds.length > 0
+					? normalizedSelectedNodeIds
+					: [node.id];
+			const definition = getCanvasNodeDefinition(node.type);
+			const nodeActions = definition.contextMenu
+				? definition.contextMenu({
+						node,
+						project: currentProject,
+						sceneOptions: contextMenuSceneOptions,
+						onInsertNodeToScene: (sceneId) => {
+							insertNodeToScene(node, sceneId);
+						},
+				  })
+				: [];
+			const actions = [
+				...toTimelineContextMenuActions(nodeActions),
+				{
+					key: "delete",
+					label: "删除",
+					danger: true,
+					onSelect: () => {
+						deleteCanvasNodes(targetNodeIds);
+					},
+				},
+			];
+			if (actions.length === 0) return false;
+			setContextMenuState({
+				open: true,
+				scope: "node",
+				x: clientX,
+				y: clientY,
+				actions,
 			});
 			return true;
 		},
 		[
 			contextMenuSceneOptions,
 			currentProject,
+			deleteCanvasNodes,
 			insertNodeToScene,
+			normalizedSelectedNodeIds,
 			setContextMenuState,
 		],
 	);
@@ -2253,7 +2371,33 @@ const CanvasWorkspace = () => {
 			if (isCanvasInteractionLocked) return;
 			const world = resolveWorldPoint(event.clientX, event.clientY);
 			const node = getTopHitNode(world.x, world.y);
+			if (
+				normalizedSelectedNodeIds.length > 1 &&
+				selectedBounds &&
+				isWorldPointInBounds(selectedBounds, world.x, world.y)
+			) {
+				if (!node || !normalizedSelectedNodeIds.includes(node.id)) {
+					openDeleteContextMenuAt(
+						normalizedSelectedNodeIds,
+						event.clientX,
+						event.clientY,
+					);
+					return;
+				}
+			}
 			if (node && openNodeContextMenuAt(node, event.clientX, event.clientY)) {
+				return;
+			}
+			if (
+				normalizedSelectedNodeIds.length > 1 &&
+				selectedBounds &&
+				isWorldPointInBounds(selectedBounds, world.x, world.y)
+			) {
+				openDeleteContextMenuAt(
+					normalizedSelectedNodeIds,
+					event.clientX,
+					event.clientY,
+				);
 				return;
 			}
 			openCanvasContextMenuAt(event.clientX, event.clientY);
@@ -2261,15 +2405,35 @@ const CanvasWorkspace = () => {
 		[
 			getTopHitNode,
 			isCanvasInteractionLocked,
+			normalizedSelectedNodeIds,
+			openDeleteContextMenuAt,
 			openCanvasContextMenuAt,
 			openNodeContextMenuAt,
 			resolveWorldPoint,
+			selectedBounds,
 		],
 	);
 
 	const closeContextMenu = useCallback(() => {
 		setContextMenuState({ open: false });
 	}, []);
+
+	useEffect(() => {
+		const handleDeleteKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Delete" && event.key !== "Backspace") return;
+			if (event.repeat) return;
+			if (event.metaKey || event.ctrlKey || event.altKey) return;
+			if (isEditableKeyboardTarget(event.target)) return;
+			if (normalizedSelectedNodeIds.length === 0) return;
+			event.preventDefault();
+			deleteCanvasNodes(normalizedSelectedNodeIds);
+			closeContextMenu();
+		};
+		window.addEventListener("keydown", handleDeleteKeyDown);
+		return () => {
+			window.removeEventListener("keydown", handleDeleteKeyDown);
+		};
+	}, [closeContextMenu, deleteCanvasNodes, normalizedSelectedNodeIds]);
 
 	const handleCreateTextNodeAt = useCallback(
 		(worldX: number, worldY: number) => {
