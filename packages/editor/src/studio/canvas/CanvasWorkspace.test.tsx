@@ -714,7 +714,18 @@ const getTopVisibleNodeAt = (clientX: number, clientY: number): CanvasNode => {
 };
 
 const clickCanvasAt = (clientX: number, clientY: number): void => {
-	fireEvent.click(screen.getByTestId("infinite-skia-canvas"), {
+	const canvas = screen.getByTestId("infinite-skia-canvas");
+	fireEvent.mouseDown(canvas, {
+		button: 0,
+		clientX,
+		clientY,
+	});
+	fireEvent.mouseUp(canvas, {
+		button: 0,
+		clientX,
+		clientY,
+	});
+	fireEvent.click(canvas, {
 		button: 0,
 		clientX,
 		clientY,
@@ -1904,6 +1915,20 @@ describe("CanvasWorkspace", () => {
 			"node-scene-1",
 			"node-video-1",
 		]);
+	});
+
+	it("框选 dragend 落在空白处后，单击空白即可清空选择", () => {
+		render(<CanvasWorkspace />);
+		marqueeCanvasAt(1100, 100, 200, 700);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-scene-1",
+			"node-video-1",
+			"node-image-1",
+		]);
+
+		clickCanvasAt(1120, 700);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([]);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBeNull();
 	});
 
 	it("Shift 框选会基于初始选择做 toggle", () => {

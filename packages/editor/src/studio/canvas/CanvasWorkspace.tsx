@@ -187,6 +187,11 @@ interface SelectionResizeSession {
 	moved: boolean;
 }
 
+interface PendingCanvasClickSuppression {
+	suppressNode: boolean;
+	suppressCanvas: boolean;
+}
+
 const CANVAS_MARQUEE_ACTIVATION_PX = 3;
 const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
 
@@ -365,8 +370,8 @@ const CanvasWorkspace = () => {
 	const nodeResizeSessionRef = useRef<NodeResizeSession | null>(null);
 	const selectionResizeSessionRef = useRef<SelectionResizeSession | null>(null);
 	const marqueeSessionRef = useRef<CanvasMarqueeSession | null>(null);
-	const suppressNextNodeClickRef = useRef(false);
-	const suppressNextCanvasClickRef = useRef(false);
+	const pendingClickSuppressionRef =
+		useRef<PendingCanvasClickSuppression | null>(null);
 	const { getCamera, applyCamera } = useCanvasCameraController({
 		camera,
 		onChange: setCanvasCamera,
@@ -388,9 +393,6 @@ const CanvasWorkspace = () => {
 	const normalizedSelectedNodeIds = useMemo(() => {
 		return normalizeSelectedNodeIds(selectedNodeIds, currentNodeIdSet);
 	}, [currentNodeIdSet, selectedNodeIds]);
-	const selectedNodeIdSet = useMemo(() => {
-		return new Set(normalizedSelectedNodeIds);
-	}, [normalizedSelectedNodeIds]);
 
 	const focusedNode = useMemo(() => {
 		if (!focusedNodeId) return null;
@@ -790,6 +792,25 @@ const CanvasWorkspace = () => {
 			y2: marqueeRectRef.current.y2,
 		});
 	}, [updateMarqueeRectState]);
+	const clearPendingClickSuppression = useCallback(() => {
+		pendingClickSuppressionRef.current = null;
+	}, []);
+	const setPendingClickSuppression = useCallback(
+		(nextSuppression: PendingCanvasClickSuppression) => {
+			pendingClickSuppressionRef.current = nextSuppression;
+		},
+		[],
+	);
+	const resolvePendingClickSuppression = useCallback(
+		() => {
+			const pendingSuppression = pendingClickSuppressionRef.current;
+			if (!pendingSuppression) return null;
+			clearPendingClickSuppression();
+			// 只有没被新的 mousedown 打断时，才把它视为上一轮手势的尾随 click。
+			return pendingSuppression;
+		},
+		[clearPendingClickSuppression],
+	);
 	const isResizeAnchorHitAtWorldPoint = useCallback(
 		(worldX: number, worldY: number) => {
 			if (activeNode && !activeNode.locked && isSingleSelection) {
@@ -1281,7 +1302,7 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			nodeDragSessionRef.current = null;
-			suppressNextNodeClickRef.current = false;
+			clearPendingClickSuppression();
 			commitSelectedNodeIds([node.id]);
 			nodeResizeSessionRef.current = {
 				nodeId: node.id,
@@ -1304,6 +1325,7 @@ const CanvasWorkspace = () => {
 			};
 		},
 		[
+			clearPendingClickSuppression,
 			clearCanvasMarquee,
 			focusedNodeId,
 			commitSelectedNodeIds,
@@ -1415,15 +1437,21 @@ const CanvasWorkspace = () => {
 	);
 
 	const handleSkiaNodeResizeEnd = useCallback(
-		(node: CanvasNode, anchor: CanvasNodeResizeAnchor) => {
+		(
+			node: CanvasNode,
+			anchor: CanvasNodeResizeAnchor,
+			_event: CanvasNodeDragEvent,
+		) => {
 			const resizeSession = nodeResizeSessionRef.current;
 			nodeResizeSessionRef.current = null;
 			if (!resizeSession) return;
 			if (resizeSession.nodeId !== node.id) return;
 			if (resizeSession.anchor !== anchor) return;
+			setPendingClickSuppression({
+				suppressNode: true,
+				suppressCanvas: true,
+			});
 			if (!resizeSession.moved) return;
-			suppressNextNodeClickRef.current = true;
-			suppressNextCanvasClickRef.current = true;
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			const latestNode = latestProject.canvas.nodes.find(
@@ -1440,7 +1468,7 @@ const CanvasWorkspace = () => {
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
 		},
-		[pushHistory],
+		[pushHistory, setPendingClickSuppression],
 	);
 
 	const handleSkiaNodeResize = useCallback(
@@ -1454,7 +1482,7 @@ const CanvasWorkspace = () => {
 			handleSkiaNodeResizeMove(node, anchor, event);
 			return;
 		}
-		handleSkiaNodeResizeEnd(node, anchor);
+		handleSkiaNodeResizeEnd(node, anchor, event);
 	},
 	[
 		handleSkiaNodeResizeEnd,
@@ -1583,7 +1611,7 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const finishCanvasDragSession = useCallback(() => {
+	const finishCanvasDragSession = useCallback((_event: CanvasNodeDragEvent) => {
 		const dragSession = nodeDragSessionRef.current;
 		nodeDragSessionRef.current = null;
 		if (!dragSession) return;
@@ -1595,8 +1623,10 @@ const CanvasWorkspace = () => {
 			}
 			return;
 		}
-		suppressNextNodeClickRef.current = true;
-		suppressNextCanvasClickRef.current = true;
+		setPendingClickSuppression({
+			suppressNode: true,
+			suppressCanvas: true,
+		});
 		const latestProject = useProjectStore.getState().currentProject;
 		if (!latestProject) return;
 		if (dragSession.copyEntries.length > 0) {
@@ -1671,7 +1701,12 @@ const CanvasWorkspace = () => {
 			entries: nextEntries,
 			focusNodeId: latestProject.ui.focusedNodeId,
 		});
-	}, [commitSelectedNodeIds, pushHistory, removeCanvasGraphBatch]);
+	}, [
+		commitSelectedNodeIds,
+		pushHistory,
+		removeCanvasGraphBatch,
+		setPendingClickSuppression,
+	]);
 
 	const handleSkiaNodeDragStart = useCallback(
 		(node: CanvasNode, event: CanvasNodeDragEvent) => {
@@ -1680,7 +1715,7 @@ const CanvasWorkspace = () => {
 			}
 			if (event.button !== 0) return;
 			clearCanvasMarquee();
-			suppressNextNodeClickRef.current = false;
+			clearPendingClickSuppression();
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
@@ -1705,6 +1740,7 @@ const CanvasWorkspace = () => {
 		},
 		[
 			beginCanvasDragSession,
+			clearPendingClickSuppression,
 			clearCanvasMarquee,
 			focusedNodeId,
 			handleNodeActivate,
@@ -1729,7 +1765,7 @@ const CanvasWorkspace = () => {
 	);
 
 	const handleSkiaNodeDragEnd = useCallback(
-		(node: CanvasNode) => {
+		(node: CanvasNode, event: CanvasNodeDragEvent) => {
 			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
 				return;
 			}
@@ -1738,7 +1774,7 @@ const CanvasWorkspace = () => {
 			if (dragSession.origin !== "node" || dragSession.anchorNodeId !== node.id) {
 				return;
 			}
-			finishCanvasDragSession();
+			finishCanvasDragSession(event);
 		},
 		[finishCanvasDragSession],
 	);
@@ -1755,8 +1791,10 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			clearCanvasMarquee();
-			suppressNextCanvasClickRef.current = true;
-			suppressNextNodeClickRef.current = false;
+			setPendingClickSuppression({
+				suppressNode: false,
+				suppressCanvas: true,
+			});
 			beginCanvasDragSession({
 				origin: "selection",
 				anchorNodeId: null,
@@ -1769,6 +1807,7 @@ const CanvasWorkspace = () => {
 			clearCanvasMarquee,
 			isCanvasInteractionLocked,
 			normalizedSelectedNodeIds,
+			setPendingClickSuppression,
 		],
 	);
 
@@ -1784,11 +1823,11 @@ const CanvasWorkspace = () => {
 		[applyCanvasDragEvent],
 	);
 
-	const handleSelectionBoundsDragEnd = useCallback(() => {
+	const handleSelectionBoundsDragEnd = useCallback((event: CanvasNodeDragEvent) => {
 		if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) return;
 		const dragSession = nodeDragSessionRef.current;
 		if (!dragSession || dragSession.origin !== "selection") return;
-		finishCanvasDragSession();
+		finishCanvasDragSession(event);
 	}, [finishCanvasDragSession]);
 
 	const handleSelectionResizeStart = useCallback(
@@ -1800,8 +1839,10 @@ const CanvasWorkspace = () => {
 			clearCanvasMarquee();
 			const resizeNodes = selectedNodes.filter((node) => !node.locked);
 			if (resizeNodes.length === 0) return;
-			suppressNextCanvasClickRef.current = true;
-			suppressNextNodeClickRef.current = false;
+			setPendingClickSuppression({
+				suppressNode: false,
+				suppressCanvas: true,
+			});
 			selectionResizeSessionRef.current = {
 				anchor,
 				startBoundsLeft: selectedBounds.left,
@@ -1832,7 +1873,13 @@ const CanvasWorkspace = () => {
 				moved: false,
 			};
 		},
-		[clearCanvasMarquee, isCanvasInteractionLocked, selectedBounds, selectedNodes],
+		[
+			clearCanvasMarquee,
+			isCanvasInteractionLocked,
+			selectedBounds,
+			selectedNodes,
+			setPendingClickSuppression,
+		],
 	);
 
 	const handleSelectionResizeMove = useCallback(
@@ -1912,12 +1959,14 @@ const CanvasWorkspace = () => {
 		[camera.zoom, updateCanvasNodeLayout],
 	);
 
-	const handleSelectionResizeEnd = useCallback(() => {
+	const handleSelectionResizeEnd = useCallback((_event: CanvasNodeDragEvent) => {
 		const resizeSession = selectionResizeSessionRef.current;
 		selectionResizeSessionRef.current = null;
 		if (!resizeSession) return;
-		suppressNextCanvasClickRef.current = true;
-		suppressNextNodeClickRef.current = true;
+		setPendingClickSuppression({
+			suppressNode: true,
+			suppressCanvas: true,
+		});
 		if (!resizeSession.moved) return;
 		const latestProject = useProjectStore.getState().currentProject;
 		if (!latestProject) return;
@@ -1961,7 +2010,7 @@ const CanvasWorkspace = () => {
 			entries: nextEntries,
 			focusNodeId: latestProject.ui.focusedNodeId,
 		});
-	}, [pushHistory]);
+	}, [pushHistory, setPendingClickSuppression]);
 
 	const handleSelectionResize = useCallback(
 		(resizeEvent: CanvasSelectionResizeEvent) => {
@@ -1974,7 +2023,7 @@ const CanvasWorkspace = () => {
 				handleSelectionResizeMove(anchor, event);
 				return;
 			}
-			handleSelectionResizeEnd();
+			handleSelectionResizeEnd(event);
 		},
 		[
 			handleSelectionResizeEnd,
@@ -1985,8 +2034,8 @@ const CanvasWorkspace = () => {
 
 	const handleSkiaNodeClick = useCallback(
 		(node: CanvasNode, event: CanvasNodePointerEvent) => {
-			if (suppressNextNodeClickRef.current) {
-				suppressNextNodeClickRef.current = false;
+			const pendingSuppression = resolvePendingClickSuppression();
+			if (pendingSuppression?.suppressNode) {
 				return;
 			}
 			if (event.shiftKey) {
@@ -1995,7 +2044,11 @@ const CanvasWorkspace = () => {
 			}
 			handleNodeActivate(node);
 		},
-		[handleNodeActivate, handleToggleNodeSelection],
+		[
+			handleNodeActivate,
+			handleToggleNodeSelection,
+			resolvePendingClickSuppression,
+		],
 	);
 
 	const handleSkiaNodeDoubleClick = useCallback(
@@ -2218,7 +2271,7 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const finishCanvasMarquee = useCallback(() => {
+	const finishCanvasMarquee = useCallback((_event: MouseEvent) => {
 		const marqueeSession = marqueeSessionRef.current;
 		if (!marqueeSession) return;
 		marqueeSessionRef.current = null;
@@ -2232,8 +2285,10 @@ const CanvasWorkspace = () => {
 			});
 			return;
 		}
-		suppressNextCanvasClickRef.current = true;
-		suppressNextNodeClickRef.current = true;
+		setPendingClickSuppression({
+			suppressNode: true,
+			suppressCanvas: true,
+		});
 		applyMarqueeSelection(marqueeRectRef.current);
 		updateMarqueeRectState({
 			visible: false,
@@ -2242,10 +2297,15 @@ const CanvasWorkspace = () => {
 			x2: marqueeRectRef.current.x2,
 			y2: marqueeRectRef.current.y2,
 		});
-	}, [applyMarqueeSelection, updateMarqueeRectState]);
+	}, [
+		applyMarqueeSelection,
+		setPendingClickSuppression,
+		updateMarqueeRectState,
+	]);
 
 	const handleCanvasMouseDown = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
+			clearPendingClickSuppression();
 			if (event.button !== 0) return;
 			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
@@ -2286,6 +2346,7 @@ const CanvasWorkspace = () => {
 			resolveWorldPoint,
 			selectedBounds,
 			updateMarqueeRectState,
+			clearPendingClickSuppression,
 		],
 	);
 
@@ -2316,8 +2377,8 @@ const CanvasWorkspace = () => {
 	);
 
 	useEffect(() => {
-		const handleWindowMouseUp = () => {
-			finishCanvasMarquee();
+		const handleWindowMouseUp = (event: MouseEvent) => {
+			finishCanvasMarquee(event);
 		};
 		window.addEventListener("mouseup", handleWindowMouseUp);
 		return () => {
@@ -2327,12 +2388,11 @@ const CanvasWorkspace = () => {
 
 	const handleCanvasClick = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
-			if (suppressNextNodeClickRef.current) {
-				suppressNextNodeClickRef.current = false;
-				return;
-			}
-			if (suppressNextCanvasClickRef.current) {
-				suppressNextCanvasClickRef.current = false;
+			const pendingSuppression = resolvePendingClickSuppression();
+			if (
+				pendingSuppression &&
+				(pendingSuppression.suppressCanvas || pendingSuppression.suppressNode)
+			) {
 				return;
 			}
 			if (!isCanvasSurfaceTarget(event.target)) return;
@@ -2359,6 +2419,7 @@ const CanvasWorkspace = () => {
 			isCanvasInteractionLocked,
 			normalizedSelectedNodeIds.length,
 			resolveWorldPoint,
+			resolvePendingClickSuppression,
 			selectedBounds,
 		],
 	);
