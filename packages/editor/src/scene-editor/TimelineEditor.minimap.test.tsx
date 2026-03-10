@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import {
+	act,
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import type { TimelineElement } from "core/element/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -151,6 +158,49 @@ describe("TimelineEditor minimap sync", () => {
 		vi.unstubAllGlobals();
 		resizeObserverCallback = null;
 		timelineStore.setState(initialState, true);
+	});
+
+	it("挂载和卸载时会同步 TimelineEditor mounted 状态", () => {
+		const { unmount } = render(<TimelineEditor />, { wrapper });
+
+		expect(timelineStore.getState().isTimelineEditorMounted).toBe(true);
+
+		unmount();
+
+		expect(timelineStore.getState().isTimelineEditorMounted).toBe(false);
+		expect(timelineStore.getState().isTimelineEditorHovered).toBe(false);
+	});
+
+	it("鼠标进入和离开时会同步 TimelineEditor hover 状态", () => {
+		render(<TimelineEditor />, { wrapper });
+
+		fireEvent.mouseEnter(screen.getByTestId("timeline-editor"));
+		expect(timelineStore.getState().isTimelineEditorHovered).toBe(true);
+
+		fireEvent.mouseLeave(screen.getByTestId("timeline-editor"));
+		expect(timelineStore.getState().isTimelineEditorHovered).toBe(false);
+	});
+
+	it("有选中元素时 Delete 仍会删除 timeline element", () => {
+		timelineStore.setState({
+			elements: [
+				createElement({
+					id: "clip-delete",
+					start: 0,
+					end: 60,
+					trackIndex: 0,
+				}),
+			],
+			selectedIds: ["clip-delete"],
+			primarySelectedId: "clip-delete",
+		});
+		render(<TimelineEditor />, { wrapper });
+
+		fireEvent.keyDown(window, { key: "Delete" });
+
+		expect(timelineStore.getState().elements).toHaveLength(0);
+		expect(timelineStore.getState().selectedIds).toEqual([]);
+		expect(timelineStore.getState().primarySelectedId).toBeNull();
 	});
 
 	it("rulerWidth 变化会同步到 timelineViewportWidth", async () => {

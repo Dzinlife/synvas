@@ -144,6 +144,8 @@ export interface TimelineStore {
 	isDragging: boolean; // 是否正在拖拽元素
 	selectedIds: string[]; // 当前选中的元素 ID 列表
 	primarySelectedId: string | null; // 主选中元素 ID
+	isTimelineEditorMounted: boolean; // TimelineEditor 是否已挂载
+	isTimelineEditorHovered: boolean; // 鼠标是否悬停在 TimelineEditor 内
 	// 吸附相关状态
 	snapEnabled: boolean;
 	activeSnapPoint: SnapPoint | null;
@@ -214,6 +216,8 @@ export interface TimelineStore {
 	setIsDragging: (isDragging: boolean) => void;
 	setSelectedElementId: (id: string | null) => void;
 	setSelectedIds: (ids: string[], primaryId?: string | null) => void;
+	setTimelineEditorMounted: (mounted: boolean) => void;
+	setTimelineEditorHovered: (hovered: boolean) => void;
 	// 吸附相关方法
 	setSnapEnabled: (enabled: boolean) => void;
 	setActiveSnapPoint: (point: SnapPoint | null) => void;
@@ -415,6 +419,8 @@ export const createTimelineStore = (): TimelineStoreApi => {
 			isDragging: false,
 			selectedIds: [],
 			primarySelectedId: null,
+			isTimelineEditorMounted: false,
+			isTimelineEditorHovered: false,
 			// 吸附相关状态初始值
 			snapEnabled: true,
 			activeSnapPoint: null,
@@ -1067,6 +1073,20 @@ export const createTimelineStore = (): TimelineStoreApi => {
 							? primaryId
 							: uniqueIds[uniqueIds.length - 1];
 				set({ selectedIds: uniqueIds, primarySelectedId: resolvedPrimary });
+			},
+
+			setTimelineEditorMounted: (mounted: boolean) => {
+				set((state) => {
+					if (state.isTimelineEditorMounted === mounted) return state;
+					return { isTimelineEditorMounted: mounted };
+				});
+			},
+
+			setTimelineEditorHovered: (hovered: boolean) => {
+				set((state) => {
+					if (state.isTimelineEditorHovered === hovered) return state;
+					return { isTimelineEditorHovered: hovered };
+				});
 			},
 
 			// 吸附相关方法

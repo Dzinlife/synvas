@@ -10,6 +10,10 @@ import {
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
+import {
+	createRuntimeProviderWrapper,
+	createTestEditorRuntime,
+} from "@/scene-editor/runtime/testUtils";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import CanvasWorkspace from "./CanvasWorkspace";
 
@@ -671,6 +675,14 @@ const getLatestInfiniteSkiaCanvasProps = (): MockInfiniteSkiaCanvasProps => {
 		throw new Error("InfiniteSkiaCanvas props 未捕获");
 	}
 	return props;
+};
+
+const createCanvasWorkspaceRuntime = () => {
+	const runtime = createTestEditorRuntime("canvas-workspace-test");
+	const timelineRef = { kind: "scene" as const, sceneId: "scene-1" };
+	runtime.ensureTimelineRuntime(timelineRef);
+	runtime.setActiveEditTimeline(timelineRef);
+	return runtime;
 };
 
 const isPointInNode = (node: CanvasNode, x: number, y: number): boolean => {
@@ -1649,6 +1661,77 @@ describe("CanvasWorkspace", () => {
 				.getState()
 				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
 		).toBe(true);
+	});
+
+	it("TimelineEditor 有 element 选中时会阻止 Delete 删除 node", () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		runtime.getActiveEditTimelineRuntime()?.timelineStore.setState({
+			isTimelineEditorMounted: true,
+			isTimelineEditorHovered: false,
+			selectedIds: ["element-1"],
+			primarySelectedId: "element-1",
+		});
+		render(<CanvasWorkspace />, {
+			wrapper: createRuntimeProviderWrapper(runtime),
+		});
+		clickNodeAt(300, 160);
+
+		fireEvent.keyDown(window, { key: "Delete" });
+
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+		).toBe(true);
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+	});
+
+	it("鼠标 hover TimelineEditor 时会阻止 Delete 删除 node", () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		runtime.getActiveEditTimelineRuntime()?.timelineStore.setState({
+			isTimelineEditorMounted: true,
+			isTimelineEditorHovered: true,
+			selectedIds: [],
+			primarySelectedId: null,
+		});
+		render(<CanvasWorkspace />, {
+			wrapper: createRuntimeProviderWrapper(runtime),
+		});
+		clickNodeAt(300, 160);
+
+		fireEvent.keyDown(window, { key: "Delete" });
+
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+		).toBe(true);
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+	});
+
+	it("TimelineEditor 已挂载但空闲时 Delete 仍可删除 node", () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		runtime.getActiveEditTimelineRuntime()?.timelineStore.setState({
+			isTimelineEditorMounted: true,
+			isTimelineEditorHovered: false,
+			selectedIds: [],
+			primarySelectedId: null,
+		});
+		render(<CanvasWorkspace />, {
+			wrapper: createRuntimeProviderWrapper(runtime),
+		});
+		clickNodeAt(300, 160);
+
+		fireEvent.keyDown(window, { key: "Delete" });
+
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-video-1"),
+		).toBe(false);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-delete",
+		);
 	});
 
 	it("Backspace 键可删除多选节点并写入 batch 历史", () => {

@@ -206,6 +206,12 @@ const TimelineEditor = () => {
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId, deselectAll, setSelection } =
 		useMultiSelect();
+	const setTimelineEditorMounted = useTimelineStore(
+		(state) => state.setTimelineEditorMounted,
+	);
+	const setTimelineEditorHovered = useTimelineStore(
+		(state) => state.setTimelineEditorHovered,
+	);
 	const { activeSnapPoint } = useSnap();
 	const { trackAssignments, trackCount } = useTrackAssignments();
 	const {
@@ -252,6 +258,14 @@ const TimelineEditor = () => {
 	const closeContextMenu = useCallback(() => {
 		setContextMenuState({ open: false });
 	}, []);
+
+	useEffect(() => {
+		setTimelineEditorMounted(true);
+		return () => {
+			setTimelineEditorHovered(false);
+			setTimelineEditorMounted(false);
+		};
+	}, [setTimelineEditorHovered, setTimelineEditorMounted]);
 	const copyElementsByIds = useCallback(
 		(targetIds: string[], targetPrimaryId: string | null) => {
 			const payload = buildTimelineClipboardPayload({
@@ -745,6 +759,19 @@ const TimelineEditor = () => {
 		lastHoverRef.current = null;
 		updatePreviewTime(null);
 	}, [updatePreviewTime]);
+
+	const handleTimelineEditorMouseEnter = useCallback(() => {
+		setTimelineEditorHovered(true);
+	}, [setTimelineEditorHovered]);
+
+	const handleTimelineEditorMouseMove = useCallback(() => {
+		setTimelineEditorHovered(true);
+	}, [setTimelineEditorHovered]);
+
+	const handleTimelineEditorMouseLeave = useCallback(() => {
+		setTimelineEditorHovered(false);
+		handleMouseLeave();
+	}, [handleMouseLeave, setTimelineEditorHovered]);
 	const bindRulerDrag = useDrag(
 		({ first, last, tap, xy, cancel }) => {
 			if (tap) return;
@@ -1937,8 +1964,11 @@ const TimelineEditor = () => {
 
 	return (
 		<div
+			data-testid="timeline-editor"
 			className="relative bg-neutral-800 h-full flex flex-col min-h-0 w-full overflow-hidden"
-			onMouseLeave={handleMouseLeave}
+			onMouseEnter={handleTimelineEditorMouseEnter}
+			onMouseMove={handleTimelineEditorMouseMove}
+			onMouseLeave={handleTimelineEditorMouseLeave}
 		>
 			<div className="pointer-events-none absolute top-0 left-0 w-full h-18 z-50 bg-linear-to-b from-neutral-800 to-neutral-800/80 backdrop-blur-2xl"></div>
 			{/* <ProgressiveBlur

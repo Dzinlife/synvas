@@ -2425,6 +2425,15 @@ const CanvasWorkspace = () => {
 			if (event.metaKey || event.ctrlKey || event.altKey) return;
 			if (isEditableKeyboardTarget(event.target)) return;
 			if (normalizedSelectedNodeIds.length === 0) return;
+			const activeTimelineState =
+				runtimeManager?.getActiveEditTimelineRuntime()?.timelineStore.getState();
+			if (
+				activeTimelineState?.isTimelineEditorMounted &&
+				(activeTimelineState.selectedIds.length > 0 ||
+					activeTimelineState.isTimelineEditorHovered)
+			) {
+				return;
+			}
 			event.preventDefault();
 			deleteCanvasNodes(normalizedSelectedNodeIds);
 			closeContextMenu();
@@ -2433,7 +2442,12 @@ const CanvasWorkspace = () => {
 		return () => {
 			window.removeEventListener("keydown", handleDeleteKeyDown);
 		};
-	}, [closeContextMenu, deleteCanvasNodes, normalizedSelectedNodeIds]);
+	}, [
+		closeContextMenu,
+		deleteCanvasNodes,
+		normalizedSelectedNodeIds,
+		runtimeManager,
+	]);
 
 	const handleCreateTextNodeAt = useCallback(
 		(worldX: number, worldY: number) => {
