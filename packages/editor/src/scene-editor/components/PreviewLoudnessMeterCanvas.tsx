@@ -10,6 +10,8 @@ const METER_MIN_DB = -60;
 const METER_MAX_DB = 0;
 const PEAK_HOLD_MS = 600;
 const METER_SIGNAL_STALE_MS = 180;
+const METER_ACTIVE_AMP_EPSILON = 0.001;
+const METER_STATE_EPSILON_DB = 0.1;
 const RMS_RISE_SMOOTHING_PER_SECOND = 20;
 const RMS_FALL_DB_PER_SECOND = 40;
 const PEAK_FALL_DB_PER_SECOND = 24;
@@ -60,15 +62,16 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 		leftPeakHoldUntilMs: 0,
 		rightPeakHoldUntilMs: 0,
 	});
+	const rafIdRef = useRef<number | null>(null);
 
-	const drawFrame = useCallback((frameTimeMs: number) => {
+	const drawFrame = useCallback((frameTimeMs: number): boolean => {
 		const canvas = canvasRef.current;
-		if (!canvas) return;
+		if (!canvas) return false;
 		const ctx = canvas.getContext("2d");
-		if (!ctx) return;
+		if (!ctx) return false;
 
 		const { width, height } = viewportRef.current;
-		if (width <= 0 || height <= 0) return;
+		if (width <= 0 || height <= 0) return false;
 
 		const state = meterStateRef.current;
 		if (!state.lastFrameMs) {
@@ -189,15 +192,63 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 
 		drawChannelLevel(leftChannelX, state.leftDb);
 		drawChannelLevel(rightChannelX, state.rightDb);
+
+		const hasActiveSignal =
+			!isSignalStale &&
+			Math.max(
+				snapshot.leftRms,
+				snapshot.rightRms,
+				snapshot.leftPeak,
+				snapshot.rightPeak,
+			) > METER_ACTIVE_AMP_EPSILON;
+		const hasResidualAnimation =
+			state.leftDb > METER_MIN_DB + METER_STATE_EPSILON_DB ||
+			state.rightDb > METER_MIN_DB + METER_STATE_EPSILON_DB ||
+			state.leftPeakDb > METER_MIN_DB + METER_STATE_EPSILON_DB ||
+			state.rightPeakDb > METER_MIN_DB + METER_STATE_EPSILON_DB ||
+			state.leftPeakHoldUntilMs > frameTimeMs ||
+			state.rightPeakHoldUntilMs > frameTimeMs;
+		return hasActiveSignal || hasResidualAnimation;
+	}, []);
+
+	const startAnimation = useCallback(() => {
+		if (typeof window === "undefined") return;
+		if (rafIdRef.current !== null) return;
+		const animate = (frameTime: number) => {
+			rafIdRef.current = null;
+			const shouldContinue = drawFrame(frameTime);
+			if (!shouldContinue) {
+				return;
+			}
+			rafIdRef.current = window.requestAnimationFrame(animate);
+		};
+		rafIdRef.current = window.requestAnimationFrame(animate);
+	}, [drawFrame]);
+
+	const stopAnimation = useCallback(() => {
+		if (typeof window === "undefined") return;
+		if (rafIdRef.current === null) return;
+		window.cancelAnimationFrame(rafIdRef.current);
+		rafIdRef.current = null;
 	}, []);
 
 	useEffect(() => {
 		const syncSnapshot = (snapshot: PreviewLoudnessSnapshot) => {
 			targetSnapshotRef.current = snapshot;
+			const hasActiveSignal =
+				Math.max(
+					snapshot.leftRms,
+					snapshot.rightRms,
+					snapshot.leftPeak,
+					snapshot.rightPeak,
+				) > METER_ACTIVE_AMP_EPSILON;
+			if (hasActiveSignal) {
+				startAnimation();
+			}
 		};
 		syncSnapshot(getPreviewLoudnessSnapshot());
 		return subscribePreviewLoudness(syncSnapshot);
-	}, []);
+	}, [startAnimation]);
 
 	useEffect(() => {
 		const container = containerRef.current;
@@ -220,7 +271,10 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 			const ctx = canvas.getContext("2d");
 			if (!ctx) return;
 			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-			drawFrame(nowMilliseconds());
+			const shouldContinue = drawFrame(nowMilliseconds());
+			if (shouldContinue) {
+				startAnimation();
+			}
 		};
 
 		resize();
@@ -232,20 +286,13 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 		return () => {
 			observer.disconnect();
 		};
-	}, [drawFrame]);
+	}, [drawFrame, startAnimation]);
 
 	useEffect(() => {
-		if (typeof window === "undefined") return;
-		let rafId = 0;
-		const animate = (frameTime: number) => {
-			drawFrame(frameTime);
-			rafId = window.requestAnimationFrame(animate);
-		};
-		rafId = window.requestAnimationFrame(animate);
 		return () => {
-			window.cancelAnimationFrame(rafId);
+			stopAnimation();
 		};
-	}, [drawFrame]);
+	}, [stopAnimation]);
 
 	return (
 		<div
