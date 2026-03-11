@@ -3,6 +3,7 @@ import type { CanvasNode } from "core/studio/types";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
 	DashPathEffect,
+	Easing,
 	Group,
 	Line,
 	Path,
@@ -10,6 +11,7 @@ import {
 	type SharedValue,
 	type SkiaPointerEvent,
 	useDerivedValue,
+	withTiming,
 } from "react-skia-lite";
 import type {
 	CanvasCameraState,
@@ -38,9 +40,9 @@ import {
 
 const CAMERA_ZOOM_EPSILON = 1e-6;
 const RESIZE_ANCHOR_ENTER_OFFSET_PX = 8;
-const RESIZE_ANCHOR_ENTER_TRANSITION = {
+const RESIZE_ANCHOR_ENTER_TIMING = {
 	duration: 200,
-	easing: "easeOutCubic",
+	easing: Easing.out(Easing.cubic),
 } as const;
 
 const RESIZE_DRAG_CONFIG = {
@@ -253,17 +255,21 @@ const CanvasResizeAnchorHandle = ({
 	return (
 		<Group transform={transform}>
 			<Group
-				transition={RESIZE_ANCHOR_ENTER_TRANSITION}
 				translateX={enterOffset.x}
 				translateY={enterOffset.y}
-				animate={{
-					translateX: 0,
-					translateY: 0,
-					opacity: resolveAnchorOpacity(
-						anchor,
-						hoveredResizeAnchor,
-						pressedResizeAnchor,
-					),
+				motion={{
+					animate: {
+						translateX: withTiming(0, RESIZE_ANCHOR_ENTER_TIMING),
+						translateY: withTiming(0, RESIZE_ANCHOR_ENTER_TIMING),
+						opacity: withTiming(
+							resolveAnchorOpacity(
+								anchor,
+								hoveredResizeAnchor,
+								pressedResizeAnchor,
+							),
+							RESIZE_ANCHOR_ENTER_TIMING,
+						),
+					},
 				}}
 				hitRect={hitRect}
 				opacity={0}

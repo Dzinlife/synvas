@@ -77,19 +77,15 @@ export interface TransformProps {
 	rotateZ?: number;
 }
 
-export type SkiaTransitionEasing = "linear" | "easeInOut" | "easeOutCubic";
+export type SkiaMotionValue = number;
 
-export interface SkiaTransitionSpec {
-	duration?: number;
-	easing?: SkiaTransitionEasing;
+export type SkiaMotionMap = Record<string, SkiaMotionValue>;
+
+export interface SkiaMotionSpec {
+	animate?: SkiaMotionMap;
+	hover?: SkiaMotionMap;
+	active?: SkiaMotionMap;
 }
-
-export type SkiaTransitionProp = SkiaTransitionSpec & {
-	default?: SkiaTransitionSpec;
-	[key: string]: unknown;
-};
-
-export type SkiaInteractionAnimateMap = Record<string, number>;
 
 export interface CTMProps extends TransformProps {
 	clip?: ClipDef;
@@ -168,11 +164,7 @@ export interface SkiaPointerEventProps {
 	pointerEvents?: "auto" | "none";
 	// 仅 web 生效：命中该节点时设置宿主元素 cursor
 	cursor?: string;
-	// 交互态与属性变更过渡（内建统一动画时钟）
-	transition?: SkiaTransitionProp;
-	whileHover?: SkiaInteractionAnimateMap;
-	whileActive?: SkiaInteractionAnimateMap;
-	animate?: SkiaInteractionAnimateMap;
+	motion?: SkiaMotionSpec;
 }
 
 export interface GroupProps

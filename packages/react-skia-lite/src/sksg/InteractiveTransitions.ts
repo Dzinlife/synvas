@@ -1,33 +1,48 @@
+import {
+	cancelAnimation,
+	makeMutable,
+	withSpring,
+	withTiming,
+	type AnimationCallback,
+	type EasingFunction,
+	type WithSpringConfig,
+	type WithTimingConfig,
+} from "../animation/runtime";
 import type { Mutable } from "../react-native-types";
 import type { Node } from "./Node";
 import type { Container } from "./StaticContainer";
 
-type EasingName = "linear" | "easeInOut" | "easeOutCubic";
+type AnimationKind = "timing" | "spring";
 
-interface TransitionSpec {
-	duration: number;
-	easing: EasingName;
+interface ParsedAnimationDescriptor {
+	kind: AnimationKind;
+	toValue: number;
+	config: unknown;
+	callback?: AnimationCallback<number>;
+	signature: string;
 }
 
-interface NumericTrack {
-	from: number;
-	to: number;
-	startMs: number;
-	durationMs: number;
-	easing: (value: number) => number;
+type MotionTarget =
+	| {
+			kind: "immediate";
+			value: number;
+	  }
+	| {
+			kind: "animation";
+			descriptor: ParsedAnimationDescriptor;
+	  };
+
+interface RunningMotionMeta {
+	signature: string;
+	generation: number;
 	active: boolean;
 }
 
 const NODE_TRANSITION_STATE = Symbol("skia.nodeTransitionState");
-
 const EPSILON = 1e-6;
 
-const DEFAULT_TRANSITION: TransitionSpec = {
-	duration: 180,
-	easing: "easeOutCubic",
-};
-
 const RESERVED_TRANSITION_KEYS = new Set([
+	"motion",
 	"transition",
 	"whileHover",
 	"whileActive",
@@ -41,15 +56,27 @@ const DEFAULT_VALUE_BY_KEY: Record<string, number> = {
 	scaleY: 1,
 };
 
-const easingByName: Record<EasingName, (value: number) => number> = {
-	linear: (value) => value,
-	easeInOut: (value) => {
-		if (value <= 0.5) {
-			return 2 * value * value;
-		}
-		return 1 - ((-2 * value + 2) ** 2) / 2;
-	},
-	easeOutCubic: (value) => 1 - (1 - value) ** 3,
+const warnedMessages = new Set<string>();
+const functionIds = new WeakMap<Function, number>();
+let nextFunctionId = 1;
+
+const isDevelopment = () => {
+	const candidate = globalThis as {
+		process?: {
+			env?: {
+				NODE_ENV?: string;
+			};
+		};
+	};
+	return candidate.process?.env?.NODE_ENV !== "production";
+};
+
+const warnOnce = (message: string) => {
+	if (!isDevelopment() || warnedMessages.has(message)) {
+		return;
+	}
+	warnedMessages.add(message);
+	console.warn(message);
 };
 
 const isObjectLike = (value: unknown): value is Record<string, unknown> => {
@@ -62,75 +89,6 @@ const toFiniteNumber = (value: unknown): number | null => {
 	return Number(candidate);
 };
 
-const resolveNow = (): number => {
-	if (typeof performance !== "undefined" && Number.isFinite(performance.now())) {
-		return performance.now();
-	}
-	return Date.now();
-};
-
-const parseNumericMap = (value: unknown): Record<string, number> => {
-	if (!isObjectLike(value)) return {};
-	const result: Record<string, number> = {};
-	for (const [key, raw] of Object.entries(value)) {
-		const numeric = toFiniteNumber(raw);
-		if (numeric === null) continue;
-		result[key] = numeric;
-	}
-	return result;
-};
-
-const parseTransitionPartial = (
-	value: unknown,
-): Partial<TransitionSpec> | null => {
-	if (!isObjectLike(value)) return null;
-	const next: Partial<TransitionSpec> = {};
-	const duration = toFiniteNumber(value.duration);
-	if (duration !== null) {
-		next.duration = Math.max(0, duration);
-	}
-	if (
-		value.easing === "linear" ||
-		value.easing === "easeInOut" ||
-		value.easing === "easeOutCubic"
-	) {
-		next.easing = value.easing;
-	}
-	if (next.duration === undefined && next.easing === undefined) return null;
-	return next;
-};
-
-const resolveTransitionSpecForKey = (
-	transitionInput: unknown,
-	key: string,
-): TransitionSpec => {
-	const fallback = parseTransitionPartial(transitionInput) ?? {};
-	let merged: TransitionSpec = {
-		duration: fallback.duration ?? DEFAULT_TRANSITION.duration,
-		easing: fallback.easing ?? DEFAULT_TRANSITION.easing,
-	};
-	if (!isObjectLike(transitionInput)) {
-		return merged;
-	}
-	const propertyInput = transitionInput[key] ?? transitionInput.default;
-	const propertyPartial = parseTransitionPartial(propertyInput);
-	if (!propertyPartial) {
-		return merged;
-	}
-	merged = {
-		duration: propertyPartial.duration ?? merged.duration,
-		easing: propertyPartial.easing ?? merged.easing,
-	};
-	return merged;
-};
-
-const createMutableNumber = (value: number): Mutable<number> => {
-	return {
-		value,
-		_isSharedValue: true,
-	};
-};
-
 const resolveDefaultBaseValue = (key: string): number => {
 	return DEFAULT_VALUE_BY_KEY[key] ?? 0;
 };
@@ -139,104 +97,190 @@ const isAlmostEqual = (left: number, right: number): boolean => {
 	return Math.abs(left - right) <= EPSILON;
 };
 
-class FrameClock {
-	private listeners = new Set<(nowMs: number, dtMs: number) => void>();
-	private rafId: number | ReturnType<typeof setTimeout> | null = null;
-	private lastNowMs = 0;
+const resolveFunctionId = (value: Function) => {
+	const existing = functionIds.get(value);
+	if (existing !== undefined) {
+		return existing;
+	}
+	const nextId = nextFunctionId++;
+	functionIds.set(value, nextId);
+	return nextId;
+};
 
-	subscribe(listener: (nowMs: number, dtMs: number) => void): () => void {
-		this.listeners.add(listener);
-		if (this.rafId === null) {
-			this.lastNowMs = resolveNow();
-			this.rafId = this.scheduleNextFrame();
-		}
-		return () => {
-			this.listeners.delete(listener);
-			if (this.listeners.size === 0 && this.rafId !== null) {
-				this.cancelFrame(this.rafId);
-				this.rafId = null;
-			}
+const serializeForSignature = (
+	value: unknown,
+	depth = 0,
+	visited?: WeakSet<object>,
+): string => {
+	if (depth > 5) {
+		return "depth";
+	}
+	if (value === null) {
+		return "null";
+	}
+	const valueType = typeof value;
+	if (valueType === "number") {
+		return Number.isFinite(value) ? `n:${value}` : "n:NaN";
+	}
+	if (valueType === "string") {
+		return `s:${value}`;
+	}
+	if (valueType === "boolean") {
+		return `b:${value}`;
+	}
+	if (valueType === "function") {
+		return `f:${resolveFunctionId(value as Function)}`;
+	}
+	if (Array.isArray(value)) {
+		return `[${value
+			.map((entry) => serializeForSignature(entry, depth + 1, visited))
+			.join(",")}]`;
+	}
+	if (!isObjectLike(value)) {
+		return valueType;
+	}
+	const nextVisited = visited ?? new WeakSet<object>();
+	if (nextVisited.has(value)) {
+		return "cycle";
+	}
+	nextVisited.add(value);
+	const keys = Object.keys(value).sort();
+	const serialized = keys
+		.filter((key) => key !== "callback")
+		.map((key) => {
+			return `${key}:${serializeForSignature(
+				(value as Record<string, unknown>)[key],
+				depth + 1,
+				nextVisited,
+			)}`;
+		});
+	nextVisited.delete(value);
+	return `{${serialized.join("|")}}`;
+};
+
+const parseAnimationDescriptor = (
+	value: unknown,
+): ParsedAnimationDescriptor | null => {
+	if (!isObjectLike(value)) {
+		return null;
+	}
+	const kind = value.kind;
+	if (kind !== "timing" && kind !== "spring") {
+		return null;
+	}
+	const toValue = toFiniteNumber(value.toValue);
+	if (toValue === null) {
+		return null;
+	}
+	const callback =
+		typeof value.callback === "function"
+			? (value.callback as AnimationCallback<number>)
+			: undefined;
+	const config = value.config;
+	return {
+		kind,
+		toValue,
+		config,
+		callback,
+		signature: `${kind}:${toValue}:${serializeForSignature(config)}`,
+	};
+};
+
+const parseMotionTarget = (
+	value: unknown,
+	contextPath: string,
+): MotionTarget | null => {
+	const numeric = toFiniteNumber(value);
+	if (numeric !== null) {
+		return {
+			kind: "immediate",
+			value: numeric,
 		};
 	}
-
-	private scheduleNextFrame() {
-		if (typeof globalThis.requestAnimationFrame === "function") {
-			return globalThis.requestAnimationFrame(this.tick);
-		}
-		return setTimeout(() => {
-			this.tick(resolveNow());
-		}, 16);
+	const descriptor = parseAnimationDescriptor(value);
+	if (descriptor) {
+		return {
+			kind: "animation",
+			descriptor,
+		};
 	}
+	warnOnce(
+		`[react-skia-lite] ${contextPath} must be a number or a withTiming/withSpring descriptor.`,
+	);
+	return null;
+};
 
-	private cancelFrame(handle: number | ReturnType<typeof setTimeout>) {
-		if (typeof globalThis.cancelAnimationFrame === "function") {
-			globalThis.cancelAnimationFrame(handle as number);
-			return;
-		}
-		clearTimeout(handle as ReturnType<typeof setTimeout>);
+const parseMotionMap = (value: unknown, contextPath: string) => {
+	const result = new Map<string, MotionTarget>();
+	if (!isObjectLike(value)) {
+		return result;
 	}
+	for (const [key, raw] of Object.entries(value)) {
+		const target = parseMotionTarget(raw, `${contextPath}.${key}`);
+		if (!target) {
+			continue;
+		}
+		result.set(key, target);
+	}
+	return result;
+};
 
-	private tick = (now: number) => {
-		if (this.listeners.size === 0) {
-			this.rafId = null;
-			return;
-		}
-		const nowMs = Number.isFinite(now) ? now : resolveNow();
-		const dtMs = Math.max(0, nowMs - this.lastNowMs);
-		this.lastNowMs = nowMs;
-		for (const listener of this.listeners) {
-			listener(nowMs, dtMs);
-		}
-		if (this.listeners.size === 0) {
-			this.rafId = null;
-			return;
-		}
-		this.rafId = this.scheduleNextFrame();
-	};
-}
+const resolveTimingConfig = (config: unknown): WithTimingConfig | undefined => {
+	if (!isObjectLike(config)) {
+		return undefined;
+	}
+	const nextConfig: WithTimingConfig = {};
+	const duration = toFiniteNumber(config.duration);
+	if (duration !== null) {
+		nextConfig.duration = Math.max(0, duration);
+	}
+	if (typeof config.easing === "function") {
+		nextConfig.easing = config.easing as EasingFunction;
+	}
+	return Object.keys(nextConfig).length === 0 ? undefined : nextConfig;
+};
 
-const sharedFrameClock = new FrameClock();
+const resolveSpringConfig = (config: unknown): WithSpringConfig | undefined => {
+	if (!isObjectLike(config)) {
+		return undefined;
+	}
+	const nextConfig: WithSpringConfig = {};
+	const stiffness = toFiniteNumber(config.stiffness);
+	if (stiffness !== null) {
+		nextConfig.stiffness = stiffness;
+	}
+	const damping = toFiniteNumber(config.damping);
+	if (damping !== null) {
+		nextConfig.damping = damping;
+	}
+	const mass = toFiniteNumber(config.mass);
+	if (mass !== null) {
+		nextConfig.mass = mass;
+	}
+	if (config.velocity !== undefined) {
+		nextConfig.velocity = config.velocity;
+	}
+	if (typeof config.overshootClamping === "boolean") {
+		nextConfig.overshootClamping = config.overshootClamping;
+	}
+	const restDisplacementThreshold = toFiniteNumber(
+		config.restDisplacementThreshold,
+	);
+	if (restDisplacementThreshold !== null) {
+		nextConfig.restDisplacementThreshold = restDisplacementThreshold;
+	}
+	const restSpeedThreshold = toFiniteNumber(config.restSpeedThreshold);
+	if (restSpeedThreshold !== null) {
+		nextConfig.restSpeedThreshold = restSpeedThreshold;
+	}
+	return Object.keys(nextConfig).length === 0 ? undefined : nextConfig;
+};
 
 class ContainerTransitionRuntime {
 	private states = new Set<NodeTransitionState>();
-	private activeStates = new Set<NodeTransitionState>();
-	private unsubscribeClock: (() => void) | null = null;
-	private nowMs = resolveNow();
-
-	constructor(private container: Container) {}
 
 	registerState(state: NodeTransitionState) {
 		this.states.add(state);
-	}
-
-	markStateActive(state: NodeTransitionState) {
-		this.activeStates.add(state);
-		if (this.unsubscribeClock) return;
-		this.unsubscribeClock = sharedFrameClock.subscribe((nowMs) => {
-			this.nowMs = nowMs;
-			let needsRedraw = false;
-			for (const candidate of this.activeStates) {
-				const changed = candidate.tick(nowMs);
-				if (changed) {
-					needsRedraw = true;
-				}
-				if (!candidate.hasActiveTracks()) {
-					this.activeStates.delete(candidate);
-				}
-			}
-			if (needsRedraw && !this.container.isUnmounted()) {
-				this.container.redraw();
-			}
-			if (this.activeStates.size !== 0 || !this.unsubscribeClock) {
-				return;
-			}
-			this.unsubscribeClock();
-			this.unsubscribeClock = null;
-		});
-	}
-
-	getNowMs() {
-		return this.nowMs;
 	}
 
 	pruneByRoot(root: Node[]) {
@@ -255,18 +299,13 @@ class ContainerTransitionRuntime {
 		}
 		for (const state of liveStates) {
 			this.states.add(state);
-			if (state.hasActiveTracks()) {
-				this.markStateActive(state);
+		}
+		for (const state of [...this.states]) {
+			if (liveStates.has(state)) {
+				continue;
 			}
-		}
-		for (const state of this.states) {
-			if (liveStates.has(state)) continue;
+			state.dispose();
 			this.states.delete(state);
-			this.activeStates.delete(state);
-		}
-		if (this.activeStates.size === 0 && this.unsubscribeClock) {
-			this.unsubscribeClock();
-			this.unsubscribeClock = null;
 		}
 	}
 
@@ -275,11 +314,6 @@ class ContainerTransitionRuntime {
 			state.dispose();
 		}
 		this.states.clear();
-		this.activeStates.clear();
-		if (this.unsubscribeClock) {
-			this.unsubscribeClock();
-			this.unsubscribeClock = null;
-		}
 	}
 }
 
@@ -288,20 +322,19 @@ const runtimeByContainer = new WeakMap<Container, ContainerTransitionRuntime>();
 const getContainerRuntime = (container: Container): ContainerTransitionRuntime => {
 	const existing = runtimeByContainer.get(container);
 	if (existing) return existing;
-	const next = new ContainerTransitionRuntime(container);
+	const next = new ContainerTransitionRuntime();
 	runtimeByContainer.set(container, next);
 	return next;
 };
 
 class NodeTransitionState {
-	private transitionInput: unknown = null;
 	private managedKeys = new Set<string>();
 	private sharedValues = new Map<string, Mutable<number>>();
-	private tracks = new Map<string, NumericTrack>();
+	private runningMotions = new Map<string, RunningMotionMeta>();
 	private baseTargets = new Map<string, number>();
-	private hoverTargets = new Map<string, number>();
-	private activeTargets = new Map<string, number>();
-	private animateTargets = new Map<string, number>();
+	private hoverTargets = new Map<string, MotionTarget>();
+	private activeTargets = new Map<string, MotionTarget>();
+	private animateTargets = new Map<string, MotionTarget>();
 	private hovered = false;
 	private active = false;
 	private disposed = false;
@@ -314,20 +347,10 @@ class NodeTransitionState {
 
 	configure(params: {
 		props: Record<string, unknown>;
-		transitionInput: unknown;
-		whileHoverInput: unknown;
-		whileActiveInput: unknown;
-		animateInput: unknown;
+		motionInput: unknown;
 	}) {
 		if (this.disposed) return;
-		const {
-			props,
-			transitionInput,
-			whileHoverInput,
-			whileActiveInput,
-			animateInput,
-		} = params;
-		this.transitionInput = transitionInput;
+		const { props, motionInput } = params;
 
 		const numericProps: Record<string, number> = {};
 		for (const [key, value] of Object.entries(props)) {
@@ -336,26 +359,28 @@ class NodeTransitionState {
 			if (numeric === null) continue;
 			numericProps[key] = numeric;
 		}
-		const hoverTargets = parseNumericMap(whileHoverInput);
-		const activeTargets = parseNumericMap(whileActiveInput);
-		const animateTargets = parseNumericMap(animateInput);
+
+		const animateTargets = parseMotionMap(
+			isObjectLike(motionInput) ? motionInput.animate : undefined,
+			"motion.animate",
+		);
+		const hoverTargets = parseMotionMap(
+			isObjectLike(motionInput) ? motionInput.hover : undefined,
+			"motion.hover",
+		);
+		const activeTargets = parseMotionMap(
+			isObjectLike(motionInput) ? motionInput.active : undefined,
+			"motion.active",
+		);
 
 		const nextManagedKeys = new Set<string>();
-		if (transitionInput !== undefined && transitionInput !== null) {
-			for (const key of Object.keys(numericProps)) {
-				nextManagedKeys.add(key);
-			}
-		}
-		for (const key of this.managedKeys) {
+		for (const key of animateTargets.keys()) {
 			nextManagedKeys.add(key);
 		}
-		for (const key of Object.keys(hoverTargets)) {
+		for (const key of hoverTargets.keys()) {
 			nextManagedKeys.add(key);
 		}
-		for (const key of Object.keys(activeTargets)) {
-			nextManagedKeys.add(key);
-		}
-		for (const key of Object.keys(animateTargets)) {
+		for (const key of activeTargets.keys()) {
 			nextManagedKeys.add(key);
 		}
 
@@ -374,28 +399,28 @@ class NodeTransitionState {
 
 		this.managedKeys = nextManagedKeys;
 		this.baseTargets = nextBaseTargets;
-		this.hoverTargets = new Map(Object.entries(hoverTargets));
-		this.activeTargets = new Map(Object.entries(activeTargets));
-		this.animateTargets = new Map(Object.entries(animateTargets));
+		this.hoverTargets = hoverTargets;
+		this.activeTargets = activeTargets;
+		this.animateTargets = animateTargets;
 
 		for (const key of this.managedKeys) {
 			const shared = this.sharedValues.get(key);
 			if (shared) continue;
-			// 首次挂载时若声明 animate，先以 base 作为初值，再自动过渡到 animate 目标。
 			const initialValue = this.resolveInitialValueForKey(key);
-			this.sharedValues.set(key, createMutableNumber(initialValue));
+			this.sharedValues.set(key, makeMutable(initialValue));
 		}
 
-		for (const key of this.sharedValues.keys()) {
+		for (const key of [...this.sharedValues.keys()]) {
 			if (this.managedKeys.has(key)) continue;
+			const shared = this.sharedValues.get(key);
+			if (shared) {
+				cancelAnimation(shared);
+			}
 			this.sharedValues.delete(key);
-			this.tracks.delete(key);
+			this.runningMotions.delete(key);
 		}
 
-		for (const key of this.managedKeys) {
-			const target = this.resolveTargetForKey(key);
-			this.startTrackToTarget(key, target);
-		}
+		this.syncTargets();
 	}
 
 	attachSharedProps(props: Record<string, unknown>): Record<string, unknown> {
@@ -423,45 +448,13 @@ class NodeTransitionState {
 		this.syncTargets();
 	}
 
-	hasActiveTracks(): boolean {
-		for (const track of this.tracks.values()) {
-			if (track.active) return true;
-		}
-		return false;
-	}
-
-	tick(nowMs: number): boolean {
-		if (this.disposed) return false;
-		let changed = false;
-		for (const [key, track] of this.tracks.entries()) {
-			if (!track.active) continue;
-			const shared = this.sharedValues.get(key);
-			if (!shared) continue;
-			const progress = Math.max(
-				0,
-				Math.min(1, (nowMs - track.startMs) / Math.max(track.durationMs, EPSILON)),
-			);
-			const eased = track.easing(progress);
-			const nextValue = track.from + (track.to - track.from) * eased;
-			if (!isAlmostEqual(shared.value, nextValue)) {
-				shared.value = nextValue;
-				changed = true;
-			}
-			if (progress >= 1) {
-				track.active = false;
-				if (!isAlmostEqual(shared.value, track.to)) {
-					shared.value = track.to;
-					changed = true;
-				}
-			}
-		}
-		return changed;
-	}
-
 	dispose() {
 		if (this.disposed) return;
 		this.disposed = true;
-		this.tracks.clear();
+		for (const shared of this.sharedValues.values()) {
+			cancelAnimation(shared);
+		}
+		this.runningMotions.clear();
 		this.sharedValues.clear();
 		this.baseTargets.clear();
 		this.hoverTargets.clear();
@@ -473,21 +466,31 @@ class NodeTransitionState {
 	private syncTargets() {
 		for (const key of this.managedKeys) {
 			const target = this.resolveTargetForKey(key);
-			this.startTrackToTarget(key, target);
+			this.applyTargetForKey(key, target);
 		}
 	}
 
-	private resolveTargetForKey(key: string): number {
-		if (this.active && this.activeTargets.has(key)) {
-			return this.activeTargets.get(key) as number;
+	private resolveTargetForKey(key: string): MotionTarget {
+		if (this.active) {
+			const activeTarget = this.activeTargets.get(key);
+			if (activeTarget) {
+				return activeTarget;
+			}
 		}
-		if (this.hovered && this.hoverTargets.has(key)) {
-			return this.hoverTargets.get(key) as number;
+		if (this.hovered) {
+			const hoverTarget = this.hoverTargets.get(key);
+			if (hoverTarget) {
+				return hoverTarget;
+			}
 		}
-		if (this.animateTargets.has(key)) {
-			return this.animateTargets.get(key) as number;
+		const animateTarget = this.animateTargets.get(key);
+		if (animateTarget) {
+			return animateTarget;
 		}
-		return this.baseTargets.get(key) ?? resolveDefaultBaseValue(key);
+		return {
+			kind: "immediate",
+			value: this.baseTargets.get(key) ?? resolveDefaultBaseValue(key),
+		};
 	}
 
 	private resolveInitialValueForKey(key: string): number {
@@ -497,67 +500,58 @@ class NodeTransitionState {
 		return resolveDefaultBaseValue(key);
 	}
 
-	private startTrackToTarget(key: string, target: number) {
+	private applyTargetForKey(key: string, target: MotionTarget) {
 		const shared = this.sharedValues.get(key);
-		if (!shared) return;
-		const spec = resolveTransitionSpecForKey(this.transitionInput, key);
-		const durationMs = Math.max(0, spec.duration);
-		const easing = easingByName[spec.easing];
-		const existingTrack = this.tracks.get(key);
-		// 相同目标与参数的活跃轨道不重启，避免高频重渲染（如 camera pan）反复打断过渡。
-		if (
-			existingTrack?.active &&
-			isAlmostEqual(existingTrack.to, target) &&
-			isAlmostEqual(existingTrack.durationMs, durationMs) &&
-			existingTrack.easing === easing
-		) {
+		if (!shared) {
 			return;
 		}
-		const nowMs = resolveNow();
-		const currentValue = shared.value;
-		if (isAlmostEqual(currentValue, target)) {
-			shared.value = target;
-			const currentTrack = this.tracks.get(key);
-			if (currentTrack) {
-				currentTrack.active = false;
+		if (target.kind === "immediate") {
+			cancelAnimation(shared);
+			if (!isAlmostEqual(shared.value, target.value)) {
+				shared.value = target.value;
+			}
+			const meta = this.runningMotions.get(key);
+			if (meta) {
+				meta.active = false;
+				meta.signature = `immediate:${target.value}`;
 			}
 			return;
 		}
 
-		if (durationMs <= 0) {
-			shared.value = target;
-			let track = this.tracks.get(key);
-			if (!track) {
-				track = {
-					from: target,
-					to: target,
-					startMs: nowMs,
-					durationMs: 0,
-					easing,
-					active: false,
-				};
-				this.tracks.set(key, track);
-			} else {
-				track.from = target;
-				track.to = target;
-				track.startMs = nowMs;
-				track.durationMs = 0;
-				track.easing = easing;
-				track.active = false;
-			}
+		const { descriptor } = target;
+		const existingMeta = this.runningMotions.get(key);
+		if (existingMeta?.active && existingMeta.signature === descriptor.signature) {
 			return;
 		}
-
-		const nextTrack: NumericTrack = {
-			from: currentValue,
-			to: target,
-			startMs: nowMs,
-			durationMs,
-			easing,
+		const generation = (existingMeta?.generation ?? 0) + 1;
+		this.runningMotions.set(key, {
+			signature: descriptor.signature,
+			generation,
 			active: true,
+		});
+
+		const callback: AnimationCallback<number> = (finished, current) => {
+			descriptor.callback?.(finished, current);
+			const latest = this.runningMotions.get(key);
+			if (!latest || latest.generation !== generation) {
+				return;
+			}
+			latest.active = false;
 		};
-		this.tracks.set(key, nextTrack);
-		this.runtime.markStateActive(this);
+
+		if (descriptor.kind === "timing") {
+			shared.value = withTiming(
+				descriptor.toValue,
+				resolveTimingConfig(descriptor.config),
+				callback,
+			) as number;
+			return;
+		}
+		shared.value = withSpring(
+			descriptor.toValue,
+			resolveSpringConfig(descriptor.config),
+			callback,
+		) as number;
 	}
 }
 
@@ -590,23 +584,18 @@ export const prepareInteractiveTransitionProps = (params: {
 }): Record<string, unknown> => {
 	const { node, previousNode, props, container } = params;
 	const nextProps = { ...props };
-	const transitionInput = nextProps.transition;
-	const whileHoverInput = nextProps.whileHover;
-	const whileActiveInput = nextProps.whileActive;
-	const animateInput = nextProps.animate;
+	const motionInput = nextProps.motion;
+
+	delete nextProps.motion;
 	delete nextProps.transition;
 	delete nextProps.whileHover;
 	delete nextProps.whileActive;
 	delete nextProps.animate;
 
 	const previousState = previousNode ? getNodeTransitionState(previousNode) : null;
-	const hasTransitionConfig =
-		transitionInput !== undefined ||
-		whileHoverInput !== undefined ||
-		whileActiveInput !== undefined ||
-		animateInput !== undefined;
+	const hasMotionConfig = motionInput !== undefined && motionInput !== null;
 
-	if (!hasTransitionConfig) {
+	if (!hasMotionConfig) {
 		if (previousState) {
 			previousState.dispose();
 		}
@@ -625,10 +614,7 @@ export const prepareInteractiveTransitionProps = (params: {
 	runtime.registerState(state);
 	state.configure({
 		props: nextProps,
-		transitionInput,
-		whileHoverInput,
-		whileActiveInput,
-		animateInput,
+		motionInput,
 	});
 	setNodeTransitionState(node, state);
 	return state.attachSharedProps(nextProps);
