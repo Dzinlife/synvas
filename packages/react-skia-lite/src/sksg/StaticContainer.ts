@@ -1,3 +1,5 @@
+import { scheduleAnimationFrameTask } from "../animation/runtime/core";
+import type { SharedValue } from "../react-native-types";
 import type { SkCanvas, Skia, SkPaint } from "../skia/types";
 import { SkiaViewApi } from "../views/api";
 import {
@@ -11,6 +13,8 @@ import type { Recording } from "./Recorder/Recorder";
 import { Recorder } from "./Recorder/Recorder";
 import { visit } from "./Recorder/Visitor";
 import "../views/api";
+
+let nextAnimationListenerId = 1;
 
 export abstract class Container {
 	private _root: Node[] = [];
@@ -63,6 +67,14 @@ export abstract class Container {
 }
 
 export class StaticContainer extends Container {
+	private animationListeners = new Map<SharedValue<unknown>, number>();
+	private readonly scheduledPresent = () => {
+		if (this.unmounted) {
+			return;
+		}
+		this.present();
+	};
+
 	constructor(
 		Skia: Skia,
 		private nativeId: number,
@@ -70,18 +82,63 @@ export class StaticContainer extends Container {
 		super(Skia);
 	}
 
+	override unmount() {
+		this.clearAnimationSubscriptions();
+		super.unmount();
+	}
+
 	redraw() {
+		this.rebuildRecording();
+		this.present();
+	}
+
+	rebuildRecording() {
 		handleContainerRedraw(this, this.root);
 		const recorder = new Recorder();
 		visit(recorder, this.root);
 		this.recording = recorder.getRecording();
-		const isOnScreen = this.nativeId !== -1;
-		if (isOnScreen) {
-			const rec = this.Skia.PictureRecorder();
-			const canvas = rec.beginRecording();
-			this.drawOnCanvas(canvas);
-			const picture = rec.finishRecordingAsPicture();
-			SkiaViewApi.setJsiProperty(this.nativeId, "picture", picture);
+		this.syncAnimationSubscriptions(this.recording.animationValues);
+	}
+
+	present() {
+		if (this.recording === null || this.unmounted || this.nativeId === -1) {
+			return;
 		}
+		const rec = this.Skia.PictureRecorder();
+		const canvas = rec.beginRecording();
+		this.drawOnCanvas(canvas);
+		const picture = rec.finishRecordingAsPicture();
+		SkiaViewApi.setJsiProperty(this.nativeId, "picture", picture);
+	}
+
+	private syncAnimationSubscriptions(animationValues: Set<SharedValue<unknown>>) {
+		for (const [sharedValue, listenerId] of [...this.animationListeners.entries()]) {
+			if (animationValues.has(sharedValue)) {
+				continue;
+			}
+			sharedValue.removeListener?.(listenerId);
+			this.animationListeners.delete(sharedValue);
+		}
+
+		for (const sharedValue of animationValues) {
+			if (
+				this.animationListeners.has(sharedValue) ||
+				typeof sharedValue.addListener !== "function"
+			) {
+				continue;
+			}
+			const listenerId = nextAnimationListenerId++;
+			sharedValue.addListener(listenerId, () => {
+				scheduleAnimationFrameTask(this.scheduledPresent);
+			});
+			this.animationListeners.set(sharedValue, listenerId);
+		}
+	}
+
+	private clearAnimationSubscriptions() {
+		for (const [sharedValue, listenerId] of this.animationListeners) {
+			sharedValue.removeListener?.(listenerId);
+		}
+		this.animationListeners.clear();
 	}
 }

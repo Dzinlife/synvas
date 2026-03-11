@@ -39,9 +39,6 @@ import { CommandType } from "./Core";
 export interface Recording {
 	commands: Command[];
 	paintPool: SkPaint[];
-}
-
-interface AnimationValues {
 	animationValues: Set<SharedValue<unknown>>;
 }
 
@@ -54,7 +51,7 @@ export class Recorder implements BaseRecorder {
 		this.cursors.push(this.commands);
 	}
 
-	getRecording(): Recording & AnimationValues {
+	getRecording(): Recording {
 		return {
 			commands: this.commands,
 			paintPool: [],

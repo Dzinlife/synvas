@@ -321,74 +321,56 @@ const containsRectPoint = (rect: Rect, point: Point): boolean => {
 	);
 };
 
+const resolveRectLike = (value: unknown): Rect | null => {
+	const rect = resolveSharedValue(value);
+	if (!rect || typeof rect !== "object") return null;
+	const x = resolveNumericValue((rect as { x?: unknown }).x);
+	const y = resolveNumericValue((rect as { y?: unknown }).y);
+	const width = resolveNumericValue((rect as { width?: unknown }).width);
+	const height = resolveNumericValue((rect as { height?: unknown }).height);
+	if (x === null || y === null || width === null || height === null) {
+		return null;
+	}
+	return normalizeRect({
+		x,
+		y,
+		width,
+		height,
+	});
+};
+
 const resolveRect = (props: Record<string, unknown>): Rect | null => {
-	const rect = props.rect as Partial<Rect> | undefined;
-	const nestedRect = (props.rect as { rect?: Partial<Rect> } | undefined)?.rect;
-	if (
-		rect &&
-		isFiniteNumber(rect.x) &&
-		isFiniteNumber(rect.y) &&
-		isFiniteNumber(rect.width) &&
-		isFiniteNumber(rect.height)
-	) {
-		return normalizeRect({
-			x: rect.x,
-			y: rect.y,
-			width: rect.width,
-			height: rect.height,
-		});
+	const directRect = resolveRectLike(props.rect);
+	if (directRect) {
+		return directRect;
 	}
-	if (
-		nestedRect &&
-		isFiniteNumber(nestedRect.x) &&
-		isFiniteNumber(nestedRect.y) &&
-		isFiniteNumber(nestedRect.width) &&
-		isFiniteNumber(nestedRect.height)
-	) {
-		return normalizeRect({
-			x: nestedRect.x,
-			y: nestedRect.y,
-			width: nestedRect.width,
-			height: nestedRect.height,
-		});
+	const nestedRect = resolveRectLike(
+		(resolveSharedValue(props.rect) as { rect?: unknown } | undefined)?.rect,
+	);
+	if (nestedRect) {
+		return nestedRect;
 	}
-	const width = props.width;
-	const height = props.height;
-	if (!isFiniteNumber(width) || !isFiniteNumber(height)) return null;
-	const x = isFiniteNumber(props.x) ? props.x : 0;
-	const y = isFiniteNumber(props.y) ? props.y : 0;
+	const width = resolveNumericValue(props.width);
+	const height = resolveNumericValue(props.height);
+	if (width === null || height === null) return null;
+	const x = resolveNumericValue(props.x) ?? 0;
+	const y = resolveNumericValue(props.y) ?? 0;
 	return normalizeRect({ x, y, width, height });
 };
 
 const resolveHitRect = (hitRect: RectCtor): Rect | null => {
-	if (!isFiniteNumber(hitRect.width) || !isFiniteNumber(hitRect.height)) {
-		return null;
-	}
-	return normalizeRect({
-		x: isFiniteNumber(hitRect.x) ? hitRect.x : 0,
-		y: isFiniteNumber(hitRect.y) ? hitRect.y : 0,
-		width: hitRect.width,
-		height: hitRect.height,
-	});
+	return resolveRectLike(hitRect);
 };
 
 const containsCirclePoint = (
 	props: Record<string, unknown>,
 	point: Point,
 ): boolean => {
-	const center = props.c as Partial<Point> | undefined;
-	const cx = isFiniteNumber(center?.x)
-		? center.x
-		: isFiniteNumber(props.cx)
-			? props.cx
-			: null;
-	const cy = isFiniteNumber(center?.y)
-		? center.y
-		: isFiniteNumber(props.cy)
-			? props.cy
-			: null;
-	const radius = props.r;
-	if (!isFiniteNumber(cx) || !isFiniteNumber(cy) || !isFiniteNumber(radius)) {
+	const center = resolveSharedValue(props.c) as Partial<Point> | undefined;
+	const cx = resolveNumericValue(center?.x) ?? resolveNumericValue(props.cx);
+	const cy = resolveNumericValue(center?.y) ?? resolveNumericValue(props.cy);
+	const radius = resolveNumericValue(props.r);
+	if (cx === null || cy === null || radius === null) {
 		return false;
 	}
 	const dx = point.x - cx;
