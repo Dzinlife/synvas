@@ -137,4 +137,64 @@ describe("useSkiaUiTextSprites", () => {
 		expect(result.current[0]?.image).not.toBe(previousImage);
 		expect(result.current[0]?.textWidth).toBeLessThan(previousWidth ?? 0);
 	});
+
+	it("maxWidth sharedValue 变化时会自动重算文本栅格", () => {
+		let widthValue = 200;
+		const listeners = new Map<number, (value: number) => void>();
+		const maxWidthShared = {
+			get value() {
+				return widthValue;
+			},
+			set value(nextValue: number) {
+				widthValue = nextValue;
+				for (const listener of listeners.values()) {
+					listener(nextValue);
+				}
+			},
+			addListener(listenerID: number, listener: (value: number) => void) {
+				listeners.set(listenerID, listener);
+			},
+			removeListener(listenerID: number) {
+				listeners.delete(listenerID);
+			},
+			_isSharedValue: true as const,
+		};
+		const stableRequests = [
+			{
+				slotKey: "focus-label",
+				text: "focus-label",
+				maxWidthPx: maxWidthShared,
+				style: {
+					fontSizePx: 12,
+					lineHeightPx: 16,
+					paddingPx: 1,
+				},
+				dprBucket: 1,
+			},
+		];
+		const { result } = renderHook(() => useSkiaUiTextSprites(stableRequests));
+
+		act(() => {
+			__processSkiaUiTextRasterQueueFrameForTests();
+		});
+		const previousImage = result.current[0]?.image;
+		const previousWidth = result.current[0]?.textWidth ?? 0;
+		expect(result.current[0]?.ready).toBe(true);
+		expect(previousImage).not.toBeNull();
+
+		act(() => {
+			maxWidthShared.value = 40;
+		});
+
+		expect(result.current[0]?.ready).toBe(false);
+		expect(result.current[0]?.image).toBe(previousImage);
+		expect(result.current[0]?.textWidth).toBe(previousWidth);
+
+		act(() => {
+			__processSkiaUiTextRasterQueueFrameForTests();
+		});
+
+		expect(result.current[0]?.ready).toBe(true);
+		expect(result.current[0]?.textWidth).toBeLessThan(previousWidth);
+	});
 });

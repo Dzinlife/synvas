@@ -6,11 +6,36 @@ import {
 } from "./textRasterStore";
 import type { SkiaUiTextRequest, SkiaUiTextSprite } from "./types";
 
+interface SharedValueLike<T = unknown> {
+	value: T;
+	addListener?: (listenerID: number, listener: (value: T) => void) => void;
+	removeListener?: (listenerID: number) => void;
+}
+
+let sharedListenerSeed = 1;
+
 const resolveSpriteSlotKey = (
 	request: SkiaUiTextRequest | undefined,
 	index: number,
 ): string => {
 	return request?.slotKey?.trim() || `__index__${index}`;
+};
+
+const isSharedValueLike = (value: unknown): value is SharedValueLike => {
+	if (typeof value !== "object" || value === null) {
+		return false;
+	}
+	return "value" in value;
+};
+
+const resolveRequestSharedValues = (
+	request: SkiaUiTextRequest,
+): SharedValueLike[] => {
+	const sharedValues: SharedValueLike[] = [];
+	if (isSharedValueLike(request.maxWidthPx)) {
+		sharedValues.push(request.maxWidthPx);
+	}
+	return sharedValues;
 };
 
 export const useSkiaUiTextSprites = (
@@ -71,6 +96,15 @@ export const useSkiaUiTextSprites = (
 		}
 		return [...cacheKeys];
 	}, [slotKeys, sprites]);
+	const requestSharedValues = useMemo(() => {
+		const unique = new Set<SharedValueLike>();
+		for (const request of requests) {
+			for (const sharedValue of resolveRequestSharedValues(request)) {
+				unique.add(sharedValue);
+			}
+		}
+		return [...unique];
+	}, [requests]);
 
 	useEffect(() => {
 		if (signatures.length === 0) {
@@ -101,6 +135,34 @@ export const useSkiaUiTextSprites = (
 			}
 		};
 	}, [requests, signatures, sprites]);
+
+	useEffect(() => {
+		if (requestSharedValues.length === 0) {
+			return;
+		}
+		let disposed = false;
+		const unsubs: Array<() => void> = [];
+		for (const sharedValue of requestSharedValues) {
+			if (typeof sharedValue.addListener !== "function") {
+				continue;
+			}
+			const listenerId = sharedListenerSeed;
+			sharedListenerSeed += 1;
+			sharedValue.addListener(listenerId, () => {
+				if (disposed) return;
+				forceUpdate();
+			});
+			unsubs.push(() => {
+				sharedValue.removeListener?.(listenerId);
+			});
+		}
+		return () => {
+			disposed = true;
+			for (const unsub of unsubs) {
+				unsub();
+			}
+		};
+	}, [requestSharedValues]);
 
 	useEffect(() => {
 		const activeSlotKeys = new Set<string>();

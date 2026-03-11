@@ -1,4 +1,4 @@
-import type { SkImage } from "react-skia-lite";
+import type { SharedValue, SkImage } from "react-skia-lite";
 
 export interface SkiaUiTextStyle {
 	fontFamily?: string;
@@ -11,7 +11,7 @@ export interface SkiaUiTextStyle {
 
 export interface SkiaUiTextRequest {
 	text: string;
-	maxWidthPx?: number;
+	maxWidthPx?: number | SharedValue<number>;
 	slotKey?: string;
 	style?: SkiaUiTextStyle;
 	dprBucket?: number;

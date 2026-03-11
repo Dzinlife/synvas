@@ -590,6 +590,22 @@ const sweepWeakIndex = () => {
 	}
 };
 
+const resolveRequestNumericValue = (
+	value: number | { value: unknown } | undefined,
+): number | undefined => {
+	if (Number.isFinite(value)) {
+		return value as number;
+	}
+	if (typeof value !== "object" || value === null || !("value" in value)) {
+		return undefined;
+	}
+	const sharedValue = (value as { value?: unknown }).value;
+	if (!Number.isFinite(sharedValue)) {
+		return undefined;
+	}
+	return sharedValue as number;
+};
+
 const toNormalizedTextRequest = (
 	request: SkiaUiTextRequest | NormalizedSkiaUiTextRequest,
 ): NormalizedSkiaUiTextRequest => {
@@ -600,7 +616,13 @@ const toNormalizedTextRequest = (
 	const text = String(sourceRequest.text ?? "");
 	const style = normalizeTextStyle(sourceRequest.style);
 	const dprBucket = normalizeDprBucket(sourceRequest.dprBucket);
-	const fittedText = fitTextToMaxWidth(text, style, sourceRequest.maxWidthPx);
+	const fittedText = fitTextToMaxWidth(
+		text,
+		style,
+		resolveRequestNumericValue(
+			sourceRequest.maxWidthPx as number | { value: unknown } | undefined,
+		),
+	);
 	const signature = JSON.stringify([
 		fittedText,
 		style.fontFamily,

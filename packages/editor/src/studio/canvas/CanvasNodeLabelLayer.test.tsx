@@ -63,7 +63,7 @@ describe("CanvasNodeLabelLayer", () => {
 		vi.clearAllMocks();
 	});
 
-	it("label request 会把节点当前屏幕宽度传给 maxWidthPx", () => {
+	it("label request 会携带 shared maxWidthPx", () => {
 		render(
 			<CanvasNodeLabelLayer
 				width={800}
@@ -94,7 +94,9 @@ describe("CanvasNodeLabelLayer", () => {
 		expect(labelRequests?.[0]).toMatchObject({
 			slotKey: "node-a",
 			text: "very-long-node-label",
-			maxWidthPx: 150,
+		});
+		expect(labelRequests?.[0]?.maxWidthPx).toMatchObject({
+			_isSharedValue: true,
 		});
 	});
 });

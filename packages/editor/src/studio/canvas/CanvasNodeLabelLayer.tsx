@@ -1,5 +1,5 @@
 import type { CanvasNode } from "core/studio/types";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import {
 	Group,
 	Image,
@@ -57,20 +57,6 @@ interface CanvasNodeLabelSpriteProps {
 	viewport: ReturnType<typeof resolveCanvasViewportRect>;
 }
 
-let sharedListenerSeed = 1;
-
-const resolveLabelMaxWidthPx = (
-	node: CanvasNode,
-	layout: SharedValue<CanvasNodeLayoutState> | null,
-	camera: SharedValue<CanvasCameraState>,
-): number => {
-	const frame = resolveCanvasNodeLayoutScreenFrame(
-		layout?.value ?? node,
-		camera.value,
-	);
-	return Math.max(0, Math.floor(frame.width));
-};
-
 const CanvasNodeLabelSprite = ({
 	camera,
 	candidate,
@@ -78,52 +64,14 @@ const CanvasNodeLabelSprite = ({
 	viewport,
 }: CanvasNodeLabelSpriteProps) => {
 	const layout = getNodeLayout(candidate.nodeId);
-	const initialMaxWidthPx = resolveLabelMaxWidthPx(
-		candidate.node,
-		layout,
-		camera,
-	);
-	const [maxWidthPx, setMaxWidthPx] = useState(initialMaxWidthPx);
-	const maxWidthRef = useRef(initialMaxWidthPx);
-
-	useEffect(() => {
-		maxWidthRef.current = maxWidthPx;
-	}, [maxWidthPx]);
-
-	useEffect(() => {
-		const syncMaxWidth = () => {
-			const nextMaxWidthPx = resolveLabelMaxWidthPx(
-				candidate.node,
-				layout,
-				camera,
-			);
-			if (nextMaxWidthPx === maxWidthRef.current) {
-				return;
-			}
-			maxWidthRef.current = nextMaxWidthPx;
-			setMaxWidthPx(nextMaxWidthPx);
-		};
-
-		syncMaxWidth();
-		const cameraListenerId = sharedListenerSeed;
-		sharedListenerSeed += 1;
-		camera.addListener?.(cameraListenerId, syncMaxWidth);
-		let layoutListenerId: number | null = null;
-		if (layout?.addListener) {
-			layoutListenerId = sharedListenerSeed;
-			sharedListenerSeed += 1;
-			layout.addListener(layoutListenerId, syncMaxWidth);
-		}
-
-		return () => {
-			camera.removeListener?.(cameraListenerId);
-			if (layoutListenerId !== null) {
-				layout?.removeListener?.(layoutListenerId);
-			}
-		};
-	}, [camera, candidate.node, layout]);
-
-	const labelRequest = useMemo(() => {
+	const maxWidthPx = useDerivedValue(() => {
+		const frame = resolveCanvasNodeLayoutScreenFrame(
+			layout?.value ?? candidate.node,
+			camera.value,
+		);
+		return Math.max(0, Math.floor(frame.width));
+	});
+	const labelRequests = useMemo(() => {
 		return [
 			{
 				text: candidate.text,
@@ -133,7 +81,7 @@ const CanvasNodeLabelSprite = ({
 			},
 		];
 	}, [candidate.nodeId, candidate.text, maxWidthPx]);
-	const [sprite] = useSkiaUiTextSprites(labelRequest);
+	const [sprite] = useSkiaUiTextSprites(labelRequests);
 	const renderableImage = sprite?.image ?? null;
 	const hasRenderableSprite = Boolean(sprite?.text && renderableImage);
 	const textWidth = Math.max(1, sprite?.textWidth ?? 1);
