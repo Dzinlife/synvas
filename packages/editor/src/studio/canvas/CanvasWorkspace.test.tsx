@@ -2276,7 +2276,7 @@ describe("CanvasWorkspace", () => {
 		expect(node?.height).toBe(180);
 	});
 
-	it("多选 bbox resize 会对每个受约束 node 独立求解最终 rect", () => {
+	it("多选 bbox resize 会保持 dragstart 比例，并对每个受约束 node 独立求解最终 rect", () => {
 		setAssetSceneSourceSize(400, 300);
 		render(<CanvasWorkspace />);
 		clickNodeAt(300, 160);
@@ -2293,8 +2293,8 @@ describe("CanvasWorkspace", () => {
 		expect(video?.y).toBeCloseTo(120);
 		expect(video?.width).toBeCloseTo(352);
 		expect(video?.height).toBeCloseTo(264);
-		expect(image?.x).toBeCloseTo(768);
-		expect(image?.y).toBeCloseTo(320);
+		expect(image?.x).toBeCloseTo(724);
+		expect(image?.y).toBeCloseTo(340);
 		expect(image?.width).toBeCloseTo(286);
 		expect(image?.height).toBeCloseTo(214.5);
 		expect(
@@ -2318,7 +2318,7 @@ describe("CanvasWorkspace", () => {
 		expect(node?.x).toBe(560);
 	});
 
-	it("多选横向拖拽时受约束 node 会联动另一轴，text 仍保持自由缩放", () => {
+	it("多选横向拖拽时 bbox 会等比缩放，text 也跟随外框比例变化", () => {
 		setAssetSceneSourceSize(400, 300);
 		const textId = useProjectStore.getState().createCanvasNode({
 			type: "text",
@@ -2347,13 +2347,13 @@ describe("CanvasWorkspace", () => {
 		expect(image.width).toBeCloseTo(286);
 		expect(image.height).toBeCloseTo(214.5);
 		expect(Math.abs(image.width / image.height - 4 / 3)).toBeLessThan(1e-6);
-		expect(text.x).toBeCloseTo(1040);
-		expect(text.y).toBeCloseTo(340);
-		expect(text.width).toBeCloseTo(240);
-		expect(text.height).toBeCloseTo(80);
+		expect(text.x).toBeCloseTo(1010);
+		expect(text.y).toBeCloseTo(342);
+		expect(text.width).toBeCloseTo(220);
+		expect(text.height).toBeCloseTo(88);
 	});
 
-	it("无约束 node 的多选 resize 仍保持普通比例缩放", () => {
+	it("无约束 node 的多选 resize 会保持 dragstart 比例", () => {
 		const firstTextId = useProjectStore.getState().createCanvasNode({
 			type: "text",
 			name: "Text A",
@@ -2387,15 +2387,15 @@ describe("CanvasWorkspace", () => {
 		);
 		expect(firstText?.x).toBeCloseTo(760);
 		expect(firstText?.y).toBeCloseTo(520);
-		expect(firstText?.width).toBeCloseTo(150);
-		expect(firstText?.height).toBeCloseTo(60);
-		expect(secondText?.x).toBeCloseTo(1035);
-		expect(secondText?.y).toBeCloseTo(620);
-		expect(secondText?.width).toBeCloseTo(250);
-		expect(secondText?.height).toBeCloseTo(80);
+		expect(firstText?.width).toBeCloseTo(135);
+		expect(firstText?.height).toBeCloseTo(67.5);
+		expect(secondText?.x).toBeCloseTo(1007.5);
+		expect(secondText?.y).toBeCloseTo(632.5);
+		expect(secondText?.width).toBeCloseTo(225);
+		expect(secondText?.height).toBeCloseTo(90);
 	});
 
-	it("多选 bbox resize 会按外框吸附并保留自由缩放结果", () => {
+	it("多选 bbox resize 会按等比外框吸附", () => {
 		const firstTextId = useProjectStore.getState().createCanvasNode({
 			type: "text",
 			name: "Snap Text A",
@@ -2419,7 +2419,7 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		clickNodeAt(780, 540);
 		clickNodeAt(1000, 640, { shiftKey: true });
-		resizeSelectionBoundsAt(1180, 700, 1596, 700, "bottom-right");
+		resizeSelectionBoundsAt(1180, 700, 1596, 880, "bottom-right");
 		const project = useProjectStore.getState().currentProject;
 		const firstText = project?.canvas.nodes.find(
 			(item) => item.id === firstTextId,
@@ -2429,8 +2429,11 @@ describe("CanvasWorkspace", () => {
 		);
 		expect(firstText?.x).toBeCloseTo(760);
 		expect(firstText?.width).toBeCloseTo(240);
+		expect(firstText?.height).toBeCloseTo(120);
 		expect(secondText?.x).toBeCloseTo(1200);
+		expect(secondText?.y).toBeCloseTo(720);
 		expect(secondText?.width).toBeCloseTo(400);
+		expect(secondText?.height).toBeCloseTo(160);
 		expect(
 			(secondText?.x ?? 0) + (secondText?.width ?? 0),
 		).toBeCloseTo(1600);

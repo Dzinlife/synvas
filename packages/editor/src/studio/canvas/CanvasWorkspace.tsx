@@ -306,29 +306,6 @@ const isBottomResizeAnchor = (anchor: CanvasNodeResizeAnchor): boolean => {
 	return anchor === "bottom-left" || anchor === "bottom-right";
 };
 
-const resolveResizeBox = ({
-	anchor,
-	fixedCornerX,
-	fixedCornerY,
-	width,
-	height,
-}: {
-	anchor: CanvasNodeResizeAnchor;
-	fixedCornerX: number;
-	fixedCornerY: number;
-	width: number;
-	height: number;
-}): CanvasSnapRect => {
-	const safeWidth = Math.max(CAMERA_ZOOM_EPSILON, width);
-	const safeHeight = Math.max(CAMERA_ZOOM_EPSILON, height);
-	return {
-		x: isRightResizeAnchor(anchor) ? fixedCornerX : fixedCornerX - safeWidth,
-		y: isBottomResizeAnchor(anchor) ? fixedCornerY : fixedCornerY - safeHeight,
-		width: safeWidth,
-		height: safeHeight,
-	};
-};
-
 const applyResizeSnapDeltaToBox = (
 	box: CanvasSnapRect,
 	anchor: CanvasNodeResizeAnchor,
@@ -2177,120 +2154,155 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const handleSelectionResizeMove = useCallback(
-		(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
-			const resizeSession = selectionResizeSessionRef.current;
-			if (!resizeSession) return;
-			if (resizeSession.anchor !== anchor) return;
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-			const deltaX = event.movementX / safeZoom;
-			const deltaY = event.movementY / safeZoom;
-			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
-			const isRightAnchor = isRightResizeAnchor(anchor);
-			const isBottomAnchor = isBottomResizeAnchor(anchor);
-			const globalMinSize = 32 / safeZoom;
-			const nextWidth = clampSize(
-				isRightAnchor
-					? resizeSession.startBoundsWidth + deltaX
-					: resizeSession.startBoundsWidth - deltaX,
-				globalMinSize,
-			);
-			const nextHeight = clampSize(
-				isBottomAnchor
-					? resizeSession.startBoundsHeight + deltaY
-					: resizeSession.startBoundsHeight - deltaY,
-				globalMinSize,
-			);
-			let nextBoundsBox = resolveResizeBox({
-				anchor,
-				fixedCornerX: resizeSession.fixedCornerX,
-				fixedCornerY: resizeSession.fixedCornerY,
-				width: nextWidth,
-				height: nextHeight,
-			});
-			if (canvasSnapEnabled) {
-				const guideValues = resolveCanvasGuideValues(
-					Object.keys(resizeSession.snapshots),
+		const handleSelectionResizeMove = useCallback(
+			(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
+				const resizeSession = selectionResizeSessionRef.current;
+				if (!resizeSession) return;
+				if (resizeSession.anchor !== anchor) return;
+				const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+				const deltaX = event.movementX / safeZoom;
+				const deltaY = event.movementY / safeZoom;
+				if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
+				const isRightAnchor = isRightResizeAnchor(anchor);
+				const isBottomAnchor = isBottomResizeAnchor(anchor);
+				const globalMinSize = 32 / safeZoom;
+				const draftWidth = clampSize(
+					isRightAnchor
+						? resizeSession.startBoundsWidth + deltaX
+						: resizeSession.startBoundsWidth - deltaX,
+					globalMinSize,
 				);
-				const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
-				const snapResult = resolveCanvasRectSnap({
-					guideValues,
-					threshold: snapThreshold,
-					movingX: [
-						isRightAnchor
-							? nextBoundsBox.x + nextBoundsBox.width
-							: nextBoundsBox.x,
-					],
-					movingY: [
-						isBottomAnchor
-							? nextBoundsBox.y + nextBoundsBox.height
-							: nextBoundsBox.y,
-					],
+				const draftHeight = clampSize(
+					isBottomAnchor
+						? resizeSession.startBoundsHeight + deltaY
+						: resizeSession.startBoundsHeight - deltaY,
+					globalMinSize,
+				);
+				const groupAspectRatio = resolvePositiveNumber(
+					resizeSession.startBoundsWidth /
+						Math.max(resizeSession.startBoundsHeight, CAMERA_ZOOM_EPSILON),
+				);
+				const groupResizeConstraints: ResolvedCanvasNodeResizeConstraints = {
+					lockAspectRatio: groupAspectRatio !== null,
+					aspectRatio: groupAspectRatio,
+					minWidth: null,
+					minHeight: null,
+					maxWidth: null,
+					maxHeight: null,
+				};
+				let preferredResizeAxis: "x" | "y" | null = null;
+				let nextBoundsBox = resolveConstrainedResizeLayout({
+					anchor,
+					fixedCornerX: resizeSession.fixedCornerX,
+					fixedCornerY: resizeSession.fixedCornerY,
+					startWidth: resizeSession.startBoundsWidth,
+					startHeight: resizeSession.startBoundsHeight,
+					draftWidth,
+					draftHeight,
+					constraints: groupResizeConstraints,
+					globalMinSize,
 				});
-				const selectedSnap = selectCornerResizeSnap({
-					deltaX: snapResult.deltaX,
-					deltaY: snapResult.deltaY,
-					guidesWorld: snapResult.guidesWorld,
-				});
-				if (selectedSnap.deltaX !== 0 || selectedSnap.deltaY !== 0) {
-					nextBoundsBox = applyResizeSnapDeltaToBox(
-						nextBoundsBox,
-						anchor,
-						selectedSnap.deltaX,
-						selectedSnap.deltaY,
+				if (canvasSnapEnabled) {
+					const guideValues = resolveCanvasGuideValues(
+						Object.keys(resizeSession.snapshots),
 					);
-					setCanvasSnapGuides(selectedSnap.guidesWorld);
+					const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
+					const snapResult = resolveCanvasRectSnap({
+						guideValues,
+						threshold: snapThreshold,
+						movingX: [
+							isRightAnchor
+								? nextBoundsBox.x + nextBoundsBox.width
+								: nextBoundsBox.x,
+						],
+						movingY: [
+							isBottomAnchor
+								? nextBoundsBox.y + nextBoundsBox.height
+								: nextBoundsBox.y,
+						],
+					});
+					const selectedSnap = selectCornerResizeSnap({
+						deltaX: snapResult.deltaX,
+						deltaY: snapResult.deltaY,
+						guidesWorld: snapResult.guidesWorld,
+					});
+					if (selectedSnap.deltaX !== 0 || selectedSnap.deltaY !== 0) {
+						const snappedBoundsBox = applyResizeSnapDeltaToBox(
+							nextBoundsBox,
+							anchor,
+							selectedSnap.deltaX,
+							selectedSnap.deltaY,
+						);
+						preferredResizeAxis =
+							selectedSnap.deltaX !== 0
+								? "x"
+								: selectedSnap.deltaY !== 0
+									? "y"
+									: preferredResizeAxis;
+						nextBoundsBox = resolveConstrainedResizeLayout({
+							anchor,
+							fixedCornerX: resizeSession.fixedCornerX,
+							fixedCornerY: resizeSession.fixedCornerY,
+							startWidth: resizeSession.startBoundsWidth,
+							startHeight: resizeSession.startBoundsHeight,
+							draftWidth: snappedBoundsBox.width,
+							draftHeight: snappedBoundsBox.height,
+							constraints: groupResizeConstraints,
+							globalMinSize,
+							preferredAxis: preferredResizeAxis,
+						});
+						setCanvasSnapGuides(selectedSnap.guidesWorld);
+					} else {
+						clearCanvasSnapGuides();
+					}
 				} else {
 					clearCanvasSnapGuides();
 				}
-			} else {
-				clearCanvasSnapGuides();
-			}
-			const nextLeft = nextBoundsBox.x;
-			const nextTop = nextBoundsBox.y;
-			const safeStartWidth = Math.max(
-				resizeSession.startBoundsWidth,
-				CAMERA_ZOOM_EPSILON,
-			);
-			const safeStartHeight = Math.max(
-				resizeSession.startBoundsHeight,
-				CAMERA_ZOOM_EPSILON,
-			);
-			const scaleX = nextBoundsBox.width / safeStartWidth;
-			const scaleY = nextBoundsBox.height / safeStartHeight;
-			let didMove = false;
-			for (const snapshot of Object.values(resizeSession.snapshots)) {
-				const candidateNodeX =
-					nextLeft +
-					(snapshot.startNodeX - resizeSession.startBoundsLeft) * scaleX;
-				const candidateNodeY =
-					nextTop +
-					(snapshot.startNodeY - resizeSession.startBoundsTop) * scaleY;
-				const candidateNodeWidth = Math.max(
+				const nextLeft = nextBoundsBox.x;
+				const nextTop = nextBoundsBox.y;
+				const safeStartWidth = Math.max(
+					resizeSession.startBoundsWidth,
 					CAMERA_ZOOM_EPSILON,
-					snapshot.startNodeWidth * scaleX,
 				);
-				const candidateNodeHeight = Math.max(
+				const safeStartHeight = Math.max(
+					resizeSession.startBoundsHeight,
 					CAMERA_ZOOM_EPSILON,
-					snapshot.startNodeHeight * scaleY,
 				);
-				const candidateFixedCornerX = isRightAnchor
-					? candidateNodeX
-					: candidateNodeX + candidateNodeWidth;
-				const candidateFixedCornerY = isBottomAnchor
-					? candidateNodeY
-					: candidateNodeY + candidateNodeHeight;
-				const nextLayout = resolveConstrainedResizeLayout({
-					anchor,
-					fixedCornerX: candidateFixedCornerX,
-					fixedCornerY: candidateFixedCornerY,
-					startWidth: snapshot.startNodeWidth,
-					startHeight: snapshot.startNodeHeight,
-					draftWidth: candidateNodeWidth,
-					draftHeight: candidateNodeHeight,
-					constraints: snapshot.constraints,
-					globalMinSize,
-				});
+				const scaleX = nextBoundsBox.width / safeStartWidth;
+				const scaleY = nextBoundsBox.height / safeStartHeight;
+				let didMove = false;
+				for (const snapshot of Object.values(resizeSession.snapshots)) {
+					const candidateNodeX =
+						nextLeft +
+						(snapshot.startNodeX - resizeSession.startBoundsLeft) * scaleX;
+					const candidateNodeY =
+						nextTop +
+						(snapshot.startNodeY - resizeSession.startBoundsTop) * scaleY;
+					const candidateNodeWidth = Math.max(
+						CAMERA_ZOOM_EPSILON,
+						snapshot.startNodeWidth * scaleX,
+					);
+					const candidateNodeHeight = Math.max(
+						CAMERA_ZOOM_EPSILON,
+						snapshot.startNodeHeight * scaleY,
+					);
+					const candidateFixedCornerX = isRightAnchor
+						? candidateNodeX
+						: candidateNodeX + candidateNodeWidth;
+					const candidateFixedCornerY = isBottomAnchor
+						? candidateNodeY
+						: candidateNodeY + candidateNodeHeight;
+					const nextLayout = resolveConstrainedResizeLayout({
+						anchor,
+						fixedCornerX: candidateFixedCornerX,
+						fixedCornerY: candidateFixedCornerY,
+						startWidth: snapshot.startNodeWidth,
+						startHeight: snapshot.startNodeHeight,
+						draftWidth: candidateNodeWidth,
+						draftHeight: candidateNodeHeight,
+						constraints: snapshot.constraints,
+						globalMinSize,
+					});
 				if (
 					Math.abs(nextLayout.x - snapshot.startNodeX) > 1e-6 ||
 					Math.abs(nextLayout.y - snapshot.startNodeY) > 1e-6 ||
