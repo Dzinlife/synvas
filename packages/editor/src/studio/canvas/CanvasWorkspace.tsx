@@ -546,7 +546,13 @@ const CanvasWorkspace = () => {
 	const marqueeSessionRef = useRef<CanvasMarqueeSession | null>(null);
 	const pendingClickSuppressionRef =
 		useRef<PendingCanvasClickSuppression | null>(null);
-	const { getCamera, applyCamera } = useCanvasCameraController({
+	const {
+		renderCamera,
+		cameraAnimationKey,
+		getCamera,
+		applyCamera,
+		finishCameraAnimation,
+	} = useCanvasCameraController({
 		camera,
 		onChange: setCanvasCamera,
 		onAnimationStateChange: setIsCameraAnimating,
@@ -3067,30 +3073,32 @@ const CanvasWorkspace = () => {
 				event.dataTransfer.dropEffect = "copy";
 			}}
 			onDrop={handleCanvasDrop}
-		>
-			<InfiniteSkiaCanvas
-				width={stageSize.width}
-				height={stageSize.height}
-				camera={camera}
-				nodes={sortedNodes}
-				scenes={currentProject.scenes}
-				assets={currentProject.assets}
-				activeNodeId={activeNodeId}
-				selectedNodeIds={normalizedSelectedNodeIds}
-				focusedNodeId={focusedNodeId}
-				snapGuidesScreen={snapGuidesScreen}
-				suspendHover={isCameraAnimating}
-				onNodeDragStart={handleSkiaNodeDragStart}
-				onNodeDrag={handleSkiaNodeDrag}
-				onNodeDragEnd={handleSkiaNodeDragEnd}
-				onNodeResize={handleSkiaNodeResize}
-				onSelectionDragStart={handleSelectionBoundsDragStart}
-				onSelectionDrag={handleSelectionBoundsDrag}
-				onSelectionDragEnd={handleSelectionBoundsDragEnd}
-				onSelectionResize={handleSelectionResize}
-				onNodeClick={handleSkiaNodeClick}
-				onNodeDoubleClick={handleSkiaNodeDoubleClick}
-			/>
+			>
+				<InfiniteSkiaCanvas
+					width={stageSize.width}
+					height={stageSize.height}
+					camera={renderCamera}
+					cameraAnimationKey={cameraAnimationKey}
+					nodes={sortedNodes}
+					scenes={currentProject.scenes}
+					assets={currentProject.assets}
+					activeNodeId={activeNodeId}
+					selectedNodeIds={normalizedSelectedNodeIds}
+					focusedNodeId={focusedNodeId}
+					snapGuidesScreen={snapGuidesScreen}
+					suspendHover={isCameraAnimating}
+					onNodeDragStart={handleSkiaNodeDragStart}
+					onNodeDrag={handleSkiaNodeDrag}
+					onNodeDragEnd={handleSkiaNodeDragEnd}
+					onNodeResize={handleSkiaNodeResize}
+					onSelectionDragStart={handleSelectionBoundsDragStart}
+					onSelectionDrag={handleSelectionBoundsDrag}
+					onSelectionDragEnd={handleSelectionBoundsDragEnd}
+					onSelectionResize={handleSelectionResize}
+					onNodeClick={handleSkiaNodeClick}
+					onNodeDoubleClick={handleSkiaNodeDoubleClick}
+					onCameraAnimationComplete={finishCameraAnimation}
+				/>
 			{marqueeRect.visible && (
 				<div
 					data-testid="canvas-selection-rect"

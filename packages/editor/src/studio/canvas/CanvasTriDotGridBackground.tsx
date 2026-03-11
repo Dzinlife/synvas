@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import { Rect, Shader, Skia } from "react-skia-lite";
+import {
+	Rect,
+	Shader,
+	Skia,
+	type SharedValue,
+} from "react-skia-lite";
 
 interface CanvasTriDotGridCamera {
 	x: number;
@@ -10,7 +15,8 @@ interface CanvasTriDotGridCamera {
 interface CanvasTriDotGridBackgroundProps {
 	width: number;
 	height: number;
-	camera: CanvasTriDotGridCamera;
+	camera?: CanvasTriDotGridCamera;
+	uniforms?: CanvasTriDotGridUniforms | SharedValue<CanvasTriDotGridUniforms>;
 }
 
 const DOT_GRID_BASE_SPACING_WORLD = 40;
@@ -148,10 +154,55 @@ export const resolveDotGridLod = (
 	};
 };
 
+export interface CanvasTriDotGridUniforms {
+	[name: string]: number | [number, number];
+	uResolution: [number, number];
+	uCamera: [number, number];
+	uZoom: number;
+	uLevel: number;
+	uFade: number;
+	uBaseSpacingWorld: number;
+	uDotRadiusPx: number;
+	uSoftnessPx: number;
+	uBaseAlpha: number;
+	uDetailAlpha: number;
+	uDetailMinRadiusRatio: number;
+	uDetailSizeEasePower: number;
+	uDetailMinOpacity: number;
+	uDetailOpacityEasePower: number;
+	uCameraParallaxFactor: number;
+}
+
+export const resolveDotGridUniforms = (
+	width: number,
+	height: number,
+	camera: CanvasTriDotGridCamera,
+): CanvasTriDotGridUniforms => {
+	const lod = resolveDotGridLod(camera.zoom);
+	return {
+		uResolution: [width, height],
+		uCamera: [camera.x, camera.y],
+		uZoom: camera.zoom,
+		uLevel: lod.level,
+		uFade: lod.fade,
+		uBaseSpacingWorld: DOT_GRID_BASE_SPACING_WORLD,
+		uDotRadiusPx: DOT_GRID_DOT_RADIUS_PX,
+		uSoftnessPx: DOT_GRID_DOT_SOFTNESS_PX,
+		uBaseAlpha: DOT_GRID_BASE_ALPHA,
+		uDetailAlpha: DOT_GRID_DETAIL_ALPHA,
+		uDetailMinRadiusRatio: DOT_GRID_DETAIL_MIN_RADIUS_RATIO,
+		uDetailSizeEasePower: DOT_GRID_DETAIL_SIZE_EASE_POWER,
+		uDetailMinOpacity: DOT_GRID_DETAIL_MIN_OPACITY,
+		uDetailOpacityEasePower: DOT_GRID_DETAIL_OPACITY_EASE_POWER,
+		uCameraParallaxFactor: DOT_GRID_CAMERA_PARALLAX_FACTOR,
+	};
+};
+
 export const CanvasTriDotGridBackground = ({
 	width,
 	height,
 	camera,
+	uniforms,
 }: CanvasTriDotGridBackgroundProps) => {
 	const shaderSource = useMemo(() => {
 		try {
@@ -161,35 +212,23 @@ export const CanvasTriDotGridBackground = ({
 			return null;
 		}
 	}, []);
+	const resolvedUniforms = useMemo(() => {
+		if (uniforms) {
+			return uniforms;
+		}
+		if (!camera) {
+			return null;
+		}
+		return resolveDotGridUniforms(width, height, camera);
+	}, [camera, height, uniforms, width]);
 
-	const lod = useMemo(() => {
-		return resolveDotGridLod(camera.zoom);
-	}, [camera.zoom]);
-
-	if (width <= 0 || height <= 0 || !shaderSource) return null;
+	if (width <= 0 || height <= 0 || !shaderSource || !resolvedUniforms) {
+		return null;
+	}
 
 	return (
 		<Rect x={0} y={0} width={width} height={height}>
-			<Shader
-				source={shaderSource}
-				uniforms={{
-					uResolution: [width, height],
-					uCamera: [camera.x, camera.y],
-					uZoom: camera.zoom,
-					uLevel: lod.level,
-					uFade: lod.fade,
-					uBaseSpacingWorld: DOT_GRID_BASE_SPACING_WORLD,
-					uDotRadiusPx: DOT_GRID_DOT_RADIUS_PX,
-					uSoftnessPx: DOT_GRID_DOT_SOFTNESS_PX,
-					uBaseAlpha: DOT_GRID_BASE_ALPHA,
-					uDetailAlpha: DOT_GRID_DETAIL_ALPHA,
-					uDetailMinRadiusRatio: DOT_GRID_DETAIL_MIN_RADIUS_RATIO,
-					uDetailSizeEasePower: DOT_GRID_DETAIL_SIZE_EASE_POWER,
-					uDetailMinOpacity: DOT_GRID_DETAIL_MIN_OPACITY,
-					uDetailOpacityEasePower: DOT_GRID_DETAIL_OPACITY_EASE_POWER,
-					uCameraParallaxFactor: DOT_GRID_CAMERA_PARALLAX_FACTOR,
-				}}
-			/>
+			<Shader source={shaderSource} uniforms={resolvedUniforms} />
 		</Rect>
 	);
 };

@@ -6,11 +6,14 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
+import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
-import { NodeInteractionWrapper } from "./NodeInteractionWrapper";
 
 const { rootRenderSpy } = vi.hoisted(() => ({
 	rootRenderSpy: vi.fn(),
+}));
+const { runtimeManagerMock } = vi.hoisted(() => ({
+	runtimeManagerMock: {},
 }));
 const {
 	focusLayerPointerDownSpy,
@@ -112,6 +115,19 @@ vi.mock("react-skia-lite", async () => {
 		return ReactModule.createElement("div", { "data-testid": "canvas" });
 	});
 	Canvas.displayName = "MockCanvas";
+	const createSharedValue = <T,>(value: T) => {
+		const listeners = new Map<number, (nextValue: T) => void>();
+		return {
+			value,
+			_isSharedValue: true as const,
+			addListener: (listenerId: number, listener: (nextValue: T) => void) => {
+				listeners.set(listenerId, listener);
+			},
+			removeListener: (listenerId: number) => {
+				listeners.delete(listenerId);
+			},
+		};
+	};
 
 	return {
 		Canvas,
@@ -122,6 +138,25 @@ vi.mock("react-skia-lite", async () => {
 		Text: "text",
 		Path: "path",
 		Shader: "shader",
+		cancelAnimation: vi.fn(),
+		Easing: {
+			cubic: (value: number) => value ** 3,
+			out: (easing: (value: number) => number) => {
+				return (value: number) => 1 - easing(1 - value);
+			},
+		},
+		makeMutable: <T,>(initialValue: T) => createSharedValue(initialValue),
+		useSharedValue: <T,>(initialValue: T) => {
+			const ref = ReactModule.useRef(createSharedValue(initialValue));
+			return ref.current;
+		},
+		useDerivedValue: <T,>(updater: () => T) => {
+			const ref = ReactModule.useRef(createSharedValue(updater()));
+			ref.current.value = updater();
+			return ref.current;
+		},
+		withTiming: <T,>(value: T) => value,
+		withSpring: <T,>(value: T) => value,
 		useFont: () => ({
 			getTextWidth: (text: string) => text.length * 6,
 			getMetrics: () => ({
@@ -147,7 +182,7 @@ vi.mock("react-skia-lite", async () => {
 });
 
 vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", () => ({
-	useStudioRuntimeManager: () => ({}),
+	useStudioRuntimeManager: () => runtimeManagerMock,
 }));
 
 vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
@@ -272,6 +307,20 @@ const getLabelLayerElement = (tree: React.ReactNode): AnyElement | null => {
 			(element) => element.type === CanvasNodeLabelLayer,
 		)[0] ?? null
 	);
+};
+
+const getCanvasNodeSkiaItems = (tree: React.ReactNode): AnyElement[] => {
+	return collectElements(tree, (element) => {
+		if (typeof element.type !== "function") return false;
+		const componentType = element.type as {
+			name?: string;
+			displayName?: string;
+		};
+		return (
+			componentType.displayName === "CanvasNodeSkiaItem" ||
+			componentType.name === "CanvasNodeSkiaItem"
+		);
+	});
 };
 
 const createVideoNode = (
@@ -408,22 +457,19 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 		const initialRenderCount = rootRenderSpy.mock.calls.length;
 		const tree = getLatestRenderTree();
-		const wrappers = collectElements(
-			tree,
-			(element) => element.type === NodeInteractionWrapper,
-		);
-		const targetWrapper = wrappers.find(
-			(wrapper) =>
-				getElementProps<{ node?: { id: string } }>(wrapper)?.node?.id ===
+		const nodeItems = getCanvasNodeSkiaItems(tree);
+		const targetNodeItem = nodeItems.find(
+			(nodeItem) =>
+				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
 				"node-b",
 		);
-		expect(targetWrapper).toBeTruthy();
-		const targetWrapperProps = getElementProps<{
+		expect(targetNodeItem).toBeTruthy();
+		const targetNodeItemProps = getElementProps<{
 			onPointerEnter?: (nodeId: string) => void;
-		}>(targetWrapper);
+		}>(targetNodeItem);
 
 		act(() => {
-			targetWrapperProps?.onPointerEnter?.("node-b");
+			targetNodeItemProps?.onPointerEnter?.("node-b");
 		});
 
 		await waitFor(() => {
@@ -467,16 +513,13 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const wrappers = collectElements(
-			tree,
-			(element) => element.type === NodeInteractionWrapper,
-		);
+		const nodeItems = getCanvasNodeSkiaItems(tree);
 		const selectedById = Object.fromEntries(
-			wrappers.map((wrapper) => {
+			nodeItems.map((nodeItem) => {
 				const props = getElementProps<{
 					node?: { id: string };
 					isSelected?: boolean;
-				}>(wrapper);
+				}>(nodeItem);
 				return [props?.node?.id ?? "", props?.isSelected ?? false];
 			}),
 		);
@@ -568,15 +611,230 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const tree = getLatestRenderTree();
 		const labelLayerElement = getLabelLayerElement(tree);
-		const labelLayerProps = getElementProps<{
+	const labelLayerProps = getElementProps<{
 			nodes?: unknown[];
-			camera?: { x: number; y: number; zoom: number };
+			camera?: { _isSharedValue?: boolean };
 			focusedNodeId?: string | null;
 		}>(labelLayerElement);
 		expect(labelLayerElement).toBeTruthy();
 		expect(labelLayerProps?.nodes).toHaveLength(2);
-		expect(labelLayerProps?.camera).toEqual({ x: 0, y: 0, zoom: 1 });
+		expect(labelLayerProps?.camera?._isSharedValue).toBe(true);
+		expect(typeof labelLayerElement?.props.getNodeLayout).toBe("function");
 		expect(labelLayerProps?.focusedNodeId ?? null).toBeNull();
+	});
+
+	it("摄像机动画中 overlay 与 label 也走 shared camera 快通道", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 24, y: -12, zoom: 1.25 }}
+				nodes={[createVideoNode("node-a", 0), createVideoNode("node-b", 1)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId={null}
+				suspendHover
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		const overlayElement = getOverlayElement(tree);
+		const labelLayerElement = getLabelLayerElement(tree);
+		expect(overlayElement).toBeTruthy();
+		expect(labelLayerElement).toBeTruthy();
+		expect(
+			(overlayElement?.props.camera as
+				| { _isSharedValue?: boolean }
+				| undefined)?._isSharedValue,
+		).toBe(true);
+		expect(
+			(labelLayerElement?.props.camera as
+				| { _isSharedValue?: boolean }
+				| undefined)?._isSharedValue,
+		).toBe(true);
+
+		const backgroundElement = collectElements(tree, (element) => {
+			return element.type === CanvasTriDotGridBackground;
+		})[0];
+		expect(backgroundElement).toBeTruthy();
+		expect(
+			(backgroundElement?.props.uniforms as
+				| { _isSharedValue?: boolean }
+				| undefined)?._isSharedValue,
+		).toBe(true);
+
+		const fastWorldGroup = collectElements(tree, (element) => {
+			if (element.type !== ("group" as React.ElementType)) return false;
+			const transform = element.props.transform as
+				| { _isSharedValue?: boolean }
+				| undefined;
+			return transform?._isSharedValue === true;
+		})[0];
+		expect(fastWorldGroup).toBeTruthy();
+		expect(
+			(
+				fastWorldGroup?.props.transform as
+					| { value?: unknown }
+					| undefined
+			)?.value,
+		).toEqual([
+			{
+				matrix: [
+					1.25,
+					0,
+					0,
+					30,
+					0,
+					1.25,
+					0,
+					-15,
+					0,
+					0,
+					1,
+					0,
+					0,
+					0,
+					0,
+					1,
+				],
+			},
+		]);
+	});
+
+	it("camera-only 更新不会重建 Skia 树", async () => {
+		const nodes = [createVideoNode("node-a", 0)];
+		const selectedNodeIds = ["node-a"];
+		const assets: StudioProject["assets"] = [];
+		const snapGuidesScreen = { vertical: [], horizontal: [] };
+		const { rerender } = render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={nodes}
+				scenes={emptyScenes}
+				assets={assets}
+				activeNodeId="node-a"
+				selectedNodeIds={selectedNodeIds}
+				focusedNodeId={null}
+				snapGuidesScreen={snapGuidesScreen}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const initialRenderCount = rootRenderSpy.mock.calls.length;
+
+		rerender(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 48, y: -24, zoom: 1.5 }}
+				nodes={nodes}
+				scenes={emptyScenes}
+				assets={assets}
+				activeNodeId="node-a"
+				selectedNodeIds={selectedNodeIds}
+				focusedNodeId={null}
+				snapGuidesScreen={snapGuidesScreen}
+			/>,
+		);
+
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		expect(rootRenderSpy.mock.calls.length).toBe(initialRenderCount);
+	});
+
+	it("layout-only 更新不会重建 Skia 树", async () => {
+		const nodes = [createVideoNode("node-a", 0)];
+		const assets: StudioProject["assets"] = [];
+		const selectedNodeIds = ["node-a"];
+		const { rerender } = render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={nodes}
+				scenes={emptyScenes}
+				assets={assets}
+				activeNodeId="node-a"
+				selectedNodeIds={selectedNodeIds}
+				focusedNodeId={null}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const initialRenderCount = rootRenderSpy.mock.calls.length;
+		rerender(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				nodes={[
+					createVideoNode("node-a", 0, {
+						x: 180,
+						y: 140,
+						width: 240,
+						height: 160,
+						updatedAt: 2,
+					}),
+				]}
+				scenes={emptyScenes}
+				assets={assets}
+				activeNodeId="node-a"
+				selectedNodeIds={selectedNodeIds}
+				focusedNodeId={null}
+			/>,
+		);
+
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		expect(rootRenderSpy.mock.calls.length).toBe(initialRenderCount);
+
+		const tree = getLatestRenderTree();
+		const labelLayerElement = getLabelLayerElement(tree);
+		expect(typeof labelLayerElement?.props.getNodeLayout).toBe("function");
+
+		const nodeItems = getCanvasNodeSkiaItems(tree);
+		const targetNodeItem = nodeItems.find((nodeItem) => {
+			return (
+				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
+				"node-a"
+			);
+		});
+		const nodeItemProps = getElementProps<{
+			layout?: {
+				_isSharedValue?: boolean;
+				value?: {
+					x: number;
+					y: number;
+					width: number;
+					height: number;
+				};
+			};
+		}>(targetNodeItem);
+		expect(nodeItemProps?.layout?._isSharedValue).toBe(true);
+		expect(nodeItemProps?.layout?.value).toEqual({
+			x: 180,
+			y: 140,
+			width: 240,
+			height: 160,
+		});
 	});
 
 	it("focus scene 模式会抑制普通 node 交互并接管 Focus 层事件", async () => {
@@ -602,15 +860,12 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const wrappers = collectElements(
-			tree,
-			(element) => element.type === NodeInteractionWrapper,
-		);
-		expect(wrappers).toHaveLength(2);
+		const nodeItems = getCanvasNodeSkiaItems(tree);
+		expect(nodeItems).toHaveLength(2);
 		expect(
-			wrappers.every((wrapper) => {
+			nodeItems.every((nodeItem) => {
 				return (
-					getElementProps<{ disabled?: boolean }>(wrapper)?.disabled === true
+					getElementProps<{ disabled?: boolean }>(nodeItem)?.disabled === true
 				);
 			}),
 		).toBe(true);
@@ -879,6 +1134,45 @@ describe("InfiniteSkiaCanvas", () => {
 		const tree = getLatestRenderTree();
 		const overlayElement = getOverlayElement(tree);
 		expect(overlayElement).toBeTruthy();
-		expect(overlayElement?.props.onNodeResize).toBe(onNodeResize);
+		const overlayProps = getElementProps<{
+			onNodeResize?: (event: {
+				phase: "start" | "move" | "end";
+				node: VideoCanvasNode;
+				anchor: "top-left";
+				event: Record<string, unknown>;
+			}) => void;
+		}>(overlayElement);
+		expect(typeof overlayProps?.onNodeResize).toBe("function");
+
+		act(() => {
+			overlayProps?.onNodeResize?.({
+				phase: "move",
+				node: createVideoNode("node-a", 0, { x: 999 }),
+				anchor: "top-left",
+				event: {
+					clientX: 0,
+					clientY: 0,
+					button: 0,
+					buttons: 1,
+					shiftKey: false,
+					altKey: false,
+					metaKey: false,
+					ctrlKey: false,
+					movementX: 0,
+					movementY: 0,
+					first: false,
+					last: false,
+					tap: false,
+				},
+			});
+		});
+		expect(onNodeResize).toHaveBeenCalledWith(
+			expect.objectContaining({
+				node: expect.objectContaining({
+					id: "node-a",
+					x: 20,
+				}),
+			}),
+		);
 	});
 });

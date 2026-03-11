@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("react-skia-lite", () => ({
+	useDerivedValue: <T,>(updater: () => T) => ({
+		value: updater(),
+		_isSharedValue: true as const,
+	}),
 	Rect: ({
 		children,
 		...props
@@ -27,9 +31,23 @@ vi.mock("react-skia-lite", () => ({
 			{children}
 		</div>
 	),
-	Shader: (props: Record<string, unknown>) => (
-		<div data-testid="grid-shader" data-props={JSON.stringify(props)} />
-	),
+	Shader: (props: Record<string, unknown>) => {
+		const normalizedProps = {
+			...props,
+			uniforms:
+				typeof props.uniforms === "object" &&
+				props.uniforms !== null &&
+				"value" in props.uniforms
+					? (props.uniforms as { value: unknown }).value
+					: props.uniforms,
+		};
+		return (
+			<div
+				data-testid="grid-shader"
+				data-props={JSON.stringify(normalizedProps)}
+			/>
+		);
+	},
 	Skia: {
 		RuntimeEffect: {
 			Make: mocks.runtimeEffectMake,

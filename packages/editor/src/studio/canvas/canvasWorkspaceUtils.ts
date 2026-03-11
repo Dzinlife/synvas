@@ -1,3 +1,4 @@
+import type { CanvasNode } from "core/studio/types";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
 import {
 	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
@@ -10,7 +11,6 @@ import type {
 	CanvasNodeDrawerTrigger,
 } from "@/studio/canvas/node-system/types";
 import type { CanvasNodeLayoutSnapshot } from "@/studio/history/studioHistoryStore";
-import type { CanvasNode } from "core/studio/types";
 import type { CameraSafeInsets } from "./canvasOverlayLayout";
 
 export const MIN_ZOOM = 0.2;

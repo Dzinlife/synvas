@@ -7,6 +7,13 @@ export interface CanvasCameraState {
 	zoom: number;
 }
 
+export interface CanvasNodeLayoutState {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
 export interface CanvasScreenRect {
 	x: number;
 	y: number;
@@ -85,21 +92,32 @@ export const resolveCanvasNodeScreenFrame = (
 	node: CanvasNode,
 	camera: CanvasCameraState,
 ): CanvasScreenRect => {
-	const nodeLeft = Math.min(node.x, node.x + node.width);
-	const nodeRight = Math.max(node.x, node.x + node.width);
-	const nodeTop = Math.min(node.y, node.y + node.height);
-	const nodeBottom = Math.max(node.y, node.y + node.height);
-	return resolveCanvasWorldRectScreenFrame(
-		{
-			left: nodeLeft,
-			top: nodeTop,
-			right: nodeRight,
-			bottom: nodeBottom,
-			width: Math.max(1, nodeRight - nodeLeft),
-			height: Math.max(1, nodeBottom - nodeTop),
-		},
-		camera,
-	);
+	return resolveCanvasNodeLayoutScreenFrame(node, camera);
+};
+
+export const resolveCanvasNodeLayoutWorldRect = (
+	layout: CanvasNodeLayoutState,
+): CanvasWorldRect => {
+	const nodeLeft = Math.min(layout.x, layout.x + layout.width);
+	const nodeRight = Math.max(layout.x, layout.x + layout.width);
+	const nodeTop = Math.min(layout.y, layout.y + layout.height);
+	const nodeBottom = Math.max(layout.y, layout.y + layout.height);
+	return {
+		left: nodeLeft,
+		top: nodeTop,
+		right: nodeRight,
+		bottom: nodeBottom,
+		width: Math.max(1, nodeRight - nodeLeft),
+		height: Math.max(1, nodeBottom - nodeTop),
+	};
+};
+
+export const resolveCanvasNodeLayoutScreenFrame = (
+	layout: CanvasNodeLayoutState,
+	camera: CanvasCameraState,
+): CanvasScreenRect => {
+	const worldRect = resolveCanvasNodeLayoutWorldRect(layout);
+	return resolveCanvasWorldRectScreenFrame(worldRect, camera);
 };
 
 export const isCanvasScreenRectVisible = (

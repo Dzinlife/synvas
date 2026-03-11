@@ -8,6 +8,7 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import type { CanvasNode, StudioProject } from "core/studio/types";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import {
@@ -15,6 +16,10 @@ import {
 	createTestEditorRuntime,
 } from "@/scene-editor/runtime/testUtils";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
+import {
+	CAMERA_SMOOTH_DURATION_MS,
+	type CameraState,
+} from "./canvasWorkspaceUtils";
 import CanvasWorkspace from "./CanvasWorkspace";
 
 const togglePlaybackMock = vi.fn();
@@ -46,12 +51,19 @@ interface MockCanvasNodeDragEvent extends MockCanvasNodePointerEvent {
 interface MockInfiniteSkiaCanvasProps {
 	width: number;
 	height: number;
+	camera?: CameraState;
 	focusedNodeId?: string | null;
 	selectedNodeIds?: string[];
 	snapGuidesScreen?: {
 		vertical: number[];
 		horizontal: number[];
 	};
+	suspendHover?: boolean;
+	cameraAnimationKey?: number;
+	onCameraAnimationComplete?: (
+		animationKey: number,
+		settledCamera?: CameraState,
+	) => void;
 	onNodeClick?: (node: CanvasNode, event: MockCanvasNodePointerEvent) => void;
 	onNodeDoubleClick?: (
 		node: CanvasNode,
@@ -85,6 +97,21 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 
 vi.mock("./InfiniteSkiaCanvas", () => ({
 	default: (props: MockInfiniteSkiaCanvasProps) => {
+		useEffect(() => {
+			if (!props.suspendHover) return;
+			if (!props.onCameraAnimationComplete) return;
+			const animationKey = props.cameraAnimationKey ?? 0;
+			const timer = window.setTimeout(() => {
+				props.onCameraAnimationComplete?.(animationKey);
+			}, CAMERA_SMOOTH_DURATION_MS);
+			return () => {
+				window.clearTimeout(timer);
+			};
+		}, [
+			props.cameraAnimationKey,
+			props.onCameraAnimationComplete,
+			props.suspendHover,
+		]);
 		infiniteSkiaCanvasPropsMock(props);
 		return (
 			<>
@@ -1415,14 +1442,14 @@ describe("CanvasWorkspace", () => {
 		expect(afterCamera.y).not.toBe(beforeCamera.y);
 	});
 
-	it("smooth 动画期间 instant camera 更新会被忽略", async () => {
+	it("smooth 动画期间 instant zoom 更新会被忽略", async () => {
 		render(<CanvasWorkspace />);
 		const workspace = screen.getByTestId("canvas-workspace");
 		clickSidebarNode("node-video-offscreen");
 		const beforeWheel = useProjectStore.getState().currentProject?.ui.camera;
 		fireEvent.wheel(workspace, {
-			deltaX: 120,
 			deltaY: 80,
+			ctrlKey: true,
 		});
 		const afterWheel = useProjectStore.getState().currentProject?.ui.camera;
 		expect(beforeWheel).toBeTruthy();
@@ -1455,6 +1482,34 @@ describe("CanvasWorkspace", () => {
 				settled.y !== afterWheel.y ||
 				settled.zoom !== afterWheel.zoom,
 		).toBe(true);
+	});
+
+	it("退出 focus 的 smooth 动画期间 instant pan 会被忽略", async () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		await waitFor(() => {
+			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
+		});
+
+		fireEvent.keyDown(window, { key: "Escape" });
+		await waitFor(() => {
+			expect(getLatestInfiniteSkiaCanvasProps().suspendHover).toBe(true);
+		});
+
+		const beforePanCamera = getLatestInfiniteSkiaCanvasProps().camera;
+		expect(beforePanCamera).toBeTruthy();
+		if (!beforePanCamera) return;
+
+		fireEvent.wheel(screen.getByTestId("canvas-workspace"), {
+			deltaX: 120,
+			deltaY: 80,
+		});
+
+		const afterPanCamera = getLatestInfiniteSkiaCanvasProps().camera;
+		expect(afterPanCamera).toBeTruthy();
+		if (!afterPanCamera) return;
+		expect(afterPanCamera).toEqual(beforePanCamera);
+		expect(getLatestInfiniteSkiaCanvasProps().suspendHover).toBe(true);
 	});
 
 	it("未完成的 smooth 动画会被新的 smooth 动画覆盖", async () => {

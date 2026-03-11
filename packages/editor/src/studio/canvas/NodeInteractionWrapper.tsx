@@ -1,6 +1,13 @@
 import { useDrag } from "@use-gesture/react";
 import type { CanvasNode } from "core/studio/types";
-import { Group, Rect, type SkiaPointerEvent } from "react-skia-lite";
+import {
+	Group,
+	Rect,
+	type SharedValue,
+	type SkiaPointerEvent,
+	useDerivedValue,
+} from "react-skia-lite";
+import type { CanvasNodeLayoutState } from "./canvasNodeLabelUtils";
 
 export interface CanvasNodePointerEvent {
 	clientX: number;
@@ -23,11 +30,12 @@ export interface CanvasNodeDragEvent extends CanvasNodePointerEvent {
 
 interface NodeInteractionWrapperProps {
 	node: CanvasNode;
+	layout?: SharedValue<CanvasNodeLayoutState> | null;
 	isActive: boolean;
 	isSelected: boolean;
 	isDimmed: boolean;
 	isHovered: boolean;
-	cameraZoom: number;
+	cameraZoom: number | SharedValue<number>;
 	showBorder?: boolean;
 	disabled?: boolean;
 	onPointerEnter: (nodeId: string) => void;
@@ -44,6 +52,8 @@ interface NodeInteractionBorderStyle {
 	color: string;
 	baseStrokeWidthPx: number;
 }
+
+const NODE_INTERACTION_SURFACE_COLOR = "rgba(255,255,255,0.001)";
 
 const resolvePointerField = (
 	event: unknown,
@@ -138,6 +148,7 @@ export const resolveNodeInteractionStrokeWidth = (
 
 export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	node,
+	layout = null,
 	isActive,
 	isSelected,
 	isDimmed,
@@ -159,10 +170,42 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 		isSelected,
 		isHovered,
 	});
-	const borderWidth = resolveNodeInteractionStrokeWidth(
-		borderStyle.baseStrokeWidthPx,
-		cameraZoom,
-	);
+	const borderWidth = useDerivedValue(() => {
+		const resolvedCameraZoom =
+			typeof cameraZoom === "object" &&
+			cameraZoom !== null &&
+			"value" in cameraZoom
+				? cameraZoom.value
+				: cameraZoom;
+		return resolveNodeInteractionStrokeWidth(
+			borderStyle.baseStrokeWidthPx,
+			resolvedCameraZoom,
+		);
+	});
+	const transform = useDerivedValue(() => {
+		const nextLayout = layout?.value ?? node;
+		return [
+			{ translateX: nextLayout.x },
+			{ translateY: nextLayout.y },
+		];
+	});
+	const hitRect = useDerivedValue(() => {
+		const nextLayout = layout?.value ?? node;
+		return {
+			x: 0,
+			y: 0,
+			width: Math.max(1, nextLayout.width),
+			height: Math.max(1, nextLayout.height),
+		};
+	});
+	const borderRectWidth = useDerivedValue(() => {
+		const nextLayout = layout?.value ?? node;
+		return Math.max(1, nextLayout.width);
+	});
+	const borderRectHeight = useDerivedValue(() => {
+		const nextLayout = layout?.value ?? node;
+		return Math.max(1, nextLayout.height);
+	});
 	const bindDrag = useDrag(
 		({
 			first,
@@ -204,15 +247,10 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 
 	return (
 		<Group
-			transform={[{ translateX: node.x }, { translateY: node.y }]}
+			transform={transform}
 			opacity={isDimmed ? 0.35 : 1}
 			pointerEvents={disabled ? "none" : "auto"}
-			hitRect={{
-				x: 0,
-				y: 0,
-				width: Math.max(1, node.width),
-				height: Math.max(1, node.height),
-			}}
+			hitRect={hitRect}
 			onPointerEnter={disabled ? undefined : () => {
 				onPointerEnter(node.id);
 			}}
@@ -229,13 +267,20 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 				onDoubleClick?.(node, resolvePointerEventMeta(event));
 			}}
 		>
+			<Rect
+				x={0}
+				y={0}
+				width={borderRectWidth}
+				height={borderRectHeight}
+				color={NODE_INTERACTION_SURFACE_COLOR}
+			/>
 			{children}
 			{showBorder && (
 				<Rect
 					x={0}
 					y={0}
-					width={Math.max(1, node.width)}
-					height={Math.max(1, node.height)}
+					width={borderRectWidth}
+					height={borderRectHeight}
 					style="stroke"
 					strokeWidth={borderWidth}
 					color={borderStyle.color}

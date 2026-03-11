@@ -1,12 +1,18 @@
 import type { CanvasNode } from "core/studio/types";
 import { useMemo } from "react";
-import { Group, Image } from "react-skia-lite";
-import { useSkiaUiTextSprites } from "@/studio/canvas/skia-text";
 import {
+	Group,
+	Image,
+	type SharedValue,
+	useDerivedValue,
+} from "react-skia-lite";
+import { useSkiaUiTextSprites } from "@/studio/canvas/skia-text";
+import type { SkiaUiTextSprite } from "@/studio/canvas/skia-text/types";
+import {
+	type CanvasNodeLayoutState,
 	type CanvasCameraState,
 	isCanvasScreenRectVisible,
-	resolveCanvasNodeLabelLayout,
-	resolveCanvasNodeScreenFrame,
+	resolveCanvasNodeLayoutScreenFrame,
 	resolveCanvasViewportRect,
 } from "./canvasNodeLabelUtils";
 
@@ -20,28 +26,112 @@ const LABEL_FONT_FAMILY =
 const LABEL_TEXT_COLOR = "rgba(255,255,255,0.92)";
 const LABEL_GAP_PX = 6;
 const LABEL_DIMMED_OPACITY = 0.45;
+const LABEL_MAX_RENDER_WIDTH_PX = 4096;
 
 interface CanvasNodeLabelLayerProps {
 	width: number;
 	height: number;
-	camera: CanvasCameraState;
+	camera: SharedValue<CanvasCameraState>;
+	getNodeLayout: (
+		nodeId: string,
+	) => SharedValue<CanvasNodeLayoutState> | null;
 	nodes: CanvasNode[];
 	focusedNodeId: string | null;
 }
 
 interface CanvasNodeLabelCandidate {
 	nodeId: string;
+	node: CanvasNode;
 	text: string;
-	x: number;
-	y: number;
-	availableWidth: number;
 	opacity: number;
 }
+
+interface CanvasNodeLabelSpriteProps {
+	camera: SharedValue<CanvasCameraState>;
+	candidate: CanvasNodeLabelCandidate;
+	getNodeLayout: (
+		nodeId: string,
+	) => SharedValue<CanvasNodeLayoutState> | null;
+	sprite: SkiaUiTextSprite;
+	viewport: ReturnType<typeof resolveCanvasViewportRect>;
+}
+
+const CanvasNodeLabelSprite = ({
+	camera,
+	candidate,
+	getNodeLayout,
+	sprite,
+	viewport,
+}: CanvasNodeLabelSpriteProps) => {
+	const textWidth = Math.max(1, sprite.textWidth);
+	const textHeight = Math.max(
+		1,
+		sprite.textHeight || Math.ceil(LABEL_LINE_HEIGHT_PX),
+	);
+	const layout = getNodeLayout(candidate.nodeId);
+	const transform = useDerivedValue(() => {
+		const frame = resolveCanvasNodeLayoutScreenFrame(
+			layout?.value ?? candidate.node,
+			camera.value,
+		);
+		return [
+			{ translateX: frame.x },
+			{ translateY: frame.y - LABEL_GAP_PX - LABEL_TEXT_HEIGHT_PX },
+		];
+	});
+	const clip = useDerivedValue(() => {
+		const frame = resolveCanvasNodeLayoutScreenFrame(
+			layout?.value ?? candidate.node,
+			camera.value,
+		);
+		if (!isCanvasScreenRectVisible(frame, viewport)) {
+			return {
+				x: 0,
+				y: 0,
+				width: 0,
+				height: textHeight,
+			};
+		}
+		return {
+			x: 0,
+			y: 0,
+			width: Math.max(0, Math.min(frame.width, textWidth)),
+			height: textHeight,
+		};
+	});
+	const opacity = useDerivedValue(() => {
+		const frame = resolveCanvasNodeLayoutScreenFrame(
+			layout?.value ?? candidate.node,
+			camera.value,
+		);
+		return isCanvasScreenRectVisible(frame, viewport) ? candidate.opacity : 0;
+	});
+
+	return (
+		<Group
+			transform={transform}
+			opacity={opacity}
+			pointerEvents="none"
+			clip={clip}
+		>
+			<Image
+				image={sprite.image}
+				x={0}
+				y={0}
+				width={textWidth}
+				height={textHeight}
+				fit="fill"
+				pointerEvents="none"
+			/>
+		</Group>
+	);
+};
 
 export const CanvasNodeLabelLayer = ({
 	width,
 	height,
 	camera,
+	getNodeLayout,
 	nodes,
 	focusedNodeId,
 }: CanvasNodeLabelLayerProps) => {
@@ -54,20 +144,10 @@ export const CanvasNodeLabelLayer = ({
 			.map((node) => {
 				const labelText = node.name.trim();
 				if (!labelText) return null;
-				const frame = resolveCanvasNodeScreenFrame(node, camera);
-				if (!isCanvasScreenRectVisible(frame, viewport)) return null;
-				const layout = resolveCanvasNodeLabelLayout({
-					frame,
-					badgeHeight: LABEL_TEXT_HEIGHT_PX,
-					gap: LABEL_GAP_PX,
-				});
-				if (!layout) return null;
 				return {
 					nodeId: node.id,
+					node,
 					text: labelText,
-					x: layout.x,
-					y: layout.y,
-					availableWidth: layout.availableWidth,
 					opacity:
 						focusedNodeId && node.id !== focusedNodeId
 							? LABEL_DIMMED_OPACITY
@@ -77,11 +157,11 @@ export const CanvasNodeLabelLayer = ({
 			.filter((candidate): candidate is CanvasNodeLabelCandidate => {
 				return candidate !== null;
 			});
-	}, [camera, focusedNodeId, height, nodes, viewport, width]);
+	}, [focusedNodeId, height, nodes, width]);
 	const labelRequests = useMemo(() => {
 		return labelCandidates.map((candidate) => ({
 			text: candidate.text,
-			maxWidthPx: Math.max(0, candidate.availableWidth),
+			maxWidthPx: LABEL_MAX_RENDER_WIDTH_PX,
 			slotKey: candidate.nodeId,
 			style: {
 				fontFamily: LABEL_FONT_FAMILY,
@@ -104,39 +184,15 @@ export const CanvasNodeLabelLayer = ({
 			{labelCandidates.map((candidate, index) => {
 				const sprite = labelSprites[index];
 				if (!sprite?.text || !sprite.image) return null;
-				const textWidth = Math.max(1, sprite.textWidth);
-				const textHeight = Math.max(
-					1,
-					sprite.textHeight || Math.ceil(LABEL_LINE_HEIGHT_PX),
-				);
-				const drawWidth = Math.min(candidate.availableWidth, textWidth);
-				if (drawWidth <= 0) return null;
 				return (
-					<Group
+					<CanvasNodeLabelSprite
 						key={`canvas-node-label-${candidate.nodeId}`}
-						transform={[
-							{ translateX: candidate.x },
-							{ translateY: candidate.y },
-						]}
-						opacity={candidate.opacity}
-						pointerEvents="none"
-						clip={{
-							x: 0,
-							y: 0,
-							width: drawWidth,
-							height: textHeight,
-						}}
-					>
-						<Image
-							image={sprite.image}
-							x={0}
-							y={0}
-							width={textWidth}
-							height={textHeight}
-							fit="fill"
-							pointerEvents="none"
-						/>
-					</Group>
+						camera={camera}
+						candidate={candidate}
+						getNodeLayout={getNodeLayout}
+						sprite={sprite}
+						viewport={viewport}
+					/>
 				);
 			})}
 		</Group>

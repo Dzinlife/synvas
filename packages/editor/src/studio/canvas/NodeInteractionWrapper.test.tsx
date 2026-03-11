@@ -66,6 +66,10 @@ vi.mock("@use-gesture/react", () => ({
 }));
 
 vi.mock("react-skia-lite", () => ({
+	useDerivedValue: <T,>(updater: () => T) => ({
+		value: updater(),
+		_isSharedValue: true as const,
+	}),
 	Group: ({
 		children,
 		onPointerDown,
@@ -100,9 +104,27 @@ vi.mock("react-skia-lite", () => ({
 			{children}
 		</div>
 	),
-	Rect: (props: Record<string, unknown>) => (
-		<div data-testid="rect" data-props={JSON.stringify(props)} />
-	),
+	Rect: (props: Record<string, unknown>) => {
+		const resolveSharedProp = (value: unknown) => {
+			if (
+				typeof value === "object" &&
+				value !== null &&
+				"value" in value
+			) {
+				return (value as { value: unknown }).value;
+			}
+			return value;
+		};
+		const normalizedProps = {
+			...props,
+			width: resolveSharedProp(props.width),
+			height: resolveSharedProp(props.height),
+			strokeWidth: resolveSharedProp(props.strokeWidth),
+		};
+		return (
+			<div data-testid="rect" data-props={JSON.stringify(normalizedProps)} />
+		);
+	},
 }));
 
 const createSceneNode = (id = "node-1"): CanvasNode => ({
@@ -121,13 +143,22 @@ const createSceneNode = (id = "node-1"): CanvasNode => ({
 	sceneId: "scene-1",
 });
 
-const parseRectProps = (): Record<string, unknown> => {
-	const rect = screen.getByTestId("rect");
-	const serialized = rect.getAttribute("data-props");
-	if (!serialized) {
-		throw new Error("Rect props 不存在");
+const getRectPropsList = (): Array<Record<string, unknown>> => {
+	return screen.getAllByTestId("rect").map((rect) => {
+		const serialized = rect.getAttribute("data-props");
+		if (!serialized) {
+			throw new Error("Rect props 不存在");
+		}
+		return JSON.parse(serialized) as Record<string, unknown>;
+	});
+};
+
+const parseBorderRectProps = (): Record<string, unknown> => {
+	const borderRect = getRectPropsList().find((rect) => rect.style === "stroke");
+	if (!borderRect) {
+		throw new Error("未找到描边 Rect");
 	}
-	return JSON.parse(serialized) as Record<string, unknown>;
+	return borderRect;
 };
 
 describe("NodeInteractionWrapper", () => {
@@ -164,7 +195,7 @@ describe("NodeInteractionWrapper", () => {
 			</NodeInteractionWrapper>,
 		);
 
-		expect(parseRectProps().strokeWidth).toBe(0.5);
+		expect(parseBorderRectProps().strokeWidth).toBe(0.5);
 
 		rerender(
 			<NodeInteractionWrapper
@@ -183,7 +214,7 @@ describe("NodeInteractionWrapper", () => {
 				<div data-testid="child" />
 			</NodeInteractionWrapper>,
 		);
-		expect(parseRectProps().strokeWidth).toBe(1);
+		expect(parseBorderRectProps().strokeWidth).toBe(1);
 
 		rerender(
 			<NodeInteractionWrapper
@@ -202,7 +233,7 @@ describe("NodeInteractionWrapper", () => {
 				<div data-testid="child" />
 			</NodeInteractionWrapper>,
 		);
-		expect(parseRectProps().strokeWidth).toBe(1);
+		expect(parseBorderRectProps().strokeWidth).toBe(1);
 	});
 
 	it("cameraZoom=0.5 时 default 与 active/hover 线宽放大", () => {
@@ -224,7 +255,7 @@ describe("NodeInteractionWrapper", () => {
 				<div data-testid="child" />
 			</NodeInteractionWrapper>,
 		);
-		expect(parseRectProps().strokeWidth).toBe(2);
+		expect(parseBorderRectProps().strokeWidth).toBe(2);
 
 		rerender(
 			<NodeInteractionWrapper
@@ -240,10 +271,10 @@ describe("NodeInteractionWrapper", () => {
 				<div data-testid="child" />
 			</NodeInteractionWrapper>,
 		);
-		expect(parseRectProps().strokeWidth).toBe(4);
+		expect(parseBorderRectProps().strokeWidth).toBe(4);
 	});
 
-	it("showBorder=false 时不渲染描边且交互事件仍绑定", () => {
+	it("showBorder=false 时仍保留透明命中面且不渲染描边", () => {
 		render(
 			<NodeInteractionWrapper
 				node={createSceneNode()}
@@ -262,7 +293,13 @@ describe("NodeInteractionWrapper", () => {
 			</NodeInteractionWrapper>,
 		);
 
-		expect(screen.queryByTestId("rect")).toBeNull();
+		expect(getRectPropsList()).toEqual([
+			expect.objectContaining({
+				width: 100,
+				height: 50,
+				color: "rgba(255,255,255,0.001)",
+			}),
+		]);
 		const group = screen.getByTestId("group");
 		expect(group.getAttribute("data-has-on-pointer-down")).toBe("true");
 		expect(group.getAttribute("data-has-on-pointer-enter")).toBe("true");
