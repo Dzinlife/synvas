@@ -240,14 +240,32 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const renderer = useRef<Renderer | null>(null);
 	const redrawRequestsRef = useRef(0);
-	const requestIdRef = useRef(0);
+	const requestIdRef = useRef<number | null>(null);
 	const pictureRef = useRef<SkPicture | null>(null);
 
 	const { picture, onLayout } = props;
 
+	const tick = useCallback(() => {
+		requestIdRef.current = null;
+		if (redrawRequestsRef.current === 0) {
+			return;
+		}
+		redrawRequestsRef.current = 0;
+		if (renderer.current && pictureRef.current) {
+			renderer.current.draw(pictureRef.current);
+		}
+		if (redrawRequestsRef.current > 0 && requestIdRef.current === null) {
+			requestIdRef.current = requestAnimationFrame(tick);
+		}
+	}, []);
+
 	const redraw = useCallback(() => {
 		redrawRequestsRef.current++;
-	}, []);
+		if (requestIdRef.current !== null) {
+			return;
+		}
+		requestIdRef.current = requestAnimationFrame(tick);
+	}, [tick]);
 
 	const getSize = useCallback(() => {
 		return {
@@ -321,16 +339,6 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 		[],
 	);
 
-	const tick = useCallback(() => {
-		if (redrawRequestsRef.current > 0) {
-			redrawRequestsRef.current = 0;
-			if (renderer.current && pictureRef.current) {
-				renderer.current.draw(pictureRef.current);
-			}
-		}
-		requestIdRef.current = requestAnimationFrame(tick);
-	}, []);
-
 	const onLayoutEvent = useCallback(
 		(evt: LayoutChangeEvent) => {
 			const canvas = canvasRef.current;
@@ -393,15 +401,17 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	}, [setPicture, props.picture]);
 
 	useEffect(() => {
-		tick();
 		return () => {
-			cancelAnimationFrame(requestIdRef.current);
+			if (requestIdRef.current !== null) {
+				cancelAnimationFrame(requestIdRef.current);
+				requestIdRef.current = null;
+			}
 			if (renderer.current) {
 				renderer.current.dispose();
 				renderer.current = null;
 			}
 		};
-	}, [tick]);
+	}, []);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: ...
 	useEffect(() => {
