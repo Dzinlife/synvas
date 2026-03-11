@@ -11,12 +11,15 @@ import {
 	useState,
 } from "react";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
+import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
+import { findTimelineDropTargetFromScreenPosition } from "@/scene-editor/drag/timelineDropTargets";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
+import { DEFAULT_TRACK_HEIGHT } from "@/scene-editor/timeline/trackConfig";
 import { findAttachments } from "@/scene-editor/utils/attachments";
 import { resolveExternalVideoUri } from "@/scene-editor/utils/externalVideo";
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
@@ -32,6 +35,16 @@ import type {
 	CanvasNodeDrawerTrigger,
 	CanvasNodeResizeConstraints,
 } from "@/studio/canvas/node-system/types";
+import {
+	type CanvasGraphHistoryEntry as ClipboardCanvasGraphHistoryEntry,
+	buildCanvasClipboardEntries,
+	instantiateCanvasClipboardEntries,
+} from "@/studio/clipboard/canvasClipboard";
+import {
+	type StudioClipboardPayload,
+	type StudioTimelineClipboardPayload,
+	useStudioClipboardStore,
+} from "@/studio/clipboard/studioClipboardStore";
 import type { CanvasSidebarTab } from "@/studio/canvas/sidebar/CanvasSidebar";
 import {
 	type CanvasNodeLayoutSnapshot,
@@ -204,10 +217,7 @@ interface PendingCanvasClickSuppression {
 	suppressCanvas: boolean;
 }
 
-type CanvasGraphHistoryEntry = {
-	node: CanvasNode;
-	scene: SceneDocument | undefined;
-};
+type CanvasGraphHistoryEntry = ClipboardCanvasGraphHistoryEntry;
 
 const CANVAS_MARQUEE_ACTIVATION_PX = 3;
 const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
@@ -219,6 +229,11 @@ const createCanvasEntityId = (prefix: string): string => {
 	return `${prefix}-${Date.now().toString(36)}-${Math.random()
 		.toString(36)
 		.slice(2, 8)}`;
+};
+
+const buildCopyName = (name: string): string => {
+	const trimmed = name.trim();
+	return trimmed ? `${trimmed}副本` : "副本";
 };
 
 const cloneTimelineJson = <T,>(value: T): T => {
@@ -506,6 +521,9 @@ const CanvasWorkspace = () => {
 		}
 		return manager as StudioRuntimeManager;
 	}, [runtime]);
+	const setStudioClipboardPayload = useStudioClipboardStore(
+		(state) => state.setPayload,
+	);
 
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
@@ -546,6 +564,10 @@ const CanvasWorkspace = () => {
 	const marqueeSessionRef = useRef<CanvasMarqueeSession | null>(null);
 	const pendingClickSuppressionRef =
 		useRef<PendingCanvasClickSuppression | null>(null);
+	const lastPointerClientRef = useRef<{ x: number; y: number } | null>(null);
+	const lastCanvasPointerWorldRef = useRef<{ x: number; y: number } | null>(
+		null,
+	);
 	const {
 		renderCamera,
 		cameraAnimationKey,
@@ -557,6 +579,17 @@ const CanvasWorkspace = () => {
 		onChange: setCanvasCamera,
 		onAnimationStateChange: setIsCameraAnimating,
 	});
+	useEffect(() => {
+		const handleWindowMouseMove = (event: MouseEvent) => {
+			lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
+		};
+		window.addEventListener("mousemove", handleWindowMouseMove, {
+			passive: true,
+		});
+		return () => {
+			window.removeEventListener("mousemove", handleWindowMouseMove);
+		};
+	}, []);
 
 	const sortedNodes = useMemo(() => {
 		if (!currentProject) return [];
@@ -1444,9 +1477,7 @@ const CanvasWorkspace = () => {
 		return sourceNodes.reduce<CanvasGraphHistoryEntry[]>(
 			(entries, sourceNode, index) => {
 				const createdAt = now + index;
-				const copyName = sourceNode.name.trim()
-					? `${sourceNode.name}副本`
-					: "副本";
+				const copyName = buildCopyName(sourceNode.name);
 				const baseNode = {
 					...sourceNode,
 					id: createCanvasEntityId("node"),
@@ -1482,7 +1513,209 @@ const CanvasWorkspace = () => {
 			},
 			[],
 		);
-		}, []);
+	}, []);
+
+	const resolvePointerTimelineDropTarget = useCallback(() => {
+		const pointer = lastPointerClientRef.current;
+		if (!pointer) return null;
+		return findTimelineDropTargetFromScreenPosition(
+			pointer.x,
+			pointer.y,
+			0,
+			DEFAULT_TRACK_HEIGHT,
+			false,
+		);
+	}, []);
+
+	const resolveCanvasPasteWorldPoint = useCallback(() => {
+		const pointer = lastPointerClientRef.current;
+		if (pointer && typeof document.elementFromPoint === "function") {
+			const target = document.elementFromPoint(pointer.x, pointer.y);
+			if (isCanvasSurfaceTarget(target) && !isOverlayWheelTarget(target)) {
+				return resolveWorldPoint(pointer.x, pointer.y);
+			}
+		}
+		if (lastCanvasPointerWorldRef.current) {
+			return lastCanvasPointerWorldRef.current;
+		}
+		const container = containerRef.current;
+		if (!container) {
+			return {
+				x: -camera.x,
+				y: -camera.y,
+			};
+		}
+		const rect = container.getBoundingClientRect();
+		return resolveWorldPoint(
+			rect.left + rect.width / 2,
+			rect.top + rect.height / 2,
+		);
+	}, [camera.x, camera.y, resolveWorldPoint]);
+
+	const commitCreatedCanvasEntries = useCallback(
+		(entries: CanvasGraphHistoryEntry[]): boolean => {
+			if (entries.length === 0) return false;
+			commitSelectedNodeIds(entries.map((entry) => entry.node.id));
+			const latestProject = useProjectStore.getState().currentProject;
+			pushHistory({
+				kind: "canvas.node-create.batch",
+				entries,
+				focusNodeId: latestProject?.ui.focusedNodeId ?? null,
+			});
+			setContextMenuState({ open: false });
+			return true;
+		},
+		[commitSelectedNodeIds, pushHistory],
+	);
+
+	const resolveTimelineClipboardConvertedInputs = useCallback(
+		(clipboardPayload: StudioTimelineClipboardPayload) => {
+			const sourceCanvasSize =
+				clipboardPayload.source?.canvasSize ??
+				clipboardPayload.payload.source?.canvasSize ??
+				null;
+			const sourceFps =
+				clipboardPayload.source?.fps ??
+				clipboardPayload.payload.source?.fps ??
+				30;
+			return [...clipboardPayload.payload.elements]
+				.sort((left, right) => {
+					if (left.timeline.start !== right.timeline.start) {
+						return left.timeline.start - right.timeline.start;
+					}
+					if (left.timeline.end !== right.timeline.end) {
+						return left.timeline.end - right.timeline.end;
+					}
+					return left.id.localeCompare(right.id);
+				})
+				.map((element) => {
+					const definition = componentRegistry.get(element.component);
+					const input = definition?.toCanvasClipboardNode?.({
+						element,
+						sourceCanvasSize,
+						fps: sourceFps,
+					});
+					if (!input) return null;
+					const nextName = buildCopyName(input.name ?? element.name ?? "");
+					return {
+						...input,
+						name: nextName,
+						x:
+							Number.isFinite(input.x as number) && input.x !== undefined
+								? input.x
+								: 0,
+						y:
+							Number.isFinite(input.y as number) && input.y !== undefined
+								? input.y
+								: 0,
+					};
+				})
+				.filter((input): input is NonNullable<typeof input> => Boolean(input));
+		},
+		[],
+	);
+
+	const copyNodeIdsToClipboard = useCallback(
+		(nodeIds: string[]): boolean => {
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject || nodeIds.length === 0) {
+				return false;
+			}
+			const normalizedNodeIds = normalizeSelectedNodeIds(
+				nodeIds,
+				new Set(latestProject.canvas.nodes.map((node) => node.id)),
+			);
+			if (normalizedNodeIds.length === 0) return false;
+			const entries = buildCanvasClipboardEntries(latestProject, normalizedNodeIds);
+			if (entries.length === 0) return false;
+			setStudioClipboardPayload({
+				kind: "canvas-nodes",
+				entries,
+			});
+			return true;
+		},
+		[setStudioClipboardPayload],
+	);
+
+	const canPasteClipboardPayloadToCanvas = useCallback(
+		(clipboardPayload: StudioClipboardPayload | null): boolean => {
+			if (!clipboardPayload) return false;
+			if (clipboardPayload.kind === "canvas-nodes") {
+				return clipboardPayload.entries.some((entry) => {
+					if (entry.node.type !== "scene") return true;
+					return Boolean(entry.scene);
+				});
+			}
+			return resolveTimelineClipboardConvertedInputs(clipboardPayload).length > 0;
+		},
+		[resolveTimelineClipboardConvertedInputs],
+	);
+
+	const pasteFromClipboardToCanvasAt = useCallback(
+		(anchorPoint: { x: number; y: number }): boolean => {
+			const clipboardPayload = useStudioClipboardStore.getState().payload;
+			if (!clipboardPayload) return false;
+			if (clipboardPayload.kind === "canvas-nodes") {
+				const latestProject = useProjectStore.getState().currentProject;
+				if (!latestProject) return false;
+				const maxZIndex = latestProject.canvas.nodes.reduce((maxValue, node) => {
+					return Math.max(maxValue, node.zIndex);
+				}, -1);
+				const entries = instantiateCanvasClipboardEntries({
+					sourceEntries: clipboardPayload.entries,
+					targetLeft: anchorPoint.x,
+					targetTop: anchorPoint.y,
+					existingMaxZIndex: maxZIndex,
+				});
+				if (entries.length === 0) return false;
+				appendCanvasGraphBatch(entries);
+				return commitCreatedCanvasEntries(entries);
+			}
+			const convertedInputs =
+				resolveTimelineClipboardConvertedInputs(clipboardPayload);
+			if (convertedInputs.length === 0) return false;
+			const sourceLeft = convertedInputs.reduce((minValue, input) => {
+				return Math.min(minValue, input.x ?? 0);
+			}, Number.POSITIVE_INFINITY);
+			const sourceTop = convertedInputs.reduce((minValue, input) => {
+				return Math.min(minValue, input.y ?? 0);
+			}, Number.POSITIVE_INFINITY);
+			const safeLeft = Number.isFinite(sourceLeft) ? sourceLeft : 0;
+			const safeTop = Number.isFinite(sourceTop) ? sourceTop : 0;
+			const createdEntries: CanvasGraphHistoryEntry[] = [];
+			for (const input of convertedInputs) {
+				const nodeId = createCanvasNode({
+					...input,
+					x: (input.x ?? 0) - safeLeft + anchorPoint.x,
+					y: (input.y ?? 0) - safeTop + anchorPoint.y,
+				});
+				const latestProject = useProjectStore.getState().currentProject;
+				if (!latestProject) continue;
+				const node = latestProject.canvas.nodes.find(
+					(candidate) => candidate.id === nodeId,
+				);
+				if (!node) continue;
+				createdEntries.push({
+					node,
+					scene:
+						node.type === "scene"
+							? latestProject.scenes[node.sceneId]
+							: undefined,
+				});
+			}
+			return commitCreatedCanvasEntries(createdEntries);
+		},
+		[
+			appendCanvasGraphBatch,
+			commitCreatedCanvasEntries,
+			createCanvasNode,
+			resolveTimelineClipboardConvertedInputs,
+		],
+	);
+
+	const copySelectedNodesToClipboard = useCallback((): boolean => {
+		return copyNodeIdsToClipboard(normalizedSelectedNodeIds);
+	}, [copyNodeIdsToClipboard, normalizedSelectedNodeIds]);
 
 	const handleSkiaNodeResizeStart = useCallback(
 		(
@@ -1585,8 +1818,16 @@ const CanvasWorkspace = () => {
 				const snapResult = resolveCanvasRectSnap({
 					guideValues,
 					threshold: snapThreshold,
-					movingX: [isRightAnchor ? candidateBox.x + candidateBox.width : candidateBox.x],
-					movingY: [isBottomAnchor ? candidateBox.y + candidateBox.height : candidateBox.y],
+					movingX: [
+						isRightAnchor
+							? candidateBox.x + candidateBox.width
+							: candidateBox.x,
+					],
+					movingY: [
+						isBottomAnchor
+							? candidateBox.y + candidateBox.height
+							: candidateBox.y,
+					],
 				});
 				const selectedSnap = selectCornerResizeSnap({
 					deltaX: snapResult.deltaX,
@@ -1905,12 +2146,8 @@ const CanvasWorkspace = () => {
 									? (latestProject.scenes[latestNode.sceneId] ?? entry.scene)
 									: undefined,
 						};
-						})
-						.filter(
-							(
-								entry,
-							): entry is CanvasGraphHistoryEntry => entry !== null,
-						);
+					})
+					.filter((entry): entry is CanvasGraphHistoryEntry => entry !== null);
 				if (nextEntries.length === 0) return;
 				pushHistory({
 					kind: "canvas.node-create.batch",
@@ -2163,156 +2400,156 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-		const handleSelectionResizeMove = useCallback(
-			(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
-				const resizeSession = selectionResizeSessionRef.current;
-				if (!resizeSession) return;
-				if (resizeSession.anchor !== anchor) return;
-				const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-				const deltaX = event.movementX / safeZoom;
-				const deltaY = event.movementY / safeZoom;
-				if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
-				const isRightAnchor = isRightResizeAnchor(anchor);
-				const isBottomAnchor = isBottomResizeAnchor(anchor);
-				const globalMinSize = 32 / safeZoom;
-				const draftWidth = clampSize(
-					isRightAnchor
-						? resizeSession.startBoundsWidth + deltaX
-						: resizeSession.startBoundsWidth - deltaX,
-					globalMinSize,
+	const handleSelectionResizeMove = useCallback(
+		(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
+			const resizeSession = selectionResizeSessionRef.current;
+			if (!resizeSession) return;
+			if (resizeSession.anchor !== anchor) return;
+			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const deltaX = event.movementX / safeZoom;
+			const deltaY = event.movementY / safeZoom;
+			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
+			const isRightAnchor = isRightResizeAnchor(anchor);
+			const isBottomAnchor = isBottomResizeAnchor(anchor);
+			const globalMinSize = 32 / safeZoom;
+			const draftWidth = clampSize(
+				isRightAnchor
+					? resizeSession.startBoundsWidth + deltaX
+					: resizeSession.startBoundsWidth - deltaX,
+				globalMinSize,
+			);
+			const draftHeight = clampSize(
+				isBottomAnchor
+					? resizeSession.startBoundsHeight + deltaY
+					: resizeSession.startBoundsHeight - deltaY,
+				globalMinSize,
+			);
+			const groupAspectRatio = resolvePositiveNumber(
+				resizeSession.startBoundsWidth /
+					Math.max(resizeSession.startBoundsHeight, CAMERA_ZOOM_EPSILON),
+			);
+			const groupResizeConstraints: ResolvedCanvasNodeResizeConstraints = {
+				lockAspectRatio: groupAspectRatio !== null,
+				aspectRatio: groupAspectRatio,
+				minWidth: null,
+				minHeight: null,
+				maxWidth: null,
+				maxHeight: null,
+			};
+			let preferredResizeAxis: "x" | "y" | null = null;
+			let nextBoundsBox = resolveConstrainedResizeLayout({
+				anchor,
+				fixedCornerX: resizeSession.fixedCornerX,
+				fixedCornerY: resizeSession.fixedCornerY,
+				startWidth: resizeSession.startBoundsWidth,
+				startHeight: resizeSession.startBoundsHeight,
+				draftWidth,
+				draftHeight,
+				constraints: groupResizeConstraints,
+				globalMinSize,
+			});
+			if (canvasSnapEnabled) {
+				const guideValues = resolveCanvasGuideValues(
+					Object.keys(resizeSession.snapshots),
 				);
-				const draftHeight = clampSize(
-					isBottomAnchor
-						? resizeSession.startBoundsHeight + deltaY
-						: resizeSession.startBoundsHeight - deltaY,
-					globalMinSize,
-				);
-				const groupAspectRatio = resolvePositiveNumber(
-					resizeSession.startBoundsWidth /
-						Math.max(resizeSession.startBoundsHeight, CAMERA_ZOOM_EPSILON),
-				);
-				const groupResizeConstraints: ResolvedCanvasNodeResizeConstraints = {
-					lockAspectRatio: groupAspectRatio !== null,
-					aspectRatio: groupAspectRatio,
-					minWidth: null,
-					minHeight: null,
-					maxWidth: null,
-					maxHeight: null,
-				};
-				let preferredResizeAxis: "x" | "y" | null = null;
-				let nextBoundsBox = resolveConstrainedResizeLayout({
-					anchor,
-					fixedCornerX: resizeSession.fixedCornerX,
-					fixedCornerY: resizeSession.fixedCornerY,
-					startWidth: resizeSession.startBoundsWidth,
-					startHeight: resizeSession.startBoundsHeight,
-					draftWidth,
-					draftHeight,
-					constraints: groupResizeConstraints,
-					globalMinSize,
+				const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
+				const snapResult = resolveCanvasRectSnap({
+					guideValues,
+					threshold: snapThreshold,
+					movingX: [
+						isRightAnchor
+							? nextBoundsBox.x + nextBoundsBox.width
+							: nextBoundsBox.x,
+					],
+					movingY: [
+						isBottomAnchor
+							? nextBoundsBox.y + nextBoundsBox.height
+							: nextBoundsBox.y,
+					],
 				});
-				if (canvasSnapEnabled) {
-					const guideValues = resolveCanvasGuideValues(
-						Object.keys(resizeSession.snapshots),
+				const selectedSnap = selectCornerResizeSnap({
+					deltaX: snapResult.deltaX,
+					deltaY: snapResult.deltaY,
+					guidesWorld: snapResult.guidesWorld,
+					preferSingleAxis: groupResizeConstraints.lockAspectRatio,
+				});
+				if (selectedSnap.deltaX !== 0 || selectedSnap.deltaY !== 0) {
+					const snappedBoundsBox = applyResizeSnapDeltaToBox(
+						nextBoundsBox,
+						anchor,
+						selectedSnap.deltaX,
+						selectedSnap.deltaY,
 					);
-					const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
-					const snapResult = resolveCanvasRectSnap({
-						guideValues,
-						threshold: snapThreshold,
-						movingX: [
-							isRightAnchor
-								? nextBoundsBox.x + nextBoundsBox.width
-								: nextBoundsBox.x,
-						],
-						movingY: [
-							isBottomAnchor
-								? nextBoundsBox.y + nextBoundsBox.height
-								: nextBoundsBox.y,
-						],
+					preferredResizeAxis =
+						selectedSnap.deltaX !== 0
+							? "x"
+							: selectedSnap.deltaY !== 0
+								? "y"
+								: preferredResizeAxis;
+					nextBoundsBox = resolveConstrainedResizeLayout({
+						anchor,
+						fixedCornerX: resizeSession.fixedCornerX,
+						fixedCornerY: resizeSession.fixedCornerY,
+						startWidth: resizeSession.startBoundsWidth,
+						startHeight: resizeSession.startBoundsHeight,
+						draftWidth: snappedBoundsBox.width,
+						draftHeight: snappedBoundsBox.height,
+						constraints: groupResizeConstraints,
+						globalMinSize,
+						preferredAxis: preferredResizeAxis,
 					});
-					const selectedSnap = selectCornerResizeSnap({
-						deltaX: snapResult.deltaX,
-						deltaY: snapResult.deltaY,
-						guidesWorld: snapResult.guidesWorld,
-						preferSingleAxis: groupResizeConstraints.lockAspectRatio,
-					});
-					if (selectedSnap.deltaX !== 0 || selectedSnap.deltaY !== 0) {
-						const snappedBoundsBox = applyResizeSnapDeltaToBox(
-							nextBoundsBox,
-							anchor,
-							selectedSnap.deltaX,
-							selectedSnap.deltaY,
-						);
-						preferredResizeAxis =
-							selectedSnap.deltaX !== 0
-								? "x"
-								: selectedSnap.deltaY !== 0
-									? "y"
-									: preferredResizeAxis;
-						nextBoundsBox = resolveConstrainedResizeLayout({
-							anchor,
-							fixedCornerX: resizeSession.fixedCornerX,
-							fixedCornerY: resizeSession.fixedCornerY,
-							startWidth: resizeSession.startBoundsWidth,
-							startHeight: resizeSession.startBoundsHeight,
-							draftWidth: snappedBoundsBox.width,
-							draftHeight: snappedBoundsBox.height,
-							constraints: groupResizeConstraints,
-							globalMinSize,
-							preferredAxis: preferredResizeAxis,
-						});
-						setCanvasSnapGuides(selectedSnap.guidesWorld);
-					} else {
-						clearCanvasSnapGuides();
-					}
+					setCanvasSnapGuides(selectedSnap.guidesWorld);
 				} else {
 					clearCanvasSnapGuides();
 				}
-				const nextLeft = nextBoundsBox.x;
-				const nextTop = nextBoundsBox.y;
-				const safeStartWidth = Math.max(
-					resizeSession.startBoundsWidth,
+			} else {
+				clearCanvasSnapGuides();
+			}
+			const nextLeft = nextBoundsBox.x;
+			const nextTop = nextBoundsBox.y;
+			const safeStartWidth = Math.max(
+				resizeSession.startBoundsWidth,
+				CAMERA_ZOOM_EPSILON,
+			);
+			const safeStartHeight = Math.max(
+				resizeSession.startBoundsHeight,
+				CAMERA_ZOOM_EPSILON,
+			);
+			const scaleX = nextBoundsBox.width / safeStartWidth;
+			const scaleY = nextBoundsBox.height / safeStartHeight;
+			let didMove = false;
+			for (const snapshot of Object.values(resizeSession.snapshots)) {
+				const candidateNodeX =
+					nextLeft +
+					(snapshot.startNodeX - resizeSession.startBoundsLeft) * scaleX;
+				const candidateNodeY =
+					nextTop +
+					(snapshot.startNodeY - resizeSession.startBoundsTop) * scaleY;
+				const candidateNodeWidth = Math.max(
 					CAMERA_ZOOM_EPSILON,
+					snapshot.startNodeWidth * scaleX,
 				);
-				const safeStartHeight = Math.max(
-					resizeSession.startBoundsHeight,
+				const candidateNodeHeight = Math.max(
 					CAMERA_ZOOM_EPSILON,
+					snapshot.startNodeHeight * scaleY,
 				);
-				const scaleX = nextBoundsBox.width / safeStartWidth;
-				const scaleY = nextBoundsBox.height / safeStartHeight;
-				let didMove = false;
-				for (const snapshot of Object.values(resizeSession.snapshots)) {
-					const candidateNodeX =
-						nextLeft +
-						(snapshot.startNodeX - resizeSession.startBoundsLeft) * scaleX;
-					const candidateNodeY =
-						nextTop +
-						(snapshot.startNodeY - resizeSession.startBoundsTop) * scaleY;
-					const candidateNodeWidth = Math.max(
-						CAMERA_ZOOM_EPSILON,
-						snapshot.startNodeWidth * scaleX,
-					);
-					const candidateNodeHeight = Math.max(
-						CAMERA_ZOOM_EPSILON,
-						snapshot.startNodeHeight * scaleY,
-					);
-					const candidateFixedCornerX = isRightAnchor
-						? candidateNodeX
-						: candidateNodeX + candidateNodeWidth;
-					const candidateFixedCornerY = isBottomAnchor
-						? candidateNodeY
-						: candidateNodeY + candidateNodeHeight;
-					const nextLayout = resolveConstrainedResizeLayout({
-						anchor,
-						fixedCornerX: candidateFixedCornerX,
-						fixedCornerY: candidateFixedCornerY,
-						startWidth: snapshot.startNodeWidth,
-						startHeight: snapshot.startNodeHeight,
-						draftWidth: candidateNodeWidth,
-						draftHeight: candidateNodeHeight,
-						constraints: snapshot.constraints,
-						globalMinSize,
-					});
+				const candidateFixedCornerX = isRightAnchor
+					? candidateNodeX
+					: candidateNodeX + candidateNodeWidth;
+				const candidateFixedCornerY = isBottomAnchor
+					? candidateNodeY
+					: candidateNodeY + candidateNodeHeight;
+				const nextLayout = resolveConstrainedResizeLayout({
+					anchor,
+					fixedCornerX: candidateFixedCornerX,
+					fixedCornerY: candidateFixedCornerY,
+					startWidth: snapshot.startNodeWidth,
+					startHeight: snapshot.startNodeHeight,
+					draftWidth: candidateNodeWidth,
+					draftHeight: candidateNodeHeight,
+					constraints: snapshot.constraints,
+					globalMinSize,
+				});
 				if (
 					Math.abs(nextLayout.x - snapshot.startNodeX) > 1e-6 ||
 					Math.abs(nextLayout.y - snapshot.startNodeY) > 1e-6 ||
@@ -2541,12 +2778,8 @@ const CanvasWorkspace = () => {
 								? (latestProject.scenes[node.sceneId] ?? undefined)
 								: undefined,
 					};
-					})
-					.filter(
-						(
-							entry,
-						): entry is CanvasGraphHistoryEntry => entry !== null,
-					);
+				})
+				.filter((entry): entry is CanvasGraphHistoryEntry => entry !== null);
 			if (entries.length === 0) return;
 			if (entries.length === 1) {
 				const entry = entries[0];
@@ -2622,6 +2855,24 @@ const CanvasWorkspace = () => {
 			const actions = [
 				...toTimelineContextMenuActions(nodeActions),
 				{
+					key: "copy",
+					label: "复制",
+					disabled: targetNodeIds.length === 0,
+					onSelect: () => {
+						copyNodeIdsToClipboard(targetNodeIds);
+					},
+				},
+				{
+					key: "cut",
+					label: "剪切",
+					disabled: targetNodeIds.length === 0,
+					onSelect: () => {
+						const didCopy = copyNodeIdsToClipboard(targetNodeIds);
+						if (!didCopy) return;
+						deleteCanvasNodes(targetNodeIds);
+					},
+				},
+				{
 					key: "delete",
 					label: "删除",
 					danger: true,
@@ -2641,6 +2892,7 @@ const CanvasWorkspace = () => {
 			return true;
 		},
 		[
+			copyNodeIdsToClipboard,
 			contextMenuSceneOptions,
 			currentProject,
 			deleteCanvasNodes,
@@ -2683,6 +2935,10 @@ const CanvasWorkspace = () => {
 
 	const handleCanvasMouseDown = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
+			lastPointerClientRef.current = {
+				x: event.clientX,
+				y: event.clientY,
+			};
 			clearPendingClickSuppression();
 			clearCanvasSnapGuides();
 			if (event.button !== 0) return;
@@ -2690,6 +2946,7 @@ const CanvasWorkspace = () => {
 			if (isOverlayWheelTarget(event.target)) return;
 			if (isCanvasInteractionLocked) return;
 			const world = resolveWorldPoint(event.clientX, event.clientY);
+			lastCanvasPointerWorldRef.current = world;
 			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) return;
 			const node = getTopHitNode(world.x, world.y);
 			if (node) return;
@@ -2732,6 +2989,14 @@ const CanvasWorkspace = () => {
 
 	const handleCanvasMouseMove = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
+			lastPointerClientRef.current = {
+				x: event.clientX,
+				y: event.clientY,
+			};
+			lastCanvasPointerWorldRef.current = resolveWorldPoint(
+				event.clientX,
+				event.clientY,
+			);
 			const marqueeSession = marqueeSessionRef.current;
 			if (!marqueeSession) return;
 			const local = resolveLocalPoint(event.clientX, event.clientY);
@@ -2753,7 +3018,12 @@ const CanvasWorkspace = () => {
 			if (!hasActivated) return;
 			applyMarqueeSelection(nextRect);
 		},
-		[applyMarqueeSelection, resolveLocalPoint, updateMarqueeRectState],
+		[
+			applyMarqueeSelection,
+			resolveLocalPoint,
+			resolveWorldPoint,
+			updateMarqueeRectState,
+		],
 	);
 
 	useEffect(() => {
@@ -2768,6 +3038,10 @@ const CanvasWorkspace = () => {
 
 	const handleCanvasClick = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
+			lastPointerClientRef.current = {
+				x: event.clientX,
+				y: event.clientY,
+			};
 			const pendingSuppression = resolvePendingClickSuppression();
 			if (
 				pendingSuppression &&
@@ -2780,6 +3054,7 @@ const CanvasWorkspace = () => {
 			if (isCanvasInteractionLocked) return;
 			if (event.shiftKey) return;
 			const world = resolveWorldPoint(event.clientX, event.clientY);
+			lastCanvasPointerWorldRef.current = world;
 			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) return;
 			const node = getTopHitNode(world.x, world.y);
 			if (node) return;
@@ -2806,11 +3081,16 @@ const CanvasWorkspace = () => {
 
 	const handleCanvasContextMenu = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
+			lastPointerClientRef.current = {
+				x: event.clientX,
+				y: event.clientY,
+			};
 			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
 			event.preventDefault();
 			if (isCanvasInteractionLocked) return;
 			const world = resolveWorldPoint(event.clientX, event.clientY);
+			lastCanvasPointerWorldRef.current = world;
 			const node = getTopHitNode(world.x, world.y);
 			if (
 				normalizedSelectedNodeIds.length > 1 &&
@@ -2860,34 +3140,64 @@ const CanvasWorkspace = () => {
 	}, []);
 
 	useEffect(() => {
-		const handleDeleteKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Delete" && event.key !== "Backspace") return;
-			if (event.repeat) return;
-			if (event.metaKey || event.ctrlKey || event.altKey) return;
+		const handleGlobalKeyDown = (event: KeyboardEvent) => {
+			if (event.defaultPrevented) return;
 			if (isEditableKeyboardTarget(event.target)) return;
-			if (normalizedSelectedNodeIds.length === 0) return;
 			const activeTimelineState = runtimeManager
 				?.getActiveEditTimelineRuntime()
 				?.timelineStore.getState();
-			if (
+			const timelineHasPriority = Boolean(
 				activeTimelineState?.isTimelineEditorMounted &&
-				(activeTimelineState.selectedIds.length > 0 ||
-					activeTimelineState.isTimelineEditorHovered)
-			) {
+					(activeTimelineState.selectedIds.length > 0 ||
+						activeTimelineState.isTimelineEditorHovered),
+			);
+			const isModifier = event.metaKey || event.ctrlKey;
+			if (isModifier && !event.altKey) {
+				const key = event.key.toLowerCase();
+				if (key === "c") {
+					if (timelineHasPriority) return;
+					if (normalizedSelectedNodeIds.length === 0) return;
+					const didCopy = copySelectedNodesToClipboard();
+					if (!didCopy) return;
+					event.preventDefault();
+					closeContextMenu();
+					return;
+				}
+				if (key === "v") {
+					if (resolvePointerTimelineDropTarget()) {
+						return;
+					}
+					const didPaste = pasteFromClipboardToCanvasAt(
+						resolveCanvasPasteWorldPoint(),
+					);
+					if (!didPaste) return;
+					event.preventDefault();
+					return;
+				}
+			}
+			if (event.key !== "Delete" && event.key !== "Backspace") return;
+			if (event.repeat) return;
+			if (event.metaKey || event.ctrlKey || event.altKey) return;
+			if (normalizedSelectedNodeIds.length === 0) return;
+			if (timelineHasPriority) {
 				return;
 			}
 			event.preventDefault();
 			deleteCanvasNodes(normalizedSelectedNodeIds);
 			closeContextMenu();
 		};
-		window.addEventListener("keydown", handleDeleteKeyDown);
+		window.addEventListener("keydown", handleGlobalKeyDown);
 		return () => {
-			window.removeEventListener("keydown", handleDeleteKeyDown);
+			window.removeEventListener("keydown", handleGlobalKeyDown);
 		};
 	}, [
 		closeContextMenu,
+		copySelectedNodesToClipboard,
 		deleteCanvasNodes,
 		normalizedSelectedNodeIds,
+		pasteFromClipboardToCanvasAt,
+		resolveCanvasPasteWorldPoint,
+		resolvePointerTimelineDropTarget,
 		runtimeManager,
 	]);
 
@@ -3031,7 +3341,22 @@ const CanvasWorkspace = () => {
 			return contextMenuState.actions;
 		}
 		if (focusedNodeId) return [];
+		const canPaste = canPasteClipboardPayloadToCanvas(
+			useStudioClipboardStore.getState().payload,
+		);
 		return [
+			{
+				key: "paste",
+				label: "粘贴",
+				disabled: !canPaste,
+				onSelect: () => {
+					if (!canPaste) return;
+					pasteFromClipboardToCanvasAt({
+						x: contextMenuState.worldX,
+						y: contextMenuState.worldY,
+					});
+				},
+			},
 			{
 				key: "new-text-node",
 				label: "新建文本节点",
@@ -3043,7 +3368,13 @@ const CanvasWorkspace = () => {
 				},
 			},
 		];
-	}, [contextMenuState, focusedNodeId, handleCreateTextNodeAt]);
+	}, [
+		canPasteClipboardPayloadToCanvas,
+		contextMenuState,
+		focusedNodeId,
+		handleCreateTextNodeAt,
+		pasteFromClipboardToCanvasAt,
+	]);
 
 	const toolbarLeftOffset = sidebarExpanded
 		? overlayLayout.cameraSafeInsets.left + 4
@@ -3073,32 +3404,32 @@ const CanvasWorkspace = () => {
 				event.dataTransfer.dropEffect = "copy";
 			}}
 			onDrop={handleCanvasDrop}
-			>
-				<InfiniteSkiaCanvas
-					width={stageSize.width}
-					height={stageSize.height}
-					camera={renderCamera}
-					cameraAnimationKey={cameraAnimationKey}
-					nodes={sortedNodes}
-					scenes={currentProject.scenes}
-					assets={currentProject.assets}
-					activeNodeId={activeNodeId}
-					selectedNodeIds={normalizedSelectedNodeIds}
-					focusedNodeId={focusedNodeId}
-					snapGuidesScreen={snapGuidesScreen}
-					suspendHover={isCameraAnimating}
-					onNodeDragStart={handleSkiaNodeDragStart}
-					onNodeDrag={handleSkiaNodeDrag}
-					onNodeDragEnd={handleSkiaNodeDragEnd}
-					onNodeResize={handleSkiaNodeResize}
-					onSelectionDragStart={handleSelectionBoundsDragStart}
-					onSelectionDrag={handleSelectionBoundsDrag}
-					onSelectionDragEnd={handleSelectionBoundsDragEnd}
-					onSelectionResize={handleSelectionResize}
-					onNodeClick={handleSkiaNodeClick}
-					onNodeDoubleClick={handleSkiaNodeDoubleClick}
-					onCameraAnimationComplete={finishCameraAnimation}
-				/>
+		>
+			<InfiniteSkiaCanvas
+				width={stageSize.width}
+				height={stageSize.height}
+				camera={renderCamera}
+				cameraAnimationKey={cameraAnimationKey}
+				nodes={sortedNodes}
+				scenes={currentProject.scenes}
+				assets={currentProject.assets}
+				activeNodeId={activeNodeId}
+				selectedNodeIds={normalizedSelectedNodeIds}
+				focusedNodeId={focusedNodeId}
+				snapGuidesScreen={snapGuidesScreen}
+				suspendHover={isCameraAnimating}
+				onNodeDragStart={handleSkiaNodeDragStart}
+				onNodeDrag={handleSkiaNodeDrag}
+				onNodeDragEnd={handleSkiaNodeDragEnd}
+				onNodeResize={handleSkiaNodeResize}
+				onSelectionDragStart={handleSelectionBoundsDragStart}
+				onSelectionDrag={handleSelectionBoundsDrag}
+				onSelectionDragEnd={handleSelectionBoundsDragEnd}
+				onSelectionResize={handleSelectionResize}
+				onNodeClick={handleSkiaNodeClick}
+				onNodeDoubleClick={handleSkiaNodeDoubleClick}
+				onCameraAnimationComplete={finishCameraAnimation}
+			/>
 			{marqueeRect.visible && (
 				<div
 					data-testid="canvas-selection-rect"

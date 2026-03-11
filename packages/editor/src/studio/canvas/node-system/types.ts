@@ -1,10 +1,16 @@
-import type { TimelineAsset } from "core/element/types";
-import type { CanvasNode, SceneDocument, StudioProject } from "core/studio/types";
+import type { TimelineAsset, TimelineElement } from "core/element/types";
+import type {
+	CanvasNode,
+	SceneDocument,
+	StudioProject,
+} from "core/studio/types";
 import type React from "react";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { CanvasNodeCreateInput } from "@/projects/projectStore";
 
-export interface CanvasNodeSkiaRenderProps<TNode extends CanvasNode = CanvasNode> {
+export interface CanvasNodeSkiaRenderProps<
+	TNode extends CanvasNode = CanvasNode,
+> {
 	node: TNode;
 	scene: SceneDocument | null;
 	asset: TimelineAsset | null;
@@ -81,6 +87,20 @@ export interface CanvasNodeContextMenuContext<
 	onInsertNodeToScene: (sceneId: string) => void;
 }
 
+export interface CanvasNodeToTimelineElementContext<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	node: TNode;
+	project: StudioProject;
+	targetSceneId?: string | null;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+	fps: number;
+	startFrame: number;
+	trackIndex: number;
+	createElementId: () => string;
+}
+
 export interface CanvasExternalFileContext {
 	projectId: string;
 	fps: number;
@@ -149,4 +169,7 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 		file: File,
 		context: CanvasExternalFileContext,
 	) => Promise<CanvasExternalFileResult>;
+	toTimelineClipboardElement?: (
+		context: CanvasNodeToTimelineElementContext<TNode>,
+	) => TimelineElement | null;
 }

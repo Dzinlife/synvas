@@ -5,10 +5,7 @@ import {
 	type TimelinePostProcessOptions,
 } from "./mainTrackMagnet";
 import { reflowInsertedElementsOnTracks } from "./insertedTrackReflow";
-import {
-	getStoredTrackAssignments,
-	insertTrackAt,
-} from "./trackAssignment";
+import { getStoredTrackAssignments, insertTrackAt } from "./trackAssignment";
 import { collectLinkedTransitions, isTransitionElement } from "./transitions";
 
 interface TimelineClipboardAnchor {
@@ -17,16 +14,27 @@ interface TimelineClipboardAnchor {
 	trackIndex: number;
 }
 
+export interface TimelineClipboardSource {
+	sceneId: string | null;
+	canvasSize: {
+		width: number;
+		height: number;
+	};
+	fps: number;
+}
+
 export interface TimelineClipboardPayload {
 	elements: TimelineElement[];
 	primaryId: string | null;
 	anchor: TimelineClipboardAnchor;
+	source?: TimelineClipboardSource;
 }
 
 export interface BuildTimelineClipboardOptions {
 	elements: TimelineElement[];
 	selectedIds: string[];
 	primaryId?: string | null;
+	source?: TimelineClipboardSource;
 }
 
 export interface PasteTimelineClipboardOptions {
@@ -112,6 +120,7 @@ export const buildTimelineClipboardPayload = (
 			start: anchorElement.timeline.start,
 			trackIndex: getTrackIndex(anchorElement),
 		},
+		source: options.source,
 	};
 };
 

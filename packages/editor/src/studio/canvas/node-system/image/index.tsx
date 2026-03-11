@@ -1,6 +1,9 @@
 import type { ImageCanvasNode } from "core/studio/types";
+import { createTransformMeta } from "@/element/transform";
+import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
+import { secondsToFrames } from "@/utils/timecode";
 import { ImageNodeSkiaRenderer } from "./renderer";
 import { ImageNodeToolbar } from "./toolbar";
 
@@ -131,6 +134,46 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 			name: file.name,
 			width: metadata.width,
 			height: metadata.height,
+		};
+	},
+	toTimelineClipboardElement: ({
+		node,
+		fps,
+		startFrame,
+		trackIndex,
+		createElementId,
+	}) => {
+		if (!node.assetId) return null;
+		const durationFrames = Math.max(1, secondsToFrames(5, fps));
+		const width = Math.max(1, Math.round(Math.abs(node.width)));
+		const height = Math.max(1, Math.round(Math.abs(node.height)));
+		return {
+			id: createElementId(),
+			type: "Image",
+			component: "image",
+			name: node.name,
+			assetId: node.assetId,
+			props: {},
+			transform: createTransformMeta({
+				width,
+				height,
+				positionX: 0,
+				positionY: 0,
+			}),
+			timeline: buildTimelineMeta(
+				{
+					start: startFrame,
+					end: startFrame + durationFrames,
+					trackIndex: trackIndex >= 0 ? trackIndex : 0,
+					role: "clip",
+				},
+				fps,
+			),
+			render: {
+				zIndex: 0,
+				visible: true,
+				opacity: 1,
+			},
 		};
 	},
 };

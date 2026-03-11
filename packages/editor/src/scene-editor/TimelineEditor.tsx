@@ -11,6 +11,7 @@ import {
 	useState,
 } from "react";
 import { cn } from "@/lib/utils";
+import { useProjectStore } from "@/projects/projectStore";
 import { useProjectAssets } from "@/projects/useProjectAssets";
 import TimeIndicatorCanvas from "@/scene-editor/components/TimeIndicatorCanvas";
 import {
@@ -20,6 +21,8 @@ import {
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { hasSceneAudibleLeafAudio } from "@/scene-editor/audio/sceneReferenceAudio";
 import { clampFrame } from "@/utils/timecode";
+import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
+import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
@@ -97,6 +100,15 @@ const shouldUpdateOffset = (element: TimelineElementType): boolean => {
 	);
 };
 
+const createTimelineClipboardElementId = (): string => {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return `element-${crypto.randomUUID()}`;
+	}
+	return `element-${Date.now().toString(36)}-${Math.random()
+		.toString(36)
+		.slice(2, 8)}`;
+};
+
 const getVideoClipHasSourceAudioTrack = (
 	modelRegistry: ReturnType<typeof useModelRegistry>,
 	element: TimelineElementType | undefined,
@@ -119,7 +131,8 @@ const getCompositionHasSourceAudioTrack = (
 	element: TimelineElementType | undefined,
 ): boolean => {
 	if (!element || element.type !== "Composition") return false;
-	const rawSceneId = (element.props as { sceneId?: unknown } | undefined)?.sceneId;
+	const rawSceneId = (element.props as { sceneId?: unknown } | undefined)
+		?.sceneId;
 	if (typeof rawSceneId !== "string" || rawSceneId.trim().length === 0) {
 		return false;
 	}
@@ -202,10 +215,15 @@ const TimelineEditor = () => {
 	const { currentTime, setCurrentTime: seekTo } = useCurrentTime();
 	const { fps } = useFps();
 	const { assets } = useProjectAssets();
+	const currentProject = useProjectStore((state) => state.currentProject);
 	const { timelineScale, setTimelineScale } = useTimelineScale();
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId, deselectAll, setSelection } =
 		useMultiSelect();
+	const clipboardPayload = useStudioClipboardStore((state) => state.payload);
+	const setStudioClipboardPayload = useStudioClipboardStore(
+		(state) => state.setPayload,
+	);
 	const setTimelineEditorMounted = useTimelineStore(
 		(state) => state.setTimelineEditorMounted,
 	);
@@ -241,8 +259,6 @@ const TimelineEditor = () => {
 		}
 		return map;
 	}, [tracks, audioTrackStates]);
-	const [clipboardPayload, setClipboardPayload] =
-		useState<TimelineClipboardPayload | null>(null);
 	const [contextMenuState, setContextMenuState] =
 		useState<TimelineContextMenuState>({ open: false });
 	const postProcessOptions = useMemo(
@@ -266,19 +282,117 @@ const TimelineEditor = () => {
 			setTimelineEditorMounted(false);
 		};
 	}, [setTimelineEditorHovered, setTimelineEditorMounted]);
+	const resolveTimelineSceneId = useCallback((): string | null => {
+		for (const timelineRuntime of runtimeManager.listTimelineRuntimes()) {
+			if (timelineRuntime.timelineStore === timelineStore) {
+				return timelineRuntime.ref.sceneId;
+			}
+		}
+		return runtimeManager.getActiveEditTimelineRef()?.sceneId ?? null;
+	}, [runtimeManager, timelineStore]);
 	const copyElementsByIds = useCallback(
 		(targetIds: string[], targetPrimaryId: string | null) => {
+			const timelineState = timelineStore.getState();
 			const payload = buildTimelineClipboardPayload({
 				elements,
 				selectedIds: targetIds,
 				primaryId: targetPrimaryId,
+				source: {
+					sceneId: resolveTimelineSceneId(),
+					canvasSize: timelineState.canvasSize,
+					fps: timelineState.fps,
+				},
 			});
 			if (!payload) return null;
-			setClipboardPayload(payload);
+			setStudioClipboardPayload({
+				kind: "timeline-elements",
+				payload,
+				source: payload.source,
+			});
 			return payload;
 		},
-		[elements],
+		[
+			elements,
+			resolveTimelineSceneId,
+			setStudioClipboardPayload,
+			timelineStore,
+		],
 	);
+	const buildTimelinePayloadFromCanvasClipboard =
+		useCallback((): TimelineClipboardPayload | null => {
+			if (!clipboardPayload || clipboardPayload.kind !== "canvas-nodes") {
+				return null;
+			}
+			if (!currentProject) return null;
+			const targetSceneId = resolveTimelineSceneId();
+			const projectForConversion =
+				targetSceneId && currentProject.scenes[targetSceneId]
+					? {
+							...currentProject,
+							scenes: {
+								...currentProject.scenes,
+								[targetSceneId]: {
+									...currentProject.scenes[targetSceneId],
+									timeline: {
+										...currentProject.scenes[targetSceneId].timeline,
+										elements,
+									},
+								},
+							},
+						}
+					: currentProject;
+			const orderedEntries = [...clipboardPayload.entries].sort(
+				(left, right) => {
+					if (left.node.zIndex !== right.node.zIndex) {
+						return left.node.zIndex - right.node.zIndex;
+					}
+					return left.node.createdAt - right.node.createdAt;
+				},
+			);
+			let nextStartFrame = 0;
+			const convertedElements: TimelineElementType[] = [];
+			for (const entry of orderedEntries) {
+				const definition = getCanvasNodeDefinition(entry.node.type);
+				const scene =
+					entry.node.type === "scene"
+						? (entry.scene ??
+							projectForConversion.scenes[entry.node.sceneId] ??
+							null)
+						: null;
+				const assetId = "assetId" in entry.node ? entry.node.assetId : null;
+				const asset = assetId
+					? (currentProject.assets.find((item) => item.id === assetId) ?? null)
+					: null;
+				const converted = definition.toTimelineClipboardElement?.({
+					node: entry.node,
+					project: projectForConversion,
+					targetSceneId,
+					scene,
+					asset,
+					fps,
+					startFrame: nextStartFrame,
+					trackIndex: entry.node.type === "audio" ? -1 : 0,
+					createElementId: createTimelineClipboardElementId,
+				});
+				if (!converted) continue;
+				convertedElements.push(converted);
+				nextStartFrame = Math.max(
+					nextStartFrame,
+					Math.round(converted.timeline.end),
+				);
+			}
+			if (convertedElements.length === 0) return null;
+			const anchorElement = convertedElements[0];
+			return {
+				elements: convertedElements,
+				primaryId: anchorElement.id,
+				anchor: {
+					assetId: anchorElement.id,
+					start: anchorElement.timeline.start,
+					trackIndex: anchorElement.timeline.trackIndex ?? 0,
+				},
+			};
+		}, [clipboardPayload, currentProject, elements, fps, resolveTimelineSceneId]);
 	const deleteElementsByIds = useCallback(
 		(targetIds: string[]) => {
 			if (targetIds.length === 0) return;
@@ -310,21 +424,35 @@ const TimelineEditor = () => {
 	);
 	const pasteFromClipboard = useCallback(
 		(target: TimelinePasteTarget) => {
-			if (!clipboardPayload) return;
+			if (!clipboardPayload) return false;
+			const payload =
+				clipboardPayload.kind === "timeline-elements"
+					? clipboardPayload.payload
+					: buildTimelinePayloadFromCanvasClipboard();
+			if (!payload) return false;
 			const pasteResult = pasteTimelineClipboardPayload({
-				payload: clipboardPayload,
+				payload,
 				elements,
 				targetTime: target.time,
 				targetTrackIndex: target.trackIndex,
 				targetType: target.dropType,
 				postProcessOptions,
 			});
-			setElements(pasteResult.elements);
-			if (pasteResult.insertedIds.length > 0) {
-				setSelection(pasteResult.insertedIds, pasteResult.primaryId);
+			if (pasteResult.insertedIds.length === 0) {
+				return false;
 			}
+			setElements(pasteResult.elements);
+			setSelection(pasteResult.insertedIds, pasteResult.primaryId);
+			return true;
 		},
-		[clipboardPayload, elements, postProcessOptions, setElements, setSelection],
+		[
+			buildTimelinePayloadFromCanvasClipboard,
+			clipboardPayload,
+			elements,
+			postProcessOptions,
+			setElements,
+			setSelection,
+		],
 	);
 	const handleElementContextMenu = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>, elementId: string) => {
@@ -366,6 +494,9 @@ const TimelineEditor = () => {
 	const selectionActivatedRef = useRef(false);
 	const timeStampsRef = useRef<HTMLDivElement>(null);
 	const isRulerDraggingRef = useRef(false);
+	const lastPointerRef = useRef<{ clientX: number; clientY: number } | null>(
+		null,
+	);
 	const lastHoverRef = useRef<{
 		clientX: number;
 		clientY: number;
@@ -399,6 +530,20 @@ const TimelineEditor = () => {
 	});
 	const selectionRectRef = useRef(selectionRect);
 	useEffect(() => {
+		const handleWindowMouseMove = (event: MouseEvent) => {
+			lastPointerRef.current = {
+				clientX: event.clientX,
+				clientY: event.clientY,
+			};
+		};
+		window.addEventListener("mousemove", handleWindowMouseMove, {
+			passive: true,
+		});
+		return () => {
+			window.removeEventListener("mousemove", handleWindowMouseMove);
+		};
+	}, []);
+	useEffect(() => {
 		if (rippleEditingEnabled && !rippleEditingRef.current) {
 			setElements(
 				(prev) =>
@@ -421,6 +566,37 @@ const TimelineEditor = () => {
 		fps,
 		trackLockedMap,
 	]);
+	const resolveTimelinePasteTargetFromPointer =
+		useCallback((): TimelinePasteTarget | null => {
+			const pointer = lastPointerRef.current;
+			if (!pointer) return null;
+			const dropTarget = findTimelineDropTargetFromScreenPosition(
+				pointer.clientX,
+				pointer.clientY,
+				Math.max(0, trackCount - 1),
+				DEFAULT_TRACK_HEIGHT,
+				false,
+			);
+			if (!dropTarget) return null;
+			const timelineState = timelineStore.getState();
+			const ratio = getPixelsPerFrame(
+				timelineState.fps,
+				timelineState.timelineScale,
+			);
+			if (!Number.isFinite(ratio) || ratio <= 0) return null;
+			const dropTime = getTimelineDropTimeFromScreenX(
+				pointer.clientX,
+				dropTarget.trackIndex,
+				ratio,
+				timelineState.scrollLeft,
+			);
+			if (dropTime === null) return null;
+			return {
+				time: dropTime,
+				trackIndex: dropTarget.trackIndex,
+				dropType: dropTarget.type,
+			};
+		}, [timelineStore, trackCount]);
 
 	const handleTimelineKeyDown = useEffectEvent((event: KeyboardEvent) => {
 		if (
@@ -430,6 +606,7 @@ const TimelineEditor = () => {
 		) {
 			return;
 		}
+		if (event.defaultPrevented) return;
 
 		const isModifier = event.metaKey || event.ctrlKey;
 		if (isModifier) {
@@ -449,13 +626,11 @@ const TimelineEditor = () => {
 				return;
 			}
 			if (key === "v") {
-				if (!clipboardPayload) return;
+				const pasteTarget = resolveTimelinePasteTargetFromPointer();
+				if (!pasteTarget) return;
+				const didPaste = pasteFromClipboard(pasteTarget);
+				if (!didPaste) return;
 				event.preventDefault();
-				pasteFromClipboard({
-					time: clampFrame(timelineStore.getState().getDisplayTime()),
-					trackIndex: clipboardPayload.anchor.trackIndex,
-					dropType: "track",
-				});
 				closeContextMenu();
 				return;
 			}
@@ -1478,9 +1653,8 @@ const TimelineEditor = () => {
 				modelRegistry,
 				targetElement,
 			);
-			const isCompositionSourceMuted = isCompositionSourceAudioMuted(
-				targetElement,
-			);
+			const isCompositionSourceMuted =
+				isCompositionSourceAudioMuted(targetElement);
 			const hasCompositionSourceAudioTrack = getCompositionHasSourceAudioTrack(
 				runtimeManager,
 				targetElement,
@@ -1547,7 +1721,16 @@ const TimelineEditor = () => {
 		const trackLocked =
 			contextMenuState.pasteTarget.dropType === "track" &&
 			(trackLockedMap.get(contextMenuState.pasteTarget.trackIndex) ?? false);
-		const pasteDisabled = !clipboardPayload || trackLocked;
+		const canPaste =
+			clipboardPayload?.kind === "timeline-elements"
+				? clipboardPayload.payload.elements.length > 0
+				: clipboardPayload?.kind === "canvas-nodes"
+					? clipboardPayload.entries.some((entry) => {
+							const definition = getCanvasNodeDefinition(entry.node.type);
+							return Boolean(definition.toTimelineClipboardElement);
+						})
+					: false;
+		const pasteDisabled = !canPaste || trackLocked;
 		return [
 			{
 				key: "paste",

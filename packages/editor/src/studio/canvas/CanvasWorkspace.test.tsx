@@ -10,11 +10,15 @@ import {
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { componentRegistry } from "@/element/model/componentRegistry";
+import { resolveClipboardNodeGeometry } from "@/element/model/clipboardTransform";
+import { createTransformMeta } from "@/element/transform";
 import { useProjectStore } from "@/projects/projectStore";
 import {
 	createRuntimeProviderWrapper,
 	createTestEditorRuntime,
 } from "@/scene-editor/runtime/testUtils";
+import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import {
 	CAMERA_SMOOTH_DURATION_MS,
@@ -655,9 +659,44 @@ const createProject = (): StudioProject => ({
 	updatedAt: 1,
 });
 
+let clipboardConvertersRegistered = false;
+
+const registerClipboardConvertersForTests = (): void => {
+	if (clipboardConvertersRegistered) return;
+	componentRegistry.register({
+		type: "Image",
+		component: "image",
+		createModel: (() => ({}) as never) as never,
+		Renderer: (() => null) as never,
+		Timeline: (() => null) as never,
+		toCanvasClipboardNode: ({ element, sourceCanvasSize }) => {
+			if (!element.assetId) return null;
+			const geometry = resolveClipboardNodeGeometry(element, sourceCanvasSize, {
+				width: 640,
+				height: 360,
+			});
+			return {
+				type: "image",
+				assetId: element.assetId,
+				name: element.name,
+				x: geometry.x,
+				y: geometry.y,
+				width: geometry.width,
+				height: geometry.height,
+			};
+		},
+		meta: {
+			name: "Image",
+			category: "test",
+		},
+	});
+	clipboardConvertersRegistered = true;
+};
+
 beforeEach(() => {
 	togglePlaybackMock.mockReset();
 	infiniteSkiaCanvasPropsMock.mockReset();
+	registerClipboardConvertersForTests();
 	nativeRequestAnimationFrame = window.requestAnimationFrame;
 	nativeCancelAnimationFrame = window.cancelAnimationFrame;
 	rafTimers.clear();
@@ -687,6 +726,7 @@ beforeEach(() => {
 		error: null,
 	});
 	useStudioHistoryStore.getState().clear();
+	useStudioClipboardStore.getState().clearPayload();
 });
 
 afterEach(() => {
@@ -1594,6 +1634,127 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
+	it("右键节点菜单可复制单个节点到全局剪贴板", () => {
+		render(<CanvasWorkspace />);
+
+		rightClickNodeAt(300, 160);
+		fireEvent.click(screen.getByRole("menuitem", { name: "复制" }));
+
+		const payload = useStudioClipboardStore.getState().payload;
+		expect(payload?.kind).toBe("canvas-nodes");
+		if (!payload || payload.kind !== "canvas-nodes") return;
+		expect(payload.entries.map((entry) => entry.node.id)).toEqual([
+			"node-video-1",
+		]);
+	});
+
+	it("右键命中已多选节点时复制整组选区", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+
+		rightClickNodeAt(300, 160);
+		fireEvent.click(screen.getByRole("menuitem", { name: "复制" }));
+
+		const payload = useStudioClipboardStore.getState().payload;
+		expect(payload?.kind).toBe("canvas-nodes");
+		if (!payload || payload.kind !== "canvas-nodes") return;
+		expect(payload.entries.map((entry) => entry.node.id)).toEqual([
+			"node-video-1",
+			"node-image-1",
+		]);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-video-1",
+			"node-image-1",
+		]);
+	});
+
+	it("右键命中非选中节点时仅复制该节点", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+
+		rightClickNodeAt(60, 60);
+		fireEvent.click(screen.getByRole("menuitem", { name: "复制" }));
+
+		const payload = useStudioClipboardStore.getState().payload;
+		expect(payload?.kind).toBe("canvas-nodes");
+		if (!payload || payload.kind !== "canvas-nodes") return;
+		expect(payload.entries.map((entry) => entry.node.id)).toEqual([
+			"node-scene-1",
+		]);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-video-1",
+			"node-image-1",
+		]);
+	});
+
+	it("右键节点菜单剪切会先复制再删除节点", () => {
+		render(<CanvasWorkspace />);
+
+		rightClickNodeAt(300, 160);
+		fireEvent.click(screen.getByRole("menuitem", { name: "剪切" }));
+
+		const payload = useStudioClipboardStore.getState().payload;
+		expect(payload?.kind).toBe("canvas-nodes");
+		if (!payload || payload.kind !== "canvas-nodes") return;
+		expect(payload.entries.map((entry) => entry.node.id)).toEqual([
+			"node-video-1",
+		]);
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some(
+					(node) => node.id === "node-video-1",
+				),
+		).toBe(false);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-delete",
+		);
+	});
+
+	it("空白处右键菜单在不可粘贴时显示禁用粘贴项", () => {
+		render(<CanvasWorkspace />);
+		const beforeNodeCount =
+			useProjectStore.getState().currentProject?.canvas.nodes.length ?? 0;
+
+		fireEvent.contextMenu(screen.getByTestId("infinite-skia-canvas"), {
+			clientX: 1040,
+			clientY: 640,
+		});
+		const pasteItem = screen.getByRole("menuitem", { name: "粘贴" });
+		expect(pasteItem.getAttribute("data-disabled")).not.toBeNull();
+
+		fireEvent.click(pasteItem);
+		const afterNodeCount =
+			useProjectStore.getState().currentProject?.canvas.nodes.length ?? 0;
+		expect(afterNodeCount).toBe(beforeNodeCount);
+	});
+
+	it("空白处右键菜单可粘贴并按右键位置落点", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		fireEvent.keyDown(window, { key: "c", ctrlKey: true });
+
+		fireEvent.contextMenu(screen.getByTestId("infinite-skia-canvas"), {
+			clientX: 1020,
+			clientY: 620,
+		});
+		const pasteItem = screen.getByRole("menuitem", { name: "粘贴" });
+		expect(pasteItem.getAttribute("data-disabled")).toBeNull();
+		fireEvent.click(pasteItem);
+
+		const project = useProjectStore.getState().currentProject;
+		const pastedNode =
+			project?.canvas.nodes.find(
+				(node) => node.type === "video" && node.name === "Video 1副本",
+			) ?? null;
+		expect(pastedNode).toBeTruthy();
+		if (!pastedNode || pastedNode.type !== "video") return;
+		expect(pastedNode.x).toBe(1020);
+		expect(pastedNode.y).toBe(620);
+	});
+
 	it("非 InfiniteSkiaCanvas 区域右键不会弹出画布菜单", () => {
 		render(<CanvasWorkspace />);
 		fireEvent.contextMenu(screen.getByTestId("canvas-workspace"), {
@@ -1860,6 +2021,178 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("Ctrl+C/V 可复制节点并按鼠标位置对齐包围盒左上", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		fireEvent.mouseMove(screen.getByTestId("infinite-skia-canvas"), {
+			clientX: 960,
+			clientY: 540,
+		});
+
+		fireEvent.keyDown(window, { key: "c", ctrlKey: true });
+		fireEvent.keyDown(window, { key: "v", ctrlKey: true });
+
+		const project = useProjectStore.getState().currentProject;
+		const copiedNode =
+			project?.canvas.nodes.find(
+				(node) => node.type === "video" && node.name === "Video 1副本",
+			) ?? null;
+		expect(copiedNode).toBeTruthy();
+		if (!copiedNode || copiedNode.type !== "video") return;
+		expect(copiedNode.x).toBe(960);
+		expect(copiedNode.y).toBe(540);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			copiedNode.id,
+		]);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-create.batch",
+		);
+	});
+
+	it("Timeline 正在编辑时 Ctrl+C 不会触发 canvas 复制", () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		runtime.getActiveEditTimelineRuntime()?.timelineStore.setState({
+			isTimelineEditorMounted: true,
+			isTimelineEditorHovered: false,
+			selectedIds: ["element-1"],
+			primarySelectedId: "element-1",
+		});
+		render(<CanvasWorkspace />, {
+			wrapper: createRuntimeProviderWrapper(runtime),
+		});
+		clickNodeAt(300, 160);
+
+		fireEvent.keyDown(window, { key: "c", ctrlKey: true });
+
+		expect(useStudioClipboardStore.getState().payload).toBeNull();
+	});
+
+	it("timeline element 可粘贴为 canvas node，并按鼠标位置落点", () => {
+		render(<CanvasWorkspace />);
+		useStudioClipboardStore.getState().setPayload({
+			kind: "timeline-elements",
+			payload: {
+				elements: [
+					{
+						id: "element-image-copy",
+						type: "Image",
+						component: "image",
+						name: "Image Clip",
+						assetId: "asset-scene",
+						props: {},
+						transform: createTransformMeta({
+							width: 320,
+							height: 180,
+							positionX: 0,
+							positionY: 0,
+						}),
+						timeline: {
+							start: 0,
+							end: 150,
+							startTimecode: "00:00:00:00",
+							endTimecode: "00:00:05:00",
+							trackIndex: 0,
+							role: "clip",
+						},
+						render: {
+							zIndex: 0,
+							visible: true,
+							opacity: 1,
+						},
+					},
+				],
+				primaryId: "element-image-copy",
+				anchor: {
+					assetId: "element-image-copy",
+					start: 0,
+					trackIndex: 0,
+				},
+				source: {
+					sceneId: "scene-1",
+					canvasSize: { width: 1920, height: 1080 },
+					fps: 30,
+				},
+			},
+			source: {
+				sceneId: "scene-1",
+				canvasSize: { width: 1920, height: 1080 },
+				fps: 30,
+			},
+		});
+		fireEvent.mouseMove(screen.getByTestId("infinite-skia-canvas"), {
+			clientX: 520,
+			clientY: 440,
+		});
+
+		fireEvent.keyDown(window, { key: "v", ctrlKey: true });
+
+		const project = useProjectStore.getState().currentProject;
+		const pastedNode =
+			project?.canvas.nodes.find(
+				(node) => node.type === "image" && node.name === "Image Clip副本",
+			) ?? null;
+		expect(pastedNode).toBeTruthy();
+		if (!pastedNode || pastedNode.type !== "image") return;
+		expect(pastedNode.x).toBe(520);
+		expect(pastedNode.y).toBe(440);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-create.batch",
+		);
+	});
+
+	it("鼠标命中 timeline drop zone 时 Ctrl+V 不会触发 canvas 粘贴", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		fireEvent.keyDown(window, { key: "c", ctrlKey: true });
+
+		const mainZone = document.createElement("div");
+		mainZone.setAttribute("data-track-drop-zone", "main");
+		Object.defineProperty(mainZone, "getBoundingClientRect", {
+			value: () => ({
+				x: 0,
+				y: 0,
+				left: 0,
+				top: 0,
+				right: 300,
+				bottom: 200,
+				width: 300,
+				height: 200,
+				toJSON: () => ({}),
+			}),
+		});
+		const contentArea = document.createElement("div");
+		contentArea.setAttribute("data-track-content-area", "main");
+		Object.defineProperty(contentArea, "getBoundingClientRect", {
+			value: () => ({
+				x: 0,
+				y: 0,
+				left: 0,
+				top: 0,
+				right: 300,
+				bottom: 200,
+				width: 300,
+				height: 200,
+				toJSON: () => ({}),
+			}),
+		});
+		mainZone.append(contentArea);
+		document.body.append(mainZone);
+
+		try {
+			fireEvent.mouseMove(window, { clientX: 120, clientY: 80 });
+			fireEvent.keyDown(window, { key: "v", ctrlKey: true });
+		} finally {
+			mainZone.remove();
+		}
+
+		const project = useProjectStore.getState().currentProject;
+		const pastedNodes =
+			project?.canvas.nodes.filter(
+				(node) => node.type === "video" && node.name === "Video 1副本",
+			) ?? [];
+		expect(pastedNodes).toHaveLength(0);
+	});
+
 	it("右键多选 bbox 空白区域可删除整组选区", () => {
 		render(<CanvasWorkspace />);
 		clickNodeAt(300, 160);
@@ -2083,9 +2416,9 @@ describe("CanvasWorkspace", () => {
 			(item) => item.id === "node-image-1",
 		);
 		expect(draggingNode?.x).toBe(560);
-		expect(getLatestInfiniteSkiaCanvasProps().snapGuidesScreen?.vertical).toContain(
-			560,
-		);
+		expect(
+			getLatestInfiniteSkiaCanvasProps().snapGuidesScreen?.vertical,
+		).toContain(560);
 
 		act(() => {
 			const endEvent: MockCanvasNodeDragEvent = {
@@ -2510,9 +2843,7 @@ describe("CanvasWorkspace", () => {
 		expect(secondText?.y).toBeCloseTo(720);
 		expect(secondText?.width).toBeCloseTo(400);
 		expect(secondText?.height).toBeCloseTo(160);
-		expect(
-			(secondText?.x ?? 0) + (secondText?.width ?? 0),
-		).toBeCloseTo(1600);
+		expect((secondText?.x ?? 0) + (secondText?.width ?? 0)).toBeCloseTo(1600);
 	});
 
 	it("resize anchor 落在 node rect 外侧时不会误触发框选，也不会卡死后续拖拽", () => {

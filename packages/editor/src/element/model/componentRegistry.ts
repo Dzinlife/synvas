@@ -1,12 +1,28 @@
 import type { RendererPrepareFrameContext } from "core/element/model/types";
-import type { ElementType, TimelineElement, TrackRole } from "core/element/types";
+import type {
+	ElementType,
+	TimelineElement,
+	TrackRole,
+} from "core/element/types";
 import type React from "react";
+import type { CanvasNodeCreateInput } from "@/projects/projectStore";
 import type { EditorRuntime } from "@/scene-editor/runtime/types";
 import type { ComponentModelStore } from "./types";
 
 export interface ElementComponentSettingProps<Props = Record<string, unknown>> {
 	element: TimelineElement<Props>;
 	updateProps: (partial: Partial<Props>) => void;
+}
+
+export interface ElementToCanvasClipboardNodeContext<
+	Props = Record<string, unknown>,
+> {
+	element: TimelineElement<Props>;
+	sourceCanvasSize: {
+		width: number;
+		height: number;
+	} | null;
+	fps: number;
 }
 
 /**
@@ -31,6 +47,9 @@ export interface ElementComponentDefinition<Props = any, Internal = any> {
 	prepareRenderFrame?: (
 		context: RendererPrepareFrameContext,
 	) => Promise<void> | void;
+	toCanvasClipboardNode?: (
+		context: ElementToCanvasClipboardNodeContext<Props>,
+	) => CanvasNodeCreateInput | null;
 
 	// 时间线组件
 	Timeline: React.ComponentType<any>;

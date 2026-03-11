@@ -8,6 +8,7 @@ import type {
 	CanvasNodeDefinition,
 	CanvasNodeFocusEditorBridgeProps,
 } from "../types";
+import { convertSceneNodeToTimelineElement } from "./clipboard";
 import { SceneNodeDrawer } from "./drawer";
 import { SceneNodeSkiaRenderer } from "./renderer";
 import { SceneNodeToolbar } from "./toolbar";
@@ -74,6 +75,7 @@ const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
 			},
 		];
 	},
+	toTimelineClipboardElement: convertSceneNodeToTimelineElement,
 };
 
 registerCanvasNodeDefinition(sceneDefinition);
