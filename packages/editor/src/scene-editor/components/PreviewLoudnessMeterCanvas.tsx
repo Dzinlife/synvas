@@ -46,7 +46,13 @@ const nowMilliseconds = (): number => {
 	return Date.now();
 };
 
-const PreviewLoudnessMeterCanvas: React.FC = () => {
+interface PreviewLoudnessMeterCanvasProps {
+	active?: boolean;
+}
+
+const PreviewLoudnessMeterCanvas: React.FC<PreviewLoudnessMeterCanvasProps> = ({
+	active = true,
+}) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const viewportRef = useRef({ width: 60, height: 44 });
@@ -212,6 +218,7 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 	}, []);
 
 	const startAnimation = useCallback(() => {
+		if (!active) return;
 		if (typeof window === "undefined") return;
 		if (rafIdRef.current !== null) return;
 		const animate = (frameTime: number) => {
@@ -223,7 +230,7 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 			rafIdRef.current = window.requestAnimationFrame(animate);
 		};
 		rafIdRef.current = window.requestAnimationFrame(animate);
-	}, [drawFrame]);
+	}, [active, drawFrame]);
 
 	const stopAnimation = useCallback(() => {
 		if (typeof window === "undefined") return;
@@ -235,6 +242,9 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 	useEffect(() => {
 		const syncSnapshot = (snapshot: PreviewLoudnessSnapshot) => {
 			targetSnapshotRef.current = snapshot;
+			if (!active) {
+				return;
+			}
 			const hasActiveSignal =
 				Math.max(
 					snapshot.leftRms,
@@ -248,7 +258,7 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 		};
 		syncSnapshot(getPreviewLoudnessSnapshot());
 		return subscribePreviewLoudness(syncSnapshot);
-	}, [startAnimation]);
+	}, [active, startAnimation]);
 
 	useEffect(() => {
 		const container = containerRef.current;
@@ -287,6 +297,21 @@ const PreviewLoudnessMeterCanvas: React.FC = () => {
 			observer.disconnect();
 		};
 	}, [drawFrame, startAnimation]);
+
+	useEffect(() => {
+		if (active) return;
+		stopAnimation();
+		meterStateRef.current = {
+			lastFrameMs: 0,
+			leftDb: METER_MIN_DB,
+			rightDb: METER_MIN_DB,
+			leftPeakDb: METER_MIN_DB,
+			rightPeakDb: METER_MIN_DB,
+			leftPeakHoldUntilMs: 0,
+			rightPeakHoldUntilMs: 0,
+		};
+		drawFrame(nowMilliseconds());
+	}, [active, drawFrame, stopAnimation]);
 
 	useEffect(() => {
 		return () => {

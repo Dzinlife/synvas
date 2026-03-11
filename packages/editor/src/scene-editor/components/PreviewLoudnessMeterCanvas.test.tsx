@@ -88,4 +88,20 @@ describe("PreviewLoudnessMeterCanvas", () => {
 
 		expect(rafCallbacks.size).toBe(1);
 	});
+
+	it("inactive 时收到音量信号也不会启动 RAF", () => {
+		render(<PreviewLoudnessMeterCanvas active={false} />);
+
+		act(() => {
+			emitSnapshot({
+				leftRms: 0.25,
+				rightRms: 0.2,
+				leftPeak: 0.4,
+				rightPeak: 0.35,
+				updatedAtMs: 1,
+			});
+		});
+
+		expect(rafCallbacks.size).toBe(0);
+	});
 });

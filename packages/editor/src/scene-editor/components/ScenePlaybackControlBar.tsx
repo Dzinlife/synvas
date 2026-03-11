@@ -142,7 +142,7 @@ const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 				<div className="text-md text-white font-mono font-medium tracking-tight">
 					{previewTimecode}
 				</div>
-				<PreviewLoudnessMeterCanvas />
+				<PreviewLoudnessMeterCanvas active={isPlaying} />
 			</div>
 			<div className="flex items-center gap-2">
 				<ExportVideoDialog

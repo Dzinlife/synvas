@@ -138,7 +138,7 @@ const PreviewControlBarComponent: React.FC = () => {
 								<span className="text-neutral-400">{previewTimecodeMuted}</span>
 								<span>{previewTimecodeStrong}</span>
 							</div>
-							<PreviewLoudnessMeterCanvas />
+							<PreviewLoudnessMeterCanvas active={isPlaying} />
 							{/* <div
 								className="flex items-center rounded-full border border-white/10 bg-black/40 p-0.5"
 								role="group"
