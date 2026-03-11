@@ -542,6 +542,51 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(box.y).toBeCloseTo(340, 1);
 	});
 
+	it("对角线 resize 会按双轴平均 scale 保持等比", () => {
+		const elementA = createElement("element-a", 300, 300);
+		const { result, timelineStore } = setupInteractions([elementA]);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(300, 300));
+			result.current.onLayerPointerUp(createPointerEvent(300, 300));
+		});
+
+		const topLeftHandle = result.current.handleItems.find(
+			(item) => item.handle === "top-left",
+		);
+		expect(topLeftHandle).toBeTruthy();
+		if (!topLeftHandle) return;
+
+		act(() => {
+			result.current.onLayerPointerDown(
+				createPointerEvent(topLeftHandle.screenX, topLeftHandle.screenY),
+			);
+			result.current.onLayerPointerMove(
+				createPointerEvent(
+					topLeftHandle.screenX - 30,
+					topLeftHandle.screenY - 20,
+				),
+			);
+			result.current.onLayerPointerUp(
+				createPointerEvent(
+					topLeftHandle.screenX - 30,
+					topLeftHandle.screenY - 20,
+				),
+			);
+		});
+
+		const resized = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "element-a");
+		expect(resized).toBeTruthy();
+		if (!resized) return;
+		const box = resolveSceneBox(resized);
+		expect(box.x).toBeCloseTo(222.5, 1);
+		expect(box.y).toBeCloseTo(238, 1);
+		expect(box.width).toBeCloseTo(127.5, 1);
+		expect(box.height).toBeCloseTo(102, 1);
+	});
+
 	it("Shift 单次拖拽可从 45° 回吸附到 0°", () => {
 		const elementA = createElement("element-a", 300, 300);
 		const { result, timelineStore } = setupInteractions([elementA]);

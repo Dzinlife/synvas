@@ -528,18 +528,13 @@ const resolveResizeAnchorDelta = (params: {
 	let height = Math.abs(bottom - top);
 
 	if (isCorner && baseFrameScreen.height > FOCUS_SCENE_EPSILON) {
-		const ratio =
-			baseFrameScreen.width /
-			Math.max(baseFrameScreen.height, FOCUS_SCENE_EPSILON);
-		const widthByHeight = height * ratio;
-		const heightByWidth = width / ratio;
-		const widthDelta = Math.abs(width - baseFrameScreen.width);
-		const heightDelta = Math.abs(height - baseFrameScreen.height);
-		if (widthDelta >= heightDelta) {
-			height = heightByWidth;
-		} else {
-			width = widthByHeight;
-		}
+		const safeBaseWidth = Math.max(baseFrameScreen.width, FOCUS_SCENE_EPSILON);
+		const safeBaseHeight = Math.max(baseFrameScreen.height, FOCUS_SCENE_EPSILON);
+		const scaleX = width / safeBaseWidth;
+		const scaleY = height / safeBaseHeight;
+		const scale = Math.max((scaleX + scaleY) / 2, 0);
+		width = baseFrameScreen.width * scale;
+		height = baseFrameScreen.height * scale;
 
 		if (centered) {
 			left = originCenterX - width / 2;
