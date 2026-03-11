@@ -218,7 +218,6 @@ const PreviewLoudnessMeterCanvas: React.FC<PreviewLoudnessMeterCanvasProps> = ({
 	}, []);
 
 	const startAnimation = useCallback(() => {
-		if (!active) return;
 		if (typeof window === "undefined") return;
 		if (rafIdRef.current !== null) return;
 		const animate = (frameTime: number) => {
@@ -230,7 +229,7 @@ const PreviewLoudnessMeterCanvas: React.FC<PreviewLoudnessMeterCanvasProps> = ({
 			rafIdRef.current = window.requestAnimationFrame(animate);
 		};
 		rafIdRef.current = window.requestAnimationFrame(animate);
-	}, [active, drawFrame]);
+	}, [drawFrame]);
 
 	const stopAnimation = useCallback(() => {
 		if (typeof window === "undefined") return;
@@ -282,7 +281,7 @@ const PreviewLoudnessMeterCanvas: React.FC<PreviewLoudnessMeterCanvasProps> = ({
 			if (!ctx) return;
 			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 			const shouldContinue = drawFrame(nowMilliseconds());
-			if (shouldContinue) {
+			if (shouldContinue && active) {
 				startAnimation();
 			}
 		};
@@ -296,22 +295,7 @@ const PreviewLoudnessMeterCanvas: React.FC<PreviewLoudnessMeterCanvasProps> = ({
 		return () => {
 			observer.disconnect();
 		};
-	}, [drawFrame, startAnimation]);
-
-	useEffect(() => {
-		if (active) return;
-		stopAnimation();
-		meterStateRef.current = {
-			lastFrameMs: 0,
-			leftDb: METER_MIN_DB,
-			rightDb: METER_MIN_DB,
-			leftPeakDb: METER_MIN_DB,
-			rightPeakDb: METER_MIN_DB,
-			leftPeakHoldUntilMs: 0,
-			rightPeakHoldUntilMs: 0,
-		};
-		drawFrame(nowMilliseconds());
-	}, [active, drawFrame, stopAnimation]);
+	}, [active, drawFrame, startAnimation]);
 
 	useEffect(() => {
 		return () => {

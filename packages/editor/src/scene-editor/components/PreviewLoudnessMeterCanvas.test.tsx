@@ -44,8 +44,21 @@ const emitSnapshot = (snapshot: PreviewLoudnessSnapshot) => {
 	}
 };
 
+const runNextRaf = (
+	callbacks: Map<number, FrameRequestCallback>,
+	frameTime: number,
+) => {
+	const [nextId, callback] = callbacks.entries().next().value ?? [];
+	if (!nextId || !callback) return;
+	callbacks.delete(nextId);
+	act(() => {
+		callback(frameTime);
+	});
+};
+
 describe("PreviewLoudnessMeterCanvas", () => {
 	let rafCallbacks: Map<number, FrameRequestCallback>;
+	let restoreCanvasContext: (() => void) | null = null;
 
 	beforeEach(() => {
 		snapshotState.value = createSilentSnapshot();
@@ -61,10 +74,27 @@ describe("PreviewLoudnessMeterCanvas", () => {
 		vi.stubGlobal("cancelAnimationFrame", (id: number) => {
 			rafCallbacks.delete(id);
 		});
+		const canvas2dContextStub = {
+			clearRect: vi.fn(),
+			fillRect: vi.fn(),
+			setTransform: vi.fn(),
+			fillStyle: "",
+		};
+		const contextSpy = vi
+			.spyOn(HTMLCanvasElement.prototype, "getContext")
+			.mockImplementation((contextId: string) => {
+				if (contextId !== "2d") return null;
+				return canvas2dContextStub as unknown as CanvasRenderingContext2D;
+			});
+		restoreCanvasContext = () => {
+			contextSpy.mockRestore();
+		};
 	});
 
 	afterEach(() => {
 		cleanup();
+		restoreCanvasContext?.();
+		restoreCanvasContext = null;
 		vi.unstubAllGlobals();
 	});
 
@@ -103,5 +133,31 @@ describe("PreviewLoudnessMeterCanvas", () => {
 		});
 
 		expect(rafCallbacks.size).toBe(0);
+	});
+
+	it("停止 active 后保留电平回落动画", () => {
+		const { rerender } = render(<PreviewLoudnessMeterCanvas active={true} />);
+
+		act(() => {
+			emitSnapshot({
+				leftRms: 0.28,
+				rightRms: 0.22,
+				leftPeak: 0.42,
+				rightPeak: 0.36,
+				updatedAtMs: 1,
+			});
+		});
+		expect(rafCallbacks.size).toBe(1);
+
+		runNextRaf(rafCallbacks, 16);
+		expect(rafCallbacks.size).toBe(1);
+
+		rerender(<PreviewLoudnessMeterCanvas active={false} />);
+		act(() => {
+			emitSnapshot(createSilentSnapshot());
+		});
+
+		runNextRaf(rafCallbacks, 32);
+		expect(rafCallbacks.size).toBe(1);
 	});
 });
