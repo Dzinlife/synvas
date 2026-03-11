@@ -344,12 +344,14 @@ const selectCornerResizeSnap = ({
 	deltaX,
 	deltaY,
 	guidesWorld,
+	preferSingleAxis,
 }: {
 	deltaX: number;
 	deltaY: number;
 	guidesWorld: CanvasSnapGuidesWorld;
+	preferSingleAxis: boolean;
 }) => {
-	if (deltaX !== 0 && deltaY !== 0) {
+	if (preferSingleAxis && deltaX !== 0 && deltaY !== 0) {
 		if (Math.abs(deltaX) <= Math.abs(deltaY)) {
 			return {
 				deltaX,
@@ -1584,6 +1586,7 @@ const CanvasWorkspace = () => {
 					deltaX: snapResult.deltaX,
 					deltaY: snapResult.deltaY,
 					guidesWorld: snapResult.guidesWorld,
+					preferSingleAxis: resizeSession.constraints.lockAspectRatio,
 				});
 				if (selectedSnap.deltaX !== 0 || selectedSnap.deltaY !== 0) {
 					const snappedBox = applyResizeSnapDeltaToBox(
@@ -2225,6 +2228,7 @@ const CanvasWorkspace = () => {
 						deltaX: snapResult.deltaX,
 						deltaY: snapResult.deltaY,
 						guidesWorld: snapResult.guidesWorld,
+						preferSingleAxis: groupResizeConstraints.lockAspectRatio,
 					});
 					if (selectedSnap.deltaX !== 0 || selectedSnap.deltaY !== 0) {
 						const snappedBoundsBox = applyResizeSnapDeltaToBox(

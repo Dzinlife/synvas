@@ -2318,6 +2318,27 @@ describe("CanvasWorkspace", () => {
 		expect(node?.x).toBe(560);
 	});
 
+	it("无比例约束 node 的角点 resize 可以同时吸附到两个轴", () => {
+		const textId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			name: "Snap Text",
+			text: "snap",
+			fontSize: 24,
+			x: 620,
+			y: 360,
+			width: 120,
+			height: 120,
+		});
+		render(<CanvasWorkspace />);
+		resizeNodeAt(620, 360, 562, 302, "top-left");
+		const project = useProjectStore.getState().currentProject;
+		const text = project?.canvas.nodes.find((item) => item.id === textId);
+		expect(text?.x).toBe(560);
+		expect(text?.y).toBe(300);
+		expect(text?.width).toBe(180);
+		expect(text?.height).toBe(180);
+	});
+
 	it("多选横向拖拽时 bbox 会等比缩放，text 也跟随外框比例变化", () => {
 		setAssetSceneSourceSize(400, 300);
 		const textId = useProjectStore.getState().createCanvasNode({
