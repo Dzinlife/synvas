@@ -60,6 +60,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 	const scheduleIdRef = useRef<number | null>(null);
 	const loadedWindowRef = useRef<LoadedWaveformWindow | null>(null);
 	const inflightRequestKeyRef = useRef<string | null>(null);
+	const lastFulfilledRequestKeyRef = useRef<string | null>(null);
 
 	const getAudioSink = useEffectEvent(() => audioSink);
 	const getAudioDuration = useEffectEvent(() => audioDuration);
@@ -293,7 +294,14 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 			const hasMatchingLoaded = loaded?.identityKey === identityKey;
 			const needRefresh =
 				!hasMatchingLoaded || !hasFullCoverage || !hasEnoughResolution;
-			if (needRefresh && inflightRequestKeyRef.current !== requestKey) {
+			const isSameAsLastFulfilled =
+				lastFulfilledRequestKeyRef.current === requestKey;
+			// 同一窗口参数已成功产出过结果时，避免因为边界浮点抖动反复触发刷新。
+			if (
+				needRefresh &&
+				inflightRequestKeyRef.current !== requestKey &&
+				!(hasMatchingLoaded && isSameAsLastFulfilled)
+			) {
 				inflightRequestKeyRef.current = requestKey;
 				const requestToken = ++renderTokenRef.current;
 				void getWaveformThumbnail({
@@ -302,6 +310,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 					windowEnd: sourceEnd,
 					decodeStart,
 					decodeEnd,
+					audioDuration: currentAudioDuration,
 					width: requestWidth,
 					height: canvasHeight,
 					pixelRatio,
@@ -313,6 +322,7 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 						if (!waveformCanvas) return;
 						if (renderTokenRef.current !== requestToken) return;
 						if (inflightRequestKeyRef.current !== requestKey) return;
+						lastFulfilledRequestKeyRef.current = requestKey;
 						loadedWindowRef.current = {
 							identityKey,
 							windowStart: sourceStart,
@@ -341,17 +351,17 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 		} catch (error) {
 			console.error("Failed to render waveform:", error);
 		}
-		}, [
-			uri,
-			clipDurationSeconds,
-			offsetSeconds,
-			fps,
-			timelineScale,
-			reversed,
-			color,
-			getAudioDuration,
-			getGainDb,
-			getAudioSink,
+	}, [
+		uri,
+		clipDurationSeconds,
+		offsetSeconds,
+		fps,
+		timelineScale,
+		reversed,
+		color,
+		getAudioDuration,
+		getGainDb,
+		getAudioSink,
 	]);
 
 	const scheduleGenerate = useCallback(() => {
@@ -371,21 +381,22 @@ export const AudioWaveformCanvas: React.FC<AudioWaveformCanvasProps> = ({
 			lastUriRef.current = uri ?? null;
 			loadedWindowRef.current = null;
 			inflightRequestKeyRef.current = null;
+			lastFulfilledRequestKeyRef.current = null;
 			renderTokenRef.current += 1;
 		}
 		scheduleGenerate();
-		}, [
-			uri,
-			audioDuration,
-			gainDb,
-			audioSink,
-			offsetSeconds,
-			clipDurationSeconds,
-			reversed,
-			start,
-			scrollLeft,
-			scheduleGenerate,
-		]);
+	}, [
+		uri,
+		audioDuration,
+		gainDb,
+		audioSink,
+		offsetSeconds,
+		clipDurationSeconds,
+		reversed,
+		start,
+		scrollLeft,
+		scheduleGenerate,
+	]);
 
 	useLayoutEffect(() => {
 		const canvas = canvasRef.current;

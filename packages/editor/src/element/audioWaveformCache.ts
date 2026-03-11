@@ -95,13 +95,20 @@ const createEmptyLoudnessChunk = (chunkIndex: number): LoudnessChunk => ({
 const buildLoudnessChunk = async (options: {
 	chunkIndex: number;
 	audioSink: AudioBufferSink;
+	audioDuration?: number;
 }): Promise<LoudnessChunk | null> => {
-	const { chunkIndex, audioSink } = options;
+	const { chunkIndex, audioSink, audioDuration } = options;
 	const chunk = createEmptyLoudnessChunk(chunkIndex);
 	const chunkStart = chunkIndex * LOUDNESS_CHUNK_DURATION;
 	const chunkEnd = chunkStart + LOUDNESS_CHUNK_DURATION;
+	const normalizedAudioDuration = audioDuration ?? Number.NaN;
+	const safeAudioDuration =
+		Number.isFinite(normalizedAudioDuration) && normalizedAudioDuration > 0
+			? normalizedAudioDuration
+			: Number.POSITIVE_INFINITY;
 	const decodeStart = Math.max(0, chunkStart);
-	const decodeEnd = Math.max(decodeStart, chunkEnd);
+	// 尾段 chunk 必须裁到真实音频末尾，避免对超尾部区间反复解码。
+	const decodeEnd = Math.max(decodeStart, Math.min(chunkEnd, safeAudioDuration));
 	if (!Number.isFinite(decodeStart) || !Number.isFinite(decodeEnd)) return null;
 	if (decodeEnd <= decodeStart) return chunk;
 
@@ -196,7 +203,8 @@ const buildLoudnessChunk = async (options: {
 		}
 	} catch (error) {
 		console.warn("Failed to build loudness chunk:", error);
-		return null;
+		// 失败时返回空 chunk 并写入缓存，避免相同尾段在每次缩放/重绘时无限重试。
+		return chunk;
 	}
 
 	for (let i = 0; i < LOUDNESS_CHUNK_BIN_COUNT; i += 1) {
@@ -212,8 +220,9 @@ const getLoudnessChunk = async (options: {
 	uri: string;
 	chunkIndex: number;
 	audioSink: AudioBufferSink;
+	audioDuration?: number;
 }): Promise<LoudnessChunk | null> => {
-	const { uri, chunkIndex, audioSink } = options;
+	const { uri, chunkIndex, audioSink, audioDuration } = options;
 	if (chunkIndex < 0) return null;
 
 	const chunkKey = getLoudnessChunkKey(uri, chunkIndex);
@@ -227,7 +236,11 @@ const getLoudnessChunk = async (options: {
 	if (inflight) return inflight;
 
 	const promise = (async () => {
-		const chunk = await buildLoudnessChunk({ chunkIndex, audioSink });
+		const chunk = await buildLoudnessChunk({
+			chunkIndex,
+			audioSink,
+			audioDuration,
+		});
 		if (!chunk) return null;
 		loudnessChunkCache.set(chunkKey, chunk);
 		touchLoudnessChunkKey(chunkKey);
@@ -246,10 +259,11 @@ const getLoudnessChunk = async (options: {
 const getLoudnessChunksForRange = async (options: {
 	uri: string;
 	audioSink: AudioBufferSink;
+	audioDuration?: number;
 	windowStart: number;
 	windowEnd: number;
 }): Promise<Map<number, LoudnessChunk>> => {
-	const { uri, audioSink, windowStart, windowEnd } = options;
+	const { uri, audioSink, audioDuration, windowStart, windowEnd } = options;
 	const rangeStart = Math.max(0, windowStart);
 	const rangeEnd = Math.max(0, windowEnd);
 	const chunkMap = new Map<number, LoudnessChunk>();
@@ -265,7 +279,14 @@ const getLoudnessChunksForRange = async (options: {
 
 	const chunkPromises: Promise<LoudnessChunk | null>[] = [];
 	for (let i = startChunk; i <= endChunk; i += 1) {
-		chunkPromises.push(getLoudnessChunk({ uri, chunkIndex: i, audioSink }));
+		chunkPromises.push(
+			getLoudnessChunk({
+				uri,
+				chunkIndex: i,
+				audioSink,
+				audioDuration,
+			}),
+		);
 	}
 	const chunkList = await Promise.all(chunkPromises);
 	for (const chunk of chunkList) {
@@ -281,6 +302,7 @@ export const getWaveformThumbnail = async (options: {
 	windowEnd: number;
 	decodeStart?: number;
 	decodeEnd?: number;
+	audioDuration?: number;
 	width: number;
 	height: number;
 	pixelRatio: number;
@@ -295,6 +317,7 @@ export const getWaveformThumbnail = async (options: {
 		windowEnd,
 		decodeStart,
 		decodeEnd,
+		audioDuration,
 		width,
 		height,
 		pixelRatio,
@@ -352,6 +375,7 @@ export const getWaveformThumbnail = async (options: {
 					? await getLoudnessChunksForRange({
 							uri,
 							audioSink,
+							audioDuration,
 							windowStart: sampleWindowStart,
 							windowEnd: sampleWindowEnd,
 						})
@@ -378,8 +402,9 @@ export const getWaveformThumbnail = async (options: {
 					const chunk = chunkMap.get(chunkIndex);
 					if (!chunk) continue;
 					const localIndex = bin - chunkIndex * LOUDNESS_CHUNK_BIN_COUNT;
-					if (localIndex < 0 || localIndex >= LOUDNESS_CHUNK_BIN_COUNT)
+					if (localIndex < 0 || localIndex >= LOUDNESS_CHUNK_BIN_COUNT) {
 						continue;
+					}
 					if (!chunk.hasData[localIndex]) continue;
 					const binPeak = chunk.peak[localIndex];
 					if (binPeak > bucketPeak) bucketPeak = binPeak;
