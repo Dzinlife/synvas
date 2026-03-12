@@ -1,4 +1,11 @@
+import {
+	type OtCommand,
+	type OtOpEnvelope,
+	type OtStreamId,
+	createOtEngine,
+} from "core/editor/ot";
 import type { TimelineJSON } from "core/editor/timelineLoader";
+import { mergeStudioOtSnapshot } from "core/studio/ot";
 import type { CanvasNode, SceneDocument } from "core/studio/types";
 import { create } from "zustand";
 import { useProjectStore } from "@/projects/projectStore";
@@ -35,14 +42,12 @@ type SceneTimelineHistoryItem = {
 
 type SceneTimelineHistoryEntry = SceneTimelineHistoryItem & {
 	kind: "scene.timeline";
-	focusNodeId: string | null;
 	opId?: string;
 };
 
 type SceneTimelineBatchHistoryEntry = {
 	kind: "scene.timeline.batch";
 	entries: SceneTimelineHistoryItem[];
-	focusNodeId: string | null;
 	opId?: string;
 };
 
@@ -88,24 +93,75 @@ export type StudioHistoryEntry =
 			focusNodeId: string | null;
 	  };
 
+type StudioHistoryEntryWithMeta = StudioHistoryEntry & {
+	__otOpId?: string;
+	__streamId?: OtStreamId;
+};
+
+type StudioOtCommand = OtCommand & {
+	id:
+		| "scene.timeline"
+		| "scene.timeline.batch"
+		| "canvas.node-layout"
+		| "canvas.node-layout.batch"
+		| "canvas.node-create"
+		| "canvas.node-create.batch"
+		| "canvas.node-delete"
+		| "canvas.node-delete.batch";
+};
+
 interface StudioHistoryState {
-	past: StudioHistoryEntry[];
-	future: StudioHistoryEntry[];
+	past: StudioHistoryEntryWithMeta[];
+	future: StudioHistoryEntryWithMeta[];
+	pastByStream: Record<string, StudioHistoryEntryWithMeta[]>;
+	futureByStream: Record<string, StudioHistoryEntryWithMeta[]>;
+	opLog: OtOpEnvelope<StudioOtCommand>[];
 	isApplying: boolean;
 	canUndo: boolean;
 	canRedo: boolean;
+	latestTimelineOpIds: Record<string, string | undefined>;
 	push: (entry: StudioHistoryEntry) => void;
 	undo: (options?: HistoryApplyOptions) => void;
 	redo: (options?: HistoryApplyOptions) => void;
 	clear: () => void;
+	getLatestTimelineOpId: (sceneId: string) => string | undefined;
 }
 
 const HISTORY_LIMIT = 200;
+const CANVAS_STREAM_ID: OtStreamId = "canvas";
 
 interface HistoryApplyOptions {
 	timelineStore?: TimelineStoreApi;
 	runtimeManager?: StudioRuntimeManager;
+	streamId?: OtStreamId;
 }
+
+const createHistoryEngine = () => {
+	return createOtEngine<StudioOtCommand>({
+		actorId: "studio-local",
+	});
+};
+
+let historyEngine = createHistoryEngine();
+
+const createCompensationTxnId = (prefix: "undo" | "redo"): string => {
+	return `${prefix}-${Date.now().toString(36)}-${Math.random()
+		.toString(36)
+		.slice(2, 8)}`;
+};
+
+const syncProjectOtSnapshot = () => {
+	const snapshot = historyEngine.getSnapshot();
+	useProjectStore.setState((state) => {
+		if (!state.currentProject) return state;
+		return {
+			currentProject: {
+				...state.currentProject,
+				ot: mergeStudioOtSnapshot(state.currentProject.ot, snapshot),
+			},
+		};
+	});
+};
 
 const resolveTimelineRef = (
 	entry: Pick<SceneTimelineHistoryItem, "timelineRef" | "sceneId">,
@@ -159,43 +215,54 @@ const mergeSceneTimelineBatchEntries = (
 	);
 };
 
-const tryMergeSceneTimelineEntry = (
-	past: StudioHistoryEntry[],
-	nextEntry: SceneTimelineHistoryEntry,
-): StudioHistoryEntry | null => {
-	const lastEntry = past[past.length - 1];
-	if (!lastEntry || !nextEntry.opId) return null;
-	if (lastEntry.kind === "scene.timeline") {
-		if (lastEntry.opId !== nextEntry.opId) return null;
-		const lastKey = resolveSceneTimelineKey(lastEntry);
-		const nextKey = resolveSceneTimelineKey(nextEntry);
-		if (lastKey && nextKey && lastKey === nextKey) {
-			return {
-				...lastEntry,
-				after: nextEntry.after,
-			};
-		}
-		return {
-			kind: "scene.timeline.batch",
-			opId: nextEntry.opId,
-			focusNodeId: lastEntry.focusNodeId,
-			entries: mergeSceneTimelineBatchEntries(
-				[toSceneTimelineHistoryItem(lastEntry)],
-				toSceneTimelineHistoryItem(nextEntry),
-			),
-		};
+const resolveHistoryStreamId = (entry: StudioHistoryEntry): OtStreamId => {
+	if (entry.kind === "scene.timeline") {
+		const key = resolveSceneTimelineKey(entry);
+		if (!key) return CANVAS_STREAM_ID;
+		const sceneId = key.split(":")[1] ?? "";
+		if (!sceneId) return CANVAS_STREAM_ID;
+		return `timeline:${sceneId}` as OtStreamId;
 	}
-	if (lastEntry.kind === "scene.timeline.batch") {
-		if (lastEntry.opId !== nextEntry.opId) return null;
-		return {
-			...lastEntry,
-			entries: mergeSceneTimelineBatchEntries(
-				lastEntry.entries,
-				toSceneTimelineHistoryItem(nextEntry),
-			),
-		};
+	if (entry.kind === "scene.timeline.batch") {
+		const first = entry.entries[0];
+		if (!first) return CANVAS_STREAM_ID;
+		const key = resolveSceneTimelineKey(first);
+		const sceneId = key?.split(":")[1] ?? "";
+		if (!sceneId) return CANVAS_STREAM_ID;
+		return `timeline:${sceneId}` as OtStreamId;
 	}
-	return null;
+	return CANVAS_STREAM_ID;
+};
+
+const toEntryWithMeta = (
+	entry: StudioHistoryEntry,
+	opId: string,
+	streamId: OtStreamId,
+): StudioHistoryEntryWithMeta => {
+	return {
+		...entry,
+		__otOpId: opId,
+		__streamId: streamId,
+	};
+};
+
+const toOtCommand = (entry: StudioHistoryEntry): StudioOtCommand => {
+	return {
+		id: entry.kind,
+		args: { entry } as Record<string, unknown>,
+	};
+};
+
+const getEntryOpId = (entry: StudioHistoryEntryWithMeta): string | undefined => {
+	if (entry.kind === "scene.timeline" || entry.kind === "scene.timeline.batch") {
+		return entry.opId ?? entry.__otOpId;
+	}
+	return entry.__otOpId;
+};
+
+const trimEntries = <T,>(entries: T[]): T[] => {
+	if (entries.length <= HISTORY_LIMIT) return entries;
+	return entries.slice(entries.length - HISTORY_LIMIT);
 };
 
 const applySceneTimelineHistoryItem = (
@@ -239,8 +306,6 @@ const applyEntry = (
 	options?: HistoryApplyOptions,
 ): void => {
 	const projectStore = useProjectStore.getState();
-	const nextFocusNodeId = entry.focusNodeId;
-	projectStore.setFocusedNode(nextFocusNodeId);
 	if (entry.kind === "scene.timeline") {
 		applySceneTimelineHistoryItem(entry, mode, options);
 		return;
@@ -251,6 +316,8 @@ const applyEntry = (
 		}
 		return;
 	}
+	const nextFocusNodeId = entry.focusNodeId;
+	projectStore.setFocusedNode(nextFocusNodeId);
 	if (entry.kind === "canvas.node-layout") {
 		const patch = mode === "undo" ? entry.before : entry.after;
 		projectStore.updateCanvasNodeLayout(entry.nodeId, patch);
@@ -312,84 +379,389 @@ const applyEntry = (
 	}
 };
 
+const updateLatestTimelineOpIds = (
+	latest: Record<string, string | undefined>,
+	entry: StudioHistoryEntryWithMeta,
+): Record<string, string | undefined> => {
+	if (entry.kind === "scene.timeline") {
+		const sceneId = entry.timelineRef?.sceneId ?? entry.sceneId;
+		if (!sceneId) return latest;
+		return {
+			...latest,
+			[sceneId]: getEntryOpId(entry),
+		};
+	}
+	if (entry.kind === "scene.timeline.batch") {
+		let next = latest;
+		for (const item of entry.entries) {
+			const sceneId = item.timelineRef?.sceneId ?? item.sceneId;
+			if (!sceneId) continue;
+			next = {
+				...next,
+				[sceneId]: entry.opId,
+			};
+		}
+		return next;
+	}
+	return latest;
+};
+
+const collectLinkedEntries = (
+	entriesByStream: Record<string, StudioHistoryEntryWithMeta[]>,
+	seedEntry: StudioHistoryEntryWithMeta,
+	mode: "undo" | "redo",
+): Array<{ streamId: OtStreamId; entry: StudioHistoryEntryWithMeta }> => {
+	const seedOpId = getEntryOpId(seedEntry);
+	if (!seedOpId) return [];
+	const result: Array<{ streamId: OtStreamId; entry: StudioHistoryEntryWithMeta }> = [];
+	for (const [streamIdRaw, entries] of Object.entries(entriesByStream)) {
+		const streamId = streamIdRaw as OtStreamId;
+		if (entries.length === 0) continue;
+		if (mode === "undo") {
+			for (let index = entries.length - 1; index >= 0; index -= 1) {
+				const candidate = entries[index];
+				if (getEntryOpId(candidate) !== seedOpId) continue;
+				result.push({ streamId, entry: candidate });
+				break;
+			}
+			continue;
+		}
+		for (const candidate of entries) {
+			if (getEntryOpId(candidate) !== seedOpId) continue;
+			result.push({ streamId, entry: candidate });
+			break;
+		}
+	}
+	return result;
+};
+
+const mergeLatestTimelineEntry = (
+	existing: StudioHistoryEntryWithMeta[],
+	nextEntry: StudioHistoryEntryWithMeta,
+): StudioHistoryEntryWithMeta[] => {
+	if (nextEntry.kind !== "scene.timeline") {
+		return [...existing, nextEntry];
+	}
+	const lastEntry = existing[existing.length - 1];
+	if (!lastEntry || lastEntry.kind !== "scene.timeline") {
+		return [...existing, nextEntry];
+	}
+	const lastOpId = getEntryOpId(lastEntry);
+	const nextOpId = getEntryOpId(nextEntry);
+	if (!lastOpId || !nextOpId || lastOpId !== nextOpId) {
+		return [...existing, nextEntry];
+	}
+	const lastKey = resolveSceneTimelineKey(lastEntry);
+	const nextKey = resolveSceneTimelineKey(nextEntry);
+	if (!lastKey || !nextKey || lastKey !== nextKey) {
+		return [...existing, nextEntry];
+	}
+	const merged: StudioHistoryEntryWithMeta = {
+		...lastEntry,
+		after: nextEntry.after,
+	};
+	return [...existing.slice(0, -1), merged];
+};
+
+const mergeGlobalTimelineEntry = (
+	existing: StudioHistoryEntryWithMeta[],
+	nextEntry: StudioHistoryEntryWithMeta,
+): StudioHistoryEntryWithMeta[] => {
+	if (nextEntry.kind !== "scene.timeline" || !nextEntry.opId) {
+		return [...existing, nextEntry];
+	}
+	const lastEntry = existing[existing.length - 1];
+	if (!lastEntry) {
+		return [...existing, nextEntry];
+	}
+	if (lastEntry.kind === "scene.timeline" && lastEntry.opId === nextEntry.opId) {
+		const mergedItems = mergeSceneTimelineBatchEntries(
+			[toSceneTimelineHistoryItem(lastEntry)],
+			toSceneTimelineHistoryItem(nextEntry),
+		);
+		if (mergedItems.length === 1) {
+			const mergedSingle: StudioHistoryEntryWithMeta = {
+				...lastEntry,
+				after: nextEntry.after,
+				__otOpId: nextEntry.__otOpId ?? lastEntry.__otOpId,
+				__streamId: nextEntry.__streamId ?? lastEntry.__streamId,
+			};
+			return [...existing.slice(0, -1), mergedSingle];
+		}
+		const mergedBatch: StudioHistoryEntryWithMeta = {
+			kind: "scene.timeline.batch",
+			entries: mergedItems,
+			opId: nextEntry.opId,
+			__otOpId: nextEntry.__otOpId ?? lastEntry.__otOpId,
+			__streamId: nextEntry.__streamId ?? lastEntry.__streamId,
+		};
+		return [...existing.slice(0, -1), mergedBatch];
+	}
+	if (
+		lastEntry.kind === "scene.timeline.batch" &&
+		lastEntry.opId &&
+		lastEntry.opId === nextEntry.opId
+	) {
+		const mergedBatch: StudioHistoryEntryWithMeta = {
+			...lastEntry,
+			entries: mergeSceneTimelineBatchEntries(
+				lastEntry.entries,
+				toSceneTimelineHistoryItem(nextEntry),
+			),
+			__otOpId: nextEntry.__otOpId ?? lastEntry.__otOpId,
+			__streamId: nextEntry.__streamId ?? lastEntry.__streamId,
+		};
+		return [...existing.slice(0, -1), mergedBatch];
+	}
+	return [...existing, nextEntry];
+};
+
+const recomputeFlags = (
+	past: StudioHistoryEntryWithMeta[],
+	future: StudioHistoryEntryWithMeta[],
+) => {
+	const canUndo = past.length > 0;
+	const canRedo = future.length > 0;
+	return { canUndo, canRedo };
+};
+
+const removeEntryFromList = <T,>(entries: T[], target: T): T[] => {
+	const index = entries.lastIndexOf(target);
+	if (index < 0) return entries;
+	return [...entries.slice(0, index), ...entries.slice(index + 1)];
+};
+
+const resolveTrackedEntries = (
+	entriesByStream: Record<string, StudioHistoryEntryWithMeta[]>,
+	targetEntry: StudioHistoryEntryWithMeta,
+	mode: "undo" | "redo",
+): Array<{ streamId: OtStreamId; entry: StudioHistoryEntryWithMeta }> => {
+	const linkedEntries = collectLinkedEntries(entriesByStream, targetEntry, mode);
+	if (linkedEntries.length > 0) return linkedEntries;
+
+	const fallbackStreamId = targetEntry.__streamId ?? resolveHistoryStreamId(targetEntry);
+	const fallbackEntries = entriesByStream[fallbackStreamId] ?? [];
+	if (fallbackEntries.length === 0) return [];
+	if (mode === "undo") {
+		const tail = fallbackEntries[fallbackEntries.length - 1];
+		return tail ? [{ streamId: fallbackStreamId, entry: tail }] : [];
+	}
+	const head = fallbackEntries[0];
+	return head ? [{ streamId: fallbackStreamId, entry: head }] : [];
+};
+
+const resolveCompensationStreamIds = (
+	targetEntry: StudioHistoryEntryWithMeta,
+	trackedEntries: Array<{ streamId: OtStreamId; entry: StudioHistoryEntryWithMeta }>,
+): OtStreamId[] => {
+	if (trackedEntries.length > 0) {
+		return Array.from(new Set(trackedEntries.map((item) => item.streamId)));
+	}
+	if (targetEntry.kind === "scene.timeline.batch") {
+		return Array.from(
+			new Set(
+				targetEntry.entries
+					.map((item) => item.timelineRef?.sceneId ?? item.sceneId)
+					.filter((sceneId): sceneId is string => Boolean(sceneId))
+					.map((sceneId) => `timeline:${sceneId}` as OtStreamId),
+			),
+		);
+	}
+	return [targetEntry.__streamId ?? resolveHistoryStreamId(targetEntry)];
+};
+
 export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 	past: [],
 	future: [],
+	pastByStream: {},
+	futureByStream: {},
+	opLog: [],
 	isApplying: false,
 	canUndo: false,
 	canRedo: false,
+	latestTimelineOpIds: {},
 	push: (entry) => {
-		set((state) => {
-			if (entry.kind === "scene.timeline") {
-				const mergedEntry = tryMergeSceneTimelineEntry(state.past, entry);
-				if (mergedEntry) {
-					const nextPast = [...state.past.slice(0, -1), mergedEntry];
-					return {
-						past: nextPast,
-						future: [],
-						canUndo: nextPast.length > 0,
-						canRedo: false,
-					};
-				}
-			}
-
-			const nextPast = [...state.past, entry];
-			const trimmedPast =
-				nextPast.length > HISTORY_LIMIT
-					? nextPast.slice(nextPast.length - HISTORY_LIMIT)
-					: nextPast;
-			return {
-				past: trimmedPast,
-				future: [],
-				canUndo: trimmedPast.length > 0,
-				canRedo: false,
-			};
+		const streamId = resolveHistoryStreamId(entry);
+		const incomingOpId =
+			entry.kind === "scene.timeline" || entry.kind === "scene.timeline.batch"
+				? entry.opId
+				: undefined;
+		const otOp = historyEngine.applyLocal({
+			streamId,
+			command: toOtCommand(entry),
+			txnId: incomingOpId,
 		});
-	},
-	undo: (options) => {
-		const { past, future } = get();
-		if (past.length === 0) return;
-		const entry = past[past.length - 1];
-		set({ isApplying: true });
-		try {
-			applyEntry(entry, "undo", options);
-			const nextPast = past.slice(0, -1);
-			const nextFuture = [entry, ...future];
-			set({
+		set((state) => {
+			const nextEntry = toEntryWithMeta(entry, otOp.opId, streamId);
+			const existingStreamPast = state.pastByStream[streamId] ?? [];
+			const mergedStreamPast = mergeLatestTimelineEntry(existingStreamPast, nextEntry);
+			const trimmedStreamPast = trimEntries(mergedStreamPast);
+			const nextPastByStream = {
+				...state.pastByStream,
+				[streamId]: trimmedStreamPast,
+			};
+			const nextFutureByStream: Record<string, StudioHistoryEntryWithMeta[]> = {};
+			const nextPast = trimEntries(mergeGlobalTimelineEntry(state.past, nextEntry));
+			const nextFuture: StudioHistoryEntryWithMeta[] = [];
+			const flags = recomputeFlags(nextPast, nextFuture);
+			return {
+				pastByStream: nextPastByStream,
+				futureByStream: nextFutureByStream,
 				past: nextPast,
 				future: nextFuture,
-				canUndo: nextPast.length > 0,
-				canRedo: nextFuture.length > 0,
+				opLog: historyEngine.getSnapshot().opLog,
+				latestTimelineOpIds: updateLatestTimelineOpIds(
+					state.latestTimelineOpIds,
+					nextEntry,
+				),
+				...flags,
+			};
+		});
+		syncProjectOtSnapshot();
+	},
+	undo: (options) => {
+		const stateSnapshot = get();
+		const targetEntry = stateSnapshot.past[stateSnapshot.past.length - 1];
+		if (!targetEntry) return;
+		set({ isApplying: true });
+		try {
+			const undoItems = resolveTrackedEntries(
+				stateSnapshot.pastByStream,
+				targetEntry,
+				"undo",
+			);
+			applyEntry(targetEntry, "undo", options);
+			const undoTxnId = createCompensationTxnId("undo");
+			const compensationStreamIds = resolveCompensationStreamIds(
+				targetEntry,
+				undoItems,
+			);
+			for (const streamId of compensationStreamIds) {
+				const sourceOpId = targetEntry.__otOpId;
+				historyEngine.applyLocal({
+					streamId,
+					command: {
+						id: targetEntry.kind,
+						args: {
+							mode: "undo",
+							entry: targetEntry,
+						},
+					},
+					causedBy: sourceOpId ? [sourceOpId] : [],
+					inverseOf: sourceOpId,
+					txnId: undoTxnId,
+					trackUndo: false,
+				});
+			}
+
+			set((state) => {
+				const nextPastByStream = { ...state.pastByStream };
+				const nextFutureByStream = { ...state.futureByStream };
+				const nextPast = state.past.slice(0, -1);
+				const nextFuture = [targetEntry, ...state.future];
+				for (const item of undoItems) {
+					const entries = nextPastByStream[item.streamId] ?? [];
+					nextPastByStream[item.streamId] = removeEntryFromList(entries, item.entry);
+					nextFutureByStream[item.streamId] = [
+						item.entry,
+						...(nextFutureByStream[item.streamId] ?? []),
+					];
+				}
+				const flags = recomputeFlags(nextPast, nextFuture);
+				return {
+					pastByStream: nextPastByStream,
+					futureByStream: nextFutureByStream,
+					past: nextPast,
+					future: nextFuture,
+					...flags,
+				};
 			});
+			syncProjectOtSnapshot();
 		} finally {
 			set({ isApplying: false });
 		}
 	},
 	redo: (options) => {
-		const { past, future } = get();
-		if (future.length === 0) return;
-		const entry = future[0];
+		const stateSnapshot = get();
+		const targetEntry = stateSnapshot.future[0];
+		if (!targetEntry) return;
 		set({ isApplying: true });
 		try {
-			applyEntry(entry, "redo", options);
-			const nextFuture = future.slice(1);
-			const nextPast = [...past, entry];
-			set({
-				past: nextPast,
-				future: nextFuture,
-				canUndo: nextPast.length > 0,
-				canRedo: nextFuture.length > 0,
+			const redoItems = resolveTrackedEntries(
+				stateSnapshot.futureByStream,
+				targetEntry,
+				"redo",
+			);
+			applyEntry(targetEntry, "redo", options);
+			const redoTxnId = createCompensationTxnId("redo");
+			const compensationStreamIds = resolveCompensationStreamIds(
+				targetEntry,
+				redoItems,
+			);
+			for (const streamId of compensationStreamIds) {
+				const sourceOpId = targetEntry.__otOpId;
+				historyEngine.applyLocal({
+					streamId,
+					command: {
+						id: targetEntry.kind,
+						args: {
+							mode: "redo",
+							entry: targetEntry,
+						},
+					},
+					causedBy: sourceOpId ? [sourceOpId] : [],
+					txnId: redoTxnId,
+					trackUndo: false,
+				});
+			}
+
+			set((state) => {
+				const nextPastByStream = { ...state.pastByStream };
+				const nextFutureByStream = { ...state.futureByStream };
+				const nextPast = trimEntries([...state.past, targetEntry]);
+				const nextFuture = state.future.slice(1);
+				for (const item of redoItems) {
+					const entries = nextFutureByStream[item.streamId] ?? [];
+					const nextEntries = [...entries];
+					const index = nextEntries.indexOf(item.entry);
+					if (index >= 0) {
+						nextEntries.splice(index, 1);
+					}
+					nextFutureByStream[item.streamId] = nextEntries;
+					nextPastByStream[item.streamId] = trimEntries([
+						...(nextPastByStream[item.streamId] ?? []),
+						item.entry,
+					]);
+				}
+				const flags = recomputeFlags(nextPast, nextFuture);
+				return {
+					pastByStream: nextPastByStream,
+					futureByStream: nextFutureByStream,
+					past: nextPast,
+					future: nextFuture,
+					...flags,
+				};
 			});
+			syncProjectOtSnapshot();
 		} finally {
 			set({ isApplying: false });
 		}
 	},
 	clear: () => {
+		historyEngine = createHistoryEngine();
 		set({
 			past: [],
 			future: [],
+			pastByStream: {},
+			futureByStream: {},
+			opLog: [],
 			canUndo: false,
 			canRedo: false,
+			latestTimelineOpIds: {},
 		});
+		syncProjectOtSnapshot();
+	},
+	getLatestTimelineOpId: (sceneId) => {
+		return get().latestTimelineOpIds[sceneId];
 	},
 }));

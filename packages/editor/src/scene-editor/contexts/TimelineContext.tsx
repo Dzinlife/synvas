@@ -135,6 +135,8 @@ export interface TimelineStore {
 	historyPast: TimelineHistorySnapshot[];
 	historyFuture: TimelineHistorySnapshot[];
 	lastCommittedHistoryOpId: string | null;
+	lastHistoryCommitSnapshot: TimelineHistorySnapshot | null;
+	historyCommitRevision: number;
 	historyLimit: number;
 	canvasSize: { width: number; height: number };
 	isPlaying: boolean;
@@ -304,16 +306,23 @@ const withHistoryCommit = (
 	historyOpId?: string,
 ): Pick<
 	TimelineStore,
-	"historyPast" | "historyFuture" | "lastCommittedHistoryOpId"
+	| "historyPast"
+	| "historyFuture"
+	| "lastCommittedHistoryOpId"
+	| "lastHistoryCommitSnapshot"
+	| "historyCommitRevision"
 > => {
+	const snapshot = buildHistorySnapshot(state);
 	const nextPast = trimHistory(
-		[...state.historyPast, buildHistorySnapshot(state)],
+		[...state.historyPast, snapshot],
 		state.historyLimit,
 	);
 	return {
 		historyPast: nextPast,
 		historyFuture: [],
 		lastCommittedHistoryOpId: historyOpId ?? createHistoryOpId(),
+		lastHistoryCommitSnapshot: snapshot,
+		historyCommitRevision: state.historyCommitRevision + 1,
 	};
 };
 
@@ -410,6 +419,8 @@ export const createTimelineStore = (): TimelineStoreApi => {
 			historyPast: [],
 			historyFuture: [],
 			lastCommittedHistoryOpId: null,
+			lastHistoryCommitSnapshot: null,
+			historyCommitRevision: 0,
 			historyLimit: HISTORY_LIMIT,
 			canvasSize: { width: 1920, height: 1080 },
 			isPlaying: false,
@@ -616,18 +627,19 @@ export const createTimelineStore = (): TimelineStoreApi => {
 						state.selectedIds,
 						state.primarySelectedId,
 					);
-					return {
-						elements: previous.elements,
-						tracks: previous.tracks,
-						audioTrackStates: previous.audioTrackStates,
-						rippleEditingEnabled: previous.rippleEditingEnabled,
-						historyPast: nextPast,
-						historyFuture: nextFuture,
-						lastCommittedHistoryOpId: null,
-						selectedIds: selection.selectedIds,
-						primarySelectedId: selection.primarySelectedId,
-						isPlaying: false,
-					};
+						return {
+							elements: previous.elements,
+							tracks: previous.tracks,
+							audioTrackStates: previous.audioTrackStates,
+							rippleEditingEnabled: previous.rippleEditingEnabled,
+							historyPast: nextPast,
+							historyFuture: nextFuture,
+							lastCommittedHistoryOpId: null,
+							lastHistoryCommitSnapshot: null,
+							selectedIds: selection.selectedIds,
+							primarySelectedId: selection.primarySelectedId,
+							isPlaying: false,
+						};
 				});
 			},
 
@@ -648,30 +660,32 @@ export const createTimelineStore = (): TimelineStoreApi => {
 						state.selectedIds,
 						state.primarySelectedId,
 					);
-					return {
-						elements: next.elements,
-						tracks: next.tracks,
-						audioTrackStates: next.audioTrackStates,
-						rippleEditingEnabled: next.rippleEditingEnabled,
-						historyPast: nextPast,
-						historyFuture: nextFuture,
-						lastCommittedHistoryOpId: null,
-						selectedIds: selection.selectedIds,
-						primarySelectedId: selection.primarySelectedId,
-						isPlaying: false,
-					};
+						return {
+							elements: next.elements,
+							tracks: next.tracks,
+							audioTrackStates: next.audioTrackStates,
+							rippleEditingEnabled: next.rippleEditingEnabled,
+							historyPast: nextPast,
+							historyFuture: nextFuture,
+							lastCommittedHistoryOpId: null,
+							lastHistoryCommitSnapshot: null,
+							selectedIds: selection.selectedIds,
+							primarySelectedId: selection.primarySelectedId,
+							isPlaying: false,
+						};
 				});
 			},
 
-			resetHistory: () => {
-				set({
-					historyPast: [],
-					historyFuture: [],
-					lastCommittedHistoryOpId: null,
-					selectedIds: [],
-					primarySelectedId: null,
-				});
-			},
+				resetHistory: () => {
+					set({
+						historyPast: [],
+						historyFuture: [],
+						lastCommittedHistoryOpId: null,
+						lastHistoryCommitSnapshot: null,
+						selectedIds: [],
+						primarySelectedId: null,
+					});
+				},
 
 			setTrackHidden: (trackId: string, hidden: boolean) => {
 				set((state) => {

@@ -12,6 +12,7 @@ import {
 	shiftMainTrackElementsAfter,
 } from "@/scene-editor/utils/mainTrackMagnet";
 import { updateElementTime } from "@/scene-editor/utils/timelineTime";
+import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import type {
 	ComponentModel,
 	ComponentModelStore,
@@ -241,11 +242,14 @@ const createSceneReferenceClipModel = (
 			),
 		});
 		if (nextElements === timelineState.elements) return;
-		const propagatedOpId =
+		const propagatedOpId = useStudioHistoryStore
+			.getState()
+			.getLatestTimelineOpId(sceneId);
+		const fallbackHistoryOpId =
 			useProjectStore.getState().sceneTimelineMutationOpIds[sceneId];
 		timelineState.setElements(nextElements, {
 			history: true,
-			historyOpId: propagatedOpId,
+			historyOpId: propagatedOpId ?? fallbackHistoryOpId,
 		});
 	};
 

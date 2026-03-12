@@ -22,7 +22,9 @@ import {
 	snapshotTimelineFromStore,
 } from "./timelineSession";
 
-type TimelineHistorySnapshot = TimelineStore["historyPast"][number];
+type TimelineHistorySnapshot = NonNullable<
+	TimelineStore["lastHistoryCommitSnapshot"]
+>;
 
 const cloneAudioSettings = (audio: TimelineStore["audioSettings"]) => ({
 	...audio,
@@ -49,8 +51,7 @@ const buildTimelineFromHistorySnapshot = (
 };
 
 type RuntimePersistHistoryMeta = {
-	length: number;
-	tail: TimelineHistorySnapshot | undefined;
+	commitRevision: number;
 };
 
 type BridgeState = {
@@ -102,86 +103,74 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 		const timelineRefs = listTimelineRefs(currentProject);
 		const expectedRuntimeIds = new Set<string>();
 
-		for (const ref of timelineRefs) {
-			const runtime = runtimeManager.ensureTimelineRuntime(ref);
-			const runtimeId = buildTimelineRuntimeIdFromRef(ref);
-			expectedRuntimeIds.add(runtimeId);
+			for (const ref of timelineRefs) {
+				const runtime = runtimeManager.ensureTimelineRuntime(ref);
+				const runtimeId = buildTimelineRuntimeIdFromRef(ref);
+				expectedRuntimeIds.add(runtimeId);
 
-			if (!bridgeState.subscriptions.has(runtimeId)) {
-				const historyPast = runtime.timelineStore.getState().historyPast;
-				bridgeState.persistHistoryMeta.set(runtimeId, {
-					length: historyPast.length,
-					tail: historyPast[historyPast.length - 1],
-				});
+				if (!bridgeState.subscriptions.has(runtimeId)) {
+					const timelineState = runtime.timelineStore.getState();
+					bridgeState.persistHistoryMeta.set(runtimeId, {
+						commitRevision: timelineState.historyCommitRevision,
+					});
 
-				const unsubscribePersist = runtime.timelineStore.subscribe(
-					(state) => state.persistRevision,
-					() => {
-						if (bridgeState.writingRuntimeIds.has(runtimeId)) return;
-						try {
-							const timelineState = runtime.timelineStore.getState();
-							const history = timelineState.historyPast;
-							const historyTail = history[history.length - 1];
-							const previousHistoryMeta =
-								bridgeState.persistHistoryMeta.get(runtimeId);
-							const didCommitHistory =
-								(previousHistoryMeta?.length ?? 0) < history.length ||
-								previousHistoryMeta?.tail !== historyTail;
-							const timeline = snapshotTimelineFromStore(runtime.timelineStore);
-							writeTimelineByRef(projectWriter, ref, timeline, {
-								recordHistory: false,
-								historyOpId: didCommitHistory
-									? (timelineState.lastCommittedHistoryOpId ?? undefined)
-									: undefined,
-							});
-							bridgeState.projectTimelineRefs.set(runtimeId, timeline);
-							bridgeState.persistHistoryMeta.set(runtimeId, {
-								length: history.length,
-								tail: historyTail,
-							});
-						} catch (error) {
-							console.error(
-								`Failed to write runtime timeline (${runtimeId}) to project:`,
+					const unsubscribePersist = runtime.timelineStore.subscribe(
+						(state) => state.persistRevision,
+						() => {
+							if (bridgeState.writingRuntimeIds.has(runtimeId)) return;
+							try {
+								const timeline = snapshotTimelineFromStore(runtime.timelineStore);
+								writeTimelineByRef(projectWriter, ref, timeline, {
+									recordHistory: false,
+								});
+								bridgeState.projectTimelineRefs.set(runtimeId, timeline);
+							} catch (error) {
+								console.error(
+									`Failed to write runtime timeline (${runtimeId}) to project:`,
 								error,
 							);
 						}
 					},
-				);
+					);
 
-				const unsubscribeHistory = runtime.timelineStore.subscribe(
-					(state) => state.historyPast,
-					(historyPast, prevHistoryPast) => {
-						if (bridgeState.writingRuntimeIds.has(runtimeId)) return;
-						if (useStudioHistoryStore.getState().isApplying) return;
-						const nextTop = historyPast[historyPast.length - 1];
-						const prevTop = prevHistoryPast[prevHistoryPast.length - 1];
-						const didPushHistory =
-							historyPast.length > prevHistoryPast.length ||
-							nextTop !== prevTop;
-						if (!didPushHistory || !nextTop) return;
-
-						const timelineStoreState = runtime.timelineStore.getState();
-						const beforeTimeline = buildTimelineFromHistorySnapshot(
-							nextTop,
-							timelineStoreState,
-						);
-						const afterTimeline = snapshotTimelineFromStore(
-							runtime.timelineStore,
-						);
-						const latestProject = useProjectStore.getState().currentProject;
-						if (!latestProject) return;
-						const nextEntry: StudioHistoryEntry = {
-							kind: "scene.timeline",
-							timelineRef: ref,
-							sceneId: ref.sceneId,
-							before: beforeTimeline,
-							after: afterTimeline,
-							focusNodeId: latestProject.ui.focusedNodeId,
-							opId: timelineStoreState.lastCommittedHistoryOpId ?? undefined,
-						};
-						pushHistory(nextEntry);
-					},
-				);
+					const unsubscribeHistory = runtime.timelineStore.subscribe(
+						(state) => state.historyCommitRevision,
+						(historyCommitRevision) => {
+							if (bridgeState.writingRuntimeIds.has(runtimeId)) return;
+							if (useStudioHistoryStore.getState().isApplying) return;
+							const timelineStoreState = runtime.timelineStore.getState();
+							const previousMeta = bridgeState.persistHistoryMeta.get(runtimeId);
+							if (
+								previousMeta &&
+								historyCommitRevision <= previousMeta.commitRevision
+							) {
+								return;
+							}
+							const snapshot = timelineStoreState.lastHistoryCommitSnapshot;
+							if (!snapshot) return;
+							const beforeTimeline = buildTimelineFromHistorySnapshot(
+								snapshot,
+								timelineStoreState,
+							);
+							const afterTimeline = snapshotTimelineFromStore(
+								runtime.timelineStore,
+							);
+							const latestProject = useProjectStore.getState().currentProject;
+							if (!latestProject) return;
+							const nextEntry: StudioHistoryEntry = {
+								kind: "scene.timeline",
+								timelineRef: ref,
+								sceneId: ref.sceneId,
+								before: beforeTimeline,
+								after: afterTimeline,
+								opId: timelineStoreState.lastCommittedHistoryOpId ?? undefined,
+							};
+							pushHistory(nextEntry);
+							bridgeState.persistHistoryMeta.set(runtimeId, {
+								commitRevision: historyCommitRevision,
+							});
+						},
+					);
 
 				bridgeState.subscriptions.set(runtimeId, () => {
 					unsubscribePersist();
@@ -196,15 +185,14 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 			if (knownProjectTimelineRef === timeline) continue;
 
 			bridgeState.writingRuntimeIds.add(runtimeId);
-			try {
-				applyTimelineJsonToStore(timeline, runtime.timelineStore);
-				bridgeState.projectTimelineRefs.set(runtimeId, timeline);
-				const historyPast = runtime.timelineStore.getState().historyPast;
-				bridgeState.persistHistoryMeta.set(runtimeId, {
-					length: historyPast.length,
-					tail: historyPast[historyPast.length - 1],
-				});
-			} catch (error) {
+				try {
+					applyTimelineJsonToStore(timeline, runtime.timelineStore);
+					bridgeState.projectTimelineRefs.set(runtimeId, timeline);
+					const timelineState = runtime.timelineStore.getState();
+					bridgeState.persistHistoryMeta.set(runtimeId, {
+						commitRevision: timelineState.historyCommitRevision,
+					});
+				} catch (error) {
 				console.error(
 					`Failed to apply project timeline (${runtimeId}) to runtime:`,
 					error,

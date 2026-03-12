@@ -2,17 +2,20 @@ import {
 	canvasPointToTransformPosition,
 	transformPositionToCanvasPoint,
 } from "core/element/position";
+import { saveTimelineToObject } from "core/editor/timelineLoader";
 import type { TimelineElement, TransformMeta } from "core/element/types";
 import type { SceneNode } from "core/studio/types";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SkiaPointerEvent } from "react-skia-lite";
 import { transformMetaToRenderLayout } from "@/element/layout";
+import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { cloneValue, createCopySeed } from "@/scene-editor/utils/copyUtils";
 import { reflowInsertedElementsOnTracks } from "@/scene-editor/utils/insertedTrackReflow";
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
 import type { CameraState } from "@/studio/canvas/canvasWorkspaceUtils";
+import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import {
 	buildFocusTransformHandleItems,
 	isRotateHandle,
@@ -57,6 +60,13 @@ type TimelineHistorySnapshot = {
 	>["audioTrackStates"];
 	rippleEditingEnabled: boolean;
 };
+
+const cloneAudioSettings = (
+	audio: ReturnType<TimelineStoreApi["getState"]>["audioSettings"],
+) => ({
+	...audio,
+	compressor: { ...audio.compressor },
+});
 
 type FocusSceneElementLayout = {
 	element: TimelineElement;
@@ -648,6 +658,8 @@ export const useFocusSceneSkiaInteractions = ({
 	timelineStore,
 	disabled = false,
 }: UseFocusSceneSkiaInteractionsOptions): UseFocusSceneSkiaInteractionsResult => {
+	const pushHistory = useStudioHistoryStore((state) => state.push);
+	const currentProject = useProjectStore((state) => state.currentProject);
 	const ctx = useMemo(() => {
 		if (!focusedNode) return null;
 		return createFocusSceneCoordinateContext({
@@ -721,20 +733,46 @@ export const useFocusSceneSkiaInteractions = ({
 		(snapshot: TimelineHistorySnapshot | null) => {
 			if (!snapshot) return;
 			if (!timelineStore) return;
-			timelineStore.setState((state) => {
-				if (state.elements === snapshot.elements) return state;
-				const nextPast = [...state.historyPast, snapshot];
-				const trimmedPast =
-					nextPast.length <= state.historyLimit
-						? nextPast
-						: nextPast.slice(nextPast.length - state.historyLimit);
-				return {
-					historyPast: trimmedPast,
-					historyFuture: [],
-				};
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const sceneId = focusedNode?.sceneId ?? latestProject.ui.activeSceneId;
+			if (!sceneId) return;
+			const state = timelineStore.getState();
+			if (state.elements === snapshot.elements) return;
+			const before = saveTimelineToObject(
+				snapshot.elements,
+				state.fps,
+				state.canvasSize,
+				snapshot.tracks,
+				{
+					snapEnabled: state.snapEnabled,
+					autoAttach: state.autoAttach,
+					rippleEditingEnabled: snapshot.rippleEditingEnabled,
+					previewAxisEnabled: state.previewAxisEnabled,
+					audio: cloneAudioSettings(state.audioSettings),
+				},
+			);
+			const after = saveTimelineToObject(
+				state.elements,
+				state.fps,
+				state.canvasSize,
+				state.tracks,
+				{
+					snapEnabled: state.snapEnabled,
+					autoAttach: state.autoAttach,
+					rippleEditingEnabled: state.rippleEditingEnabled,
+					previewAxisEnabled: state.previewAxisEnabled,
+					audio: cloneAudioSettings(state.audioSettings),
+				},
+			);
+			pushHistory({
+				kind: "scene.timeline",
+				sceneId,
+				before,
+				after,
 			});
 		},
-		[timelineStore],
+		[currentProject, focusedNode?.sceneId, pushHistory, timelineStore],
 	);
 
 	const setElementsWithoutHistory = useCallback(

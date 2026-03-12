@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ensureStudioProjectOt } from "./ot";
 import type { StudioProject } from "./types";
 
 const nonEmptyStringSchema = z.string().min(1);
@@ -78,12 +79,63 @@ const sceneDocumentSchema = z.object({
 	updatedAt: z.number(),
 });
 
+const otCommandSchema = z.object({
+	id: nonEmptyStringSchema,
+	args: z.record(z.unknown()),
+});
+
+const otOpEnvelopeSchema = z.object({
+	opId: nonEmptyStringSchema,
+	txnId: nonEmptyStringSchema,
+	streamId: nonEmptyStringSchema,
+	actorId: nonEmptyStringSchema,
+	seq: z.number().int().positive(),
+	lamport: z.number().int().nonnegative(),
+	createdAt: z.number(),
+	command: otCommandSchema,
+	causedBy: z.array(nonEmptyStringSchema),
+	inverseOf: nonEmptyStringSchema.optional(),
+});
+
+const otTransactionSchema = z.object({
+	txnId: nonEmptyStringSchema,
+	opIds: z.array(nonEmptyStringSchema),
+	createdAt: z.number(),
+	ops: z.array(otOpEnvelopeSchema),
+});
+
+const otStreamCursorSchema = z.object({
+	opIds: z.array(nonEmptyStringSchema),
+	undoStack: z.array(nonEmptyStringSchema),
+	redoStack: z.array(nonEmptyStringSchema),
+});
+
+const studioOtSchema = z.object({
+	version: z.literal(1),
+	actorId: nonEmptyStringSchema,
+	lamport: z.number().int().nonnegative(),
+	streams: z.record(nonEmptyStringSchema, otStreamCursorSchema),
+	ops: z.array(otOpEnvelopeSchema),
+	transactions: z.array(otTransactionSchema),
+	tombstones: z.object({
+		scenes: z.record(
+			nonEmptyStringSchema,
+			z.object({
+				scene: sceneDocumentSchema,
+				node: sceneNodeSchema,
+				deletedAt: z.number(),
+			}),
+		),
+	}),
+});
+
 const studioProjectSchema = z.object({
 	id: nonEmptyStringSchema,
 	revision: z.number().int().nonnegative(),
 	canvas: canvasDocumentSchema,
 	scenes: z.record(nonEmptyStringSchema, sceneDocumentSchema),
 	assets: z.array(z.unknown()),
+	ot: studioOtSchema.optional(),
 	ui: z.object({
 		activeSceneId: nonEmptyStringSchema.nullable(),
 		focusedNodeId: nonEmptyStringSchema.nullable(),
@@ -100,5 +152,10 @@ const studioProjectSchema = z.object({
 });
 
 export const parseStudioProject = (value: unknown): StudioProject => {
-	return studioProjectSchema.parse(value) as StudioProject;
+	const parsed = studioProjectSchema.parse(value) as StudioProject;
+	if (parsed.ot) return parsed;
+	return {
+		...parsed,
+		ot: ensureStudioProjectOt(parsed),
+	};
 };

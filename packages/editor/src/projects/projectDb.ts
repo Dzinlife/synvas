@@ -2,6 +2,7 @@ import {
 	DEFAULT_TIMELINE_SETTINGS,
 	type TimelineJSON,
 } from "core/editor/timelineLoader";
+import { createEmptyStudioOt } from "core/studio/ot";
 import type { StudioProject } from "core/studio/types";
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
 
@@ -103,6 +104,9 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 			},
 		},
 		assets: [],
+		ot: createEmptyStudioOt({
+			streamIds: ["canvas", `timeline:${sceneId}`],
+		}),
 		ui: {
 			activeSceneId: sceneId,
 			focusedNodeId: null,

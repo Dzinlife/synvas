@@ -1,4 +1,10 @@
 import type { TimelineAsset } from "../element/types";
+import type {
+	OtCommand,
+	OtOpEnvelope,
+	OtStreamCursorState,
+	OtTransaction,
+} from "../editor/ot";
 import type { TimelineJSON } from "../editor/timelineLoader";
 
 export type CanvasNodeType = "scene" | "video" | "audio" | "text" | "image";
@@ -69,12 +75,31 @@ export interface SceneDocument {
 	updatedAt: number;
 }
 
+export interface StudioOtTombstoneScene {
+	scene: SceneDocument;
+	node: SceneNode;
+	deletedAt: number;
+}
+
+export interface StudioProjectOt {
+	version: 1;
+	actorId: string;
+	lamport: number;
+	streams: Record<string, OtStreamCursorState>;
+	ops: OtOpEnvelope<OtCommand>[];
+	transactions: OtTransaction<OtCommand>[];
+	tombstones: {
+		scenes: Record<string, StudioOtTombstoneScene>;
+	};
+}
+
 export interface StudioProject {
 	id: string;
 	revision: number;
 	canvas: CanvasDocument;
 	scenes: Record<string, SceneDocument>;
 	assets: TimelineAsset[];
+	ot?: StudioProjectOt;
 	ui: {
 		activeSceneId: string | null;
 		focusedNodeId: string | null;

@@ -147,7 +147,6 @@ describe("studioHistoryStore", () => {
 			sceneId: "scene-1",
 			before: createTimeline(0),
 			after: createTimeline(1),
-			focusNodeId: "node-1",
 			opId: "op-1",
 		});
 		useStudioHistoryStore.getState().push({
@@ -156,7 +155,6 @@ describe("studioHistoryStore", () => {
 			sceneId: "scene-2",
 			before: createTimeline(1),
 			after: createTimeline(2),
-			focusNodeId: "node-2",
 			opId: "op-1",
 		});
 
@@ -174,7 +172,6 @@ describe("studioHistoryStore", () => {
 			sceneId: "scene-2",
 			before: createTimeline(0),
 			after: createTimeline(1),
-			focusNodeId: "node-2",
 			opId: "op-2",
 		});
 		useStudioHistoryStore.getState().push({
@@ -183,7 +180,6 @@ describe("studioHistoryStore", () => {
 			sceneId: "scene-2",
 			before: createTimeline(5),
 			after: createTimeline(3),
-			focusNodeId: "node-2",
 			opId: "op-2",
 		});
 
@@ -195,7 +191,7 @@ describe("studioHistoryStore", () => {
 		expect(past[0].after.elements).toHaveLength(3);
 	});
 
-	it("undo/redo scene.timeline 时会同步 focus scene", () => {
+	it("undo/redo scene.timeline 时不会改动 focus scene", () => {
 		const before = createTimeline(0);
 		const after = createTimeline(2);
 		useStudioHistoryStore.getState().push({
@@ -204,12 +200,11 @@ describe("studioHistoryStore", () => {
 			sceneId: "scene-2",
 			before,
 			after,
-			focusNodeId: "node-2",
 		});
 
 		useStudioHistoryStore.getState().undo();
 		expect(useProjectStore.getState().currentProject?.ui.focusedNodeId).toBe(
-			"node-2",
+			"node-1",
 		);
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-2"].timeline
@@ -230,7 +225,6 @@ describe("studioHistoryStore", () => {
 			sceneId: "scene-1",
 			before: createTimeline(0),
 			after: createTimeline(1),
-			focusNodeId: "node-1",
 			opId: "op-batch",
 		});
 		useStudioHistoryStore.getState().push({
@@ -239,7 +233,6 @@ describe("studioHistoryStore", () => {
 			sceneId: "scene-2",
 			before: createTimeline(1),
 			after: createTimeline(3),
-			focusNodeId: "node-2",
 			opId: "op-batch",
 		});
 
