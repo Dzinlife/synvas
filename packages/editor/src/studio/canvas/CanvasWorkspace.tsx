@@ -1,5 +1,5 @@
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement, TrackRole } from "core/element/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import type React from "react";
 import {
@@ -16,14 +16,27 @@ import { createTransformMeta } from "@/element/transform";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
+import {
+	calculateAutoScrollSpeed,
+	type DropTargetInfo,
+	resolveMaterialDropTarget,
+	useDragStore,
+} from "@/scene-editor/drag";
 import { findTimelineDropTargetFromScreenPosition } from "@/scene-editor/drag/timelineDropTargets";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { DEFAULT_TRACK_HEIGHT } from "@/scene-editor/timeline/trackConfig";
+import { getAudioTrackControlState } from "@/scene-editor/utils/audioTrackState";
 import { findAttachments } from "@/scene-editor/utils/attachments";
 import { resolveExternalVideoUri } from "@/scene-editor/utils/externalVideo";
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
+import { getPixelsPerFrame } from "@/scene-editor/utils/timelineScale";
+import { pasteTimelineClipboardPayload } from "@/scene-editor/utils/timelineClipboard";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
+import {
+	getStoredTrackAssignments,
+	getTrackRoleMapFromTracks,
+} from "@/scene-editor/utils/trackAssignment";
 import { CANVAS_NODE_DRAWER_DEFAULT_HEIGHT } from "@/studio/canvas/CanvasNodeDrawerShell";
 import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import {
@@ -149,6 +162,9 @@ interface NodeDragSession {
 	moved: boolean;
 	axisLock: "x" | "y" | null;
 	copyMode: boolean;
+	timelineDropMode: boolean;
+	timelineDropTarget: DropTargetInfo | null;
+	globalDragStarted: boolean;
 }
 
 interface CanvasMarqueeRect {
@@ -238,6 +254,26 @@ const buildCopyName = (name: string): string => {
 
 const cloneTimelineJson = <T,>(value: T): T => {
 	return JSON.parse(JSON.stringify(value)) as T;
+};
+
+const createTimelineClipboardElementId = (): string => {
+	return createCanvasEntityId("element");
+};
+
+const resolveTimelineTrackLockedMap = (
+	tracks: Array<{ locked?: boolean }>,
+	audioTrackStates: Parameters<typeof getAudioTrackControlState>[0],
+): Map<number, boolean> => {
+	const map = new Map<number, boolean>(
+		tracks.map((track, index) => [index, track.locked ?? false]),
+	);
+	for (const trackIndexRaw of Object.keys(audioTrackStates)) {
+		const trackIndex = Number(trackIndexRaw);
+		if (!Number.isFinite(trackIndex)) continue;
+		const audioState = getAudioTrackControlState(audioTrackStates, trackIndex);
+		map.set(trackIndex, audioState.locked);
+	}
+	return map;
 };
 
 const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
@@ -524,6 +560,19 @@ const CanvasWorkspace = () => {
 	const setStudioClipboardPayload = useStudioClipboardStore(
 		(state) => state.setPayload,
 	);
+	const startGlobalDrag = useDragStore((state) => state.startDrag);
+	const updateGlobalDragGhost = useDragStore((state) => state.updateGhost);
+	const updateGlobalDropTarget = useDragStore(
+		(state) => state.updateDropTarget,
+	);
+	const setGlobalAutoScrollSpeedX = useDragStore(
+		(state) => state.setAutoScrollSpeedX,
+	);
+	const setGlobalAutoScrollSpeedY = useDragStore(
+		(state) => state.setAutoScrollSpeedY,
+	);
+	const stopGlobalAutoScroll = useDragStore((state) => state.stopAutoScroll);
+	const endGlobalDrag = useDragStore((state) => state.endDrag);
 
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
@@ -1527,6 +1576,337 @@ const CanvasWorkspace = () => {
 		);
 	}, []);
 
+	const resolveDragSessionTimelineNodes = useCallback(
+		(dragSession: NodeDragSession) => {
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return [];
+			return dragSession.dragNodeIds
+				.map((nodeId) => {
+					return (
+						latestProject.canvas.nodes.find((node) => node.id === nodeId) ?? null
+					);
+				})
+				.filter((node): node is CanvasNode => Boolean(node))
+				.sort((left, right) => {
+					if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
+					return left.createdAt - right.createdAt;
+				})
+				.filter((node) => {
+					const definition = getCanvasNodeDefinition(node.type);
+					return Boolean(definition.toTimelineClipboardElement);
+				});
+		},
+		[],
+	);
+
+	const resolveDragSessionTimelineRole = useCallback(
+		(dragSession: NodeDragSession): TrackRole | null => {
+			const timelineNodes = resolveDragSessionTimelineNodes(dragSession);
+			if (timelineNodes.length === 0) return null;
+			return timelineNodes.every((node) => node.type === "audio")
+				? "audio"
+				: "clip";
+		},
+		[resolveDragSessionTimelineNodes],
+	);
+
+	const resolveDragSessionTimelineDuration = useCallback(
+		(dragSession: NodeDragSession, fps: number): number => {
+			const timelineNodes = resolveDragSessionTimelineNodes(dragSession);
+			const firstNode = timelineNodes[0] ?? null;
+			if (
+				firstNode &&
+				"duration" in firstNode &&
+				Number.isFinite(firstNode.duration) &&
+				(firstNode.duration ?? 0) > 0
+			) {
+				return Math.max(1, Math.round(firstNode.duration as number));
+			}
+			return Math.max(1, secondsToFrames(5, fps));
+		},
+		[resolveDragSessionTimelineNodes],
+	);
+
+	const resolveCanvasNodeTimelineDropTarget = useCallback(
+		(
+			dragSession: NodeDragSession,
+			clientX: number,
+			clientY: number,
+		): DropTargetInfo | null => {
+			const materialRole = resolveDragSessionTimelineRole(dragSession);
+			if (!materialRole) return null;
+			const timelineRuntime = runtimeManager?.getActiveEditTimelineRuntime();
+			if (!timelineRuntime) return null;
+			const timelineState = timelineRuntime.timelineStore.getState();
+			const ratio = getPixelsPerFrame(timelineState.fps, timelineState.timelineScale);
+			if (!Number.isFinite(ratio) || ratio <= 0) return null;
+			return resolveMaterialDropTarget(
+				{
+					fps: timelineState.fps,
+					ratio,
+					defaultDurationFrames: Math.max(1, secondsToFrames(5, timelineState.fps)),
+					elements: timelineState.elements,
+					trackAssignments: getStoredTrackAssignments(timelineState.elements),
+					trackRoleMap: getTrackRoleMapFromTracks(timelineState.tracks),
+					trackLockedMap: resolveTimelineTrackLockedMap(
+						timelineState.tracks,
+						timelineState.audioTrackStates,
+					),
+					trackCount: timelineState.tracks.length || 1,
+					rippleEditingEnabled: timelineState.rippleEditingEnabled,
+				},
+				{
+					materialRole,
+					materialDurationFrames: resolveDragSessionTimelineDuration(
+						dragSession,
+						timelineState.fps,
+					),
+					isTransitionMaterial: false,
+				},
+				clientX,
+				clientY,
+			);
+		},
+		[
+			resolveDragSessionTimelineDuration,
+			resolveDragSessionTimelineRole,
+			runtimeManager,
+		],
+	);
+
+	const startCanvasTimelineDropPreview = useCallback(
+		(dragSession: NodeDragSession, clientX: number, clientY: number) => {
+			if (dragSession.globalDragStarted) return;
+			const materialRole = resolveDragSessionTimelineRole(dragSession);
+			const dragType = materialRole === "audio" ? "audio" : "video";
+			startGlobalDrag(
+				"external-file",
+				{
+					type: dragType,
+					uri: "",
+					name: "Canvas Node",
+				},
+				{
+					screenX: clientX - 60,
+					screenY: clientY - 40,
+					width: 120,
+					height: 80,
+					label: "Canvas Node",
+				},
+			);
+			dragSession.globalDragStarted = true;
+		},
+		[resolveDragSessionTimelineRole, startGlobalDrag],
+	);
+
+	const updateCanvasTimelineDropPreview = useCallback(
+		(clientX: number, clientY: number, dropTarget: DropTargetInfo | null) => {
+			updateGlobalDragGhost({
+				screenX: clientX - 60,
+				screenY: clientY - 40,
+			});
+			updateGlobalDropTarget(dropTarget);
+			const scrollArea = document.querySelector<HTMLElement>(
+				"[data-timeline-scroll-area]",
+			);
+			if (scrollArea) {
+				const rect = scrollArea.getBoundingClientRect();
+				const speedX = calculateAutoScrollSpeed(clientX, rect.left, rect.right);
+				setGlobalAutoScrollSpeedX(speedX);
+			} else {
+				setGlobalAutoScrollSpeedX(0);
+			}
+			const verticalScrollArea = document.querySelector<HTMLElement>(
+				"[data-vertical-scroll-area]",
+			);
+			if (verticalScrollArea) {
+				const rect = verticalScrollArea.getBoundingClientRect();
+				const speedY = calculateAutoScrollSpeed(clientY, rect.top, rect.bottom);
+				setGlobalAutoScrollSpeedY(speedY);
+			} else {
+				setGlobalAutoScrollSpeedY(0);
+			}
+		},
+		[
+			setGlobalAutoScrollSpeedX,
+			setGlobalAutoScrollSpeedY,
+			updateGlobalDragGhost,
+			updateGlobalDropTarget,
+		],
+	);
+
+	const stopCanvasTimelineDropPreview = useCallback(
+		(dragSession: NodeDragSession) => {
+			stopGlobalAutoScroll();
+			setGlobalAutoScrollSpeedX(0);
+			setGlobalAutoScrollSpeedY(0);
+			updateGlobalDropTarget(null);
+			if (!dragSession.globalDragStarted) return;
+			endGlobalDrag();
+			dragSession.globalDragStarted = false;
+		},
+		[
+			endGlobalDrag,
+			setGlobalAutoScrollSpeedX,
+			setGlobalAutoScrollSpeedY,
+			stopGlobalAutoScroll,
+			updateGlobalDropTarget,
+		],
+	);
+
+	const resetCanvasDragSession = useCallback(
+		(dragSession: NodeDragSession) => {
+			if (dragSession.copyEntries.length > 0) {
+				const copyNodeIds = dragSession.copyEntries.map((entry) => entry.node.id);
+				removeCanvasGraphBatch(copyNodeIds);
+				for (const copyNodeId of copyNodeIds) {
+					delete dragSession.snapshots[copyNodeId];
+				}
+				dragSession.copyEntries = [];
+				dragSession.copyMode = false;
+			}
+			for (const nodeId of dragSession.dragNodeIds) {
+				const snapshot = dragSession.snapshots[nodeId];
+				if (!snapshot) continue;
+				updateCanvasNodeLayout(nodeId, {
+					x: snapshot.startNodeX,
+					y: snapshot.startNodeY,
+				});
+			}
+			dragSession.activated = false;
+			dragSession.moved = false;
+			dragSession.axisLock = null;
+			clearCanvasSnapGuides();
+		},
+		[clearCanvasSnapGuides, removeCanvasGraphBatch, updateCanvasNodeLayout],
+	);
+
+	const buildTimelinePayloadFromCanvasDragSession = useCallback(
+		(
+			dragSession: NodeDragSession,
+			targetSceneId: string | null,
+			timelineElements: TimelineElement[],
+			fps: number,
+		) => {
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return null;
+			const projectForConversion =
+				targetSceneId && latestProject.scenes[targetSceneId]
+					? {
+							...latestProject,
+							scenes: {
+								...latestProject.scenes,
+								[targetSceneId]: {
+									...latestProject.scenes[targetSceneId],
+									timeline: {
+										...latestProject.scenes[targetSceneId].timeline,
+										elements: timelineElements,
+									},
+								},
+							},
+						}
+					: latestProject;
+			let nextStartFrame = 0;
+			const convertedElements: TimelineElement[] = [];
+			const timelineNodes = resolveDragSessionTimelineNodes(dragSession);
+			for (const node of timelineNodes) {
+				const definition = getCanvasNodeDefinition(node.type);
+				const converter = definition.toTimelineClipboardElement;
+				if (!converter) continue;
+				const scene =
+					node.type === "scene"
+						? (projectForConversion.scenes[node.sceneId] ?? null)
+						: null;
+				const assetId = "assetId" in node ? node.assetId : null;
+				const asset = assetId
+					? (latestProject.assets.find((item) => item.id === assetId) ?? null)
+					: null;
+				const converted = converter({
+					node,
+					project: projectForConversion,
+					targetSceneId,
+					scene,
+					asset,
+					fps,
+					startFrame: nextStartFrame,
+					trackIndex: node.type === "audio" ? -1 : 0,
+					createElementId: createTimelineClipboardElementId,
+				});
+				if (!converted) continue;
+				convertedElements.push(converted);
+				nextStartFrame = Math.max(
+					nextStartFrame,
+					Math.round(converted.timeline.end),
+				);
+			}
+			if (convertedElements.length === 0) return null;
+			const anchorElement = convertedElements[0];
+			return {
+				elements: convertedElements,
+				primaryId: anchorElement.id,
+				anchor: {
+					assetId: anchorElement.id,
+					start: anchorElement.timeline.start,
+					trackIndex: anchorElement.timeline.trackIndex ?? 0,
+				},
+			};
+		},
+		[resolveDragSessionTimelineNodes],
+	);
+
+	const commitCanvasTimelineDrop = useCallback(
+		(dragSession: NodeDragSession): boolean => {
+			const dropTarget = dragSession.timelineDropTarget;
+			if (!dropTarget || dropTarget.zone !== "timeline" || !dropTarget.canDrop) {
+				return false;
+			}
+			if (
+				dropTarget.time === undefined ||
+				dropTarget.trackIndex === undefined ||
+				!runtimeManager
+			) {
+				return false;
+			}
+			const timelineRuntime = runtimeManager.getActiveEditTimelineRuntime();
+			if (!timelineRuntime) return false;
+			const timelineState = timelineRuntime.timelineStore.getState();
+			const payload = buildTimelinePayloadFromCanvasDragSession(
+				dragSession,
+				timelineRuntime.ref.sceneId,
+				timelineState.elements,
+				timelineState.fps,
+			);
+			if (!payload) return false;
+			const pasteResult = pasteTimelineClipboardPayload({
+				payload,
+				elements: timelineState.elements,
+				targetTime: dropTarget.time,
+				targetTrackIndex: dropTarget.trackIndex,
+				targetType: dropTarget.type ?? "track",
+				postProcessOptions: {
+					rippleEditingEnabled: timelineState.rippleEditingEnabled,
+					attachments: timelineState.autoAttach
+						? findAttachments(timelineState.elements)
+						: undefined,
+					autoAttach: timelineState.autoAttach,
+					fps: timelineState.fps,
+					trackLockedMap: resolveTimelineTrackLockedMap(
+						timelineState.tracks,
+						timelineState.audioTrackStates,
+					),
+				},
+			});
+			if (pasteResult.insertedIds.length === 0) return false;
+			timelineState.setElements(pasteResult.elements);
+			timelineState.setSelectedIds(
+				pasteResult.insertedIds,
+				pasteResult.primaryId,
+			);
+			return true;
+		},
+		[buildTimelinePayloadFromCanvasDragSession, runtimeManager],
+	);
+
 	const resolveCanvasPasteWorldPoint = useCallback(() => {
 		const pointer = lastPointerClientRef.current;
 		if (pointer && typeof document.elementFromPoint === "function") {
@@ -1988,6 +2368,9 @@ const CanvasWorkspace = () => {
 				moved: false,
 				axisLock: null,
 				copyMode: input.copyMode,
+				timelineDropMode: false,
+				timelineDropTarget: null,
+				globalDragStarted: false,
 			};
 			return true;
 		},
@@ -1998,14 +2381,53 @@ const CanvasWorkspace = () => {
 		(event: CanvasNodeDragEvent) => {
 			const dragSession = nodeDragSessionRef.current;
 			if (!dragSession) return;
+			const pointerX = Number.isFinite(event.clientX)
+				? event.clientX
+				: (lastPointerClientRef.current?.x ?? 0);
+			const pointerY = Number.isFinite(event.clientY)
+				? event.clientY
+				: (lastPointerClientRef.current?.y ?? 0);
+			if (dragSession.timelineDropMode) {
+				const timelineDropTarget = resolveCanvasNodeTimelineDropTarget(
+					dragSession,
+					pointerX,
+					pointerY,
+				);
+				const resolvedDropTarget =
+					timelineDropTarget?.zone === "timeline"
+						? timelineDropTarget
+						: ({
+								zone: "none",
+								canDrop: false,
+							} as const);
+				dragSession.timelineDropTarget = resolvedDropTarget;
+				updateCanvasTimelineDropPreview(
+					pointerX,
+					pointerY,
+					resolvedDropTarget,
+				);
+				return;
+			}
 			if (
 				Math.abs(event.movementX) + Math.abs(event.movementY) <
 				CANVAS_MARQUEE_ACTIVATION_PX
 			) {
 				return;
 			}
+			const timelineDropTarget = resolveCanvasNodeTimelineDropTarget(
+				dragSession,
+				pointerX,
+				pointerY,
+			);
+			if (timelineDropTarget?.zone === "timeline") {
+				resetCanvasDragSession(dragSession);
+				dragSession.timelineDropMode = true;
+				dragSession.timelineDropTarget = timelineDropTarget;
+				startCanvasTimelineDropPreview(dragSession, pointerX, pointerY);
+				updateCanvasTimelineDropPreview(pointerX, pointerY, timelineDropTarget);
+				return;
+			}
 			if (!dragSession.activated) {
-				commitSelectedNodeIds(dragSession.pendingSelectedNodeIds);
 				dragSession.activated = true;
 				if (dragSession.copyMode) {
 					const copyEntries = buildCanvasCopyEntries(dragSession.dragNodeIds);
@@ -2104,10 +2526,13 @@ const CanvasWorkspace = () => {
 			canvasSnapEnabled,
 			camera.zoom,
 			clearCanvasSnapGuides,
-			commitSelectedNodeIds,
+			resetCanvasDragSession,
+			resolveCanvasNodeTimelineDropTarget,
 			resolveCanvasGuideValues,
+			startCanvasTimelineDropPreview,
 			setCanvasSnapGuides,
 			updateCanvasNodeLayout,
+			updateCanvasTimelineDropPreview,
 		],
 	);
 
@@ -2117,6 +2542,16 @@ const CanvasWorkspace = () => {
 			nodeDragSessionRef.current = null;
 			clearCanvasSnapGuides();
 			if (!dragSession) return;
+			if (dragSession.timelineDropMode) {
+				stopCanvasTimelineDropPreview(dragSession);
+				resetCanvasDragSession(dragSession);
+				setPendingClickSuppression({
+					suppressNode: true,
+					suppressCanvas: true,
+				});
+				commitCanvasTimelineDrop(dragSession);
+				return;
+			}
 			if (!dragSession.activated || !dragSession.moved) {
 				if (dragSession.copyEntries.length > 0) {
 					removeCanvasGraphBatch(
@@ -2154,7 +2589,6 @@ const CanvasWorkspace = () => {
 					entries: nextEntries,
 					focusNodeId: latestProject.ui.focusedNodeId,
 				});
-				commitSelectedNodeIds(nextEntries.map((entry) => entry.node.id));
 				return;
 			}
 			const nextEntries = dragSession.dragNodeIds
@@ -2201,10 +2635,12 @@ const CanvasWorkspace = () => {
 		},
 		[
 			clearCanvasSnapGuides,
-			commitSelectedNodeIds,
+			commitCanvasTimelineDrop,
 			pushHistory,
 			removeCanvasGraphBatch,
+			resetCanvasDragSession,
 			setPendingClickSuppression,
+			stopCanvasTimelineDropPreview,
 		],
 	);
 

@@ -18,6 +18,8 @@ import {
 	createRuntimeProviderWrapper,
 	createTestEditorRuntime,
 } from "@/scene-editor/runtime/testUtils";
+import { useDragStore } from "@/scene-editor/drag";
+import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import {
@@ -269,6 +271,47 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					},
 				];
 			},
+			toTimelineClipboardElement: ({
+				node,
+				fps,
+				startFrame,
+				trackIndex,
+				createElementId,
+			}: {
+				node: { name: string; sceneId: string; width: number; height: number };
+				fps: number;
+				startFrame: number;
+				trackIndex: number;
+				createElementId: () => string;
+			}) => ({
+				id: createElementId(),
+				type: "Composition",
+				component: "composition",
+				name: node.name,
+				props: {
+					sceneId: node.sceneId,
+				},
+				transform: createTransformMeta({
+					width: Math.max(1, Math.round(Math.abs(node.width))),
+					height: Math.max(1, Math.round(Math.abs(node.height))),
+					positionX: 0,
+					positionY: 0,
+				}),
+				timeline: buildTimelineMeta(
+					{
+						start: startFrame,
+						end: startFrame + 150,
+						trackIndex: trackIndex >= 0 ? trackIndex : 0,
+						role: "clip",
+					},
+					fps,
+				),
+				render: {
+					zIndex: 0,
+					visible: true,
+					opacity: 1,
+				},
+			}),
 		},
 		video: {
 			type: "video",
@@ -330,6 +373,56 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					height: 120,
 				};
 			},
+			toTimelineClipboardElement: ({
+				node,
+				fps,
+				startFrame,
+				trackIndex,
+				createElementId,
+			}: {
+				node: {
+					name: string;
+					assetId?: string;
+					width: number;
+					height: number;
+					duration?: number;
+				};
+				fps: number;
+				startFrame: number;
+				trackIndex: number;
+				createElementId: () => string;
+			}) => {
+				if (!node.assetId) return null;
+				const durationFrames = Math.max(1, Math.round(node.duration ?? 150));
+				return {
+					id: createElementId(),
+					type: "VideoClip",
+					component: "video-clip",
+					name: node.name,
+					assetId: node.assetId,
+					props: {},
+					transform: createTransformMeta({
+						width: Math.max(1, Math.round(Math.abs(node.width))),
+						height: Math.max(1, Math.round(Math.abs(node.height))),
+						positionX: 0,
+						positionY: 0,
+					}),
+					timeline: buildTimelineMeta(
+						{
+							start: startFrame,
+							end: startFrame + durationFrames,
+							trackIndex: trackIndex >= 0 ? trackIndex : 0,
+							role: "clip",
+						},
+						fps,
+					),
+					render: {
+						zIndex: 0,
+						visible: true,
+						opacity: 1,
+					},
+				};
+			},
 		},
 		audio: {
 			type: "audio",
@@ -360,6 +453,58 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					name: file.name,
 					width: 180,
 					height: 80,
+				};
+			},
+			toTimelineClipboardElement: ({
+				node,
+				fps,
+				startFrame,
+				trackIndex,
+				createElementId,
+			}: {
+				node: {
+					name: string;
+					assetId?: string;
+					width: number;
+					height: number;
+					duration?: number;
+				};
+				fps: number;
+				startFrame: number;
+				trackIndex: number;
+				createElementId: () => string;
+			}) => {
+				if (!node.assetId) return null;
+				const durationFrames = Math.max(1, Math.round(node.duration ?? 150));
+				return {
+					id: createElementId(),
+					type: "AudioClip",
+					component: "audio-clip",
+					name: node.name,
+					assetId: node.assetId,
+					props: {
+						reversed: false,
+					},
+					transform: createTransformMeta({
+						width: Math.max(1, Math.round(Math.abs(node.width))),
+						height: Math.max(1, Math.round(Math.abs(node.height))),
+						positionX: 0,
+						positionY: 0,
+					}),
+					timeline: buildTimelineMeta(
+						{
+							start: startFrame,
+							end: startFrame + durationFrames,
+							trackIndex: trackIndex < 0 ? trackIndex : -1,
+							role: "audio",
+						},
+						fps,
+					),
+					render: {
+						zIndex: 0,
+						visible: true,
+						opacity: 1,
+					},
 				};
 			},
 		},
@@ -441,6 +586,49 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 					name: file.name,
 					width: 240,
 					height: 140,
+				};
+			},
+			toTimelineClipboardElement: ({
+				node,
+				fps,
+				startFrame,
+				trackIndex,
+				createElementId,
+			}: {
+				node: { name: string; assetId?: string; width: number; height: number };
+				fps: number;
+				startFrame: number;
+				trackIndex: number;
+				createElementId: () => string;
+			}) => {
+				if (!node.assetId) return null;
+				return {
+					id: createElementId(),
+					type: "Image",
+					component: "image",
+					name: node.name,
+					assetId: node.assetId,
+					props: {},
+					transform: createTransformMeta({
+						width: Math.max(1, Math.round(Math.abs(node.width))),
+						height: Math.max(1, Math.round(Math.abs(node.height))),
+						positionX: 0,
+						positionY: 0,
+					}),
+					timeline: buildTimelineMeta(
+						{
+							start: startFrame,
+							end: startFrame + 150,
+							trackIndex: trackIndex >= 0 ? trackIndex : 0,
+							role: "clip",
+						},
+						fps,
+					),
+					render: {
+						zIndex: 0,
+						visible: true,
+						opacity: 1,
+					},
 				};
 			},
 		},
@@ -727,6 +915,8 @@ beforeEach(() => {
 	});
 	useStudioHistoryStore.getState().clear();
 	useStudioClipboardStore.getState().clearPayload();
+	useDragStore.getState().endDrag();
+	useDragStore.getState().setTimelineScrollLeft(0);
 });
 
 afterEach(() => {
@@ -755,6 +945,44 @@ const createCanvasWorkspaceRuntime = () => {
 	runtime.ensureTimelineRuntime(timelineRef);
 	runtime.setActiveEditTimeline(timelineRef);
 	return runtime;
+};
+
+const mountMainTimelineDropZone = () => {
+	const mainZone = document.createElement("div");
+	mainZone.setAttribute("data-track-drop-zone", "main");
+	Object.defineProperty(mainZone, "getBoundingClientRect", {
+		value: () => ({
+			x: 0,
+			y: 0,
+			left: 0,
+			top: 0,
+			right: 400,
+			bottom: 200,
+			width: 400,
+			height: 200,
+			toJSON: () => ({}),
+		}),
+	});
+	const contentArea = document.createElement("div");
+	contentArea.setAttribute("data-track-content-area", "main");
+	Object.defineProperty(contentArea, "getBoundingClientRect", {
+		value: () => ({
+			x: 0,
+			y: 0,
+			left: 0,
+			top: 0,
+			right: 400,
+			bottom: 200,
+			width: 400,
+			height: 200,
+			toJSON: () => ({}),
+		}),
+	});
+	mainZone.append(contentArea);
+	document.body.append(mainZone);
+	return () => {
+		mainZone.remove();
+	};
 };
 
 const setAssetSceneSourceSize = (width: number, height: number): void => {
@@ -2375,7 +2603,7 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
-	it("节点拖拽会更新位置并保持 active", () => {
+	it("节点拖拽会更新位置且不改 active", () => {
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 420, 260);
 		const project = useProjectStore.getState().currentProject;
@@ -2384,7 +2612,7 @@ describe("CanvasWorkspace", () => {
 		);
 		expect(node?.x).toBe(360);
 		expect(node?.y).toBe(220);
-		expect(project?.ui.activeNodeId).toBe("node-video-1");
+		expect(project?.ui.activeNodeId).toBe("node-scene-1");
 	});
 
 	it("节点拖拽吸附时会显示 guide，并在 dragEnd 后清空", () => {
@@ -2436,6 +2664,123 @@ describe("CanvasWorkspace", () => {
 			vertical: [],
 			horizontal: [],
 		});
+	});
+
+	it("拖入 timeline 区域后会复位画布节点并创建 timeline element", () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const removeDropZone = mountMainTimelineDropZone();
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			dragNodeAt(300, 160, 120, 80);
+			const project = useProjectStore.getState().currentProject;
+			const draggedNode = project?.canvas.nodes.find(
+				(item) => item.id === "node-video-1",
+			);
+			expect(draggedNode?.x).toBe(240);
+			expect(draggedNode?.y).toBe(120);
+			const timelineElements =
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
+				[];
+			expect(timelineElements.length).toBe(1);
+			expect(timelineElements[0]?.type).toBe("VideoClip");
+			expect(timelineElements[0]?.timeline.trackIndex).toBe(0);
+			expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+		} finally {
+			removeDropZone();
+		}
+	});
+
+	it("Alt 拖入 timeline 区域会取消画布复制态并进入 timeline drop", () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const removeDropZone = mountMainTimelineDropZone();
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			const beforeNodeCount =
+				useProjectStore.getState().currentProject?.canvas.nodes.length ?? 0;
+			dragNodeAt(300, 160, 120, 80, { altKey: true });
+			const project = useProjectStore.getState().currentProject;
+			const draggedNode = project?.canvas.nodes.find(
+				(item) => item.id === "node-video-1",
+			);
+			expect(project?.canvas.nodes.length).toBe(beforeNodeCount);
+			expect(project?.canvas.nodes.some((item) => item.name.includes("副本"))).toBe(
+				false,
+			);
+			expect(draggedNode?.x).toBe(240);
+			expect(draggedNode?.y).toBe(120);
+			const timelineElements =
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
+				[];
+			expect(timelineElements.length).toBe(1);
+			expect(timelineElements[0]?.type).toBe("VideoClip");
+			expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+		} finally {
+			removeDropZone();
+		}
+	});
+
+	it("进入 timeline drop 态后拖离并松手，不会恢复画布拖拽也不会投放", () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const removeDropZone = mountMainTimelineDropZone();
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			const node = getTopVisibleNodeAt(300, 160);
+			act(() => {
+				const startEvent: MockCanvasNodeDragEvent = {
+					...createPointerMeta(300, 160),
+					movementX: 0,
+					movementY: 0,
+					first: true,
+					last: false,
+					tap: false,
+				};
+				getLatestInfiniteSkiaCanvasProps().onNodeDragStart?.(node, startEvent);
+				getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, startEvent);
+				const moveToTimelineEvent: MockCanvasNodeDragEvent = {
+					...createPointerMeta(120, 80),
+					movementX: -180,
+					movementY: -80,
+					first: false,
+					last: false,
+					tap: false,
+				};
+				getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, moveToTimelineEvent);
+				const leaveTimelineEvent: MockCanvasNodeDragEvent = {
+					...createPointerMeta(620, 360),
+					movementX: 320,
+					movementY: 200,
+					first: false,
+					last: false,
+					tap: false,
+				};
+				getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, leaveTimelineEvent);
+				const endEvent: MockCanvasNodeDragEvent = {
+					...leaveTimelineEvent,
+					last: true,
+					buttons: 0,
+				};
+				getLatestInfiniteSkiaCanvasProps().onNodeDragEnd?.(node, endEvent);
+			});
+			const project = useProjectStore.getState().currentProject;
+			const draggedNode = project?.canvas.nodes.find(
+				(item) => item.id === "node-video-1",
+			);
+			expect(draggedNode?.x).toBe(240);
+			expect(draggedNode?.y).toBe(120);
+			const timelineElements =
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
+				[];
+			expect(timelineElements).toHaveLength(0);
+			expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+		} finally {
+			removeDropZone();
+		}
 	});
 
 	it("多选组拖拽会整体移动并只写入一条 batch 历史", () => {
@@ -2521,7 +2866,7 @@ describe("CanvasWorkspace", () => {
 		expect(node?.y).toBe(120);
 	});
 
-	it("Alt 拖拽会复制节点并在结束后切换选择到副本", () => {
+	it("Alt 拖拽会复制节点且不改 active", () => {
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 420, 260, { altKey: true });
 
@@ -2529,17 +2874,22 @@ describe("CanvasWorkspace", () => {
 		const original = project?.canvas.nodes.find(
 			(item) => item.id === "node-video-1",
 		);
-		const copyIds = getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
 		const copiedNode =
-			project?.canvas.nodes.find((item) => item.id === copyIds[0]) ?? null;
+			project?.canvas.nodes.find(
+				(item) =>
+					item.type === "video" &&
+					item.id !== "node-video-1" &&
+					item.name === "Video 1副本",
+			) ?? null;
 		expect(original?.x).toBe(240);
 		expect(original?.y).toBe(120);
-		expect(copyIds).toHaveLength(1);
+		expect(copiedNode).toBeTruthy();
+		if (!copiedNode || copiedNode.type !== "video") return;
 		expect(copiedNode?.type).toBe("video");
 		expect(copiedNode?.name).toContain("副本");
 		expect(copiedNode?.x).toBe(360);
 		expect(copiedNode?.y).toBe(220);
-		expect(copyIds).toEqual([copiedNode?.id]);
+		expect(project?.ui.activeNodeId).toBe("node-scene-1");
 		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
 			"canvas.node-create.batch",
 		);
@@ -2550,9 +2900,13 @@ describe("CanvasWorkspace", () => {
 		dragNodeAt(300, 160, 618, 160, { altKey: true });
 
 		const project = useProjectStore.getState().currentProject;
-		const copyIds = getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
 		const copiedNode =
-			project?.canvas.nodes.find((item) => item.id === copyIds[0]) ?? null;
+			project?.canvas.nodes.find(
+				(item) =>
+					item.type === "video" &&
+					item.id !== "node-video-1" &&
+					item.name === "Video 1副本",
+			) ?? null;
 		expect(copiedNode?.type).toBe("video");
 		expect(copiedNode?.x).toBe(560);
 	});
@@ -2577,36 +2931,40 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
-	it("多选 bbox Alt 拖拽会复制整组并切换到副本选择", () => {
+	it("多选 bbox Alt 拖拽会复制整组并保持当前 active", () => {
 		render(<CanvasWorkspace />);
 		clickNodeAt(300, 160);
 		clickNodeAt(720, 360, { shiftKey: true });
 		dragSelectionBoundsAt(600, 200, 720, 260, { altKey: true });
 
 		const project = useProjectStore.getState().currentProject;
-		const selectedIds =
-			getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
-		const copiedNodes = selectedIds
-			.map(
-				(nodeId) =>
-					project?.canvas.nodes.find((item) => item.id === nodeId) ?? null,
-			)
-			.filter((node): node is CanvasNode => Boolean(node));
-		expect(selectedIds).toHaveLength(2);
-		expect(copiedNodes.map((node) => node.name)).toEqual([
-			"Video 1副本",
-			"Image 1副本",
-		]);
+		const copiedVideo =
+			project?.canvas.nodes.find(
+				(node) =>
+					node.type === "video" &&
+					node.id !== "node-video-1" &&
+					node.name === "Video 1副本",
+			) ?? null;
+		const copiedImage =
+			project?.canvas.nodes.find(
+				(node) =>
+					node.type === "image" &&
+					node.id !== "node-image-1" &&
+					node.name === "Image 1副本",
+			) ?? null;
+		expect(copiedVideo).toBeTruthy();
+		expect(copiedImage).toBeTruthy();
 		expect(
 			project?.canvas.nodes.find((item) => item.id === "node-video-1")?.x,
 		).toBe(240);
 		expect(
 			project?.canvas.nodes.find((item) => item.id === "node-image-1")?.x,
 		).toBe(680);
-		expect(copiedNodes[0]?.x).toBe(360);
-		expect(copiedNodes[0]?.y).toBe(180);
-		expect(copiedNodes[1]?.x).toBe(800);
-		expect(copiedNodes[1]?.y).toBe(380);
+		expect(copiedVideo?.x).toBe(360);
+		expect(copiedVideo?.y).toBe(180);
+		expect(copiedImage?.x).toBe(800);
+		expect(copiedImage?.y).toBe(380);
+		expect(project?.ui.activeNodeId).toBe("node-image-1");
 		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
 			"canvas.node-create.batch",
 		);
@@ -2627,12 +2985,16 @@ describe("CanvasWorkspace", () => {
 		dragNodeAt(80, 80, 180, 120, { altKey: true });
 
 		const afterCopy = useProjectStore.getState().currentProject;
-		const copyIds = getLatestInfiniteSkiaCanvasProps().selectedNodeIds ?? [];
 		const copiedSceneNode =
-			afterCopy?.canvas.nodes.find((node) => node.id === copyIds[0]) ?? null;
+			afterCopy?.canvas.nodes.find(
+				(node) =>
+					node.type === "scene" &&
+					node.id !== "node-scene-1" &&
+					node.sceneId !== "scene-1" &&
+					node.sceneId !== "scene-2",
+			) ?? null;
 		expect(copiedSceneNode).toBeTruthy();
 		if (!copiedSceneNode || copiedSceneNode.type !== "scene") return;
-		expect(copyIds).toEqual([copiedSceneNode.id]);
 		expect(copiedSceneNode.sceneId).not.toBe("scene-1");
 		expect(afterCopy?.scenes[copiedSceneNode.sceneId]).toBeTruthy();
 
@@ -2923,7 +3285,7 @@ describe("CanvasWorkspace", () => {
 			);
 		});
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
-			"node-video-1",
+			"node-scene-1",
 		);
 	});
 
