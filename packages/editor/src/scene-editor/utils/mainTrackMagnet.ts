@@ -1,4 +1,3 @@
-import type { TimelineElement } from "core/element/types";
 import {
 	compactMainTrackElements as compactMainTrackElementsCore,
 	finalizeTimelineElements as finalizeTimelineElementsCore,
@@ -7,6 +6,7 @@ import {
 	shiftMainTrackElementsAfter as shiftMainTrackElementsAfterCore,
 	type TimelinePostProcessOptions,
 } from "core/editor/utils/mainTrackMagnet";
+import type { TimelineElement } from "core/element/types";
 import { resolveTimelineElementRole } from "./resolveRole";
 
 const withResolveRole = (
@@ -51,6 +51,7 @@ export const insertElementIntoMainTrack = (
 	dropStart: number,
 	options: TimelinePostProcessOptions,
 	targetOverride?: TimelineElement,
+	insertPointerTime?: number,
 ): TimelineElement[] =>
 	insertElementIntoMainTrackCore(
 		elements,
@@ -58,4 +59,5 @@ export const insertElementIntoMainTrack = (
 		dropStart,
 		withResolveRole(options),
 		targetOverride,
+		insertPointerTime,
 	);

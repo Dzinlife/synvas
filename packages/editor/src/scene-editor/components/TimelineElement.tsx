@@ -14,8 +14,8 @@ import React, {
 } from "react";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { useModelExists } from "@/element/model/registry";
-import { useModelRegistry } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { cn } from "@/lib/utils";
+import { useModelRegistry } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { framesToTimecode } from "@/utils/timecode";
 import {
 	useAttachments,
@@ -337,7 +337,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 	// 显示 Y：主轨道元素在容器内固定为 0，其他轨道使用 trackY
 	// localTrackY 在拖拽时会被设置，用于显示拖拽效果（ghost 处理）
 	// 由于主轨道元素在拖拽时会被隐藏（显示 ghost），这里不需要特殊处理 localTrackY
-	const displayY = trackIndex === 0 ? 0 : (localTrackY ?? trackY);
+	const displayY = trackIndex === 0 ? 3 : (localTrackY ?? trackY);
 
 	// 计算位置和尺寸
 	const transitionWidth = transitionDuration * ratio;

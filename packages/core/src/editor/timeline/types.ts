@@ -75,6 +75,10 @@ export interface ExtendedDropTarget extends DropTarget {
 	end: number;
 	/** 考虑重叠后的最终轨道位置 */
 	finalTrackIndex: number;
+	/** 主轨预览模式：空白区域为 box，相邻 clip 边界为 insert-line */
+	mainTrackPreviewMode?: "box" | "insert-line";
+	/** 主轨插入判定使用的鼠标时间（帧） */
+	mainTrackInsertTime?: number;
 }
 
 /**

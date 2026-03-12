@@ -13,17 +13,17 @@ import {
 import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/projects/projectStore";
 import { useProjectAssets } from "@/projects/useProjectAssets";
+import { hasSceneAudibleLeafAudio } from "@/scene-editor/audio/sceneReferenceAudio";
 import TimeIndicatorCanvas from "@/scene-editor/components/TimeIndicatorCanvas";
 import {
 	useModelRegistry,
 	useStudioRuntimeManager,
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
-import { hasSceneAudibleLeafAudio } from "@/scene-editor/audio/sceneReferenceAudio";
-import { clampFrame } from "@/utils/timecode";
-import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
+import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
+import { clampFrame } from "@/utils/timecode";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
 } from "./components/TimelineContextMenu";
@@ -60,6 +60,11 @@ import {
 	TRACK_CONTENT_GAP,
 } from "./timeline/trackConfig";
 import { getAudioTrackControlState } from "./utils/audioTrackState";
+import {
+	detachCompositionAudio,
+	isCompositionSourceAudioMuted,
+	restoreCompositionAudio,
+} from "./utils/compositionAudioSeparation";
 import { finalizeTimelineElements } from "./utils/mainTrackMagnet";
 import { resolveElementSourceUri } from "./utils/source";
 import {
@@ -75,11 +80,6 @@ import {
 	getTrackHeightByRole,
 } from "./utils/trackAssignment";
 import { reconcileTransitions } from "./utils/transitions";
-import {
-	detachCompositionAudio,
-	isCompositionSourceAudioMuted,
-	restoreCompositionAudio,
-} from "./utils/compositionAudioSeparation";
 import {
 	detachVideoClipAudio,
 	isVideoSourceAudioMuted,
@@ -149,7 +149,7 @@ const getCompositionHasSourceAudioTrack = (
 const LOCKED_TRACK_OVERLAY_STYLE: React.CSSProperties = {
 	backgroundImage:
 		"linear-gradient(135deg, rgba(255, 255, 255, 0.16) 25%, rgba(255, 255, 255, 0) 25%, rgba(255, 255, 255, 0) 50%, rgba(255, 255, 255, 0.16) 50%, rgba(255, 255, 255, 0.16) 75%, rgba(255, 255, 255, 0) 75%, rgba(255, 255, 255, 0))",
-	backgroundSize: "6px 6px",
+	backgroundSize: "4px 4px",
 };
 
 const PLAYHEAD_FOLLOW_MANUAL_DEBOUNCE_MS = 300;
@@ -392,7 +392,13 @@ const TimelineEditor = () => {
 					trackIndex: anchorElement.timeline.trackIndex ?? 0,
 				},
 			};
-		}, [clipboardPayload, currentProject, elements, fps, resolveTimelineSceneId]);
+		}, [
+			clipboardPayload,
+			currentProject,
+			elements,
+			fps,
+			resolveTimelineSceneId,
+		]);
 	const deleteElementsByIds = useCallback(
 		(targetIds: string[]) => {
 			if (targetIds.length === 0) return;
@@ -1901,8 +1907,7 @@ const TimelineEditor = () => {
 				className="relative"
 				style={{
 					transform: `translateX(-${scrollLeft}px)`,
-					height: mainTrackHeight - TRACK_CONTENT_GAP / 2,
-					marginTop: TRACK_CONTENT_GAP / 2,
+					height: mainTrackHeight,
 				}}
 			>
 				{mainTrackElements.map((element) => {
@@ -2139,8 +2144,8 @@ const TimelineEditor = () => {
 		const left = activeSnapPoint.time * ratio - scrollLeft;
 		return (
 			<div
-				className="absolute top-12 bottom-0 w-px bg-green-500 pointer-events-none"
-				style={{ left: left + timelinePaddingLeft }}
+				className="absolute top-12 bottom-0 border-l border-dashed border-white/50 pointer-events-none"
+				style={{ left: left + timelinePaddingLeft - 1 }}
 			/>
 		);
 	}, [activeSnapPoint, ratio, scrollLeft, timelinePaddingLeft]);

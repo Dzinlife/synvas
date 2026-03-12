@@ -1,8 +1,8 @@
+import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type {
 	TimelineElement as TimelineElementType,
 	TrackRole,
 } from "core/element/types";
-import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type React from "react";
 import { useCallback, useRef } from "react";
 import {
@@ -960,6 +960,7 @@ export function useExternalMaterialDnd({
 								startFrame,
 								postProcessOptions,
 								newElement,
+								startFrame,
 							);
 						} else {
 							nextElements = finalizeTimelineElements(
@@ -1184,6 +1185,7 @@ export function useExternalMaterialDnd({
 							startFrame,
 							postProcessOptions,
 							newElement,
+							startFrame,
 						);
 					} else {
 						nextElements = finalizeTimelineElements(

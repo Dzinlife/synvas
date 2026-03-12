@@ -3,6 +3,7 @@
  * 用于展示可拖拽的元素组件（图片、视频、滤镜、转场等）
  */
 
+import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type {
 	ElementType,
 	TimelineAsset,
@@ -10,11 +11,11 @@ import type {
 	TrackRole,
 } from "core/element/types";
 import { isAssetBackedElementType } from "core/element/types";
-import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
 import type React from "react";
 import { useCallback } from "react";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
+import { useProjectAssets } from "@/projects/useProjectAssets";
 import {
 	useAttachments,
 	useFps,
@@ -39,7 +40,6 @@ import {
 	getTransitionDurationParts,
 	isTransitionElement,
 } from "@/scene-editor/utils/transitions";
-import { useProjectAssets } from "@/projects/useProjectAssets";
 import {
 	clampFrame,
 	framesToTimecode,
@@ -570,6 +570,7 @@ const CanvasElementLibrary: React.FC = () => {
 						startFrame,
 						postProcessOptions,
 						newElement,
+						startFrame,
 					);
 				}
 

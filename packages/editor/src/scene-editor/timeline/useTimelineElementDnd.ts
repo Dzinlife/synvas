@@ -17,6 +17,7 @@ import { findTimelineDropTargetFromScreenPosition } from "../drag/timelineDropTa
 import { useTimelineStoreApi } from "../runtime/EditorRuntimeProvider";
 import { getAudioTrackControlState } from "../utils/audioTrackState";
 import { cloneValue, createCopySeed } from "../utils/copyUtils";
+import { resolveMainTrackDropPreview } from "../utils/mainTrackInsertPreview";
 import {
 	finalizeTimelineElements,
 	shiftMainTrackElementsAfter,
@@ -664,15 +665,54 @@ export const useTimelineElementDnd = ({
 		return Math.max(0, Math.round(localX / ratio));
 	};
 
+	const getMainTrackDropTimeByX = (
+		screenX: number,
+		scrollLeft: number,
+	): number | null => {
+		const mainZone = document.querySelector<HTMLElement>(
+			'[data-track-drop-zone="main"]',
+		);
+		if (!mainZone) return null;
+		const contentArea = mainZone.querySelector<HTMLElement>(
+			'[data-track-content-area="main"]',
+		);
+		if (!contentArea) return null;
+		const contentRect = contentArea.getBoundingClientRect();
+		const localX = screenX - contentRect.left + scrollLeft;
+		return Math.max(0, Math.round(localX / ratio));
+	};
+
+	const getMainTrackInsertTime = (
+		screenX: number,
+		screenY: number,
+		scrollLeft: number,
+		allowOutsideMainZone: boolean,
+	): number | null => {
+		const dropTime = getMainTrackDropTime(screenX, screenY, scrollLeft);
+		if (dropTime !== null) return dropTime;
+		if (!allowOutsideMainZone) return null;
+		return getMainTrackDropTimeByX(screenX, scrollLeft);
+	};
+
 	const getMainTrackDropStart = (
 		screenX: number,
 		screenY: number,
 		scrollLeft: number,
 		offsetX: number,
 	): number | null => {
-		const dropTime = getMainTrackDropTime(screenX, screenY, scrollLeft);
+		const dropTime = getMainTrackInsertTime(screenX, screenY, scrollLeft, true);
 		if (dropTime === null) return null;
 		return Math.max(0, dropTime - Math.round(offsetX / ratio));
+	};
+
+	const buildMainTrackDropPreviewMeta = (
+		insertPointerTime: number | null,
+		excludeElementIds: Iterable<string> = [],
+	) => {
+		if (insertPointerTime === null) return null;
+		return resolveMainTrackDropPreview(elements, insertPointerTime, {
+			excludeElementIds,
+		});
 	};
 
 	const bindLeftDrag = useDrag(
@@ -1246,14 +1286,15 @@ export const useTimelineElementDnd = ({
 							trackIndex: draggedBaseTrack,
 							type: "track" as const,
 						};
-				const mainDropTime = getMainTrackDropTime(
+				const mainInsertTime = getMainTrackInsertTime(
 					xy[0],
 					xy[1],
 					currentScrollLeft,
+					baseDropTarget.type === "track" && baseDropTarget.trackIndex === 0,
 				);
 				const dragSelectedIds = dragSelectedIdsRef.current;
 				const isMainTrackCandidate =
-					mainDropTime !== null &&
+					mainInsertTime !== null &&
 					dragSelectedIds.every((selectedId) => {
 						const selectedElement = elements.find((el) => el.id === selectedId);
 						if (!selectedElement) return false;
@@ -1262,6 +1303,13 @@ export const useTimelineElementDnd = ({
 					});
 				const shouldUseRippleEditingMulti =
 					rippleEditingEnabled && isMainTrackCandidate;
+				const mainTrackPreview =
+					shouldUseRippleEditingMulti && mainInsertTime !== null
+						? buildMainTrackDropPreviewMeta(
+								mainInsertTime,
+								isCopyDrag ? [] : dragSelectedIds,
+							)
+						: null;
 
 				const snapResult = runPipeline(
 					{ deltaFrames, snapPoint: null as SnapPoint | null },
@@ -1413,7 +1461,7 @@ export const useTimelineElementDnd = ({
 				);
 				if (canDropToMainTrack) {
 					resolvedDropTarget = { type: "track", trackIndex: 0 };
-				} else if (mainDropTime !== null) {
+				} else if (mainInsertTime !== null) {
 					resolvedDropTarget = { type: "track", trackIndex: draggedBaseTrack };
 				}
 
@@ -1651,6 +1699,7 @@ export const useTimelineElementDnd = ({
 													fps,
 													trackLockedMap,
 												},
+												mainTrackPreview?.insertTime,
 											),
 										),
 									);
@@ -1799,6 +1848,7 @@ export const useTimelineElementDnd = ({
 									fps,
 									trackLockedMap,
 								},
+								mainTrackPreview?.insertTime,
 							),
 						);
 
@@ -2035,6 +2085,12 @@ export const useTimelineElementDnd = ({
 							start: dropStartForRippleEditing,
 							end: dropStartForRippleEditing + groupCompactDuration,
 							finalTrackIndex: 0,
+							...(mainTrackPreview
+								? {
+										mainTrackPreviewMode: mainTrackPreview.mode,
+										mainTrackInsertTime: mainTrackPreview.insertTime,
+									}
+								: {}),
 						});
 					} else if (forceMainTrackPlacement) {
 						setActiveSnapPoint(snapPoint);
@@ -2119,6 +2175,16 @@ export const useTimelineElementDnd = ({
 				rippleEditingEnabled &&
 				resolvedDropTarget.type === "track" &&
 				resolvedDropTarget.trackIndex === 0;
+			const mainInsertTime = shouldUseRippleEditing
+				? getMainTrackInsertTime(xy[0], xy[1], currentScrollLeft, true)
+				: null;
+			const singleMainTrackPreview =
+				shouldUseRippleEditing && mainInsertTime !== null
+					? buildMainTrackDropPreviewMeta(
+							mainInsertTime,
+							isCopyDrag ? [] : [element.id],
+						)
+					: null;
 
 			let { newStart, newEnd } = dragResult;
 			const { newY } = dragResult;
@@ -2203,6 +2269,7 @@ export const useTimelineElementDnd = ({
 											trackLockedMap,
 										},
 										copy,
+										mainInsertTime ?? undefined,
 									),
 								),
 							);
@@ -2283,6 +2350,8 @@ export const useTimelineElementDnd = ({
 									fps,
 									trackLockedMap,
 								},
+								undefined,
+								mainInsertTime ?? undefined,
 							),
 						);
 					}
@@ -2370,6 +2439,12 @@ export const useTimelineElementDnd = ({
 						start: dropStartForRippleEditing,
 						end: dropStartForRippleEditing + (newEnd - newStart),
 						finalTrackIndex: 0,
+						...(singleMainTrackPreview
+							? {
+									mainTrackPreviewMode: singleMainTrackPreview.mode,
+									mainTrackInsertTime: singleMainTrackPreview.insertTime,
+								}
+							: {}),
 					});
 				} else if (finalTrackResult) {
 					const displayTrackIndex =

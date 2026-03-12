@@ -1,11 +1,17 @@
 import type React from "react";
 import { createPortal } from "react-dom";
 import { secondsToFrames } from "@/utils/timecode";
-import { useFps, useTimelineScale } from "../contexts/TimelineContext";
+import {
+	useElements,
+	useFps,
+	useRippleEditing,
+	useTimelineScale,
+} from "../contexts/TimelineContext";
 import {
 	getElementHeightForTrack,
 	TRACK_CONTENT_GAP,
 } from "../timeline/trackConfig";
+import { resolveMainTrackDropPreview } from "../utils/mainTrackInsertPreview";
 import { getPixelsPerFrame } from "../utils/timelineScale";
 import { getTrackYFromHeights } from "../utils/trackAssignment";
 import { getTransitionDurationParts } from "../utils/transitions";
@@ -57,6 +63,8 @@ const MaterialDropIndicator: React.FC = () => {
 	const { isDragging, dragSource, dropTarget } = useDragStore();
 	const dragData = useDragStore((state) => state.dragData);
 	const { fps } = useFps();
+	const { elements } = useElements();
+	const { rippleEditingEnabled } = useRippleEditing();
 	const { timelineScale } = useTimelineScale();
 	const ratio = getPixelsPerFrame(fps, timelineScale);
 	const indicatorOffset = TRACK_CONTENT_GAP / 2;
@@ -88,6 +96,13 @@ const MaterialDropIndicator: React.FC = () => {
 		(dragData.duration ?? 0) > 0
 			? (dragData.duration as number)
 			: fallbackDurationFrames;
+	const mainTrackPreview =
+		targetType === "track" &&
+		trackIndex === 0 &&
+		rippleEditingEnabled &&
+		!isTransitionMaterial
+			? resolveMainTrackDropPreview(elements, time)
+			: null;
 	const elementWidth = materialDurationFrames * ratio;
 	const transitionHead = getTransitionDurationParts(
 		materialDurationFrames,
@@ -155,7 +170,7 @@ const MaterialDropIndicator: React.FC = () => {
 
 			return createPortal(
 				<div
-					className="fixed h-px bg-green-500 z-9998 pointer-events-none rounded-full shadow-lg shadow-green-500/50"
+					className="fixed h-px bg-white z-9998 pointer-events-none"
 					style={{
 						left: screenX,
 						top: screenY,
@@ -202,7 +217,7 @@ const MaterialDropIndicator: React.FC = () => {
 
 		return createPortal(
 			<div
-				className="fixed h-px bg-green-500 z-9998 pointer-events-none rounded-full shadow-lg shadow-green-500/50"
+				className="fixed h-px bg-white z-9998 pointer-events-none"
 				style={{
 					left: screenX,
 					top: screenY,
@@ -224,7 +239,34 @@ const MaterialDropIndicator: React.FC = () => {
 			if (contentArea) {
 				const contentRect = contentArea.getBoundingClientRect();
 				const scrollLeft = useDragStore.getState().timelineScrollLeft;
-				const startTime = isTransitionMaterial ? time - transitionHead : time;
+				if (mainTrackPreview?.mode === "insert-line") {
+					screenX =
+						contentRect.left + mainTrackPreview.insertTime * ratio - scrollLeft;
+					screenY = contentRect.top + indicatorOffset;
+					indicatorHeight = getElementHeightForTrack(
+						contentRect.height || indicatorHeight,
+					);
+					return createPortal(
+						<div
+							className="fixed z-9998 pointer-events-none"
+							style={{
+								left: screenX - 0.5,
+								top: screenY,
+								height: indicatorHeight,
+							}}
+						>
+							<div className="absolute left-0 top-0 -translate-x-1/2 h-full w-0.5 bg-white" />
+							<div className="absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2 w-3 h-0.5 bg-white rounded-full" />
+							<div className="absolute left-0 bottom-0 -translate-x-1/2 translate-y-1/2 w-3 h-0.5 bg-white rounded-full" />
+						</div>,
+						document.body,
+					);
+				}
+				const boxTime =
+					mainTrackPreview?.mode === "box" ? mainTrackPreview.insertTime : time;
+				const startTime = isTransitionMaterial
+					? boxTime - transitionHead
+					: boxTime;
 				screenX = contentRect.left + startTime * ratio - scrollLeft;
 				screenY = contentRect.top + indicatorOffset;
 				indicatorHeight = getElementHeightForTrack(
@@ -320,7 +362,7 @@ const MaterialDropIndicator: React.FC = () => {
 
 	return createPortal(
 		<div
-			className="fixed bg-green-500/20 border-2 border-green-500 border-dashed z-9998 pointer-events-none rounded-md box-border"
+			className="fixed bg-white/20 border border-white border-dashed z-9998 pointer-events-none rounded box-border"
 			style={{
 				left: screenX,
 				top: screenY,

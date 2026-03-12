@@ -1,8 +1,8 @@
 import { TimelineElement } from "../../element/types";
-import { normalizeStoredTrackIndices } from "./trackAssignment";
 import { updateElementTime } from "./timelineTime";
-import { reconcileTransitions } from "./transitions";
 import type { ResolveRole } from "./trackAssignment";
+import { normalizeStoredTrackIndices } from "./trackAssignment";
+import { reconcileTransitions } from "./transitions";
 
 const MAIN_TRACK_INDEX = 0;
 const DEFAULT_FPS = 30;
@@ -24,6 +24,15 @@ export interface MainTrackMagnetOptions {
 export interface TimelinePostProcessOptions extends MainTrackMagnetOptions {
 	rippleEditingEnabled?: boolean;
 }
+
+const normalizeInsertPointerTime = (
+	insertPointerTime: number | undefined,
+): number | null => {
+	if (!Number.isFinite(insertPointerTime)) {
+		return null;
+	}
+	return Math.max(0, Math.round(insertPointerTime as number));
+};
 
 function isMainTrackElement(element: TimelineElement): boolean {
 	return (element.timeline.trackIndex ?? 0) === MAIN_TRACK_INDEX;
@@ -85,10 +94,7 @@ function applyTimelineUpdates(
 	const next = elements.map((el) => {
 		const update = updates.get(el.id);
 		if (!update) return el;
-		if (
-			update.start === el.timeline.start &&
-			update.end === el.timeline.end
-		) {
+		if (update.start === el.timeline.start && update.end === el.timeline.end) {
 			return el;
 		}
 		didChange = true;
@@ -250,6 +256,7 @@ export function reorderMainTrackElementsByInsert(
 	targetId: string,
 	dropStart: number,
 	options: TimelinePostProcessOptions,
+	insertPointerTime?: number,
 ): TimelineElement[] {
 	const ordered = sortMainTrackElements(elements);
 	if (ordered.length <= 1) {
@@ -260,13 +267,15 @@ export function reorderMainTrackElementsByInsert(
 	if (!target) return elements;
 
 	const duration = target.timeline.end - target.timeline.start;
-	const dropCenter = dropStart + duration / 2;
+	const fallbackDecisionTime = dropStart + duration / 2;
+	const decisionTime =
+		normalizeInsertPointerTime(insertPointerTime) ?? fallbackDecisionTime;
 	const others = ordered.filter((el) => el.id !== targetId);
 
 	let insertIndex = others.findIndex((el) => {
 		const center =
 			el.timeline.start + (el.timeline.end - el.timeline.start) / 2;
-		return center > dropCenter;
+		return center > decisionTime;
 	});
 	if (insertIndex < 0) {
 		insertIndex = others.length;
@@ -295,6 +304,7 @@ export function insertElementIntoMainTrack(
 	dropStart: number,
 	options: TimelinePostProcessOptions,
 	targetOverride?: TimelineElement,
+	insertPointerTime?: number,
 ): TimelineElement[] {
 	let updated = elements;
 	let target = updated.find((el) => el.id === targetId) ?? null;
@@ -327,6 +337,7 @@ export function insertElementIntoMainTrack(
 		targetId,
 		dropStart,
 		options,
+		insertPointerTime,
 	);
 }
 
@@ -335,6 +346,7 @@ export function insertElementsIntoMainTrackGroup(
 	targetIds: string[],
 	dropStart: number,
 	options: TimelinePostProcessOptions,
+	insertPointerTime?: number,
 ): TimelineElement[] {
 	if (targetIds.length === 0)
 		return finalizeTimelineElements(elements, options);
@@ -363,12 +375,14 @@ export function insertElementsIntoMainTrackGroup(
 		(sum, el) => sum + (el.timeline.end - el.timeline.start),
 		0,
 	);
-	const dropCenter = dropStart + groupDuration / 2;
+	const fallbackDecisionTime = dropStart + groupDuration / 2;
+	const decisionTime =
+		normalizeInsertPointerTime(insertPointerTime) ?? fallbackDecisionTime;
 
 	let insertIndex = others.findIndex((el) => {
 		const center =
 			el.timeline.start + (el.timeline.end - el.timeline.start) / 2;
-		return center > dropCenter;
+		return center > decisionTime;
 	});
 	if (insertIndex < 0) {
 		insertIndex = others.length;

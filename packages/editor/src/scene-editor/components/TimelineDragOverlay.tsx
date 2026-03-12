@@ -1,12 +1,13 @@
-import React, { useLayoutEffect, useMemo, useRef } from "react";
+import type React from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { DragGhostState } from "../contexts/TimelineContext";
+import type { DragGhostState } from "../contexts/TimelineContext";
 import {
 	DEFAULT_TRACK_HEIGHT,
 	getElementHeightForTrack,
 	TRACK_CONTENT_GAP,
 } from "../timeline/trackConfig";
-import { ExtendedDropTarget } from "../timeline/types";
+import type { ExtendedDropTarget } from "../timeline/types";
 import { getTrackYFromHeights } from "../utils/trackAssignment";
 
 interface TimelineDragOverlayProps {
@@ -46,8 +47,8 @@ const GhostClone: React.FC<{ ghost: DragGhostState }> = ({ ghost }) => {
 				zIndex: 9999,
 			}}
 		>
-			<div ref={containerRef} className="absolute inset-0 opacity-60" />
-			<div className="absolute inset-0 border-2 border-blue-500 rounded-md shadow-lg shadow-blue-500/30" />
+			<div ref={containerRef} className="absolute inset-0 opacity-30" />
+			<div className="absolute inset-0 border border-white/60 rounded" />
 		</div>
 	);
 };
@@ -69,8 +70,7 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 		if (activeDropTarget.type === "track" && dragGhosts.length > 1) {
 			const firstTrack = dragGhosts[0]?.element.timeline.trackIndex ?? 0;
 			const isSameTrack = dragGhosts.every(
-				(ghost) =>
-					(ghost.element.timeline.trackIndex ?? 0) === firstTrack,
+				(ghost) => (ghost.element.timeline.trackIndex ?? 0) === firstTrack,
 			);
 			if (!isSameTrack) return null;
 		}
@@ -111,6 +111,18 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 					: resolveOtherTrackHeight(activeDropTarget.finalTrackIndex),
 		);
 		const indicatorOffset = TRACK_CONTENT_GAP / 2;
+		const shouldRenderMainInsertLine =
+			activeDropTarget.finalTrackIndex === 0 &&
+			activeDropTarget.mainTrackPreviewMode === "insert-line" &&
+			Number.isFinite(activeDropTarget.mainTrackInsertTime);
+		const shouldRenderMainTailBox =
+			activeDropTarget.finalTrackIndex === 0 &&
+			activeDropTarget.mainTrackPreviewMode === "box" &&
+			Number.isFinite(activeDropTarget.mainTrackInsertTime);
+		const shouldRenderOtherVirtualGap =
+			activeDropTarget.finalTrackIndex > 0 &&
+			activeDropTarget.type === "track" &&
+			activeDropTarget.finalTrackIndex > otherTrackCount;
 
 		let targetZone: HTMLElement | null = null;
 		let screenX = 0;
@@ -126,8 +138,30 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 				);
 				if (contentArea) {
 					const contentRect = contentArea.getBoundingClientRect();
-					screenX =
-						contentRect.left + activeDropTarget.start * ratio - scrollLeft;
+					if (shouldRenderMainInsertLine) {
+						const insertTime = activeDropTarget.mainTrackInsertTime as number;
+						screenX = contentRect.left + insertTime * ratio - scrollLeft;
+						screenY = contentRect.top + indicatorOffset;
+						const indicator = (
+							<div
+								className="fixed z-9998 pointer-events-none"
+								style={{
+									left: screenX - 0.5,
+									top: screenY,
+									height: indicatorHeight,
+								}}
+							>
+								<div className="absolute left-0 top-0 -translate-x-1/2 h-full w-0.5 bg-white" />
+								<div className="absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2 w-3 h-0.5 bg-white rounded-full" />
+								<div className="absolute left-0 bottom-0 -translate-x-1/2 translate-y-1/2 w-3 h-0.5 bg-white rounded-full" />
+							</div>
+						);
+						return createPortal(indicator, document.body);
+					}
+					const boxTime = shouldRenderMainTailBox
+						? (activeDropTarget.mainTrackInsertTime as number)
+						: activeDropTarget.start;
+					screenX = contentRect.left + boxTime * ratio - scrollLeft;
 					screenY = contentRect.top + indicatorOffset;
 				}
 			}
@@ -142,9 +176,15 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 				if (contentArea) {
 					const contentRect = contentArea.getBoundingClientRect();
 
-					if (activeDropTarget.type === "gap") {
+					if (activeDropTarget.type === "gap" || shouldRenderOtherVirtualGap) {
+						const gapTrackBase = shouldRenderOtherVirtualGap
+							? Math.min(
+									otherTrackCount,
+									Math.max(0, activeDropTarget.finalTrackIndex - 1),
+								)
+							: activeDropTarget.trackIndex - 1;
 						const gapY = getTrackYFromHeights(
-							activeDropTarget.trackIndex - 1,
+							gapTrackBase,
 							otherTrackHeights,
 							otherTrackCount,
 						);
@@ -153,7 +193,7 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 
 						const indicator = (
 							<div
-								className="fixed h-px bg-green-500 z-9998 pointer-events-none rounded-full shadow-lg shadow-green-500/50"
+								className="fixed h-px bg-white z-9998 pointer-events-none"
 								style={{
 									left: screenX,
 									top: screenY,
@@ -218,7 +258,7 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 
 						const indicator = (
 							<div
-								className="fixed h-px bg-green-500 z-9998 pointer-events-none rounded-full shadow-lg shadow-green-500/50"
+								className="fixed h-px bg-white z-9998 pointer-events-none"
 								style={{
 									left: screenX,
 									top: screenY,
@@ -253,7 +293,7 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 
 		const indicator = (
 			<div
-				className="fixed bg-blue-500/20 border-2 border-blue-500 border-dashed z-9998 pointer-events-none rounded-md box-border"
+				className="fixed bg-white/20 border border-white border-dashed z-9998 pointer-events-none rounded box-border"
 				style={{
 					left: screenX,
 					top: screenY,
@@ -274,6 +314,7 @@ const TimelineDragOverlay: React.FC<TimelineDragOverlayProps> = ({
 		audioTrackCount,
 		audioTrackHeights,
 		mainTrackHeight,
+		timelinePaddingLeft,
 	]);
 
 	const ghostElement = useMemo(() => {
