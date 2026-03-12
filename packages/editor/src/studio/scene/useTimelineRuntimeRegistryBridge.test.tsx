@@ -260,7 +260,7 @@ describe("useTimelineRuntimeRegistryBridge", () => {
 		expect(useStudioHistoryStore.getState().past.length).toBeGreaterThan(0);
 	});
 
-	it("两个 runtime 使用相同 historyOpId 提交时，全局历史仅新增一条", async () => {
+	it("两个 runtime 使用相同 txnId 提交时，历史按命令级分别记录", async () => {
 		render(<BridgeMount />, { wrapper });
 
 		await waitFor(() => {
@@ -274,7 +274,7 @@ describe("useTimelineRuntimeRegistryBridge", () => {
 			scene1Runtime?.timelineStore
 				.getState()
 				.setElements((prev) => prev.slice(0, 0), {
-					historyOpId: "shared-op-id",
+					txnId: "shared-op-id",
 				});
 		});
 
@@ -285,16 +285,15 @@ describe("useTimelineRuntimeRegistryBridge", () => {
 			scene2Runtime?.timelineStore
 				.getState()
 				.setElements((prev) => prev.slice(0, 1), {
-					historyOpId: "shared-op-id",
+					txnId: "shared-op-id",
 				});
 		});
 
 		await waitFor(() => {
-			expect(useStudioHistoryStore.getState().past).toHaveLength(1);
+			expect(useStudioHistoryStore.getState().past).toHaveLength(2);
 		});
-		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
-			"scene.timeline.batch",
-		);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe("timeline.ot");
+		expect(useStudioHistoryStore.getState().past[1]?.kind).toBe("timeline.ot");
 	});
 
 	it("scene 增删时会维护 runtime 池", async () => {

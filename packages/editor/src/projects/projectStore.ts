@@ -39,6 +39,7 @@ type ProjectStatus = "idle" | "loading" | "ready" | "error";
 
 interface UpdateSceneTimelineOptions {
 	recordHistory?: boolean;
+	txnId?: string;
 	historyOpId?: string;
 }
 
@@ -871,7 +872,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				currentProject: nextProject,
 				sceneTimelineMutationOpIds: {
 					...state.sceneTimelineMutationOpIds,
-					[sceneId]: options?.historyOpId,
+					[sceneId]: options?.txnId ?? options?.historyOpId,
 				},
 			};
 		});

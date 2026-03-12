@@ -7,6 +7,7 @@ import type {
 
 interface TimelineWriteOptions {
 	recordHistory?: boolean;
+	txnId?: string;
 	historyOpId?: string;
 }
 

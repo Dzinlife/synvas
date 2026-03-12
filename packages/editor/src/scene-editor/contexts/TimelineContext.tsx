@@ -3,6 +3,11 @@ import {
 	resolveMovedChildrenTracks,
 	resolveTrackPlacementWithStoredAssignments,
 } from "core/editor/command/move";
+import {
+	buildTimelineBatchCommandFromSnapshots,
+	type TimelineOtCommand,
+	type TimelineOtIntent,
+} from "core/editor/ot";
 import { pruneAudioTrackStates } from "core/editor/command/postProcess";
 import type { TimelineCommandSnapshot } from "core/editor/command/types";
 import {
@@ -132,12 +137,12 @@ export interface TimelineStore {
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
-	historyPast: TimelineHistorySnapshot[];
-	historyFuture: TimelineHistorySnapshot[];
-	lastCommittedHistoryOpId: string | null;
-	lastHistoryCommitSnapshot: TimelineHistorySnapshot | null;
-	historyCommitRevision: number;
-	historyLimit: number;
+	otCommitRevision: number;
+	lastCommittedOtTxnId: string | null;
+	lastCommittedOtOpIds: string[];
+	lastCommittedOtIntent: TimelineOtIntent | null;
+	lastCommittedOtCommands: TimelineOtCommand[];
+	lastCommittedOtCausedBy: string[];
 	canvasSize: { width: number; height: number };
 	isPlaying: boolean;
 	isExporting: boolean; // 导出时暂停预览更新
@@ -182,14 +187,12 @@ export interface TimelineStore {
 		elements:
 			| TimelineElement[]
 			| ((prev: TimelineElement[]) => TimelineElement[]),
-		options?: { history?: boolean; historyOpId?: string },
+		options?: TimelineOtCommitOptions,
 	) => void;
 	setTracks: (
 		tracks: TimelineTrack[] | ((prev: TimelineTrack[]) => TimelineTrack[]),
+		options?: TimelineOtCommitOptions,
 	) => void;
-	undo: () => void;
-	redo: () => void;
-	resetHistory: () => void;
 	setTrackHidden: (trackId: string, hidden: boolean) => void;
 	toggleTrackHidden: (trackId: string) => void;
 	setTrackLocked: (trackId: string, locked: boolean) => void;
@@ -251,7 +254,7 @@ export interface TimelineStore {
 	getCommandSnapshot: () => TimelineCommandSnapshot;
 	applyCommandSnapshot: (
 		snapshot: TimelineCommandSnapshot,
-		options?: { history?: boolean; historyOpId?: string },
+		options?: TimelineOtCommitOptions,
 	) => void;
 }
 
@@ -260,14 +263,12 @@ export type TimelineStoreApi = Mutate<
 	[["zustand/subscribeWithSelector", never]]
 >;
 
-interface TimelineHistorySnapshot {
-	elements: TimelineElement[];
-	tracks: TimelineTrack[];
-	audioTrackStates: AudioTrackControlStateMap;
-	rippleEditingEnabled: boolean;
+export interface TimelineOtCommitOptions {
+	history?: boolean;
+	txnId?: string;
+	causedBy?: string[];
+	intent?: TimelineOtIntent;
 }
-
-const HISTORY_LIMIT = 100;
 
 const createHistoryOpId = (): string => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -278,21 +279,12 @@ const createHistoryOpId = (): string => {
 		.slice(2, 8)}`;
 };
 
-const trimHistory = (
-	history: TimelineHistorySnapshot[],
-	limit: number,
-): TimelineHistorySnapshot[] => {
-	if (history.length <= limit) return history;
-	return history.slice(history.length - limit);
-};
-
-const buildHistorySnapshot = (state: {
+const toOtSnapshotState = (state: {
 	elements: TimelineElement[];
 	tracks: TimelineTrack[];
 	audioTrackStates: AudioTrackControlStateMap;
 	rippleEditingEnabled: boolean;
-}): TimelineHistorySnapshot => {
-	// 使用不可变快照复用元素/轨道引用，避免深拷贝占用内存
+}) => {
 	return {
 		elements: state.elements,
 		tracks: state.tracks,
@@ -301,29 +293,68 @@ const buildHistorySnapshot = (state: {
 	};
 };
 
-const withHistoryCommit = (
+const withOtCommit = (
 	state: TimelineStore,
-	historyOpId?: string,
+	command: TimelineOtCommand,
+	options?: TimelineOtCommitOptions,
 ): Pick<
 	TimelineStore,
-	| "historyPast"
-	| "historyFuture"
-	| "lastCommittedHistoryOpId"
-	| "lastHistoryCommitSnapshot"
-	| "historyCommitRevision"
+	| "otCommitRevision"
+	| "lastCommittedOtTxnId"
+	| "lastCommittedOtOpIds"
+	| "lastCommittedOtIntent"
+	| "lastCommittedOtCommands"
+	| "lastCommittedOtCausedBy"
 > => {
-	const snapshot = buildHistorySnapshot(state);
-	const nextPast = trimHistory(
-		[...state.historyPast, snapshot],
-		state.historyLimit,
-	);
+	const txnId = options?.txnId ?? createHistoryOpId();
 	return {
-		historyPast: nextPast,
-		historyFuture: [],
-		lastCommittedHistoryOpId: historyOpId ?? createHistoryOpId(),
-		lastHistoryCommitSnapshot: snapshot,
-		historyCommitRevision: state.historyCommitRevision + 1,
+		otCommitRevision: state.otCommitRevision + 1,
+		lastCommittedOtTxnId: txnId,
+		lastCommittedOtOpIds: [],
+		lastCommittedOtIntent: options?.intent ?? "root",
+		lastCommittedOtCommands: [command],
+		lastCommittedOtCausedBy: options?.causedBy ?? [],
 	};
+};
+
+const withOtCommitFromPatch = (
+	state: TimelineStore,
+	patch: Partial<
+		Pick<
+			TimelineStore,
+			"elements" | "tracks" | "audioTrackStates" | "rippleEditingEnabled"
+		>
+	>,
+	options?: TimelineOtCommitOptions,
+): Pick<
+	TimelineStore,
+	| "otCommitRevision"
+	| "lastCommittedOtTxnId"
+	| "lastCommittedOtOpIds"
+	| "lastCommittedOtIntent"
+	| "lastCommittedOtCommands"
+	| "lastCommittedOtCausedBy"
+> => {
+	const before = toOtSnapshotState(state);
+	const after = toOtSnapshotState({
+		elements: patch.elements ?? state.elements,
+		tracks: patch.tracks ?? state.tracks,
+		audioTrackStates: patch.audioTrackStates ?? state.audioTrackStates,
+		rippleEditingEnabled:
+			patch.rippleEditingEnabled ?? state.rippleEditingEnabled,
+	});
+	const command = buildTimelineBatchCommandFromSnapshots({ before, after });
+	if (!command) {
+		return {
+			otCommitRevision: state.otCommitRevision,
+			lastCommittedOtTxnId: state.lastCommittedOtTxnId,
+			lastCommittedOtOpIds: state.lastCommittedOtOpIds,
+			lastCommittedOtIntent: state.lastCommittedOtIntent,
+			lastCommittedOtCommands: state.lastCommittedOtCommands,
+			lastCommittedOtCausedBy: state.lastCommittedOtCausedBy,
+		};
+	}
+	return withOtCommit(state, command, options);
 };
 
 const reconcileSelection = (
@@ -416,12 +447,12 @@ export const createTimelineStore = (): TimelineStoreApi => {
 				},
 			],
 			audioTrackStates: {},
-			historyPast: [],
-			historyFuture: [],
-			lastCommittedHistoryOpId: null,
-			lastHistoryCommitSnapshot: null,
-			historyCommitRevision: 0,
-			historyLimit: HISTORY_LIMIT,
+			otCommitRevision: 0,
+			lastCommittedOtTxnId: null,
+			lastCommittedOtOpIds: [],
+			lastCommittedOtIntent: null,
+			lastCommittedOtCommands: [],
+			lastCommittedOtCausedBy: [],
 			canvasSize: { width: 1920, height: 1080 },
 			isPlaying: false,
 			isExporting: false,
@@ -576,7 +607,7 @@ export const createTimelineStore = (): TimelineStoreApi => {
 				elements:
 					| TimelineElement[]
 					| ((prev: TimelineElement[]) => TimelineElement[]),
-				options?: { history?: boolean; historyOpId?: string },
+				options?: TimelineOtCommitOptions,
 			) => {
 				set((state) => {
 					const nextElements =
@@ -591,13 +622,20 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					}
 					return {
 						elements: nextElements,
-						...withHistoryCommit(state, options?.historyOpId),
+						...withOtCommitFromPatch(
+							state,
+							{
+								elements: nextElements,
+							},
+							options,
+						),
 					};
 				});
 			},
 
 			setTracks: (
 				tracks: TimelineTrack[] | ((prev: TimelineTrack[]) => TimelineTrack[]),
+				options?: TimelineOtCommitOptions,
 			) => {
 				set((state) => {
 					const nextTracks =
@@ -605,87 +643,16 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					if (state.tracks === nextTracks) return state;
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(
+							state,
+							{
+								tracks: nextTracks,
+							},
+							options,
+						),
 					};
 				});
 			},
-
-			undo: () => {
-				set((state) => {
-					if (state.historyPast.length === 0) {
-						if (!state.isPlaying) return state;
-						return { isPlaying: false };
-					}
-					const previous = state.historyPast[state.historyPast.length - 1];
-					const nextPast = state.historyPast.slice(0, -1);
-					const nextFuture = [
-						buildHistorySnapshot(state),
-						...state.historyFuture,
-					];
-					const selection = reconcileSelection(
-						previous.elements,
-						state.selectedIds,
-						state.primarySelectedId,
-					);
-						return {
-							elements: previous.elements,
-							tracks: previous.tracks,
-							audioTrackStates: previous.audioTrackStates,
-							rippleEditingEnabled: previous.rippleEditingEnabled,
-							historyPast: nextPast,
-							historyFuture: nextFuture,
-							lastCommittedHistoryOpId: null,
-							lastHistoryCommitSnapshot: null,
-							selectedIds: selection.selectedIds,
-							primarySelectedId: selection.primarySelectedId,
-							isPlaying: false,
-						};
-				});
-			},
-
-			redo: () => {
-				set((state) => {
-					if (state.historyFuture.length === 0) {
-						if (!state.isPlaying) return state;
-						return { isPlaying: false };
-					}
-					const next = state.historyFuture[0];
-					const nextFuture = state.historyFuture.slice(1);
-					const nextPast = trimHistory(
-						[...state.historyPast, buildHistorySnapshot(state)],
-						state.historyLimit,
-					);
-					const selection = reconcileSelection(
-						next.elements,
-						state.selectedIds,
-						state.primarySelectedId,
-					);
-						return {
-							elements: next.elements,
-							tracks: next.tracks,
-							audioTrackStates: next.audioTrackStates,
-							rippleEditingEnabled: next.rippleEditingEnabled,
-							historyPast: nextPast,
-							historyFuture: nextFuture,
-							lastCommittedHistoryOpId: null,
-							lastHistoryCommitSnapshot: null,
-							selectedIds: selection.selectedIds,
-							primarySelectedId: selection.primarySelectedId,
-							isPlaying: false,
-						};
-				});
-			},
-
-				resetHistory: () => {
-					set({
-						historyPast: [],
-						historyFuture: [],
-						lastCommittedHistoryOpId: null,
-						lastHistoryCommitSnapshot: null,
-						selectedIds: [],
-						primarySelectedId: null,
-					});
-				},
 
 			setTrackHidden: (trackId: string, hidden: boolean) => {
 				set((state) => {
@@ -699,7 +666,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					if (!didChange) return state;
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							tracks: nextTracks,
+						}),
 					};
 				});
 			},
@@ -715,7 +684,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					if (!didChange) return state;
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							tracks: nextTracks,
+						}),
 					};
 				});
 			},
@@ -744,7 +715,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 								};
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							tracks: nextTracks,
+						}),
 						selectedIds: nextSelection.selectedIds,
 						primarySelectedId: nextSelection.primarySelectedId,
 					};
@@ -774,7 +747,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 								};
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							tracks: nextTracks,
+						}),
 						selectedIds: nextSelection.selectedIds,
 						primarySelectedId: nextSelection.primarySelectedId,
 					};
@@ -793,7 +768,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					if (!didChange) return state;
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							tracks: nextTracks,
+						}),
 					};
 				});
 			},
@@ -809,7 +786,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					if (!didChange) return state;
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							tracks: nextTracks,
+						}),
 					};
 				});
 			},
@@ -826,7 +805,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					if (!didChange) return state;
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							tracks: nextTracks,
+						}),
 					};
 				});
 			},
@@ -842,7 +823,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					if (!didChange) return state;
 					return {
 						tracks: nextTracks,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							tracks: nextTracks,
+						}),
 					};
 				});
 			},
@@ -870,7 +853,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 							};
 					return {
 						audioTrackStates: nextAudioTrackStates,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							audioTrackStates: nextAudioTrackStates,
+						}),
 						selectedIds: nextSelection.selectedIds,
 						primarySelectedId: nextSelection.primarySelectedId,
 					};
@@ -900,7 +885,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 							};
 					return {
 						audioTrackStates: nextAudioTrackStates,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							audioTrackStates: nextAudioTrackStates,
+						}),
 						selectedIds: nextSelection.selectedIds,
 						primarySelectedId: nextSelection.primarySelectedId,
 					};
@@ -924,7 +911,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					};
 					return {
 						audioTrackStates: nextAudioTrackStates,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							audioTrackStates: nextAudioTrackStates,
+						}),
 					};
 				});
 			},
@@ -945,7 +934,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					};
 					return {
 						audioTrackStates: nextAudioTrackStates,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							audioTrackStates: nextAudioTrackStates,
+						}),
 					};
 				});
 			},
@@ -967,7 +958,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					};
 					return {
 						audioTrackStates: nextAudioTrackStates,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							audioTrackStates: nextAudioTrackStates,
+						}),
 					};
 				});
 			},
@@ -988,7 +981,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					};
 					return {
 						audioTrackStates: nextAudioTrackStates,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							audioTrackStates: nextAudioTrackStates,
+						}),
 					};
 				});
 			},
@@ -1123,7 +1118,9 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					if (state.rippleEditingEnabled === enabled) return state;
 					return {
 						rippleEditingEnabled: enabled,
-						...withHistoryCommit(state),
+						...withOtCommitFromPatch(state, {
+							rippleEditingEnabled: enabled,
+						}),
 					};
 				});
 			},
@@ -1201,7 +1198,7 @@ export const createTimelineStore = (): TimelineStoreApi => {
 			},
 			applyCommandSnapshot: (
 				snapshot: TimelineCommandSnapshot,
-				options?: { history?: boolean; historyOpId?: string },
+				options?: TimelineOtCommitOptions,
 			) => {
 				set((state) => {
 					const nextCurrentTime = clampFrame(snapshot.currentTime);
@@ -1234,7 +1231,16 @@ export const createTimelineStore = (): TimelineStoreApi => {
 					}
 					return {
 						...nextStateBase,
-						...withHistoryCommit(state, options?.historyOpId),
+						...withOtCommitFromPatch(
+							state,
+							{
+								elements: snapshot.elements,
+								tracks: snapshot.tracks,
+								audioTrackStates: snapshot.audioTrackStates,
+								rippleEditingEnabled: snapshot.rippleEditingEnabled,
+							},
+							options,
+						),
 					};
 				});
 			},
@@ -1458,14 +1464,6 @@ export const useTimelineScale = () => {
 	const timelineScale = useTimelineStore((state) => state.timelineScale);
 	const setTimelineScale = useTimelineStore((state) => state.setTimelineScale);
 	return { timelineScale, setTimelineScale };
-};
-
-export const useTimelineHistory = () => {
-	const canUndo = useTimelineStore((state) => state.historyPast.length > 0);
-	const canRedo = useTimelineStore((state) => state.historyFuture.length > 0);
-	const undo = useTimelineStore((state) => state.undo);
-	const redo = useTimelineStore((state) => state.redo);
-	return { canUndo, canRedo, undo, redo };
 };
 
 export const usePreviewTime = () => {
@@ -2181,7 +2179,6 @@ export const TimelineProvider = ({
 				fps: normalizeFps(initialFps ?? DEFAULT_FPS),
 				...(settingsState ?? {}),
 			});
-			timelineStore.getState().resetHistory();
 			return;
 		}
 		if (initialTracks) {
@@ -2191,7 +2188,6 @@ export const TimelineProvider = ({
 				scrollLeft: 0,
 				...(settingsState ?? {}),
 			});
-			timelineStore.getState().resetHistory();
 			return;
 		}
 		if (settingsState) {
@@ -2213,7 +2209,6 @@ export const TimelineProvider = ({
 				audioTrackStates: {},
 				scrollLeft: 0,
 			});
-			timelineStore.getState().resetHistory();
 		}
 	}, [initialElements, initialTracks, timelineStore]);
 
@@ -2224,7 +2219,6 @@ export const TimelineProvider = ({
 				audioTrackStates: {},
 				scrollLeft: 0,
 			});
-			timelineStore.getState().resetHistory();
 		}
 	}, [initialElements, initialTracks, timelineStore]);
 

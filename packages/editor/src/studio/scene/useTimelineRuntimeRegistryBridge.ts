@@ -1,10 +1,6 @@
-import {
-	saveTimelineToObject,
-	type TimelineJSON,
-} from "core/editor/timelineLoader";
+import type { TimelineJSON } from "core/editor/timelineLoader";
 import { useEffect, useMemo, useRef } from "react";
 import { useProjectStore } from "@/projects/projectStore";
-import type { TimelineStore } from "@/scene-editor/contexts/TimelineContext";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import {
 	type StudioHistoryEntry,
@@ -21,34 +17,6 @@ import {
 	applyTimelineJsonToStore,
 	snapshotTimelineFromStore,
 } from "./timelineSession";
-
-type TimelineHistorySnapshot = NonNullable<
-	TimelineStore["lastHistoryCommitSnapshot"]
->;
-
-const cloneAudioSettings = (audio: TimelineStore["audioSettings"]) => ({
-	...audio,
-	compressor: { ...audio.compressor },
-});
-
-const buildTimelineFromHistorySnapshot = (
-	snapshot: TimelineHistorySnapshot,
-	state: TimelineStore,
-): TimelineJSON => {
-	return saveTimelineToObject(
-		snapshot.elements,
-		state.fps,
-		state.canvasSize,
-		snapshot.tracks,
-		{
-			snapEnabled: state.snapEnabled,
-			autoAttach: state.autoAttach,
-			rippleEditingEnabled: snapshot.rippleEditingEnabled,
-			previewAxisEnabled: state.previewAxisEnabled,
-			audio: cloneAudioSettings(state.audioSettings),
-		},
-	);
-};
 
 type RuntimePersistHistoryMeta = {
 	commitRevision: number;
@@ -111,13 +79,14 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 				if (!bridgeState.subscriptions.has(runtimeId)) {
 					const timelineState = runtime.timelineStore.getState();
 					bridgeState.persistHistoryMeta.set(runtimeId, {
-						commitRevision: timelineState.historyCommitRevision,
+						commitRevision: timelineState.otCommitRevision,
 					});
 
 					const unsubscribePersist = runtime.timelineStore.subscribe(
 						(state) => state.persistRevision,
 						() => {
 							if (bridgeState.writingRuntimeIds.has(runtimeId)) return;
+							if (useStudioHistoryStore.getState().isApplying) return;
 							try {
 								const timeline = snapshotTimelineFromStore(runtime.timelineStore);
 								writeTimelineByRef(projectWriter, ref, timeline, {
@@ -134,40 +103,37 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 					);
 
 					const unsubscribeHistory = runtime.timelineStore.subscribe(
-						(state) => state.historyCommitRevision,
-						(historyCommitRevision) => {
+						(state) => state.otCommitRevision,
+						(otCommitRevision) => {
 							if (bridgeState.writingRuntimeIds.has(runtimeId)) return;
 							if (useStudioHistoryStore.getState().isApplying) return;
 							const timelineStoreState = runtime.timelineStore.getState();
 							const previousMeta = bridgeState.persistHistoryMeta.get(runtimeId);
 							if (
 								previousMeta &&
-								historyCommitRevision <= previousMeta.commitRevision
+								otCommitRevision <= previousMeta.commitRevision
 							) {
 								return;
 							}
-							const snapshot = timelineStoreState.lastHistoryCommitSnapshot;
-							if (!snapshot) return;
-							const beforeTimeline = buildTimelineFromHistorySnapshot(
-								snapshot,
-								timelineStoreState,
-							);
-							const afterTimeline = snapshotTimelineFromStore(
-								runtime.timelineStore,
-							);
-							const latestProject = useProjectStore.getState().currentProject;
-							if (!latestProject) return;
-							const nextEntry: StudioHistoryEntry = {
-								kind: "scene.timeline",
-								timelineRef: ref,
-								sceneId: ref.sceneId,
-								before: beforeTimeline,
-								after: afterTimeline,
-								opId: timelineStoreState.lastCommittedHistoryOpId ?? undefined,
-							};
-							pushHistory(nextEntry);
+							if (timelineStoreState.lastCommittedOtCommands.length === 0) {
+								return;
+							}
+							for (const command of timelineStoreState.lastCommittedOtCommands) {
+								const nextEntry: StudioHistoryEntry = {
+									kind: "timeline.ot",
+									timelineRef: ref,
+									sceneId: ref.sceneId,
+									command,
+									txnId:
+										timelineStoreState.lastCommittedOtTxnId ?? undefined,
+									causedBy: timelineStoreState.lastCommittedOtCausedBy,
+									intent:
+										timelineStoreState.lastCommittedOtIntent ?? "root",
+								};
+								pushHistory(nextEntry);
+							}
 							bridgeState.persistHistoryMeta.set(runtimeId, {
-								commitRevision: historyCommitRevision,
+								commitRevision: otCommitRevision,
 							});
 						},
 					);
@@ -190,7 +156,7 @@ export const useTimelineRuntimeRegistryBridge = (): void => {
 					bridgeState.projectTimelineRefs.set(runtimeId, timeline);
 					const timelineState = runtime.timelineStore.getState();
 					bridgeState.persistHistoryMeta.set(runtimeId, {
-						commitRevision: timelineState.historyCommitRevision,
+						commitRevision: timelineState.otCommitRevision,
 					});
 				} catch (error) {
 				console.error(

@@ -15,6 +15,7 @@ import {
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
+import { useOtLabStore } from "@/studio/history/otLabStore";
 
 export default function Header() {
 	const timelineStore = useTimelineStoreApi();
@@ -35,6 +36,8 @@ export default function Header() {
 	const canRedo = useStudioHistoryStore((state) => state.canRedo);
 	const undo = useStudioHistoryStore((state) => state.undo);
 	const redo = useStudioHistoryStore((state) => state.redo);
+	const otLabOpen = useOtLabStore((state) => state.open);
+	const toggleOtLab = useOtLabStore((state) => state.toggleOpen);
 
 	useEffect(() => {
 		initialize();
@@ -149,6 +152,18 @@ export default function Header() {
 						</DropdownMenuGroup>
 					</DropdownMenuContent>
 				</DropdownMenu>
+				<button
+					type="button"
+					onClick={toggleOtLab}
+					className={`px-2 py-1 text-xs rounded transition-colors ${
+						otLabOpen
+							? "bg-sky-600 text-white hover:bg-sky-500"
+							: "bg-neutral-700 text-white hover:bg-neutral-600"
+					}`}
+					title="打开 OT Lab"
+				>
+					OT Lab
+				</button>
 			</div>
 		</header>
 	);

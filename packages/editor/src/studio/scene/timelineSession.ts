@@ -26,8 +26,12 @@ export const applyTimelineJsonToStore = (
 		elements,
 		tracks,
 		audioTrackStates: {},
-		lastCommittedHistoryOpId: null,
-		lastHistoryCommitSnapshot: null,
+		otCommitRevision: 0,
+		lastCommittedOtTxnId: null,
+		lastCommittedOtOpIds: [],
+		lastCommittedOtIntent: null,
+		lastCommittedOtCommands: [],
+		lastCommittedOtCausedBy: [],
 		scrollLeft: 0,
 		canvasSize: data.canvas,
 		fps: data.fps,
@@ -37,7 +41,6 @@ export const applyTimelineJsonToStore = (
 		previewAxisEnabled: data.settings.previewAxisEnabled,
 		audioSettings: cloneAudioSettings(data.settings.audio),
 	}));
-	timelineStore.getState().resetHistory();
 };
 
 export const snapshotTimelineFromStore = (

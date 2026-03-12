@@ -249,7 +249,9 @@ const createSceneReferenceClipModel = (
 			useProjectStore.getState().sceneTimelineMutationOpIds[sceneId];
 		timelineState.setElements(nextElements, {
 			history: true,
-			historyOpId: propagatedOpId ?? fallbackHistoryOpId,
+			txnId: propagatedOpId ?? fallbackHistoryOpId,
+			causedBy: propagatedOpId ? [propagatedOpId] : [],
+			intent: "derived",
 		});
 	};
 

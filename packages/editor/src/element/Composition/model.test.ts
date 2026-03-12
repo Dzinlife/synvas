@@ -217,7 +217,6 @@ describe("Composition model", () => {
 			.setElements([createCompositionElement(100), createTailClip(100, 130)], {
 				history: false,
 			});
-		timelineStore.getState().resetHistory();
 
 		const model = createCompositionModel(
 			"composition-1",
@@ -244,7 +243,7 @@ describe("Composition model", () => {
 		);
 		expect(compositionAfterShrink?.timeline.end).toBe(80);
 		expect(tailAfterShrink?.timeline.start).toBe(80);
-		expect(timelineStore.getState().lastCommittedHistoryOpId).toBe("op-shrink");
+		expect(timelineStore.getState().lastCommittedOtTxnId).toBe("op-shrink");
 
 		useProjectStore
 			.getState()
@@ -261,7 +260,7 @@ describe("Composition model", () => {
 		);
 		expect(compositionAfterGrow?.timeline.end).toBe(120);
 		expect(tailAfterGrow?.timeline.start).toBe(120);
-		expect(timelineStore.getState().lastCommittedHistoryOpId).toBe("op-grow");
+		expect(timelineStore.getState().lastCommittedOtTxnId).toBe("op-grow");
 		model.getState().dispose();
 	});
 
@@ -274,7 +273,6 @@ describe("Composition model", () => {
 			.setElements([createCompositionElement(70), createTailClip(70, 100)], {
 				history: false,
 			});
-		timelineStore.getState().resetHistory();
 
 		const model = createCompositionModel(
 			"composition-1",
@@ -313,7 +311,6 @@ describe("Composition model", () => {
 			.setElements([createCompositionAudioClipElement(90, 10)], {
 				history: false,
 			});
-		timelineStore.getState().resetHistory();
 
 		const model = createCompositionAudioClipModel(
 			"composition-audio-1",
@@ -336,7 +333,7 @@ describe("Composition model", () => {
 			.elements.find((element) => element.id === "composition-audio-1");
 		expect(proxyClip?.timeline.end).toBe(110);
 		expect(model.getState().constraints.maxDuration).toBe(110);
-		expect(timelineStore.getState().lastCommittedHistoryOpId).toBe(
+		expect(timelineStore.getState().lastCommittedOtTxnId).toBe(
 			"op-audio-grow",
 		);
 
@@ -351,7 +348,7 @@ describe("Composition model", () => {
 			.elements.find((element) => element.id === "composition-audio-1");
 		expect(proxyClip?.timeline.end).toBe(60);
 		expect(model.getState().constraints.maxDuration).toBe(60);
-		expect(timelineStore.getState().lastCommittedHistoryOpId).toBe(
+		expect(timelineStore.getState().lastCommittedOtTxnId).toBe(
 			"op-audio-shrink",
 		);
 		model.getState().dispose();

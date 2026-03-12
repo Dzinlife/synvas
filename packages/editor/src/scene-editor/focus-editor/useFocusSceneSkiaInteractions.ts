@@ -2,15 +2,17 @@ import {
 	canvasPointToTransformPosition,
 	transformPositionToCanvasPoint,
 } from "core/element/position";
-import { saveTimelineToObject } from "core/editor/timelineLoader";
+import { buildTimelineBatchCommandFromSnapshots } from "core/editor/ot";
 import type { TimelineElement, TransformMeta } from "core/element/types";
 import type { SceneNode } from "core/studio/types";
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { SkiaPointerEvent } from "react-skia-lite";
 import { transformMetaToRenderLayout } from "@/element/layout";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
+import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { cloneValue, createCopySeed } from "@/scene-editor/utils/copyUtils";
 import { reflowInsertedElementsOnTracks } from "@/scene-editor/utils/insertedTrackReflow";
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
@@ -60,13 +62,6 @@ type TimelineHistorySnapshot = {
 	>["audioTrackStates"];
 	rippleEditingEnabled: boolean;
 };
-
-const cloneAudioSettings = (
-	audio: ReturnType<TimelineStoreApi["getState"]>["audioSettings"],
-) => ({
-	...audio,
-	compressor: { ...audio.compressor },
-});
 
 type FocusSceneElementLayout = {
 	element: TimelineElement;
@@ -658,6 +653,12 @@ export const useFocusSceneSkiaInteractions = ({
 	timelineStore,
 	disabled = false,
 }: UseFocusSceneSkiaInteractionsOptions): UseFocusSceneSkiaInteractionsResult => {
+	const editorRuntime = useContext(EditorRuntimeContext);
+	const runtimeManager = useMemo<StudioRuntimeManager | null>(() => {
+		const manager = editorRuntime as Partial<StudioRuntimeManager> | null;
+		if (!manager?.listTimelineRuntimes) return null;
+		return manager as StudioRuntimeManager;
+	}, [editorRuntime]);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 	const currentProject = useProjectStore((state) => state.currentProject);
 	const ctx = useMemo(() => {
@@ -729,50 +730,46 @@ export const useFocusSceneSkiaInteractions = ({
 			};
 		}, [timelineStore]);
 
+	const resolveHistorySceneId = useCallback((): string | null => {
+		if (!timelineStore) return null;
+		const runtime = runtimeManager
+			?.listTimelineRuntimes()
+			.find((item) => item.timelineStore === timelineStore);
+		if (runtime?.ref.sceneId) return runtime.ref.sceneId;
+		if (focusedNode?.sceneId) return focusedNode.sceneId;
+		return useProjectStore.getState().currentProject?.ui.activeSceneId ?? null;
+	}, [focusedNode?.sceneId, runtimeManager, timelineStore]);
+
 	const pushHistorySnapshot = useCallback(
 		(snapshot: TimelineHistorySnapshot | null) => {
 			if (!snapshot) return;
 			if (!timelineStore) return;
-			const latestProject = useProjectStore.getState().currentProject;
-			if (!latestProject) return;
-			const sceneId = focusedNode?.sceneId ?? latestProject.ui.activeSceneId;
+			const sceneId = resolveHistorySceneId();
 			if (!sceneId) return;
 			const state = timelineStore.getState();
 			if (state.elements === snapshot.elements) return;
-			const before = saveTimelineToObject(
-				snapshot.elements,
-				state.fps,
-				state.canvasSize,
-				snapshot.tracks,
-				{
-					snapEnabled: state.snapEnabled,
-					autoAttach: state.autoAttach,
-					rippleEditingEnabled: snapshot.rippleEditingEnabled,
-					previewAxisEnabled: state.previewAxisEnabled,
-					audio: cloneAudioSettings(state.audioSettings),
-				},
-			);
-			const after = saveTimelineToObject(
-				state.elements,
-				state.fps,
-				state.canvasSize,
-				state.tracks,
-				{
-					snapEnabled: state.snapEnabled,
-					autoAttach: state.autoAttach,
+			const command = buildTimelineBatchCommandFromSnapshots({
+				before: snapshot,
+				after: {
+					elements: state.elements,
+					tracks: state.tracks,
+					audioTrackStates: state.audioTrackStates,
 					rippleEditingEnabled: state.rippleEditingEnabled,
-					previewAxisEnabled: state.previewAxisEnabled,
-					audio: cloneAudioSettings(state.audioSettings),
 				},
-			);
+			});
+			if (!command) return;
 			pushHistory({
-				kind: "scene.timeline",
+				kind: "timeline.ot",
+				timelineRef: {
+					kind: "scene",
+					sceneId,
+				},
 				sceneId,
-				before,
-				after,
+				command,
+				intent: "root",
 			});
 		},
-		[currentProject, focusedNode?.sceneId, pushHistory, timelineStore],
+		[currentProject, pushHistory, resolveHistorySceneId, timelineStore],
 	);
 
 	const setElementsWithoutHistory = useCallback(

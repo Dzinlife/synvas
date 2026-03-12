@@ -2,14 +2,17 @@ import {
 	canvasPointToTransformPosition,
 	transformPositionToCanvasPoint,
 } from "core/element/position";
-import { saveTimelineToObject } from "core/editor/timelineLoader";
+import { buildTimelineBatchCommandFromSnapshots } from "core/editor/ot";
 import type { TimelineElement, TransformMeta } from "core/element/types";
 import Konva from "konva";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { transformMetaToRenderLayout } from "@/element/layout";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStore } from "@/scene-editor/contexts/TimelineContext";
-import { useTimelineStoreApi } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import {
+	useStudioRuntimeManager,
+	useTimelineStoreApi,
+} from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import {
 	useMultiSelect,
@@ -483,11 +486,6 @@ type TimelineHistorySnapshot = {
 	rippleEditingEnabled: boolean;
 };
 
-const cloneAudioSettings = (audio: TimelineStore["audioSettings"]) => ({
-	...audio,
-	compressor: { ...audio.compressor },
-});
-
 export const usePreviewInteractions = ({
 	renderElements,
 	renderElementsRef,
@@ -500,6 +498,7 @@ export const usePreviewInteractions = ({
 	canvasToStageCoords,
 }: UsePreviewInteractionsOptions) => {
 	const timelineStore = useTimelineStoreApi();
+	const runtimeManager = useStudioRuntimeManager();
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 	const currentProject = useProjectStore((state) => state.currentProject);
 	const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -578,55 +577,51 @@ export const usePreviewInteractions = ({
 		};
 	}, []);
 
+	const resolveHistorySceneId = useCallback((): string | null => {
+		const runtime = runtimeManager
+			.listTimelineRuntimes()
+			.find((item) => item.timelineStore === timelineStore);
+		if (runtime?.ref.sceneId) return runtime.ref.sceneId;
+		const latestProject = useProjectStore.getState().currentProject;
+		if (!latestProject) return null;
+		const focusedNode = latestProject.canvas.nodes.find(
+			(node) => node.id === latestProject.ui.focusedNodeId,
+		);
+		return (
+			latestProject.ui.activeSceneId ??
+			(focusedNode?.type === "scene" ? focusedNode.sceneId : null)
+		);
+	}, [runtimeManager, timelineStore]);
+
 	const pushHistorySnapshot = useCallback(
 		(snapshot: TimelineHistorySnapshot | null) => {
 			if (!snapshot) return;
-			const latestProject = useProjectStore.getState().currentProject;
-			if (!latestProject) return;
 			const timelineState = timelineStore.getState();
 			if (timelineState.elements === snapshot.elements) return;
-			const focusedNode = latestProject.canvas.nodes.find(
-				(node) => node.id === latestProject.ui.focusedNodeId,
-			);
-			const sceneId =
-				latestProject.ui.activeSceneId ??
-				(focusedNode?.type === "scene" ? focusedNode.sceneId : null);
+			const sceneId = resolveHistorySceneId();
 			if (!sceneId) return;
-
-			const before = saveTimelineToObject(
-				snapshot.elements,
-				timelineState.fps,
-				timelineState.canvasSize,
-				snapshot.tracks,
-				{
-					snapEnabled: timelineState.snapEnabled,
-					autoAttach: timelineState.autoAttach,
-					rippleEditingEnabled: snapshot.rippleEditingEnabled,
-					previewAxisEnabled: timelineState.previewAxisEnabled,
-					audio: cloneAudioSettings(timelineState.audioSettings),
-				},
-			);
-			const after = saveTimelineToObject(
-				timelineState.elements,
-				timelineState.fps,
-				timelineState.canvasSize,
-				timelineState.tracks,
-				{
-					snapEnabled: timelineState.snapEnabled,
-					autoAttach: timelineState.autoAttach,
+			const command = buildTimelineBatchCommandFromSnapshots({
+				before: snapshot,
+				after: {
+					elements: timelineState.elements,
+					tracks: timelineState.tracks,
+					audioTrackStates: timelineState.audioTrackStates,
 					rippleEditingEnabled: timelineState.rippleEditingEnabled,
-					previewAxisEnabled: timelineState.previewAxisEnabled,
-					audio: cloneAudioSettings(timelineState.audioSettings),
 				},
-			);
+			});
+			if (!command) return;
 			pushHistory({
-				kind: "scene.timeline",
+				kind: "timeline.ot",
+				timelineRef: {
+					kind: "scene",
+					sceneId,
+				},
 				sceneId,
-				before,
-				after,
+				command,
+				intent: "root",
 			});
 		},
-		[currentProject, pushHistory, timelineStore],
+		[currentProject, pushHistory, resolveHistorySceneId, timelineStore],
 	);
 
 	const setElementsWithoutHistory = useCallback(

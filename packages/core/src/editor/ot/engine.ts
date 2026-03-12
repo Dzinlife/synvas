@@ -63,11 +63,12 @@ export const createOtEngine = <TCommand extends OtCommand>(
 	): OtOpEnvelope<TCommand> => {
 		seq += 1;
 		lamport += 1;
+		const actorId = input.actorId ?? options.actorId;
 		return {
-			opId: `${options.actorId}:${seq}`,
+			opId: `${actorId}:${seq}`,
 			txnId: input.txnId ?? createTxnId(),
 			streamId: input.streamId,
-			actorId: options.actorId,
+			actorId,
 			seq,
 			lamport,
 			createdAt: now(),

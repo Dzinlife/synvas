@@ -1,4 +1,12 @@
 export { createOtEngine } from "./engine";
+export {
+	applyTimelineOtCommand,
+	buildTimelineBatchCommandFromSnapshots,
+	invertTimelineOtCommand,
+	isTimelineBatchNoop,
+	isTimelineOtCommand,
+	transformTimelineOtCommand,
+} from "./timelineCommands";
 export type {
 	OtCommand,
 	OtEngine,
@@ -10,3 +18,13 @@ export type {
 	OtStreamId,
 	OtTransaction,
 } from "./types";
+export type {
+	TimelineAudioTrackOp,
+	TimelineBatchApplyArgs,
+	TimelineElementOp,
+	TimelineOtCommand,
+	TimelineOtIntent,
+	TimelineOtSnapshotState,
+	TimelineSettingOp,
+	TimelineTrackOp,
+} from "./timelineCommands";

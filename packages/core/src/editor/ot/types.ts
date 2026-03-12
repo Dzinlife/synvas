@@ -42,6 +42,7 @@ export interface OtEngineSnapshot<TCommand extends OtCommand = OtCommand> {
 export interface OtLocalApplyInput<TCommand extends OtCommand = OtCommand> {
 	streamId: OtStreamId;
 	command: TCommand;
+	actorId?: string;
 	txnId?: string;
 	causedBy?: string[];
 	inverseOf?: string;

@@ -1,8 +1,13 @@
-import type { TimelineJSON } from "core/editor/timelineLoader";
+import {
+	buildTimelineBatchCommandFromSnapshots,
+} from "core/editor/ot";
+import { loadTimelineFromObject, type TimelineJSON } from "core/editor/timelineLoader";
 import type { StudioProject } from "core/studio/types";
 import { framesToTimecode } from "core/utils/timecode";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
+import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";
+import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { useStudioHistoryStore } from "./studioHistoryStore";
 
@@ -125,6 +130,52 @@ const createProject = (): StudioProject => ({
 	createdAt: 1,
 	updatedAt: 1,
 });
+
+const toTimelineOtSnapshot = (timeline: TimelineJSON) => {
+	const loaded = loadTimelineFromObject(timeline);
+	return {
+		elements: loaded.elements,
+		tracks: loaded.tracks,
+		audioTrackStates: {},
+		rippleEditingEnabled: loaded.settings.rippleEditingEnabled,
+	};
+};
+
+const createRippleTimeline = (): TimelineJSON => {
+	const base = createTimeline(2);
+	return {
+		...base,
+		settings: {
+			...base.settings,
+			rippleEditingEnabled: true,
+		},
+	};
+};
+
+const moveElementFrames = (
+	timeline: TimelineJSON,
+	elementId: string,
+	start: number,
+	end: number,
+): TimelineJSON => {
+	return {
+		...timeline,
+		elements: timeline.elements.map((element) =>
+			element.id === elementId
+				? {
+						...element,
+						timeline: {
+							...element.timeline,
+							start,
+							end,
+							startTimecode: framesToTimecode(start, timeline.fps),
+							endTimecode: framesToTimecode(end, timeline.fps),
+						},
+					}
+				: element,
+		),
+	};
+};
 
 beforeEach(() => {
 	useProjectStore.setState({
@@ -578,5 +629,454 @@ describe("studioHistoryStore", () => {
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-3"],
 		).toBeTruthy();
+	});
+
+	it("切换用户后 canUndo/canRedo 按当前用户历史栈切换", () => {
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		useStudioHistoryStore.getState().push({
+			kind: "scene.timeline",
+			timelineRef: toSceneTimelineRef("scene-1"),
+			sceneId: "scene-1",
+			before: createTimeline(0),
+			after: createTimeline(1),
+		});
+
+		expect(useStudioHistoryStore.getState().canUndo).toBe(true);
+		useStudioHistoryStore.getState().setActiveActor("user-2");
+		expect(useStudioHistoryStore.getState().canUndo).toBe(false);
+		expect(useStudioHistoryStore.getState().canRedo).toBe(false);
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		expect(useStudioHistoryStore.getState().canUndo).toBe(true);
+	});
+
+	it("交错用户编辑下，撤销只移除当前用户影响", () => {
+		const projectStore = useProjectStore.getState();
+		projectStore.updateCanvasNodeLayout("node-1", { x: 100 });
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		useStudioHistoryStore.getState().push({
+			kind: "canvas.node-layout",
+			nodeId: "node-1",
+			before: {
+				x: 0,
+				y: 0,
+				width: 960,
+				height: 540,
+				zIndex: 0,
+				hidden: false,
+				locked: false,
+			},
+			after: {
+				x: 100,
+				y: 0,
+				width: 960,
+				height: 540,
+				zIndex: 0,
+				hidden: false,
+				locked: false,
+			},
+			focusNodeId: "node-1",
+		});
+
+		projectStore.updateCanvasNodeLayout("node-1", { x: 200 });
+		useStudioHistoryStore.getState().setActiveActor("user-2");
+		useStudioHistoryStore.getState().push({
+			kind: "canvas.node-layout",
+			nodeId: "node-1",
+			before: {
+				x: 100,
+				y: 0,
+				width: 960,
+				height: 540,
+				zIndex: 0,
+				hidden: false,
+				locked: false,
+			},
+			after: {
+				x: 200,
+				y: 0,
+				width: 960,
+				height: 540,
+				zIndex: 0,
+				hidden: false,
+				locked: false,
+			},
+			focusNodeId: "node-1",
+		});
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		useStudioHistoryStore.getState().undo();
+
+		const node = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((item) => item.id === "node-1");
+		expect(node?.x).toBe(200);
+	});
+
+	it("timeline 命令交错编辑时，撤销仅回退当前用户 root 操作", () => {
+		const projectStore = useProjectStore.getState();
+		const beforeScene1 = createTimeline(2);
+		const afterScene1 = createTimeline(1);
+		projectStore.updateSceneTimeline("scene-1", beforeScene1, { txnId: "seed-s1" });
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		projectStore.updateSceneTimeline("scene-1", afterScene1, { txnId: "u1-del" });
+		const scene1Command = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(beforeScene1),
+			after: toTimelineOtSnapshot(afterScene1),
+		});
+		expect(scene1Command).toBeTruthy();
+		if (!scene1Command) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-1",
+			command: scene1Command,
+			txnId: "u1-del",
+			intent: "root",
+		});
+
+		const beforeScene2 = createTimeline(1);
+		const afterScene2 = {
+			...beforeScene2,
+			elements: beforeScene2.elements.map((element, index) =>
+				index === 0
+					? {
+							...element,
+							timeline: {
+								...element.timeline,
+								start: element.timeline.start + 15,
+								end: element.timeline.end + 15,
+								startTimecode: framesToTimecode(element.timeline.start + 15, 30),
+								endTimecode: framesToTimecode(element.timeline.end + 15, 30),
+							},
+						}
+					: element,
+			),
+		};
+		projectStore.updateSceneTimeline("scene-2", beforeScene2, { txnId: "seed-s2" });
+		useStudioHistoryStore.getState().setActiveActor("user-2");
+		projectStore.updateSceneTimeline("scene-2", afterScene2, { txnId: "u2-move" });
+		const scene2Command = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(beforeScene2),
+			after: toTimelineOtSnapshot(afterScene2),
+		});
+		expect(scene2Command).toBeTruthy();
+		if (!scene2Command) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-2",
+			command: scene2Command,
+			txnId: "u2-move",
+			intent: "root",
+		});
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		useStudioHistoryStore.getState().undo();
+
+		const current = useProjectStore.getState().currentProject;
+		expect(current?.scenes["scene-1"].timeline.elements.length).toBe(2);
+		expect(current?.scenes["scene-2"].timeline.elements[0]?.timeline.start).toBe(
+			beforeScene2.elements[0]!.timeline.start + 15,
+		);
+	});
+
+	it("timeline undo 回放会执行轨道重排，避免主轨重叠", () => {
+		const projectStore = useProjectStore.getState();
+		const before = createRippleTimeline();
+		const afterUser1 = {
+			...before,
+			elements: before.elements.filter((element) => element.id !== "element-0"),
+		};
+		const afterUser2 = moveElementFrames(afterUser1, "element-1", 10, 40);
+
+		projectStore.updateSceneTimeline("scene-1", before, { txnId: "seed-ripple" });
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		projectStore.updateSceneTimeline("scene-1", afterUser1, { txnId: "u1-delete" });
+		const user1Command = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(before),
+			after: toTimelineOtSnapshot(afterUser1),
+		});
+		expect(user1Command).toBeTruthy();
+		if (!user1Command) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-1",
+			command: user1Command,
+			txnId: "u1-delete",
+			intent: "root",
+		});
+
+		useStudioHistoryStore.getState().setActiveActor("user-2");
+		projectStore.updateSceneTimeline("scene-1", afterUser2, { txnId: "u2-move" });
+		const user2Command = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(afterUser1),
+			after: toTimelineOtSnapshot(afterUser2),
+		});
+		expect(user2Command).toBeTruthy();
+		if (!user2Command) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-1",
+			command: user2Command,
+			txnId: "u2-move",
+			intent: "root",
+		});
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		useStudioHistoryStore.getState().undo();
+
+		const elements =
+			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline.elements ??
+			[];
+		const element0 = elements.find((element) => element.id === "element-0");
+		const element1 = elements.find((element) => element.id === "element-1");
+		expect(element0).toBeTruthy();
+		expect(element1).toBeTruthy();
+		if (!element0 || !element1) return;
+		if (element0.timeline.trackIndex === element1.timeline.trackIndex) {
+			expect(element1.timeline.start).toBeGreaterThanOrEqual(
+				element0.timeline.end,
+			);
+		}
+	});
+
+	it("新 session 首次删除 + 他人编辑触发 derived 后，当前用户 undo 仍可恢复删除", () => {
+		const projectStore = useProjectStore.getState();
+		const beforeScene1 = createTimeline(2);
+		const afterDeleteScene1 = createTimeline(1);
+		const beforeScene2 = createTimeline(1);
+		const afterScene2Move = {
+			...beforeScene2,
+			elements: beforeScene2.elements.map((element, index) =>
+				index === 0
+					? {
+							...element,
+							timeline: {
+								...element.timeline,
+								start: element.timeline.start + 20,
+								end: element.timeline.end + 20,
+								startTimecode: framesToTimecode(element.timeline.start + 20, 30),
+								endTimecode: framesToTimecode(element.timeline.end + 20, 30),
+							},
+						}
+					: element,
+			),
+		};
+		const afterDerivedScene1 = {
+			...afterDeleteScene1,
+			elements: afterDeleteScene1.elements.map((element, index) =>
+				index === 0
+					? {
+							...element,
+							timeline: {
+								...element.timeline,
+								end: element.timeline.end + 10,
+								endTimecode: framesToTimecode(element.timeline.end + 10, 30),
+							},
+						}
+					: element,
+			),
+		};
+
+		projectStore.updateSceneTimeline("scene-1", beforeScene1, { txnId: "seed-s1" });
+		projectStore.updateSceneTimeline("scene-2", beforeScene2, { txnId: "seed-s2" });
+
+		const persistedProject = JSON.parse(
+			JSON.stringify(useProjectStore.getState().currentProject),
+		) as StudioProject;
+		useProjectStore.setState((state) => ({
+			...state,
+			currentProject: persistedProject,
+			sceneTimelineMutationOpIds: {},
+		}));
+		useStudioHistoryStore.getState().clear();
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		projectStore.updateSceneTimeline("scene-1", afterDeleteScene1, {
+			txnId: "u1-delete",
+		});
+		const deleteCommand = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(beforeScene1),
+			after: toTimelineOtSnapshot(afterDeleteScene1),
+		});
+		expect(deleteCommand).toBeTruthy();
+		if (!deleteCommand) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-1",
+			command: deleteCommand,
+			txnId: "u1-delete",
+			intent: "root",
+		});
+
+		useStudioHistoryStore.getState().setActiveActor("user-2");
+		projectStore.updateSceneTimeline("scene-2", afterScene2Move, {
+			txnId: "u2-root",
+		});
+		const rootCommand = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(beforeScene2),
+			after: toTimelineOtSnapshot(afterScene2Move),
+		});
+		expect(rootCommand).toBeTruthy();
+		if (!rootCommand) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-2",
+			command: rootCommand,
+			txnId: "u2-root",
+			intent: "root",
+		});
+		const latestRootEntry = useStudioHistoryStore
+			.getState()
+			.past.filter((entry) => entry.kind === "timeline.ot")
+			.at(-1);
+		expect(latestRootEntry?.__otOpId).toBeTruthy();
+		if (!latestRootEntry?.__otOpId) return;
+
+		projectStore.updateSceneTimeline("scene-1", afterDerivedScene1, {
+			txnId: "u2-root",
+		});
+		const derivedCommand = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(afterDeleteScene1),
+			after: toTimelineOtSnapshot(afterDerivedScene1),
+		});
+		expect(derivedCommand).toBeTruthy();
+		if (!derivedCommand) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-1",
+			command: derivedCommand,
+			txnId: "u2-root",
+			causedBy: [latestRootEntry.__otOpId],
+			intent: "derived",
+		});
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		useStudioHistoryStore.getState().undo();
+
+		const scene1Elements =
+			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline
+				.elements ?? [];
+		expect(scene1Elements.length).toBe(2);
+	});
+
+	it("undo 会先重建 runtime 基线，避免首删场景在 runtime 上无效", () => {
+		const projectStore = useProjectStore.getState();
+		const runtimeManager = createTestEditorRuntime("history-runtime-replay");
+		const scene1Runtime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-1"),
+		);
+		runtimeManager.ensureTimelineRuntime(toSceneTimelineRef("scene-2"));
+
+		const beforeScene1 = createTimeline(2);
+		const afterDeleteScene1 = createTimeline(1);
+		const beforeScene2 = createTimeline(1);
+		const afterScene2Move = {
+			...beforeScene2,
+			elements: beforeScene2.elements.map((element, index) =>
+				index === 0
+					? {
+							...element,
+							timeline: {
+								...element.timeline,
+								start: element.timeline.start + 20,
+								end: element.timeline.end + 20,
+								startTimecode: framesToTimecode(element.timeline.start + 20, 30),
+								endTimecode: framesToTimecode(element.timeline.end + 20, 30),
+							},
+						}
+					: element,
+			),
+		};
+		const afterDerivedScene1 = {
+			...afterDeleteScene1,
+			elements: afterDeleteScene1.elements.map((element, index) =>
+				index === 0
+					? {
+							...element,
+							timeline: {
+								...element.timeline,
+								end: element.timeline.end + 10,
+								endTimecode: framesToTimecode(element.timeline.end + 10, 30),
+							},
+						}
+					: element,
+			),
+		};
+
+		projectStore.updateSceneTimeline("scene-1", beforeScene1, { txnId: "seed-s1" });
+		projectStore.updateSceneTimeline("scene-2", beforeScene2, { txnId: "seed-s2" });
+		useStudioHistoryStore.getState().clear();
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		projectStore.updateSceneTimeline("scene-1", afterDeleteScene1, {
+			txnId: "u1-delete",
+		});
+		const deleteCommand = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(beforeScene1),
+			after: toTimelineOtSnapshot(afterDeleteScene1),
+		});
+		expect(deleteCommand).toBeTruthy();
+		if (!deleteCommand) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-1",
+			command: deleteCommand,
+			txnId: "u1-delete",
+			intent: "root",
+		});
+
+		useStudioHistoryStore.getState().setActiveActor("user-2");
+		projectStore.updateSceneTimeline("scene-2", afterScene2Move, {
+			txnId: "u2-root",
+		});
+		const rootCommand = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(beforeScene2),
+			after: toTimelineOtSnapshot(afterScene2Move),
+		});
+		expect(rootCommand).toBeTruthy();
+		if (!rootCommand) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-2",
+			command: rootCommand,
+			txnId: "u2-root",
+			intent: "root",
+		});
+		const latestRootEntry = useStudioHistoryStore
+			.getState()
+			.past.filter((entry) => entry.kind === "timeline.ot")
+			.at(-1);
+		expect(latestRootEntry?.__otOpId).toBeTruthy();
+		if (!latestRootEntry?.__otOpId) return;
+
+		projectStore.updateSceneTimeline("scene-1", afterDerivedScene1, {
+			txnId: "u2-root",
+		});
+		const derivedCommand = buildTimelineBatchCommandFromSnapshots({
+			before: toTimelineOtSnapshot(afterDeleteScene1),
+			after: toTimelineOtSnapshot(afterDerivedScene1),
+		});
+		expect(derivedCommand).toBeTruthy();
+		if (!derivedCommand) return;
+		useStudioHistoryStore.getState().push({
+			kind: "timeline.ot",
+			sceneId: "scene-1",
+			command: derivedCommand,
+			txnId: "u2-root",
+			causedBy: [latestRootEntry.__otOpId],
+			intent: "derived",
+		});
+
+		// 模拟 runtime 仍停留在“所有操作都已执行后”的状态。
+		applyTimelineJsonToStore(afterDerivedScene1, scene1Runtime.timelineStore);
+		expect(scene1Runtime.timelineStore.getState().elements.length).toBe(1);
+
+		useStudioHistoryStore.getState().setActiveActor("user-1");
+		useStudioHistoryStore
+			.getState()
+			.undo({ runtimeManager, timelineStore: scene1Runtime.timelineStore });
+
+		expect(scene1Runtime.timelineStore.getState().elements.length).toBe(2);
 	});
 });

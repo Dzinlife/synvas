@@ -60,4 +60,15 @@ describe("createOtEngine", () => {
 		const snapshot = engine.getSnapshot();
 		expect(snapshot.opLog).toHaveLength(3);
 	});
+
+	it("applyLocal 支持覆盖 actorId", () => {
+		const engine = createOtEngine<TestCommand>({ actorId: "local" });
+		const op = engine.applyLocal({
+			streamId: "canvas",
+			command: { id: "canvas.layout", args: { value: "layout-1" } },
+			actorId: "user-2",
+		});
+		expect(op.actorId).toBe("user-2");
+		expect(op.opId.startsWith("user-2:")).toBe(true);
+	});
 });
