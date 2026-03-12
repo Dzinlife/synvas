@@ -124,7 +124,7 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 	return (
 		<div
 			data-testid="canvas-sidebar"
-			className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
+			className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl [corner-shape:superellipse(1.2)] ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
 		>
 			<div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
 				<div className="text-xs font-medium text-white/90">{title}</div>

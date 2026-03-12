@@ -15,9 +15,7 @@ import CanvasSidebar, {
 	type CanvasSidebarTab,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
-import type {
-	ResolvedCanvasDrawerOptions,
-} from "./canvasWorkspaceUtils";
+import type { ResolvedCanvasDrawerOptions } from "./canvasWorkspaceUtils";
 
 interface OverlayRect {
 	x: number;

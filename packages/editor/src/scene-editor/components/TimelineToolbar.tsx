@@ -377,7 +377,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 
 	return (
 		<>
-			<div className={cn("flex items-center gap-3 px-4", className)}>
+			<div className={cn("flex items-center gap-3 px-2", className)}>
 				<div className="left-section flex flex-1 items-center gap-3 shrink-0">
 					<div className="flex items-center gap-0.5 bg-black/20 rounded-full p-0.5">
 						<Tooltip>

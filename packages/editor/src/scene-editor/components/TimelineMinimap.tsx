@@ -10,10 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useTimelineStore } from "../contexts/TimelineContext";
 import { getPixelsPerFrame } from "../utils/timelineScale";
-import {
-	MAX_TIMELINE_SCALE,
-	MIN_TIMELINE_SCALE,
-} from "../utils/timelineZoom";
+import { MAX_TIMELINE_SCALE, MIN_TIMELINE_SCALE } from "../utils/timelineZoom";
 
 interface TimelineMinimapProps {
 	fps: number;
@@ -303,8 +300,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 				event.preventDefault();
 				container.setPointerCapture?.(event.pointerId);
 				setDragState({
-					mode:
-						resizeHandleSide === "left" ? "resize-left" : "resize-right",
+					mode: resizeHandleSide === "left" ? "resize-left" : "resize-right",
 					pointerId: event.pointerId,
 					startClientX: event.clientX,
 					startFrame: visibleStartFrame,
@@ -365,14 +361,10 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 				return;
 			}
 			if (viewportWidth <= 0) return;
-			const minVisibleFrameCount = viewportWidth / getPixelsPerFrame(
-				fps,
-				MAX_TIMELINE_SCALE,
-			);
-			const maxVisibleFrameCount = viewportWidth / getPixelsPerFrame(
-				fps,
-				MIN_TIMELINE_SCALE,
-			);
+			const minVisibleFrameCount =
+				viewportWidth / getPixelsPerFrame(fps, MAX_TIMELINE_SCALE);
+			const maxVisibleFrameCount =
+				viewportWidth / getPixelsPerFrame(fps, MIN_TIMELINE_SCALE);
 			if (
 				!Number.isFinite(minVisibleFrameCount) ||
 				!Number.isFinite(maxVisibleFrameCount) ||
@@ -393,7 +385,13 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 				dragState.mode === "resize-left" ? viewportWidth : 0,
 			);
 		},
-		[dragState, fps, setScaleByVisibleFrameCount, setViewportStartFrame, viewportWidth],
+		[
+			dragState,
+			fps,
+			setScaleByVisibleFrameCount,
+			setViewportStartFrame,
+			viewportWidth,
+		],
 	);
 
 	const stopDragging = useCallback((pointerId?: number) => {
@@ -452,7 +450,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 			ref={setContainerElement}
 			aria-label="timeline minimap"
 			className={cn(
-				"relative h-8 w-full rounded border-transparent grayscale opacity-50 hover:grayscale-30 hover:opacity-100 bg-neutral-900/90 overflow-hidden touch-none select-none transition-all",
+				"group relative h-8 w-full rounded border-transparent grayscale hover:grayscale-30 bg-white/2 overflow-hidden touch-none select-none transition-all",
 				className,
 			)}
 			onPointerDown={handlePointerDown}
@@ -463,7 +461,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 		>
 			<canvas
 				ref={canvasRef}
-				className="absolute inset-0 h-full w-full"
+				className="absolute inset-0 h-full w-full opacity-30 group-hover:opacity-50"
 				aria-hidden
 			/>
 			<div className="absolute inset-0 bg-linear-to-r from-neutral-800/30 via-neutral-700/10 to-neutral-800/30" />
@@ -485,7 +483,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 						transform: "translateX(-50%)",
 					}}
 				>
-					<div className="absolute top-1 bottom-1 left-1/2 w-px -translate-x-1/2 rounded-full bg-white/60" />
+					<div className="absolute top-2 bottom-2 ml-1 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-white/30 group-hover:bg-white" />
 				</div>
 				<div
 					data-minimap-resize-handle="right"
@@ -495,7 +493,7 @@ const TimelineMinimap: React.FC<TimelineMinimapProps> = ({
 						transform: "translateX(50%)",
 					}}
 				>
-					<div className="absolute top-1 bottom-1 left-1/2 w-px -translate-x-1/2 rounded-full bg-white/60" />
+					<div className="absolute top-2 bottom-2 -ml-1 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-white/30 group-hover:bg-white" />
 				</div>
 			</div>
 		</section>

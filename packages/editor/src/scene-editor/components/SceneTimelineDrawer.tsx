@@ -1,10 +1,10 @@
 import type React from "react";
+import TimelineEditor from "@/scene-editor/TimelineEditor";
 import CanvasNodeDrawerShell, {
 	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
 	CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO,
 	CANVAS_NODE_DRAWER_MIN_HEIGHT,
 } from "@/studio/canvas/CanvasNodeDrawerShell";
-import TimelineEditor from "@/scene-editor/TimelineEditor";
 import ScenePlaybackControlBar from "./ScenePlaybackControlBar";
 
 export const SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT =
@@ -25,17 +25,18 @@ interface SceneTimelineDrawerProps extends SceneTimelineDrawerContentProps {
 	maxHeightRatio?: number;
 }
 
-export const SceneTimelineDrawerContent: React.FC<SceneTimelineDrawerContentProps> =
-	({ onExitFocus }) => {
-		return (
-			<div className="flex h-full min-h-0 flex-col">
-				<ScenePlaybackControlBar onExitFocus={onExitFocus} />
-				<div className="min-h-0 flex-1">
-					<TimelineEditor />
-				</div>
+export const SceneTimelineDrawerContent: React.FC<
+	SceneTimelineDrawerContentProps
+> = ({ onExitFocus }) => {
+	return (
+		<div className="flex h-full min-h-0 flex-col">
+			<ScenePlaybackControlBar onExitFocus={onExitFocus} />
+			<div className="min-h-0 flex-1 overflow-hidden rounded-2xl [corner-shape:superellipse(1.2)] mask-[url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAA5JREFUeNpiYGBgAAgwAAAEAAGbA+oJAAAAAElFTkSuQmCC)]">
+				<TimelineEditor />
 			</div>
-		);
-	};
+		</div>
+	);
+};
 
 const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
 	onExitFocus,

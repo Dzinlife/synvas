@@ -10,6 +10,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { ProgressiveBlur } from "@/components/ui/progressive-blur";
 import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/projects/projectStore";
 import { useProjectAssets } from "@/projects/useProjectAssets";
@@ -1512,7 +1513,7 @@ const TimelineEditor = () => {
 						className="relative"
 						style={{ width: leftColumnWidth }}
 					>
-						<div className="absolute top-0 right-0 w-px h-full bg-linear-to-t from-white/10 to-transparent"></div>
+						<div className="absolute top-0 right-0 w-0.5 h-full bg-linear-to-t from-white/5 to-transparent"></div>
 						{/* <div className="h-full text-[11px] flex items-center justify-end pr-6 font-mono text-neutral-300">
 							{formatTimecode(currentTime, fps)}
 						</div> */}
@@ -1527,7 +1528,7 @@ const TimelineEditor = () => {
 						/>
 					</div>
 				</div>
-				<div className="h-px w-full bg-neutral-200/10 backdrop-blur-2xl backdrop-saturate-150 backdrop-brightness-150"></div>
+				<div className="h-0.5 w-full bg-neutral-800/70 backdrop-blur-2xl backdrop-saturate-150 backdrop-brightness-120"></div>
 			</div>
 		);
 	}, [
@@ -2153,12 +2154,12 @@ const TimelineEditor = () => {
 	return (
 		<div
 			data-testid="timeline-editor"
-			className="relative bg-neutral-800 h-full flex flex-col min-h-0 w-full overflow-hidden"
+			className="relative h-full flex flex-col min-h-0 w-full overflow-hidden bg-neutral-900"
 			onMouseEnter={handleTimelineEditorMouseEnter}
 			onMouseMove={handleTimelineEditorMouseMove}
 			onMouseLeave={handleTimelineEditorMouseLeave}
 		>
-			<div className="pointer-events-none absolute top-0 left-0 w-full h-18 z-50 bg-linear-to-b from-neutral-800 to-neutral-800/80 backdrop-blur-2xl"></div>
+			<div className="pointer-events-none absolute top-0 left-0 w-full h-18 z-50 bg-neutral-900/80 backdrop-blur-2xl"></div>
 			{/* <ProgressiveBlur
 				position="top"
 				className="absolute top-0 w-full h-20 z-60 "
@@ -2185,7 +2186,7 @@ const TimelineEditor = () => {
 			>
 				{selectionBox && selectionBox.width > 0 && selectionBox.height > 0 && (
 					<div
-						className="absolute border z-70 border-blue-500/80 bg-blue-500/10 pointer-events-none"
+						className="absolute border z-70 border-white/80 bg-white/20 pointer-events-none"
 						style={{
 							left: selectionBox.x,
 							top: selectionBox.y,
@@ -2220,7 +2221,7 @@ const TimelineEditor = () => {
 				>
 					<div className="relative flex flex-col min-h-full">
 						<div
-							className="z-10 absolute left-0 top-0 h-full pointer-events-none bg-neutral-800/80 backdrop-blur-3xl backdrop-saturate-150 border-r border-white/10"
+							className="z-10 absolute left-0 top-0 h-full pointer-events-none bg-neutral-900/80 backdrop-blur-2xl border-r-2 border-white/5"
 							style={{ width: leftColumnWidth }}
 						/>
 						{/* 其他轨道区域 */}
@@ -2261,12 +2262,12 @@ const TimelineEditor = () => {
 							</div>
 						</div>
 						{/* 主轨道区域（sticky 底部） */}
-						<div className="z-10 flex items-start border-t border-b border-white/10 sticky bottom-0">
+						<div className="z-10 flex items-start sticky bottom-0 shadow-[0_0_0_2px_color-mix(black_15%,transparent)]">
 							{/* 左侧主轨道标签 */}
 							<div
 								className={`text-white z-10 pr-px flex flex-col ${
-									mainTrackVisible ? "bg-neutral-900/90" : "bg-black/80"
-								} backdrop-blur-2xl border-r border-white/10`}
+									mainTrackVisible ? "bg-neutral-800/90" : "bg-black/80"
+								} backdrop-blur-2xl border-r-2 border-white/3`}
 								style={{ width: leftColumnWidth }}
 							>
 								{mainTrackLabel}
@@ -2275,7 +2276,7 @@ const TimelineEditor = () => {
 							<div
 								data-track-drop-zone="main"
 								data-track-index="0"
-								className="relative flex-1 overflow-x-hidden backdrop-blur-2xl"
+								className="relative flex-1 overflow-x-hidden"
 								onMouseMove={handleMouseMove}
 								onMouseLeave={handleMouseLeave}
 								onClick={handleClick}
@@ -2284,6 +2285,7 @@ const TimelineEditor = () => {
 									marginLeft: -leftColumnWidth,
 								}}
 							>
+								<div className="absolute inset-0 bg-neutral-800 backdrop-blur-2xl"></div>
 								<div style={{ paddingLeft: timelinePaddingLeft }}>
 									<div className="relative" data-track-content-area="main">
 										{mainTrackLockedOverlay}

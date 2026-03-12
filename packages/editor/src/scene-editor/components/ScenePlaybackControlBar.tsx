@@ -112,9 +112,9 @@ const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 	}, [displayTime, fps]);
 
 	return (
-		<div className="flex items-center justify-between gap-3 border-b border-neutral-800 bg-black/55 px-3 py-2 backdrop-blur-md">
+		<div className="absolute bottom-full left-0 flex items-center justify-between gap-3 px-3 py-2 backdrop-blur-md">
 			<div className="flex items-center gap-3">
-				<Tooltip>
+				{/* <Tooltip>
 					<TooltipTrigger
 						type="button"
 						aria-label="退出 Scene"
@@ -124,7 +124,7 @@ const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
 						<X className="mx-auto size-4" />
 					</TooltipTrigger>
 					<TooltipContent>退出 Scene</TooltipContent>
-				</Tooltip>
+				</Tooltip> */}
 				<Tooltip>
 					<TooltipTrigger
 						type="button"

@@ -40,8 +40,8 @@ const TimelineRuler: React.FC<TimelineRulerProps> = ({
 		ctx.clearRect(0, 0, width, height);
 
 		// 配置绘制样式
-		ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-		ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+		ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+		ctx.strokeStyle = "rgba(255, 255, 255, 0.07)";
 
 		ctx.font = "11px Barlow";
 		ctx.textAlign = "left";
