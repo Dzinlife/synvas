@@ -5,6 +5,7 @@ import {
 	getAllProjects,
 	getCurrentProjectId,
 	getProject,
+	putProject,
 	type ProjectRecord,
 } from "./projectDb";
 
@@ -378,5 +379,14 @@ describe("projectStore", () => {
 		expect(useProjectStore.getState().currentProject?.revision).toBeGreaterThan(
 			0,
 		);
+	});
+
+	it("saveCurrentProject 持久化时不写入 ot 调试数据", async () => {
+		await expect(
+			useProjectStore.getState().saveCurrentProject(),
+		).resolves.toBeUndefined();
+		const lastCall = vi.mocked(putProject).mock.calls.at(-1)?.[0];
+		expect(lastCall).toBeDefined();
+		expect(lastCall?.data.ot).toBeUndefined();
 	});
 });

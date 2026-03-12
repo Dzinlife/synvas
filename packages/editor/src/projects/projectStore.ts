@@ -267,6 +267,12 @@ const withProjectRevision = (project: StudioProject): StudioProject => {
 	};
 };
 
+const stripProjectOtForPersistence = (project: StudioProject): StudioProject => {
+	// 当前阶段 OT 仅用于本地调试，不持久化到项目数据。
+	const { ot: _ot, ...rest } = project;
+	return rest;
+};
+
 const normalizeProjectFocusState = (project: StudioProject): StudioProject => {
 	const projectWithOt =
 		project.ot ? project : { ...project, ot: ensureStudioProjectOt(project) };
@@ -307,10 +313,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			if (validRecords.length === 0) {
 				const now = Date.now();
 				const id = createProjectId();
+				const project = buildEmptyProject(id);
 				const record: ProjectRecord = {
 					id,
 					name: buildAutoProjectName(),
-					data: buildEmptyProject(id),
+					data: stripProjectOtForPersistence(project),
 					createdAt: now,
 					updatedAt: now,
 				};
@@ -320,7 +327,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					status: "ready",
 					projects: [toSummary(record)],
 					currentProjectId: record.id,
-					currentProject: record.data,
+					currentProject: project,
 					focusedSceneDrafts: {},
 					sceneTimelineMutationOpIds: {},
 					error: null,
@@ -360,10 +367,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 		try {
 			const now = Date.now();
 			const id = createProjectId();
+			const project = buildEmptyProject(id);
 			const record: ProjectRecord = {
 				id,
 				name: buildAutoProjectName(),
-				data: buildEmptyProject(id),
+				data: stripProjectOtForPersistence(project),
 				createdAt: now,
 				updatedAt: now,
 			};
@@ -372,7 +380,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			set({
 				projects: sortProjectSummaries([...get().projects, toSummary(record)]),
 				currentProjectId: record.id,
-				currentProject: record.data,
+				currentProject: project,
 				focusedSceneDrafts: {},
 				sceneTimelineMutationOpIds: {},
 				error: null,
@@ -393,11 +401,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				...baseProject,
 				id: nextProjectId,
 			});
+			const persistedProject = stripProjectOtForPersistence(nextProject);
 			if (!currentProjectId) {
 				const record: ProjectRecord = {
 					id: nextProjectId,
 					name: buildAutoProjectName(),
-					data: nextProject,
+					data: persistedProject,
 					createdAt: now,
 					updatedAt: now,
 				};
@@ -406,7 +415,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				set({
 					projects: sortProjectSummaries([...projects, toSummary(record)]),
 					currentProjectId: record.id,
-					currentProject: record.data,
+					currentProject: nextProject,
 					error: null,
 				});
 				return;
@@ -417,7 +426,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const record: ProjectRecord = {
 				id: currentProjectId,
 				name: currentSummary?.name ?? buildAutoProjectName(),
-				data: nextProject,
+				data: persistedProject,
 				createdAt: currentSummary?.createdAt ?? now,
 				updatedAt: now,
 			};
