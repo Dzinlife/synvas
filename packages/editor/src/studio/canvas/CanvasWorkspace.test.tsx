@@ -947,6 +947,37 @@ const createCanvasWorkspaceRuntime = () => {
 	return runtime;
 };
 
+const createTimelineSelectionElement = (id = "element-1") => {
+	return {
+		id,
+		type: "Image" as const,
+		component: "image",
+		name: "Image Clip",
+		assetId: "asset-scene",
+		props: {},
+		transform: createTransformMeta({
+			width: 320,
+			height: 180,
+			positionX: 0,
+			positionY: 0,
+		}),
+		timeline: buildTimelineMeta(
+			{
+				start: 0,
+				end: 150,
+				trackIndex: 0,
+				role: "clip",
+			},
+			30,
+		),
+		render: {
+			zIndex: 0,
+			visible: true,
+			opacity: 1,
+		},
+	};
+};
+
 const mountMainTimelineDropZone = () => {
 	const mainZone = document.createElement("div");
 	mainZone.setAttribute("data-track-drop-zone", "main");
@@ -1426,6 +1457,70 @@ describe("CanvasWorkspace", () => {
 			useProjectStore.getState().currentProject?.ui.activeNodeId,
 		).toBeNull();
 		expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
+	});
+
+	it("timeline element 选中时右侧优先展示 element 属性面板并可回退 Active Node", async () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const selectedElement = createTimelineSelectionElement();
+		runtime.getActiveEditTimelineRuntime()?.timelineStore.setState({
+			elements: [selectedElement],
+			selectedIds: [selectedElement.id],
+			primarySelectedId: selectedElement.id,
+		});
+		render(<CanvasWorkspace />, {
+			wrapper: createRuntimeProviderWrapper(runtime),
+		});
+
+		expect(
+			screen.getByTestId("canvas-timeline-element-settings-panel"),
+		).toBeTruthy();
+		expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
+
+		act(() => {
+			runtime
+				.getActiveEditTimelineRuntime()
+				?.timelineStore.getState()
+				.setSelectedIds([], null);
+		});
+
+		await waitFor(() => {
+			expect(
+				screen.queryByTestId("canvas-timeline-element-settings-panel"),
+			).toBeNull();
+		});
+		expect(screen.getByTestId("canvas-active-node-meta-panel")).toBeTruthy();
+	});
+
+	it("无 active node 时只要 timeline element 仍被选中，右侧属性面板仍显示", async () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const selectedElement = createTimelineSelectionElement();
+		runtime.getActiveEditTimelineRuntime()?.timelineStore.setState({
+			elements: [selectedElement],
+			selectedIds: [selectedElement.id],
+			primarySelectedId: selectedElement.id,
+		});
+		render(<CanvasWorkspace />, {
+			wrapper: createRuntimeProviderWrapper(runtime),
+		});
+
+		act(() => {
+			useProjectStore.getState().setActiveNode(null);
+		});
+
+		expect(
+			screen.getByTestId("canvas-timeline-element-settings-panel"),
+		).toBeTruthy();
+
+		act(() => {
+			runtime
+				.getActiveEditTimelineRuntime()
+				?.timelineStore.getState()
+				.setSelectedIds([], null);
+		});
+
+		await waitFor(() => {
+			expect(screen.queryByTestId("canvas-overlay-right-panel")).toBeNull();
+		});
 	});
 
 	it("在右侧面板滚轮不会触发画布 camera 平移", () => {

@@ -588,6 +588,8 @@ const CanvasWorkspace = () => {
 	const [contextMenuState, setContextMenuState] =
 		useState<CanvasContextMenuState>({ open: false });
 	const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+	const [selectedTimelineElement, setSelectedTimelineElement] =
+		useState<TimelineElement | null>(null);
 	const [marqueeRect, setMarqueeRect] = useState<CanvasMarqueeRect>({
 		visible: false,
 		x1: 0,
@@ -671,6 +673,44 @@ const CanvasWorkspace = () => {
 			null
 		);
 	}, [activeNodeId, currentProject]);
+	useEffect(() => {
+		if (!runtimeManager) {
+			setSelectedTimelineElement(null);
+			return;
+		}
+		const timelineRuntime =
+			runtimeManager.getActiveEditTimelineRuntime() ??
+			(activeSceneId
+				? runtimeManager.getTimelineRuntime(toSceneTimelineRef(activeSceneId))
+				: null);
+		if (!timelineRuntime) {
+			setSelectedTimelineElement(null);
+			return;
+		}
+		const timelineStore = timelineRuntime.timelineStore;
+		const syncSelectedTimelineElement = () => {
+			const timelineState = timelineStore.getState();
+			const primarySelectedId = timelineState.primarySelectedId;
+			if (!primarySelectedId) {
+				setSelectedTimelineElement(null);
+				return;
+			}
+			setSelectedTimelineElement(
+				timelineState.getElementById(primarySelectedId),
+			);
+		};
+		syncSelectedTimelineElement();
+		return timelineStore.subscribe(
+			(state) => [state.primarySelectedId, state.elements] as const,
+			() => {
+				syncSelectedTimelineElement();
+			},
+			{
+				equalityFn: (left, right) =>
+					left[0] === right[0] && left[1] === right[1],
+			},
+		);
+	}, [activeSceneId, runtimeManager]);
 	const selectedNodes = useMemo(() => {
 		if (!currentProject || normalizedSelectedNodeIds.length === 0) return [];
 		return normalizedSelectedNodeIds
@@ -990,7 +1030,7 @@ const CanvasWorkspace = () => {
 		resolvedDrawerTarget?.options.defaultHeight ??
 		CANVAS_NODE_DRAWER_DEFAULT_HEIGHT;
 	const drawerVisible = Boolean(resolvedDrawerTarget);
-	const rightPanelVisible = Boolean(activeNode);
+	const rightPanelVisible = Boolean(activeNode || selectedTimelineElement);
 	const overlayLayout = useMemo(() => {
 		return resolveCanvasOverlayLayout({
 			containerWidth: stageSize.width,
@@ -3896,6 +3936,7 @@ const CanvasWorkspace = () => {
 				onCollapseSidebar={() => setSidebarExpanded(false)}
 				onExpandSidebar={() => setSidebarExpanded(true)}
 				rightPanelShouldRender={rightPanelShouldRender}
+				selectedTimelineElement={selectedTimelineElement}
 				rightPanelRect={overlayLayout.rightPanelRect}
 				resolvedDrawer={resolvedDrawer}
 				drawerIdentity={drawerIdentity}

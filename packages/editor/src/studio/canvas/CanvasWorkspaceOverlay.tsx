@@ -1,10 +1,11 @@
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineAsset, TimelineElement } from "core/element/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
 import { useMemo } from "react";
 import { SnapIcon } from "@/components/icons";
 import { useProjectStore } from "@/projects/projectStore";
+import ElementSettingsPanel from "@/scene-editor/components/ElementSettingsPanel";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
 } from "@/scene-editor/components/TimelineContextMenu";
@@ -49,6 +50,7 @@ interface CanvasWorkspaceOverlayProps {
 	onCollapseSidebar: () => void;
 	onExpandSidebar: () => void;
 	rightPanelShouldRender: boolean;
+	selectedTimelineElement: TimelineElement | null;
 	rightPanelRect: OverlayRect;
 	resolvedDrawer: DrawerViewData | null;
 	drawerIdentity: string | null;
@@ -80,6 +82,7 @@ const CanvasWorkspaceOverlay = ({
 	onCollapseSidebar,
 	onExpandSidebar,
 	rightPanelShouldRender,
+	selectedTimelineElement,
 	rightPanelRect,
 	resolvedDrawer,
 	drawerIdentity,
@@ -254,7 +257,7 @@ const CanvasWorkspaceOverlay = ({
 				</button>
 			)}
 
-			{rightPanelShouldRender && activeNode && (
+			{rightPanelShouldRender && (activeNode || selectedTimelineElement) && (
 				<div
 					data-testid="canvas-overlay-right-panel"
 					className="pointer-events-none absolute z-50"
@@ -269,11 +272,27 @@ const CanvasWorkspaceOverlay = ({
 						className="pointer-events-auto h-full w-full"
 						data-canvas-overlay-ui="true"
 					>
-						<CanvasActiveNodeMetaPanel
-							node={activeNode}
-							scene={activeNodeScene}
-							asset={activeNodeAsset}
-						/>
+						{selectedTimelineElement ? (
+							<div
+								data-testid="canvas-timeline-element-settings-panel"
+								className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl [corner-shape:superellipse(1.2)] ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
+							>
+								<div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-white/90">
+									Element
+								</div>
+								<div className="min-h-0 flex-1 overflow-y-auto p-3">
+									<ElementSettingsPanel />
+								</div>
+							</div>
+						) : (
+							activeNode && (
+								<CanvasActiveNodeMetaPanel
+									node={activeNode}
+									scene={activeNodeScene}
+									asset={activeNodeAsset}
+								/>
+							)
+						)}
 					</div>
 				</div>
 			)}
