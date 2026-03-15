@@ -1,6 +1,7 @@
 import type { SkCanvas } from "../Canvas";
 import type { SkJSIInstance } from "../JsiInstance";
 import type { SkRect } from "../Rect";
+import type { SkTypeface } from "../Typeface";
 
 import type { TextDirection } from "./ParagraphStyle";
 
@@ -38,6 +39,50 @@ export interface LineMetrics {
 export interface SkRectWithDirection {
   rect: SkRect;
   direction: TextDirection;
+}
+
+export interface TextRange {
+  start: number;
+  end: number;
+}
+
+export interface ShapedLineTextRange {
+  first: number;
+  last: number;
+}
+
+export interface GlyphInfo {
+  graphemeLayoutBounds: SkRect;
+  graphemeClusterTextRange: TextRange;
+  dir: TextDirection;
+  isEllipsis: boolean;
+}
+
+export interface GlyphRun {
+  typeface: SkTypeface | null;
+  size: number;
+  fakeBold: boolean;
+  fakeItalic: boolean;
+  glyphs: Uint16Array;
+  positions: Float32Array;
+  offsets: Uint32Array;
+  flags: number;
+}
+
+export interface ShapedLine {
+  textRange: ShapedLineTextRange;
+  top: number;
+  bottom: number;
+  baseline: number;
+  runs: GlyphRun[];
+}
+
+export interface FontBlock {
+  length: number;
+  typeface: SkTypeface;
+  size: number;
+  fakeBold: boolean;
+  fakeItalic: boolean;
 }
 
 export interface SkParagraph extends SkJSIInstance<"Paragraph"> {
@@ -95,6 +140,8 @@ export interface SkParagraph extends SkJSIInstance<"Paragraph"> {
    * @param y Y coordinate of the position
    */
   getGlyphPositionAtCoordinate(x: number, y: number): number;
+  getClosestGlyphInfoAtCoordinate(x: number, y: number): GlyphInfo | null;
+  getGlyphInfoAt(index: number): GlyphInfo | null;
   /**
    * Returns the bounding boxes of the glyphs in the given range. This method
    * requires the layout method to have been called first.
@@ -107,6 +154,7 @@ export interface SkParagraph extends SkJSIInstance<"Paragraph"> {
    * requires the layout method to have been called first.
    */
   getLineMetrics(): LineMetrics[];
+  getShapedLines(): ShapedLine[];
   /**
    * Returns a list of rects with direction info for the placeholders added
    * to the paragraph.

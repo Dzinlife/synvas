@@ -25,6 +25,7 @@ import "@/element/CompositionAudioClip";
 import "@/element/VideoClip";
 import "@/element/ColorFilterLayer";
 import "@/element/FreezeFrame";
+import "@/element/FancyText";
 import "@/element/HalationFilterLayer";
 import "@/element/Image";
 import "@/element/Lottie";

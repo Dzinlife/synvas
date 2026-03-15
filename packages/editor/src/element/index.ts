@@ -4,6 +4,7 @@ export { default as ColorFilterLayer } from "./ColorFilterLayer";
 export { default as Composition } from "./Composition";
 export { default as CompositionAudioClip } from "./CompositionAudioClip";
 export { default as FreezeFrame } from "./FreezeFrame";
+export { default as FancyText } from "./FancyText";
 export { default as HalationFilterLayer } from "./HalationFilterLayer";
 export { default as Image } from "./Image";
 export { default as Lottie } from "./Lottie";

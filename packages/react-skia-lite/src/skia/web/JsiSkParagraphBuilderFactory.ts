@@ -1,14 +1,18 @@
 import type { CanvasKit } from "canvaskit-wasm";
 
 import type {
+  FontBlock,
   ParagraphBuilderFactory,
+  ShapedLine,
   SkParagraphStyle,
   SkTypefaceFontProvider,
 } from "../types";
 
 import { Host } from "./Host";
 import { JsiSkParagraphBuilder } from "./JsiSkParagraphBuilder";
+import { normalizeShapedLines } from "./JsiSkParagraph";
 import { JsiSkParagraphStyle } from "./JsiSkParagraphStyle";
+import { JsiSkTypeface } from "./JsiSkTypeface";
 import { JsiSkTypefaceFontProvider } from "./JsiSkTypefaceFontProvider";
 
 export class JsiSkParagraphBuilderFactory
@@ -44,5 +48,20 @@ export class JsiSkParagraphBuilderFactory
         fontCollection
       )
     );
+  }
+
+  ShapeText(text: string, runs: FontBlock[], width?: number): ShapedLine[] {
+    const shapedLines = this.CanvasKit.ParagraphBuilder.ShapeText(
+      text,
+      runs.map((run) => ({
+        length: run.length,
+        typeface: JsiSkTypeface.fromValue(run.typeface),
+        size: run.size,
+        fakeBold: run.fakeBold,
+        fakeItalic: run.fakeItalic,
+      })),
+      width
+    );
+    return normalizeShapedLines(this.CanvasKit, shapedLines);
   }
 }

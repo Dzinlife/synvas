@@ -1,7 +1,7 @@
 import type { SkJSIInstance } from "../JsiInstance";
 import type { SkPaint } from "../Paint";
 
-import type { SkParagraph } from "./Paragraph";
+import type { FontBlock, ShapedLine, SkParagraph } from "./Paragraph";
 import type { SkParagraphStyle } from "./ParagraphStyle";
 import type { SkTextStyle, TextBaseline } from "./TextStyle";
 import type { SkTypefaceFontProvider } from "./TypefaceFontProvider";
@@ -16,6 +16,7 @@ export interface ParagraphBuilderFactory {
     paragraphStyle?: SkParagraphStyle,
     typefaceProvider?: SkTypefaceFontProvider
   ): SkParagraphBuilder;
+  ShapeText(text: string, runs: FontBlock[], width?: number): ShapedLine[];
 }
 
 export enum PlaceholderAlignment {
