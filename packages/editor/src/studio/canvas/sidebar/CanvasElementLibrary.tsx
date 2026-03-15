@@ -190,6 +190,20 @@ const MATERIAL_PRESETS: Record<string, MaterialPreset> = {
 			speed: 1.0,
 		},
 	},
+	text: {
+		type: "text",
+		name: "示例文本",
+		thumbnailUrl: buildSvgThumbnail("TEXT", "#0f766e"),
+		width: 500,
+		height: 160,
+		props: {
+			text: "新建文本",
+			fontSize: 48,
+			color: "#FFFFFF",
+			textAlign: "left",
+			lineHeight: 1.2,
+		},
+	},
 	"filter/color-filter": {
 		type: "image",
 		name: "调色滤镜",

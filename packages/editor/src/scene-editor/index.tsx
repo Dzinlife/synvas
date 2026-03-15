@@ -28,6 +28,7 @@ import "@/element/FreezeFrame";
 import "@/element/HalationFilterLayer";
 import "@/element/Image";
 import "@/element/Lottie";
+import "@/element/Text";
 import "@/element/Transition";
 import "@/element/PixelShaderTransition";
 import "@/element/RippleDissolveTransition";

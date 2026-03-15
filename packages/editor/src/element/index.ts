@@ -12,6 +12,7 @@ export * from "./layout";
 export * from "./model";
 export { default as PixelShaderTransition } from "./PixelShaderTransition";
 export { default as RippleDissolveTransition } from "./RippleDissolveTransition";
+export { default as Text } from "./Text";
 export { default as Timeline } from "./Timeline";
 export { default as Transition } from "./Transition";
 export { default as VideoClip } from "./VideoClip";
