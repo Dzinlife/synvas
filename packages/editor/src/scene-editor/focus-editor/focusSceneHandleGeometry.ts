@@ -38,6 +38,7 @@ export type FocusRotateHandle =
 	| "rotate-bottom-left";
 
 export type FocusTransformHandle = FocusResizeHandle | FocusRotateHandle;
+export type FocusResizeHandleMode = "default" | "horizontal-only";
 
 export type FocusTransformAnchorKind =
 	| "resize-corner"
@@ -123,9 +124,29 @@ export const isRotateHandle = (
 	return handle.startsWith("rotate-");
 };
 
+const DEFAULT_EDGE_HANDLES: FocusResizeHandle[] = [
+	"top-center",
+	"middle-right",
+	"bottom-center",
+	"middle-left",
+];
+
+const resolveEdgeHandlesByMode = (
+	mode: FocusResizeHandleMode,
+): FocusResizeHandle[] => {
+	if (mode === "horizontal-only") {
+		return ["middle-right", "middle-left"];
+	}
+	return DEFAULT_EDGE_HANDLES;
+};
+
 export const buildFocusTransformHandleItems = (
 	frameScreen: FocusFrame,
+	options?: {
+		resizeHandleMode?: FocusResizeHandleMode;
+	},
 ): FocusTransformHandleRenderItem[] => {
+	const resizeHandleMode = options?.resizeHandleMode ?? "default";
 	const width = Math.max(0, frameScreen.width);
 	const height = Math.max(0, frameScreen.height);
 	const halfEdge = FOCUS_SCENE_EDGE_HIT_WIDTH_PX / 2;
@@ -319,7 +340,11 @@ export const buildFocusTransformHandleItems = (
 			cursor: buildResizeCursor("middle-left"),
 			visibleCornerMarker: false,
 		}),
-	];
+	].filter((item) => {
+		return resolveEdgeHandlesByMode(resizeHandleMode).includes(
+			item.handle as FocusResizeHandle,
+		);
+	});
 
 	return [...rotateItems, ...cornerResizeItems, ...edgeResizeItems];
 };

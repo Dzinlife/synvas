@@ -46,6 +46,7 @@ export const TextDefinition: ElementComponentDefinition<TextProps> = {
 		name: "Text",
 		category: "overlay",
 		trackRole: "overlay",
+		resizeBehavior: "text-width-reflow",
 		description: "Text overlay rendered by Skia Paragraph",
 		defaultProps: {
 			text: "新建文本",

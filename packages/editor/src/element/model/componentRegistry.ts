@@ -25,6 +25,8 @@ export interface ElementToCanvasClipboardNodeContext<
 	fps: number;
 }
 
+export type ElementResizeBehavior = "default" | "text-width-reflow";
+
 /**
  * 组件定义接口
  */
@@ -62,6 +64,7 @@ export interface ElementComponentDefinition<Props = any, Internal = any> {
 		name: string; // 显示名称
 		category: string; // 分类
 		trackRole?: TrackRole; // 轨道角色
+		resizeBehavior?: ElementResizeBehavior; // resize 交互模式
 		icon?: React.ComponentType; // 图标组件
 		description?: string; // 描述
 		defaultProps?: Partial<Props>; // 默认 props

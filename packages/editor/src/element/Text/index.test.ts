@@ -47,6 +47,7 @@ describe("TextDefinition integration", () => {
 		expect(definition).toBeTruthy();
 		expect(definition?.type).toBe("Text");
 		expect(definition?.meta.trackRole).toBe("overlay");
+		expect(definition?.meta.resizeBehavior).toBe("text-width-reflow");
 	});
 
 	it("支持转换为 canvas text clipboard node", () => {

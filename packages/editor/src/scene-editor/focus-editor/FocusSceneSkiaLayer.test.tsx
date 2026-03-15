@@ -6,8 +6,13 @@ import {
 } from "core/element/position";
 import type { TimelineElement } from "core/element/types";
 import type { SceneNode } from "core/studio/types";
-import { describe, expect, it } from "vitest";
-import { createTimelineStore } from "@/scene-editor/contexts/TimelineContext";
+import type { SkiaPointerEvent } from "react-skia-lite";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { componentRegistry } from "@/element/model/componentRegistry";
+import {
+	createRuntimeProviderWrapper,
+	createTestEditorRuntime,
+} from "@/scene-editor/runtime/testUtils";
 import { useFocusSceneSkiaInteractions } from "./useFocusSceneSkiaInteractions";
 
 const CANVAS_SIZE = { width: 1000, height: 1000 };
@@ -33,6 +38,13 @@ const createElement = (
 	centerX: number,
 	centerY: number,
 	size: { width: number; height: number } = { width: 100, height: 80 },
+	options?: {
+		type?: TimelineElement["type"];
+		component?: string;
+		props?: Record<string, unknown>;
+		scaleX?: number;
+		scaleY?: number;
+	},
 ): TimelineElement => {
 	const { positionX, positionY } = canvasPointToTransformPosition(
 		centerX,
@@ -42,10 +54,10 @@ const createElement = (
 	);
 	return {
 		id,
-		type: "Image",
-		component: "image",
+		type: options?.type ?? "Image",
+		component: options?.component ?? "image",
 		name: id,
-		props: {},
+		props: options?.props ?? {},
 		timeline: {
 			start: 0,
 			end: 300,
@@ -70,8 +82,8 @@ const createElement = (
 				space: "normalized",
 			},
 			scale: {
-				x: 1,
-				y: 1,
+				x: options?.scaleX ?? 1,
+				y: options?.scaleY ?? 1,
 			},
 			rotation: {
 				value: 0,
@@ -108,7 +120,7 @@ const createPointerEvent = (
 		ctrlKey: false,
 		metaKey: false,
 		...patch,
-	} as any;
+	} as unknown as SkiaPointerEvent;
 };
 
 const resolveSceneCenter = (element: TimelineElement) => {
@@ -144,27 +156,56 @@ const resolveSceneBox = (element: TimelineElement) => {
 };
 
 const setupInteractions = (elements: TimelineElement[]) => {
-	const timelineStore = createTimelineStore();
+	const runtime = createTestEditorRuntime("focus-scene-interactions-test");
+	const timelineRef = {
+		kind: "scene" as const,
+		sceneId: focusedNode.sceneId,
+	};
+	const timelineRuntime = runtime.ensureTimelineRuntime(timelineRef);
+	runtime.setActiveEditTimeline(timelineRef);
+	const timelineStore = timelineRuntime.timelineStore;
 	timelineStore.getState().setCanvasSize(CANVAS_SIZE);
 	timelineStore.getState().setElements(elements, { history: false });
 	const renderElementsRef = { current: elements };
-	const hook = renderHook(() =>
-		useFocusSceneSkiaInteractions({
-			width: 1000,
-			height: 1000,
-			camera: { x: 0, y: 0, zoom: 1 },
-			focusedNode,
-			sourceWidth: 1000,
-			sourceHeight: 1000,
-			renderElements: elements,
-			renderElementsRef,
-			timelineStore,
-		}),
+	const hook = renderHook(
+		() =>
+			useFocusSceneSkiaInteractions({
+				width: 1000,
+				height: 1000,
+				camera: { x: 0, y: 0, zoom: 1 },
+				focusedNode,
+				sourceWidth: 1000,
+				sourceHeight: 1000,
+				renderElements: elements,
+				renderElementsRef,
+				timelineStore,
+			}),
+		{
+			wrapper: createRuntimeProviderWrapper(runtime),
+		},
 	);
 	return {
 		timelineStore,
+		modelRegistry: timelineRuntime.modelRegistry,
 		...hook,
 	};
+};
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+const mockTextResizeBehavior = () => {
+	vi.spyOn(componentRegistry, "get").mockImplementation((component: string) => {
+		if (component === "text") {
+			return {
+				meta: {
+					resizeBehavior: "text-width-reflow",
+				},
+			} as unknown as ReturnType<typeof componentRegistry.get>;
+		}
+		return undefined;
+	});
 };
 
 describe("FocusSceneSkiaLayer interactions", () => {
@@ -246,7 +287,9 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		});
 
 		expect(result.current.snapGuidesScreen.vertical.length).toBeGreaterThan(0);
-		expect(result.current.snapGuidesScreen.horizontal.length).toBeGreaterThanOrEqual(3);
+		expect(
+			result.current.snapGuidesScreen.horizontal.length,
+		).toBeGreaterThanOrEqual(3);
 
 		act(() => {
 			result.current.onLayerPointerUp(createPointerEvent(497, 300));
@@ -270,7 +313,10 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 		act(() => {
 			result.current.onLayerPointerDown(
-				createPointerEvent(bottomRightHandle.screenX, bottomRightHandle.screenY),
+				createPointerEvent(
+					bottomRightHandle.screenX,
+					bottomRightHandle.screenY,
+				),
 			);
 			result.current.onLayerPointerMove(
 				createPointerEvent(
@@ -292,8 +338,8 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(afterResize?.transform?.scale.x).toBeGreaterThan(1);
 		expect(afterResize?.transform?.scale.y).toBeGreaterThan(1);
 
-		const rotaterHandle = result.current.handleItems.find(
-			(item) => item.handle.startsWith("rotate-"),
+		const rotaterHandle = result.current.handleItems.find((item) =>
+			item.handle.startsWith("rotate-"),
 		);
 		const selectionFrame = result.current.selectionFrameScreen;
 		expect(rotaterHandle).toBeTruthy();
@@ -325,6 +371,278 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(rotateDeg).toBeCloseTo(snappedDeg, 3);
 	});
 
+	it("单选 Text 时仅保留左右边 resize handle", () => {
+		mockTextResizeBehavior();
+		const textElement = createElement(
+			"text-a",
+			300,
+			300,
+			{ width: 100, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+			},
+		);
+		const { result } = setupInteractions([textElement]);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(300, 300));
+			result.current.onLayerPointerUp(createPointerEvent(300, 300));
+		});
+
+		const handles = result.current.handleItems.map((item) => item.handle);
+		expect(handles).toContain("middle-left");
+		expect(handles).toContain("middle-right");
+		expect(handles).not.toContain("top-center");
+		expect(handles).not.toContain("bottom-center");
+		expect(handles).toContain("top-left");
+		expect(handles).toContain("bottom-right");
+	});
+
+	it("Text 左右 resize 会改 baseSize.width 且保持 scale 不变", () => {
+		mockTextResizeBehavior();
+		const textElement = createElement(
+			"text-a",
+			300,
+			300,
+			{ width: 100, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+			},
+		);
+		const { result, timelineStore } = setupInteractions([textElement]);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(300, 300));
+			result.current.onLayerPointerUp(createPointerEvent(300, 300));
+		});
+
+		const middleRightHandle = result.current.handleItems.find(
+			(item) => item.handle === "middle-right",
+		);
+		expect(middleRightHandle).toBeTruthy();
+		if (!middleRightHandle) return;
+
+		act(() => {
+			result.current.onLayerPointerDown(
+				createPointerEvent(
+					middleRightHandle.screenX,
+					middleRightHandle.screenY,
+				),
+			);
+			result.current.onLayerPointerMove(
+				createPointerEvent(
+					middleRightHandle.screenX + 60,
+					middleRightHandle.screenY,
+				),
+			);
+			result.current.onLayerPointerUp(
+				createPointerEvent(
+					middleRightHandle.screenX + 60,
+					middleRightHandle.screenY,
+				),
+			);
+		});
+
+		const resized = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "text-a");
+		expect(resized).toBeTruthy();
+		if (!resized?.transform) return;
+		expect(resized.transform.baseSize.width).toBeGreaterThan(100);
+		expect(resized.transform.scale.x).toBe(1);
+		expect(resized.transform.scale.y).toBe(1);
+	});
+
+	it("Text 左右 resize 越过中心不会翻转 scaleX", () => {
+		mockTextResizeBehavior();
+		const textElement = createElement(
+			"text-a",
+			300,
+			300,
+			{ width: 100, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+			},
+		);
+		const { result, timelineStore } = setupInteractions([textElement]);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(300, 300));
+			result.current.onLayerPointerUp(createPointerEvent(300, 300));
+		});
+
+		const middleRightHandle = result.current.handleItems.find(
+			(item) => item.handle === "middle-right",
+		);
+		expect(middleRightHandle).toBeTruthy();
+		if (!middleRightHandle) return;
+
+		act(() => {
+			result.current.onLayerPointerDown(
+				createPointerEvent(
+					middleRightHandle.screenX,
+					middleRightHandle.screenY,
+				),
+			);
+			result.current.onLayerPointerMove(
+				createPointerEvent(
+					middleRightHandle.screenX - 240,
+					middleRightHandle.screenY,
+				),
+			);
+			result.current.onLayerPointerUp(
+				createPointerEvent(
+					middleRightHandle.screenX - 240,
+					middleRightHandle.screenY,
+				),
+			);
+		});
+
+		const resized = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "text-a");
+		expect(resized).toBeTruthy();
+		if (!resized?.transform) return;
+		expect(resized.transform.scale.x).toBeGreaterThan(0);
+		expect(resized.transform.baseSize.width).toBeGreaterThanOrEqual(5);
+	});
+
+	it("Text 左右 resize 拖拽中实时按 paragraph 回写高度", () => {
+		mockTextResizeBehavior();
+		const textElement = createElement(
+			"text-a",
+			300,
+			300,
+			{ width: 100, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+			},
+		);
+		const { result, timelineStore, modelRegistry } = setupInteractions([
+			textElement,
+		]);
+		const paragraph = {
+			layout: vi.fn(),
+			getHeight: vi.fn(() => 132),
+		};
+		const mockModelStore = {
+			subscribe: () => () => {},
+			getState: () =>
+				({
+					internal: {
+						paragraph,
+					},
+					dispose: () => {},
+				}) as unknown,
+			setState: () => {},
+			getInitialState: () => ({}),
+		} as unknown as Parameters<typeof modelRegistry.register>[1];
+		modelRegistry.register("text-a", mockModelStore);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(300, 300));
+			result.current.onLayerPointerUp(createPointerEvent(300, 300));
+		});
+
+		const middleRightHandle = result.current.handleItems.find(
+			(item) => item.handle === "middle-right",
+		);
+		expect(middleRightHandle).toBeTruthy();
+		if (!middleRightHandle) return;
+
+		act(() => {
+			result.current.onLayerPointerDown(
+				createPointerEvent(
+					middleRightHandle.screenX,
+					middleRightHandle.screenY,
+				),
+			);
+			result.current.onLayerPointerMove(
+				createPointerEvent(
+					middleRightHandle.screenX + 50,
+					middleRightHandle.screenY,
+				),
+			);
+		});
+
+		const resizing = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "text-a");
+		expect(resizing).toBeTruthy();
+		if (!resizing?.transform) return;
+		expect(paragraph.layout).toHaveBeenCalled();
+		expect(resizing.transform.baseSize.height).toBe(132);
+
+		act(() => {
+			result.current.onLayerPointerUp(
+				createPointerEvent(
+					middleRightHandle.screenX + 50,
+					middleRightHandle.screenY,
+				),
+			);
+		});
+	});
+
+	it("Text 角点 resize 仍走 scale 缩放", () => {
+		mockTextResizeBehavior();
+		const textElement = createElement(
+			"text-a",
+			300,
+			300,
+			{ width: 100, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+			},
+		);
+		const { result, timelineStore } = setupInteractions([textElement]);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(300, 300));
+			result.current.onLayerPointerUp(createPointerEvent(300, 300));
+		});
+
+		const bottomRightHandle = result.current.handleItems.find(
+			(item) => item.handle === "bottom-right",
+		);
+		expect(bottomRightHandle).toBeTruthy();
+		if (!bottomRightHandle) return;
+
+		act(() => {
+			result.current.onLayerPointerDown(
+				createPointerEvent(
+					bottomRightHandle.screenX,
+					bottomRightHandle.screenY,
+				),
+			);
+			result.current.onLayerPointerMove(
+				createPointerEvent(
+					bottomRightHandle.screenX + 40,
+					bottomRightHandle.screenY + 30,
+				),
+			);
+			result.current.onLayerPointerUp(
+				createPointerEvent(
+					bottomRightHandle.screenX + 40,
+					bottomRightHandle.screenY + 30,
+				),
+			);
+		});
+
+		const resized = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "text-a");
+		expect(resized).toBeTruthy();
+		if (!resized?.transform) return;
+		expect(resized.transform.scale.x).toBeGreaterThan(1);
+		expect(resized.transform.scale.y).toBeGreaterThan(1);
+		expect(resized.transform.baseSize.width).toBe(100);
+	});
+
 	it("resize 拖拽中 Alt 按下/松开可立即切换中心缩放", () => {
 		const elementA = createElement("element-a", 300, 300);
 		const { result, timelineStore } = setupInteractions([elementA]);
@@ -345,7 +663,10 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 		act(() => {
 			result.current.onLayerPointerDown(
-				createPointerEvent(middleRightHandle.screenX, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX,
+					middleRightHandle.screenY,
+				),
 			);
 			result.current.onLayerPointerMove(createPointerEvent(targetX, targetY));
 		});
@@ -413,13 +734,22 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 		act(() => {
 			result.current.onLayerPointerDown(
-				createPointerEvent(middleRightHandle.screenX, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX,
+					middleRightHandle.screenY,
+				),
 			);
 			result.current.onLayerPointerMove(
-				createPointerEvent(middleRightHandle.screenX - 120, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX - 120,
+					middleRightHandle.screenY,
+				),
 			);
 			result.current.onLayerPointerUp(
-				createPointerEvent(middleRightHandle.screenX - 120, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX - 120,
+					middleRightHandle.screenY,
+				),
 			);
 		});
 
@@ -446,17 +776,28 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 		act(() => {
 			result.current.onLayerPointerDown(
-				createPointerEvent(middleRightHandle.screenX, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX,
+					middleRightHandle.screenY,
+				),
 			);
 			result.current.onLayerPointerMove(
-				createPointerEvent(middleRightHandle.screenX - 70, middleRightHandle.screenY, {
-					altKey: true,
-				}),
+				createPointerEvent(
+					middleRightHandle.screenX - 70,
+					middleRightHandle.screenY,
+					{
+						altKey: true,
+					},
+				),
 			);
 			result.current.onLayerPointerUp(
-				createPointerEvent(middleRightHandle.screenX - 70, middleRightHandle.screenY, {
-					altKey: true,
-				}),
+				createPointerEvent(
+					middleRightHandle.screenX - 70,
+					middleRightHandle.screenY,
+					{
+						altKey: true,
+					},
+				),
 			);
 		});
 
@@ -484,13 +825,22 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 		act(() => {
 			result.current.onLayerPointerDown(
-				createPointerEvent(middleRightHandle.screenX, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX,
+					middleRightHandle.screenY,
+				),
 			);
 			result.current.onLayerPointerMove(
-				createPointerEvent(middleRightHandle.screenX - 126, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX - 126,
+					middleRightHandle.screenY,
+				),
 			);
 			result.current.onLayerPointerUp(
-				createPointerEvent(middleRightHandle.screenX - 126, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX - 126,
+					middleRightHandle.screenY,
+				),
 			);
 		});
 
@@ -523,10 +873,16 @@ describe("FocusSceneSkiaLayer interactions", () => {
 				createPointerEvent(topLeftHandle.screenX, topLeftHandle.screenY),
 			);
 			result.current.onLayerPointerMove(
-				createPointerEvent(topLeftHandle.screenX + 120, topLeftHandle.screenY + 120),
+				createPointerEvent(
+					topLeftHandle.screenX + 120,
+					topLeftHandle.screenY + 120,
+				),
 			);
 			result.current.onLayerPointerUp(
-				createPointerEvent(topLeftHandle.screenX + 120, topLeftHandle.screenY + 120),
+				createPointerEvent(
+					topLeftHandle.screenX + 120,
+					topLeftHandle.screenY + 120,
+				),
 			);
 		});
 
@@ -596,8 +952,8 @@ describe("FocusSceneSkiaLayer interactions", () => {
 			result.current.onLayerPointerUp(createPointerEvent(300, 300));
 		});
 
-		const rotaterHandle = result.current.handleItems.find(
-			(item) => item.handle.startsWith("rotate-"),
+		const rotaterHandle = result.current.handleItems.find((item) =>
+			item.handle.startsWith("rotate-"),
 		);
 		const selectionFrame = result.current.selectionFrameScreen;
 		expect(rotaterHandle).toBeTruthy();
@@ -664,7 +1020,10 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 		act(() => {
 			result.current.onLayerPointerDown(
-				createPointerEvent(middleRightHandle.screenX, middleRightHandle.screenY),
+				createPointerEvent(
+					middleRightHandle.screenX,
+					middleRightHandle.screenY,
+				),
 			);
 			result.current.onLayerPointerMove(
 				createPointerEvent(448, middleRightHandle.screenY),
@@ -704,8 +1063,8 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		});
 		expect(result.current.selectedIds).toHaveLength(2);
 
-		const rotaterHandle = result.current.handleItems.find(
-			(item) => item.handle.startsWith("rotate-"),
+		const rotaterHandle = result.current.handleItems.find((item) =>
+			item.handle.startsWith("rotate-"),
 		);
 		const selectionFrame = result.current.selectionFrameScreen;
 		expect(rotaterHandle).toBeTruthy();
@@ -730,7 +1089,9 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 		expect(result.current.selectedIds).toHaveLength(2);
 		expect(result.current.selectionFrameScreen).toBeTruthy();
-		const rotatedRad = Math.abs(result.current.selectionFrameScreen?.rotationRad ?? 0);
+		const rotatedRad = Math.abs(
+			result.current.selectionFrameScreen?.rotationRad ?? 0,
+		);
 		const snappedRad = Math.round(rotatedRad / (Math.PI / 4)) * (Math.PI / 4);
 		expect(rotatedRad).toBeGreaterThan(0);
 		expect(rotatedRad).toBeCloseTo(snappedRad, 2);

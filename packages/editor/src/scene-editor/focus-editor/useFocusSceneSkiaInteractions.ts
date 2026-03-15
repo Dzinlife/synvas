@@ -1,14 +1,25 @@
+import { buildTimelineBatchCommandFromSnapshots } from "core/editor/ot";
 import {
 	canvasPointToTransformPosition,
 	transformPositionToCanvasPoint,
 } from "core/element/position";
-import { buildTimelineBatchCommandFromSnapshots } from "core/editor/ot";
 import type { TimelineElement, TransformMeta } from "core/element/types";
 import type { SceneNode } from "core/studio/types";
 import type React from "react";
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useContext,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import type { SkiaPointerEvent } from "react-skia-lite";
 import { transformMetaToRenderLayout } from "@/element/layout";
+import {
+	componentRegistry,
+	type ElementResizeBehavior,
+} from "@/element/model/componentRegistry";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
@@ -18,13 +29,6 @@ import { reflowInsertedElementsOnTracks } from "@/scene-editor/utils/insertedTra
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
 import type { CameraState } from "@/studio/canvas/canvasWorkspaceUtils";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
-import {
-	buildFocusTransformHandleItems,
-	isRotateHandle,
-	resolveFocusTransformHandleAtPoint,
-	type FocusTransformHandle,
-	type FocusTransformHandleRenderItem,
-} from "./focusSceneHandleGeometry";
 import {
 	createFocusFrameMatrix,
 	createFocusSceneCoordinateContext,
@@ -44,6 +48,14 @@ import {
 	sceneToScreenPoint,
 	screenToScenePoint,
 } from "./focusSceneCoordinates";
+import {
+	buildFocusTransformHandleItems,
+	type FocusResizeHandleMode,
+	type FocusTransformHandle,
+	type FocusTransformHandleRenderItem,
+	isRotateHandle,
+	resolveFocusTransformHandleAtPoint,
+} from "./focusSceneHandleGeometry";
 
 const SNAP_GUIDE_THRESHOLD_PX = 6;
 const SNAP_GUIDE_MATCH_EPSILON = 1e-6;
@@ -69,6 +81,20 @@ type FocusSceneElementLayout = {
 	frameScene: FocusFrame;
 	frameScreen: FocusFrame;
 	boxScene: FocusRect;
+};
+
+type TextParagraphLike = {
+	layout: (width: number) => void;
+	getHeight: () => number;
+};
+
+const isTextParagraphLike = (value: unknown): value is TextParagraphLike => {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as Partial<TextParagraphLike>;
+	return (
+		typeof candidate.layout === "function" &&
+		typeof candidate.getHeight === "function"
+	);
 };
 
 export type FocusSceneLabelItem = {
@@ -134,6 +160,7 @@ interface TransformElementSnapshot {
 interface TransformSession {
 	kind: "transform";
 	handle: FocusTransformHandle;
+	resizeBehavior: ElementResizeBehavior;
 	baseFrameScene: FocusFrame;
 	baseElements: TransformElementSnapshot[];
 	startAngleRad: number;
@@ -192,6 +219,8 @@ const isTransformChanged = (
 	next: TransformMeta,
 ): boolean => {
 	return (
+		prev.baseSize.width !== next.baseSize.width ||
+		prev.baseSize.height !== next.baseSize.height ||
 		prev.position.x !== next.position.x ||
 		prev.position.y !== next.position.y ||
 		prev.scale.x !== next.scale.x ||
@@ -451,6 +480,120 @@ const resolveSelectionFrameScreen = (
 	};
 };
 
+const resolveElementResizeBehavior = (
+	element: TimelineElement | undefined,
+): ElementResizeBehavior => {
+	if (!element) return "default";
+	const definition = componentRegistry.get(element.component);
+	return definition?.meta.resizeBehavior ?? "default";
+};
+
+const resolveSelectionResizeBehavior = ({
+	selectedIds,
+	layouts,
+}: {
+	selectedIds: string[];
+	layouts: FocusSceneElementLayout[];
+}): ElementResizeBehavior => {
+	if (selectedIds.length !== 1) return "default";
+	const selectedId = selectedIds[0];
+	if (!selectedId) return "default";
+	const selectedLayout = layouts.find((layout) => layout.id === selectedId);
+	return resolveElementResizeBehavior(selectedLayout?.element);
+};
+
+const resolveResizeHandleMode = (
+	behavior: ElementResizeBehavior,
+): FocusResizeHandleMode => {
+	if (behavior === "text-width-reflow") {
+		return "horizontal-only";
+	}
+	return "default";
+};
+
+const resolveTimelineModelRegistry = ({
+	runtimeManager,
+	timelineStore,
+}: {
+	runtimeManager: StudioRuntimeManager | null;
+	timelineStore: TimelineStoreApi | null;
+}) => {
+	if (!runtimeManager || !timelineStore) return null;
+	const runtime = runtimeManager
+		.listTimelineRuntimes()
+		.find((item) => item.timelineStore === timelineStore);
+	return runtime?.modelRegistry ?? null;
+};
+
+const resolveTextReflowHeightFromModel = ({
+	modelRegistry,
+	elementId,
+	baseWidth,
+}: {
+	modelRegistry: ReturnType<typeof resolveTimelineModelRegistry>;
+	elementId: string;
+	baseWidth: number;
+}): number | null => {
+	if (!modelRegistry) return null;
+	const modelStore = modelRegistry.get(elementId);
+	if (!modelStore) return null;
+	const internal = (modelStore.getState() as { internal?: unknown }).internal;
+	if (!internal || typeof internal !== "object") return null;
+	const paragraph = (internal as { paragraph?: unknown }).paragraph;
+	if (!isTextParagraphLike(paragraph)) return null;
+	try {
+		paragraph.layout(baseWidth);
+		const height = paragraph.getHeight();
+		if (!Number.isFinite(height)) return null;
+		return height;
+	} catch (_error) {
+		return null;
+	}
+};
+
+const resolveTextSideResizeFrameScreen = (params: {
+	baseFrameScreen: FocusFrame;
+	handle: FocusTransformHandle;
+	pointerScreen: FocusPoint;
+	centered: boolean;
+}): FocusFrame | null => {
+	const { baseFrameScreen, handle, pointerScreen, centered } = params;
+	if (isRotateHandle(handle)) return null;
+	if (handle !== "middle-left" && handle !== "middle-right") return null;
+	const baseMatrix = createFocusFrameMatrix(baseFrameScreen);
+	const inverse = invertFocusMatrix(baseMatrix);
+	if (!inverse) return null;
+	const pointerLocal = mapFocusPoint(inverse, pointerScreen);
+	const originCenterX = baseFrameScreen.width / 2;
+	const minWidth = MIN_TRANSFORM_SIZE_PX;
+	let left = 0;
+	let right = baseFrameScreen.width;
+	if (centered) {
+		const halfWidth = Math.max(
+			minWidth / 2,
+			Math.abs(pointerLocal.x - originCenterX),
+		);
+		left = originCenterX - halfWidth;
+		right = originCenterX + halfWidth;
+	} else if (handle === "middle-right") {
+		right = Math.max(pointerLocal.x, minWidth);
+	} else {
+		left = Math.min(pointerLocal.x, baseFrameScreen.width - minWidth);
+	}
+	const nextLocalCenter = {
+		x: (left + right) / 2,
+		y: baseFrameScreen.height / 2,
+	};
+	const nextScreenCenter = mapFocusPoint(baseMatrix, nextLocalCenter);
+	return {
+		cx: nextScreenCenter.x,
+		cy: nextScreenCenter.y,
+		width: Math.max(minWidth, right - left),
+		height: Math.max(MIN_TRANSFORM_SIZE_PX, baseFrameScreen.height),
+		rotationRad: baseFrameScreen.rotationRad,
+	};
+};
+
 const resolveResizeAnchorDelta = (params: {
 	baseFrameScreen: FocusFrame;
 	handle: FocusTransformHandle;
@@ -534,7 +677,10 @@ const resolveResizeAnchorDelta = (params: {
 
 	if (isCorner && baseFrameScreen.height > FOCUS_SCENE_EPSILON) {
 		const safeBaseWidth = Math.max(baseFrameScreen.width, FOCUS_SCENE_EPSILON);
-		const safeBaseHeight = Math.max(baseFrameScreen.height, FOCUS_SCENE_EPSILON);
+		const safeBaseHeight = Math.max(
+			baseFrameScreen.height,
+			FOCUS_SCENE_EPSILON,
+		);
 		const scaleX = width / safeBaseWidth;
 		const scaleY = height / safeBaseHeight;
 		const scale = Math.max((scaleX + scaleY) / 2, 0);
@@ -660,7 +806,6 @@ export const useFocusSceneSkiaInteractions = ({
 		return manager as StudioRuntimeManager;
 	}, [editorRuntime]);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
-	const currentProject = useProjectStore((state) => state.currentProject);
 	const ctx = useMemo(() => {
 		if (!focusedNode) return null;
 		return createFocusSceneCoordinateContext({
@@ -769,7 +914,7 @@ export const useFocusSceneSkiaInteractions = ({
 				intent: "root",
 			});
 		},
-		[currentProject, pushHistory, resolveHistorySceneId, timelineStore],
+		[pushHistory, resolveHistorySceneId, timelineStore],
 	);
 
 	const setElementsWithoutHistory = useCallback(
@@ -919,6 +1064,13 @@ export const useFocusSceneSkiaInteractions = ({
 		return resolveSelectionFrameScreen(selectionFrameScene, ctx);
 	}, [ctx, selectionFrameScene]);
 
+	const selectedResizeBehavior = useMemo<ElementResizeBehavior>(() => {
+		return resolveSelectionResizeBehavior({
+			selectedIds,
+			layouts: elementLayouts,
+		});
+	}, [elementLayouts, selectedIds]);
+
 	const selectionRectScreen = useMemo(() => {
 		if (!selectionRectScene) return null;
 		if (!ctx) return null;
@@ -957,8 +1109,10 @@ export const useFocusSceneSkiaInteractions = ({
 
 	const handleItems = useMemo(() => {
 		if (!selectionFrameScreen) return [];
-		return buildFocusTransformHandleItems(selectionFrameScreen);
-	}, [selectionFrameScreen]);
+		return buildFocusTransformHandleItems(selectionFrameScreen, {
+			resizeHandleMode: resolveResizeHandleMode(selectedResizeBehavior),
+		});
+	}, [selectedResizeBehavior, selectionFrameScreen]);
 
 	const labelItems = useMemo<FocusSceneLabelItem[]>(() => {
 		if (selectedIds.length === 0) return [];
@@ -1104,6 +1258,7 @@ export const useFocusSceneSkiaInteractions = ({
 						interactionSessionRef.current = {
 							kind: "transform",
 							handle: maybeHandle.handle,
+							resizeBehavior: selectedResizeBehavior,
 							baseFrameScene: selectionFrameScene,
 							baseElements,
 							startAngleRad,
@@ -1254,9 +1409,11 @@ export const useFocusSceneSkiaInteractions = ({
 			selectionFrameScreen,
 			selectionFrameScene,
 			handleItems,
+			selectedResizeBehavior,
 			elementLayouts,
 			captureHistorySnapshot,
 			modelCenterToSceneCenter,
+			applySelectionFrameOverride,
 			setSelection,
 			setElementsWithoutHistory,
 		],
@@ -1404,6 +1561,10 @@ export const useFocusSceneSkiaInteractions = ({
 				if (!baseFrameScreen) return;
 				const centered = Boolean(event.altKey);
 				const snapRotate = Boolean(event.shiftKey);
+				const isTextWidthReflowHandle =
+					session.resizeBehavior === "text-width-reflow" &&
+					(session.handle === "middle-left" ||
+						session.handle === "middle-right");
 				let nextFrameScreen: FocusFrame | null = null;
 				let resizeScaleSignX = 1;
 				let resizeScaleSignY = 1;
@@ -1430,16 +1591,25 @@ export const useFocusSceneSkiaInteractions = ({
 						rotationRad: nextRotation,
 					};
 				} else {
-					const resizeResult = resolveResizeAnchorDelta({
-						baseFrameScreen,
-						handle: session.handle,
-						pointerScreen: screenPoint,
-						centered,
-					});
-					if (!resizeResult) return;
-					nextFrameScreen = resizeResult.frameScreen;
-					resizeScaleSignX = resizeResult.scaleSignX;
-					resizeScaleSignY = resizeResult.scaleSignY;
+					if (isTextWidthReflowHandle) {
+						nextFrameScreen = resolveTextSideResizeFrameScreen({
+							baseFrameScreen,
+							handle: session.handle,
+							pointerScreen: screenPoint,
+							centered,
+						});
+					} else {
+						const resizeResult = resolveResizeAnchorDelta({
+							baseFrameScreen,
+							handle: session.handle,
+							pointerScreen: screenPoint,
+							centered,
+						});
+						if (!resizeResult) return;
+						nextFrameScreen = resizeResult.frameScreen;
+						resizeScaleSignX = resizeResult.scaleSignX;
+						resizeScaleSignY = resizeResult.scaleSignY;
+					}
 				}
 				if (!nextFrameScreen) return;
 
@@ -1706,8 +1876,13 @@ export const useFocusSceneSkiaInteractions = ({
 				const inverseBase = invertFocusMatrix(baseMatrix);
 				if (!inverseBase) return;
 				const deltaMatrix = multiplyFocusMatrix(nextMatrix, inverseBase);
+				const modelRegistry = resolveTimelineModelRegistry({
+					runtimeManager,
+					timelineStore,
+				});
 				const currentElements = timelineStore.getState().elements;
 				let changed = false;
+				let selectionFrameOverride: FocusFrame | null = null;
 				const nextElements = currentElements.map((element) => {
 					const snapshot = session.baseElements.find(
 						(item) => item.id === element.id,
@@ -1722,6 +1897,75 @@ export const useFocusSceneSkiaInteractions = ({
 					const { positionX, positionY } = sceneCenterToModelPosition(
 						metrics.center,
 					);
+					const isTextWidthReflowResize =
+						session.resizeBehavior === "text-width-reflow" &&
+						!isRotateHandle(session.handle) &&
+						(session.handle === "middle-left" ||
+							session.handle === "middle-right") &&
+						session.baseElements.length === 1;
+					if (isTextWidthReflowResize) {
+						const baseScaleX = snapshot.transform.scale.x;
+						const baseScaleY = snapshot.transform.scale.y;
+						const absScaleX = Math.max(
+							Math.abs(baseScaleX),
+							FOCUS_SCENE_EPSILON,
+						);
+						const absScaleY = Math.max(
+							Math.abs(baseScaleY),
+							FOCUS_SCENE_EPSILON,
+						);
+						const minBaseWidth = minSizeScene / absScaleX;
+						const minBaseHeight = minSizeScene / absScaleY;
+						const nextBaseWidth = Math.max(
+							minBaseWidth,
+							nextFrameScene.width / absScaleX,
+						);
+						const reflowHeight = resolveTextReflowHeightFromModel({
+							modelRegistry,
+							elementId: snapshot.id,
+							baseWidth: nextBaseWidth,
+						});
+						const nextBaseHeight = Math.max(
+							minBaseHeight,
+							reflowHeight ?? snapshot.transform.baseSize.height,
+						);
+						const updatedTransform = quantizeTransform({
+							...snapshot.transform,
+							baseSize: {
+								...snapshot.transform.baseSize,
+								width: nextBaseWidth,
+								height: nextBaseHeight,
+							},
+							position: {
+								...snapshot.transform.position,
+								x: positionX,
+								y: positionY,
+							},
+							scale: {
+								x: baseScaleX,
+								y: baseScaleY,
+							},
+							rotation: {
+								...snapshot.transform.rotation,
+								value: (metrics.rotationRad * 180) / Math.PI,
+							},
+						});
+						if (!isTransformChanged(element.transform, updatedTransform)) {
+							return element;
+						}
+						changed = true;
+						selectionFrameOverride = {
+							cx: metrics.center.x,
+							cy: metrics.center.y,
+							width: updatedTransform.baseSize.width * Math.abs(baseScaleX),
+							height: updatedTransform.baseSize.height * Math.abs(baseScaleY),
+							rotationRad: metrics.rotationRad,
+						};
+						return {
+							...element,
+							transform: updatedTransform,
+						};
+					}
 					const updatedTransform = quantizeTransform({
 						...snapshot.transform,
 						position: {
@@ -1758,7 +2002,7 @@ export const useFocusSceneSkiaInteractions = ({
 				if (!changed) return;
 				session.changed = true;
 				setElementsWithoutHistory(nextElements);
-				applySelectionFrameOverride(nextFrameScene);
+				applySelectionFrameOverride(selectionFrameOverride ?? nextFrameScene);
 			}
 		},
 		[
@@ -1775,6 +2019,7 @@ export const useFocusSceneSkiaInteractions = ({
 			applyDragToElements,
 			sceneCenterToModelPosition,
 			setElementsWithoutHistory,
+			runtimeManager,
 		],
 	);
 
