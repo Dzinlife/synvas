@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
 	Canvas,
 	Fill,
+	Path,
 	Paragraph,
 	Skia,
 	Text,
@@ -192,6 +193,51 @@ export default function SkiaFont() {
 		);
 	}, [customFontMgr, fontSize, text]);
 
+	const outlineApiAvailable = useMemo(() => {
+		const canvasKit = (globalThis as {
+			CanvasKit?: {
+				Path?: {
+					MakeFromGlyphs?: unknown;
+					MakeFromRSXformGlyphs?: unknown;
+					MakeFromText?: unknown;
+				};
+			};
+		}).CanvasKit;
+		return Boolean(
+			canvasKit?.Path?.MakeFromGlyphs &&
+				canvasKit.Path.MakeFromRSXformGlyphs &&
+				canvasKit.Path.MakeFromText,
+		);
+	}, [customFontMgr]);
+
+	const outlinePath = useMemo(() => {
+		const activeFont = selectedFontSkia || robotoFont;
+		if (!activeFont || !text) {
+			return null;
+		}
+		const glyphIds = activeFont.getGlyphIDs(text);
+		if (!glyphIds || glyphIds.length === 0) {
+			return null;
+		}
+		const widths = activeFont.getGlyphWidths(glyphIds);
+		let cursor = 12;
+		const positions = glyphIds.map((_glyphId, index) => {
+			const point = {
+				x: cursor,
+				y: fontSize + 18,
+			};
+			cursor += widths[index] ?? 0;
+			return point;
+		});
+		return Skia.Path.MakeFromGlyphs(glyphIds, positions, activeFont);
+	}, [fontSize, robotoFont, selectedFontSkia, text]);
+
+	useEffect(() => {
+		return () => {
+			outlinePath?.dispose();
+		};
+	}, [outlinePath]);
+
 	console.log("paragraph:", paragraph, "customFontMgr:", customFontMgr);
 
 	const [wrap, setWrap] = useState(false);
@@ -235,6 +281,10 @@ export default function SkiaFont() {
 				/>
 				<button onClick={() => setWrap(!wrap)}>切换换行</button>
 			</div>
+			<div style={{ marginBottom: 10, fontSize: 13 }}>
+				<div>Outline API: {outlineApiAvailable ? "available" : "missing"}</div>
+				<div>Outline Path: {outlinePath ? "created" : "null"}</div>
+			</div>
 			<Canvas style={{ width: 400, height: 100 }}>
 				<Fill>
 					{wrap ? (
@@ -256,6 +306,10 @@ export default function SkiaFont() {
 						></Text>
 					)}
 				</Fill>
+			</Canvas>
+			<Canvas style={{ width: 400, height: 120 }}>
+				<Fill color="#111827" />
+				{outlinePath ? <Path path={outlinePath} color="#38bdf8" /> : null}
 			</Canvas>
 		</>
 	);

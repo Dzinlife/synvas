@@ -1,4 +1,6 @@
 import type { SkFont } from "../Font";
+import type { SkPoint } from "../Point";
+import type { SkRSXform } from "../RSXform";
 
 import type { SkPath, PathOp, PathCommand } from "./Path";
 
@@ -26,6 +28,24 @@ export interface PathFactory {
    * @param cmds
    */
   MakeFromCmds(cmds: PathCommand[]): SkPath | null;
+
+  /**
+   * Creates a new path from the provided glyph ids and x/y positions.
+   */
+  MakeFromGlyphs(
+    glyphs: number[],
+    positions: SkPoint[],
+    font: SkFont
+  ): SkPath | null;
+
+  /**
+   * Creates a new path from the provided glyph ids and rsxforms.
+   */
+  MakeFromRSXformGlyphs(
+    glyphs: number[],
+    rsxforms: SkRSXform[],
+    font: SkFont
+  ): SkPath | null;
 
   /**
    * Converts the text to a path with the given font at location x / y.

@@ -1,10 +1,19 @@
 import type { CanvasKit } from "canvaskit-wasm";
 
-import type { PathCommand, PathOp, SkFont, SkPath } from "../types";
+import type {
+  PathCommand,
+  PathOp,
+  SkFont,
+  SkPath,
+  SkPoint,
+  SkRSXform,
+} from "../types";
 import type { PathFactory } from "../types/Path/PathFactory";
 
-import { Host, getEnum, throwNotImplementedOnRNWeb } from "./Host";
+import { Host, getEnum } from "./Host";
+import { JsiSkFont } from "./JsiSkFont";
 import { JsiSkPath } from "./JsiSkPath";
+import { JsiSkRSXform } from "./JsiSkRSXform";
 
 export class JsiSkPathFactory extends Host implements PathFactory {
   constructor(CanvasKit: CanvasKit) {
@@ -43,7 +52,48 @@ export class JsiSkPathFactory extends Host implements PathFactory {
     return new JsiSkPath(this.CanvasKit, path);
   }
 
-  MakeFromText(_text: string, _x: number, _y: number, _font: SkFont) {
-    return throwNotImplementedOnRNWeb<SkPath>();
+  MakeFromGlyphs(
+    glyphs: number[],
+    positions: SkPoint[],
+    font: SkFont
+  ) {
+    const path = this.CanvasKit.Path.MakeFromGlyphs(
+      glyphs,
+      positions.flatMap(({ x, y }) => [x, y]),
+      JsiSkFont.fromValue(font)
+    );
+    if (path === null) {
+      return null;
+    }
+    return new JsiSkPath(this.CanvasKit, path);
+  }
+
+  MakeFromRSXformGlyphs(
+    glyphs: number[],
+    rsxforms: SkRSXform[],
+    font: SkFont
+  ) {
+    const path = this.CanvasKit.Path.MakeFromRSXformGlyphs(
+      glyphs,
+      rsxforms.flatMap((rsxform) => Array.from(JsiSkRSXform.fromValue(rsxform))),
+      JsiSkFont.fromValue(font)
+    );
+    if (path === null) {
+      return null;
+    }
+    return new JsiSkPath(this.CanvasKit, path);
+  }
+
+  MakeFromText(text: string, x: number, y: number, font: SkFont) {
+    const path = this.CanvasKit.Path.MakeFromText(
+      text,
+      x,
+      y,
+      JsiSkFont.fromValue(font)
+    );
+    if (path === null) {
+      return null;
+    }
+    return new JsiSkPath(this.CanvasKit, path);
   }
 }
