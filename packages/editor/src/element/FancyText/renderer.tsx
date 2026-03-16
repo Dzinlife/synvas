@@ -2,10 +2,10 @@ import React, { useEffect, useMemo } from "react";
 import {
 	Glyphs,
 	Group,
+	Path,
 	Paragraph,
 	Skia,
-	TextBlob,
-	type SkTextBlob,
+	type SkPath,
 } from "react-skia-lite";
 import {
 	useRenderTime,
@@ -96,7 +96,7 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 		if (!font || !layoutData || layoutData.glyphSlices.length === 0) {
 			return {
 				glyphSlices: layoutData?.glyphSlices ?? [],
-				blobItems: [] as Array<{ key: string; blob: SkTextBlob }>,
+				pathItems: [] as Array<{ key: string; path: SkPath }>,
 			};
 		}
 
@@ -122,7 +122,7 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 		if (!Number.isFinite(totalFlowLength) || totalFlowLength <= 0) {
 			return {
 				glyphSlices: layoutData.glyphSlices,
-				blobItems: [] as Array<{ key: string; blob: SkTextBlob }>,
+				pathItems: [] as Array<{ key: string; path: SkPath }>,
 			};
 		}
 
@@ -131,7 +131,7 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 		const windowCenter = travelStart + (travelEnd - travelStart) * sweepProgress;
 
 		const glyphSlices: FancyGlyphSlice[] = [];
-		const blobItems: Array<{ key: string; blob: SkTextBlob }> = [];
+		const pathItems: Array<{ key: string; path: SkPath }> = [];
 
 		preparedSlices.forEach(({ slice, preparedGlyphs }, sliceIndex) => {
 			let hasInfluence = false;
@@ -159,15 +159,21 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 				return;
 			}
 
-			blobItems.push({
+			const path = Skia.Path.MakeFromRSXformGlyphs(slice.glyphIds, rsxforms, font);
+			if (!path) {
+				glyphSlices.push(slice);
+				return;
+			}
+
+			pathItems.push({
 				key: `${slice.start}-${slice.end}-${sliceIndex}`,
-				blob: Skia.TextBlob.MakeFromRSXformGlyphs(slice.glyphIds, rsxforms, font),
+				path,
 			});
 		});
 
 		return {
 			glyphSlices,
-			blobItems,
+			pathItems,
 		};
 	}, [
 		font,
@@ -180,11 +186,11 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 
 	useEffect(() => {
 		return () => {
-			for (const item of renderData.blobItems) {
-				item.blob.dispose();
+			for (const item of renderData.pathItems) {
+				item.path.dispose();
 			}
 		};
-	}, [renderData.blobItems]);
+	}, [renderData.pathItems]);
 
 	if (!paragraph) return null;
 	if (!font || !layoutData) {
@@ -201,8 +207,8 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 					color={color}
 				/>
 			))}
-			{renderData.blobItems.map((item) => (
-				<TextBlob key={item.key} blob={item.blob} color={color} />
+			{renderData.pathItems.map((item) => (
+				<Path key={item.key} path={item.path} color={color} />
 			))}
 		</Group>
 	);

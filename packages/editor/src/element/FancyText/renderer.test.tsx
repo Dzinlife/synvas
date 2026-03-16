@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => ({
 		},
 	},
 	currentTime: 45,
-	makeFromRSXformGlyphs: vi.fn(),
+	makePathFromRSXformGlyphs: vi.fn(),
 	rsxform: vi.fn((scos: number, ssin: number, tx: number, ty: number) => ({
 		scos,
 		ssin,
@@ -60,12 +60,12 @@ vi.mock("react-skia-lite", async () => {
 	return {
 		Glyphs: createNode("glyphs"),
 		Group: createNode("group"),
+		Path: createNode("path"),
 		Paragraph: createNode("paragraph"),
-		TextBlob: createNode("text-blob"),
 		Skia: {
 			RSXform: mocks.rsxform,
-			TextBlob: {
-				MakeFromRSXformGlyphs: mocks.makeFromRSXformGlyphs,
+			Path: {
+				MakeFromRSXformGlyphs: mocks.makePathFromRSXformGlyphs,
 			},
 		},
 	};
@@ -127,7 +127,7 @@ describe("FancyText renderer", () => {
 			{ text: "BC", start: 1, end: 3 },
 			{ text: "D", start: 3, end: 4 },
 		];
-		mocks.makeFromRSXformGlyphs.mockImplementation(
+		mocks.makePathFromRSXformGlyphs.mockImplementation(
 			(glyphIds: number[], rsxforms: Array<Record<string, number>>) => ({
 				glyphIds,
 				rsxforms,
@@ -140,12 +140,12 @@ describe("FancyText renderer", () => {
 		cleanup();
 	});
 
-	it("正常路径会按整段 glyph flow 生成 text blob", () => {
+	it("正常路径会按整段 glyph flow 生成组合 path", () => {
 		mocks.currentTime = 51;
 		const { container } = render(<FancyTextRenderer id="fancy-text-1" />);
 
 		expect(container.querySelectorAll('[data-kind="glyphs"]')).toHaveLength(0);
-		expect(container.querySelectorAll('[data-kind="text-blob"]')).toHaveLength(1);
+		expect(container.querySelectorAll('[data-kind="path"]')).toHaveLength(1);
 		expect(container.querySelectorAll('[data-kind="paragraph"]')).toHaveLength(0);
 
 		const paragraph = mocks.modelState.internal.paragraph;
@@ -153,12 +153,12 @@ describe("FancyText renderer", () => {
 		expect(paragraph.getShapedLines).toHaveBeenCalledTimes(1);
 		expect(paragraph.paint).not.toHaveBeenCalled();
 
-		expect(mocks.makeFromRSXformGlyphs).toHaveBeenCalledWith(
+		expect(mocks.makePathFromRSXformGlyphs).toHaveBeenCalledWith(
 			[1, 2, 3, 4],
 			expect.any(Array),
 			mocks.modelState.internal.font,
 		);
-		const rsxforms = mocks.makeFromRSXformGlyphs.mock.calls[0]?.[1] as Array<{
+		const rsxforms = mocks.makePathFromRSXformGlyphs.mock.calls[0]?.[1] as Array<{
 			ty: number;
 		}>;
 		expect(rsxforms).toHaveLength(4);
@@ -172,7 +172,20 @@ describe("FancyText renderer", () => {
 		const { container } = render(<FancyTextRenderer id="fancy-text-1" />);
 
 		expect(container.querySelectorAll('[data-kind="glyphs"]')).toHaveLength(1);
-		expect(container.querySelectorAll('[data-kind="text-blob"]')).toHaveLength(0);
-		expect(mocks.makeFromRSXformGlyphs).not.toHaveBeenCalled();
+		expect(container.querySelectorAll('[data-kind="path"]')).toHaveLength(0);
+		expect(mocks.makePathFromRSXformGlyphs).not.toHaveBeenCalled();
+	});
+
+	it("卸载时会释放生成的 path", () => {
+		mocks.currentTime = 51;
+		const dispose = vi.fn();
+		mocks.makePathFromRSXformGlyphs.mockReturnValueOnce({
+			dispose,
+		});
+
+		const { unmount } = render(<FancyTextRenderer id="fancy-text-1" />);
+		unmount();
+
+		expect(dispose).toHaveBeenCalledTimes(1);
 	});
 });
