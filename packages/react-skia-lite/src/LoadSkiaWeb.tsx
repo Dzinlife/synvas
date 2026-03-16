@@ -20,15 +20,16 @@ if (typeof global === "undefined") {
 
 export let ckSharedPromise: Promise<CanvasKitType>;
 
-const resolveWasmUrl = () => {
-	// Electron 使用打包后的 wasm 资源；Web 保持走 /public/canvaskit.wasm
-	if (typeof navigator !== "undefined" && /Electron/i.test(navigator.userAgent)) {
-		return wasmUrl;
+const normalizeCanvasKitWasmUrl = (url: string) => {
+	// Vitest 下 CanvasKit 会走 Node 的 fs 加载 wasm，需要真实文件路径。
+	if (
+		typeof process !== "undefined" &&
+		process.versions?.node &&
+		url.startsWith("/@fs/")
+	) {
+		return url.slice("/@fs".length);
 	}
-	if (typeof window !== "undefined" && "aiNleElectron" in window) {
-		return wasmUrl;
-	}
-	return "/canvaskit.wasm";
+	return url;
 };
 
 export const LoadSkiaWeb = async (opts?: CanvasKitInitOptions) => {
@@ -37,7 +38,7 @@ export const LoadSkiaWeb = async (opts?: CanvasKitInitOptions) => {
 	}
 	const locateFile = (file: string) => {
 		if (file === "canvaskit.wasm") {
-			return resolveWasmUrl();
+			return normalizeCanvasKitWasmUrl(opts?.locateFile?.(file) ?? wasmUrl);
 		}
 		return opts?.locateFile ? opts.locateFile(file) : file;
 	};

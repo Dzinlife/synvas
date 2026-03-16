@@ -45,6 +45,8 @@ export default defineConfig(() => {
 				"@nle/editor": path.resolve(__dirname, "../editor/src"),
 				// react-skia-lite 的 dist 目前不完整，这里先统一走源码。
 				"react-skia-lite": path.resolve(__dirname, "../react-skia-lite/src"),
+				// 明确指向 workspace 包，避免 SSR 解析子路径 wasm 时丢失 packages 前缀。
+				"canvaskit-wasm": path.resolve(__dirname, "../canvaskit-wasm"),
 				core: path.resolve(__dirname, "../core/src"),
 			},
 		},

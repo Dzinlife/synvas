@@ -21,7 +21,7 @@
     "@fontsource/barlow": "^5.2.8",
     "@tanstack/react-query": "^5.90.16",
     "@use-gesture/react": "^10.3.1",
-    "canvaskit-wasm": "^0.40.0",
+    "canvaskit-wasm": "workspace:*",
     "clsx": "^2.1.1",
     "core": "workspace:*",
     "idb": "^8.0.3",

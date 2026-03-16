@@ -28,7 +28,7 @@
     "@tanstack/react-start": "^1.132.0",
     "@tanstack/router-plugin": "^1.132.0",
     "@use-gesture/react": "^10.3.1",
-    "canvaskit-wasm": "^0.40.0",
+    "canvaskit-wasm": "workspace:*",
     "clsx": "^2.1.1",
     "idb": "^8.0.3",
     "jszip": "^3.10.1",

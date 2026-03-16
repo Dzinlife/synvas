@@ -24,7 +24,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "canvaskit-wasm": "^0.40.0",
+    "canvaskit-wasm": "workspace:*",
     "jszip": "^3.10.1",
     "mediabunny": "^1.27.3",
     "react-skia-lite": "workspace:*",

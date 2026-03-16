@@ -1,0 +1,284 @@
+diff --git a/modules/canvaskit/BUILD.gn b/modules/canvaskit/BUILD.gn
+index 9090ce3..c2f6f5c 100644
+--- a/modules/canvaskit/BUILD.gn
++++ b/modules/canvaskit/BUILD.gn
+@@ -95,6 +95,9 @@ action("create_notomono_cpp") {
+ 
+ skia_wasm_lib("canvaskit") {
+   deps = [ "../..:skia" ]
++  if (skia_canvaskit_enable_pathops) {
++    deps += [ "../..:pathops" ]
++  }
+   if (skia_canvaskit_enable_paragraph) {
+     deps += [
+       "../../modules/skparagraph:skparagraph",
+diff --git a/modules/canvaskit/canvaskit_bindings.cpp b/modules/canvaskit/canvaskit_bindings.cpp
+index 59c6249..f34f56c 100644
+--- a/modules/canvaskit/canvaskit_bindings.cpp
++++ b/modules/canvaskit/canvaskit_bindings.cpp
+@@ -32,7 +32,9 @@
+ #include "include/core/SkPicture.h"
+ #include "include/core/SkPictureRecorder.h"
+ #include "include/core/SkPoint3.h"
++#include "include/core/SkPathBuilder.h"
+ #include "include/core/SkRRect.h"
++#include "include/core/SkRSXform.h"
+ #include "include/core/SkSamplingOptions.h"
+ #include "include/core/SkScalar.h"
+ #include "include/core/SkSerialProcs.h"
+@@ -724,6 +726,119 @@ SkPath MakePathFromVerbsPointsWeights(WASMPointerU8 verbsPtr,
+                        SkPathFillType::kDefault);
+ }
+ 
++#ifndef CK_NO_FONTS
++struct GlyphPathBuilderContext {
++    const SkPoint* positions = nullptr;
++    const SkRSXform* rsxforms = nullptr;
++    size_t index = 0;
++    SkPathBuilder builder;
++    bool useRSXform = false;
++};
++
++SkMatrix RSXformToMatrix(const SkRSXform& rsxform) {
++    SkMatrix matrix;
++    matrix.setAll(rsxform.fSCos,
++                  -rsxform.fSSin,
++                  rsxform.fTx,
++                  rsxform.fSSin,
++                  rsxform.fSCos,
++                  rsxform.fTy,
++                  0,
++                  0,
++                  1);
++    return matrix;
++}
++
++void AppendGlyphPath(const SkPath* glyphPath, const SkMatrix& mx, void* rawCtx) {
++    auto* ctx = reinterpret_cast<GlyphPathBuilderContext*>(rawCtx);
++    const size_t glyphIndex = ctx->index++;
++    if (!glyphPath) {
++        return;
++    }
++
++    SkPath transformed = glyphPath->makeTransform(mx);
++    if (ctx->useRSXform) {
++        transformed = transformed.makeTransform(RSXformToMatrix(ctx->rsxforms[glyphIndex]));
++    } else {
++        const SkPoint& position = ctx->positions[glyphIndex];
++        transformed = transformed.makeOffset(position.fX, position.fY);
++    }
++    ctx->builder.addPath(transformed);
++}
++
++SkPathOrNull MakePathFromGlyphs(const SkFont& font,
++                                WASMPointerU16 gPtr,
++                                size_t byteLen,
++                                WASMPointerF32 pPtr,
++                                size_t numPos) {
++    const size_t numGlyphs = byteLen >> 1;
++    if (numGlyphs == 0) {
++        return emscripten::val(SkPath());
++    }
++    if ((numPos >> 1) < numGlyphs) {
++        return emscripten::val::null();
++    }
++
++    const auto* glyphs = reinterpret_cast<const SkGlyphID*>(gPtr);
++    const auto* positions = reinterpret_cast<const SkPoint*>(pPtr);
++    GlyphPathBuilderContext ctx;
++    ctx.positions = positions;
++    font.getPaths({glyphs, numGlyphs}, AppendGlyphPath, &ctx);
++    return emscripten::val(ctx.builder.detach());
++}
++
++SkPathOrNull MakePathFromRSXformGlyphs(const SkFont& font,
++                                       WASMPointerU16 gPtr,
++                                       size_t byteLen,
++                                       WASMPointerF32 xPtr,
++                                       size_t numXforms) {
++    const size_t numGlyphs = byteLen >> 1;
++    if (numGlyphs == 0) {
++        return emscripten::val(SkPath());
++    }
++    if ((numXforms >> 2) < numGlyphs) {
++        return emscripten::val::null();
++    }
++
++    const auto* glyphs = reinterpret_cast<const SkGlyphID*>(gPtr);
++    const auto* rsxforms = reinterpret_cast<const SkRSXform*>(xPtr);
++    GlyphPathBuilderContext ctx;
++    ctx.rsxforms = rsxforms;
++    ctx.useRSXform = true;
++    font.getPaths({glyphs, numGlyphs}, AppendGlyphPath, &ctx);
++    return emscripten::val(ctx.builder.detach());
++}
++
++SkPathOrNull MakePathFromText(WASMPointerU8 sptr,
++                              size_t len,
++                              float x,
++                              float y,
++                              const SkFont& font) {
++    const char* str = reinterpret_cast<const char*>(sptr);
++    const size_t glyphCount = font.countText(str, len, SkTextEncoding::kUTF8);
++    if (glyphCount == 0) {
++        return emscripten::val(SkPath());
++    }
++
++    std::vector<SkGlyphID> glyphs(glyphCount);
++    font.textToGlyphs(str,
++                      len,
++                      SkTextEncoding::kUTF8,
++                      {glyphs.data(), glyphs.size()});
++
++    std::vector<SkPoint> positions(glyphCount);
++    font.getPos({glyphs.data(), glyphs.size()},
++                {positions.data(), positions.size()},
++                {x, y});
++
++    return MakePathFromGlyphs(font,
++                              reinterpret_cast<WASMPointerU16>(glyphs.data()),
++                              glyphs.size() * sizeof(SkGlyphID),
++                              reinterpret_cast<WASMPointerF32>(positions.data()),
++                              positions.size() * 2);
++}
++#endif
++
+ void PathAddVerbsPointsWeights(SkPathBuilder& self,
+                                WASMPointerU8 verbsPtr,
+                                int numVerbs,
+@@ -2323,6 +2438,12 @@ EMSCRIPTEN_BINDINGS(Skia) {
+             .class_function("MakeFromPathInterpolation", &MakePathFromInterpolation)
+             .class_function("_MakeFromCmds", &MakePathFromCmds)
+             .class_function("_MakeFromVerbsPointsWeights", &MakePathFromVerbsPointsWeights)
++#ifndef CK_NO_FONTS
++            .class_function("_MakeFromGlyphs", &MakePathFromGlyphs, allow_raw_pointers())
++            .class_function(
++                    "_MakeFromRSXformGlyphs", &MakePathFromRSXformGlyphs, allow_raw_pointers())
++            .class_function("_MakeFromText", &MakePathFromText, allow_raw_pointers())
++#endif
+             .function("countPoints", &SkPath::countPoints)
+             .function("contains", optional_override(
+                               [](const SkPath& self, float x, float y) -> bool {
+diff --git a/modules/canvaskit/externs.js b/modules/canvaskit/externs.js
+index 988f377..07e2ef1 100644
+--- a/modules/canvaskit/externs.js
++++ b/modules/canvaskit/externs.js
+@@ -635,8 +635,11 @@ var CanvasKit = {
+     // public API (from C++ and JS bindings)
+     CanInterpolate: function() {},
+     MakeFromCmds: function() {},
++    MakeFromGlyphs: function() {},
+     MakeFromPathInterpolation: function() {},
++    MakeFromRSXformGlyphs: function() {},
+     MakeFromSVGString: function() {},
++    MakeFromText: function() {},
+     MakeFromOp: function() {},
+     MakeFromVerbsPointsWeights: function() {},
+     contains: function() {},
+@@ -663,6 +666,9 @@ var CanvasKit = {
+ 
+     // private API
+     _MakeFromCmds: function() {},
++    _MakeFromGlyphs: function() {},
++    _MakeFromRSXformGlyphs: function() {},
++    _MakeFromText: function() {},
+     _MakeFromVerbsPointsWeights: function() {},
+     _computeTightBounds: function() {},
+     _getBounds: function() {},
+diff --git a/modules/canvaskit/font.js b/modules/canvaskit/font.js
+index 24e06d2..407fcd3 100644
+--- a/modules/canvaskit/font.js
++++ b/modules/canvaskit/font.js
+@@ -191,6 +191,38 @@ CanvasKit._extraInitializations.push(function() {
+     return rv;
+   };
+ 
++  CanvasKit.Path.MakeFromGlyphs = function(glyphs, positions, font) {
++    if (!(glyphs.length * 2 <= positions.length)) {
++      throw 'Not enough positions for the array of glyphs';
++    }
++    var glyphPtr = copy1dArray(glyphs, 'HEAPU16');
++    var posPtr = copy1dArray(positions, 'HEAPF32');
++    var path = CanvasKit.Path._MakeFromGlyphs(font, glyphPtr, glyphs.length * 2, posPtr, positions.length);
++    freeArraysThatAreNotMallocedByUsers(glyphPtr, glyphs);
++    freeArraysThatAreNotMallocedByUsers(posPtr, positions);
++    return path;
++  };
++
++  CanvasKit.Path.MakeFromRSXformGlyphs = function(glyphs, rsxForms, font) {
++    var glyphPtr = copy1dArray(glyphs, 'HEAPU16');
++    var rPtr = copy1dArray(rsxForms, 'HEAPF32');
++    var path = CanvasKit.Path._MakeFromRSXformGlyphs(
++        font, glyphPtr, glyphs.length * 2, rPtr, rsxForms.length);
++    freeArraysThatAreNotMallocedByUsers(glyphPtr, glyphs);
++    freeArraysThatAreNotMallocedByUsers(rPtr, rsxForms);
++    return path;
++  };
++
++  CanvasKit.Path.MakeFromText = function(str, x, y, font) {
++    var strLen = lengthBytesUTF8(str) + 1;
++    var strPtr = CanvasKit._malloc(strLen);
++    stringToUTF8(str, strPtr, strLen);
++
++    var path = CanvasKit.Path._MakeFromText(strPtr, strLen - 1, x, y, font);
++    CanvasKit._free(strPtr);
++    return path;
++  };
++
+   CanvasKit.TextBlob.MakeOnPath = function(str, path, font, initialOffset) {
+     if (!str || !str.length) {
+       Debug('ignoring 0 length string');
+diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
+index 892a27e..9dc01a0 100644
+--- a/modules/canvaskit/npm_build/types/index.d.ts
++++ b/modules/canvaskit/npm_build/types/index.d.ts
+@@ -3909,6 +3909,16 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromCmds(cmds: InputCommands): Path | null;
+ 
++    /**
++     * Creates a new path by drawing each glyph at the corresponding x/y position.
++     * Positions are provided as a flattened point array `[x0, y0, x1, y1, ...]`.
++     * @param glyphs
++     * @param positions
++     * @param font
++     */
++    MakeFromGlyphs(glyphs: InputGlyphIDArray, positions: InputFlattenedPointArray,
++                   font: Font): Path | null;
++
+     /**
+      * Creates a new path by combining the given paths according to op. If this fails, null will
+      * be returned instead.
+@@ -3940,6 +3950,15 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromPathInterpolation(start: Path, end: Path, weight: number): Path | null;
+ 
++    /**
++     * Creates a new path by drawing each glyph with the corresponding rsxform.
++     * @param glyphs
++     * @param rsxforms
++     * @param font
++     */
++    MakeFromRSXformGlyphs(glyphs: InputGlyphIDArray, rsxforms: InputFlattenedRSXFormArray,
++                          font: Font): Path | null;
++
+     /**
+      * Creates a new path from the provided SVG string. If this fails, null will be
+      * returned instead.
+@@ -3947,6 +3966,16 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromSVGString(str: string): Path | null;
+ 
++    /**
++     * Creates a new path from text laid out with the provided font, with the
++     * first glyph positioned at x/y.
++     * @param str
++     * @param x
++     * @param y
++     * @param font
++     */
++    MakeFromText(str: string, x: number, y: number, font: Font): Path | null;
++
+     /**
+      * Creates a new path using the provided verbs and associated points and weights. The process
+      * reads the first verb from verbs and then the appropriate number of points from the

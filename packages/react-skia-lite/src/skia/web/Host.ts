@@ -70,7 +70,16 @@ export const getEnum = (
 	if (typeof e !== "function") {
 		throw new Error(`${name} is not an number`);
 	}
-	const result = Object.values(e).find(({ value }) => value === v);
+	const enumEntries = [
+		...Object.values(e),
+		...((typeof e.values === "object" && e.values !== null)
+			? Object.values(e.values)
+			: []),
+	].filter(
+		(entry): entry is EmbindEnumEntity =>
+			typeof entry === "object" && entry !== null && "value" in entry,
+	);
+	const result = enumEntries.find((entry) => entry.value === v);
 	if (!result) {
 		throw new Error(
 			`Enum ${name} does not have value ${v} on React Native Web`,

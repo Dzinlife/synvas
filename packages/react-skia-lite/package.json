@@ -32,7 +32,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "canvaskit-wasm": "^0.40.0",
+    "canvaskit-wasm": "workspace:*",
     "react-reconciler": "^0.33.0"
   },
   "devDependencies": {
