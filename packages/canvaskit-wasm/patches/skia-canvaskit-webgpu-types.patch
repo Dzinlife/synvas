@@ -1,0 +1,46 @@
+diff --git a/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts b/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
+index 99bcc75317..8b8279fd57 100644
+--- a/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
++++ b/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
+@@ -1056,7 +1056,7 @@ function verticesTests(CK: CanvasKit) {
+     const id = vertices.uniqueID(); // $ExpectType number
+ }
+ 
+-function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElement, texture?: GPUTexture) {
++function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElement | OffscreenCanvas, texture?: GPUTexture) {
+     if (!device || !canvas || !texture) {
+         return;
+     }
+@@ -1064,7 +1064,7 @@ function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElemen
+     const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType GrDirectContext
+ 
+     // Texture surface.
+-    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, 800, 600, // $ExpectType Surface | null
++    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, "bgra8unorm", 800, 600, // $ExpectType Surface | null
+                                               CK.ColorSpace.SRGB);
+ 
+     // Canvas surfaces.
+diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
+index 892a27ebe3..22129214be 100644
+--- a/modules/canvaskit/npm_build/types/index.d.ts
++++ b/modules/canvaskit/npm_build/types/index.d.ts
+@@ -288,8 +288,8 @@ export interface CanvasKit {
+      * @param height - Height of the visible region in pixels.
+      * @param colorSpace
+      */
+-    MakeGPUTextureSurface(ctx: WebGPUDeviceContext, texture: GPUTexture, width: number, height: number,
+-                          colorSpace: ColorSpace): Surface | null;
++    MakeGPUTextureSurface(ctx: WebGPUDeviceContext, texture: GPUTexture, textureFormat: GPUTextureFormat,
++                          width: number, height: number, colorSpace: ColorSpace): Surface | null;
+ 
+     /**
+      * Creates and configures a WebGPU context for the given canvas.
+@@ -297,7 +297,7 @@ export interface CanvasKit {
+      * @param canvas
+      * @param opts
+      */
+-    MakeGPUCanvasContext(ctx: WebGPUDeviceContext, canvas: HTMLCanvasElement,
++    MakeGPUCanvasContext(ctx: WebGPUDeviceContext, canvas: HTMLCanvasElement | OffscreenCanvas,
+                          opts?: WebGPUCanvasOptions): WebGPUCanvasContext | null;
+ 
+     /**

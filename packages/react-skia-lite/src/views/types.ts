@@ -30,8 +30,7 @@ export interface SkiaBaseViewProps extends ViewProps {
 
 	opaque?: boolean;
 
-	// On web, only 16 WebGL contextes are allowed. If the drawing is non-animated, set
-	// __destroyWebGLContextAfterRender to true to release the context after each draw.
+	// Web 端上下文数量受限，设为 true 时退回 software surface，避免长期占用 GPU context。
 	__destroyWebGLContextAfterRender?: boolean;
 }
 

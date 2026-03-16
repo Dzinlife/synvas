@@ -1,0 +1,12 @@
+diff --git a/third_party/dawn/build_dawn.py b/third_party/dawn/build_dawn.py
+--- a/third_party/dawn/build_dawn.py
++++ b/third_party/dawn/build_dawn.py
+@@ -193,6 +193,8 @@
+   # The headers are located in the build directory in a gen/include folder.
+   # The Skia build expects to find headers in subdirectories of the include path.
+   generated_headers_src = os.path.join(build_dir, "gen", "include")
++  if target_os == "wasm":
++    generated_headers_src = os.path.join(build_dir, "gen", "src", "emdawnwebgpu", "include")
+   generated_headers_dest = os.path.join(gen_dir, "include")
+ 
+   if os.path.exists(generated_headers_dest):

@@ -10,6 +10,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./bootstrap": {
+      "import": "./dist/bootstrap.js",
+      "types": "./dist/bootstrap.d.ts"
     }
   },
   "files": [

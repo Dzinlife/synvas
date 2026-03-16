@@ -1,0 +1,83 @@
+diff --git a/src/gpu/graphite/dawn/DawnBuffer.cpp b/src/gpu/graphite/dawn/DawnBuffer.cpp
+index e39052346c..519f009b77 100644
+--- a/src/gpu/graphite/dawn/DawnBuffer.cpp
++++ b/src/gpu/graphite/dawn/DawnBuffer.cpp
+@@ -23,7 +23,7 @@ bool is_map_succeeded(WGPUBufferMapAsyncStatus status) {
+ [[maybe_unused]]
+ void log_map_error(WGPUBufferMapAsyncStatus status, const char*) {
+     const char* statusStr;
+-    SkLogPriority priority = SkLogPriority::kError;
++    bool isDebugLog = false;
+     switch (status) {
+         case WGPUBufferMapAsyncStatus_ValidationError:
+             statusStr = "ValidationError";
+@@ -36,11 +36,11 @@ void log_map_error(WGPUBufferMapAsyncStatus status, const char*) {
+             break;
+         case WGPUBufferMapAsyncStatus_DestroyedBeforeCallback:
+             statusStr = "DestroyedBeforeCallback";
+-            priority = SkLogPriority::kDebug;
++            isDebugLog = true;
+             break;
+         case WGPUBufferMapAsyncStatus_UnmappedBeforeCallback:
+             statusStr = "UnmappedBeforeCallback";
+-            priority = SkLogPriority::kDebug;
++            isDebugLog = true;
+             break;
+         case WGPUBufferMapAsyncStatus_MappingAlreadyPending:
+             statusStr = "MappingAlreadyPending";
+@@ -55,7 +55,11 @@ void log_map_error(WGPUBufferMapAsyncStatus status, const char*) {
+             statusStr = "<other>";
+             break;
+     }
+-    SKGPU_LOG(priority, "Buffer async map failed with status %s.", statusStr);
++    if (isDebugLog) {
++        SKGPU_LOG(SkLogPriority::kDebug, "Buffer async map failed with status %s.", statusStr);
++    } else {
++        SKGPU_LOG(SkLogPriority::kError, "Buffer async map failed with status %s.", statusStr);
++    }
+ }
+ 
+ #else
+diff --git a/src/gpu/graphite/dawn/DawnCaps.cpp b/src/gpu/graphite/dawn/DawnCaps.cpp
+index e7c11d45a6..9401819001 100644
+--- a/src/gpu/graphite/dawn/DawnCaps.cpp
++++ b/src/gpu/graphite/dawn/DawnCaps.cpp
+@@ -81,11 +81,9 @@ static constexpr wgpu::TextureFormat kFormats[] = {
+         wgpu::TextureFormat::ETC2RGB8UnormSrgb,
+         wgpu::TextureFormat::ETC2RGBA8Unorm,
+         wgpu::TextureFormat::ETC2RGBA8UnormSrgb,
+-
++#if !defined(__EMSCRIPTEN__)
+         wgpu::TextureFormat::R8BG8Biplanar420Unorm,
+         wgpu::TextureFormat::R10X6BG10X6Biplanar420Unorm,
+-
+-#if !defined(__EMSCRIPTEN__)
+         wgpu::TextureFormat::OpaqueYCbCrAndroid,
+ #endif
+ 
+@@ -504,10 +502,10 @@ void DawnCaps::initShaderCaps(const wgpu::Device& device) {
+     // WGSL supports shader derivatives in the fragment shader
+     shaderCaps->fShaderDerivativeSupport = true;
+ 
++#if !defined(__EMSCRIPTEN__)
+     if (device.HasFeature(wgpu::FeatureName::DualSourceBlending)) {
+         shaderCaps->fDualSourceBlendingSupport = true;
+     }
+-#if !defined(__EMSCRIPTEN__)
+     if (device.HasFeature(wgpu::FeatureName::FramebufferFetch)) {
+         shaderCaps->fFBFetchSupport = true;
+     }
+@@ -553,9 +551,13 @@ void DawnCaps::initFormatTable(const wgpu::Device& device) {
+     {
+         info = &fFormatTable[GetFormatIndex(wgpu::TextureFormat::R8Unorm)];
+         info->fFlags = FormatInfo::kAllFlags;
++#if defined(__EMSCRIPTEN__)
++        info->fFlags &= ~FormatInfo::kStorage_Flag;
++#else
+         if (!device.HasFeature(wgpu::FeatureName::TextureFormatsTier1)) {
+             info->fFlags &= ~FormatInfo::kStorage_Flag;
+         }
++#endif
+         info->fColorTypeInfoCount = 3;
+         info->fColorTypeInfos = std::make_unique<ColorTypeInfo[]>(info->fColorTypeInfoCount);
+         int ctIdx = 0;

@@ -8,7 +8,11 @@ import {
 	QUALITY_HIGH,
 	StreamTarget,
 } from "mediabunny";
-import { JsiSkSurface } from "react-skia-lite";
+import {
+	createSkiaCanvasSurface,
+	getSkiaRenderBackend,
+	JsiSkSurface,
+} from "react-skia-lite";
 import type { TimelineElement } from "../element/types";
 import { resolveTimelineElementClipGainLinear } from "./audio/clipGain";
 import { renderMixedAudioForExport } from "./audio/dsp/exportRenderer";
@@ -120,13 +124,6 @@ const sortByTrackIndex = (items: TimelineElement[]) => {
 		.map(({ el }) => el);
 };
 
-const cleanupWebGLContext = (canvas: HTMLCanvasElement | OffscreenCanvas) => {
-	const ctx = canvas.getContext("webgl2") as WebGL2RenderingContext;
-	if (!ctx) return;
-	const loseContext = ctx.getExtension("WEBGL_lose_context");
-	loseContext?.loseContext();
-};
-
 const OPFS_CLEANUP_DELAY_MS = 10 * 60_000;
 
 const createAbortError = (): Error => {
@@ -151,7 +148,7 @@ const isAbortError = (error: unknown): boolean => {
 	return error instanceof Error && error.name === "AbortError";
 };
 
-const createWebGLSurfaceForExport = (
+const createSurfaceForExport = (
 	canvas: HTMLCanvasElement | OffscreenCanvas,
 	width: number,
 	height: number,
@@ -169,24 +166,18 @@ const createWebGLSurfaceForExport = (
 	let surface: JsiSkSurface | null = null;
 	try {
 		const canvasKit = (globalThis as { CanvasKit?: any }).CanvasKit;
-		if (!canvasKit?.MakeWebGLCanvasSurface) {
+		if (!canvasKit) {
 			throw new Error("CanvasKit 未初始化");
 		}
-		const ctx = canvas.getContext("webgl2") as WebGL2RenderingContext;
-		if (ctx) {
-			ctx.drawingBufferColorSpace = "display-p3";
+		surface = createSkiaCanvasSurface(canvasKit, canvas);
+		if (!surface) {
+			throw new Error(
+				`无法创建 ${getSkiaRenderBackend().kind} Surface`,
+			);
 		}
-		const webglSurface = canvasKit.MakeWebGLCanvasSurface(canvas);
-		if (!webglSurface) {
-			throw new Error("无法创建 WebGL Surface");
-		}
-		surface = new JsiSkSurface(canvasKit, webglSurface);
 		return { surface, canvas };
 	} catch {
-		if (surface) {
-			surface.ref.delete();
-		}
-		cleanupWebGLContext(canvas);
+		surface?.dispose();
 		return null;
 	}
 };
@@ -538,6 +529,7 @@ export const __chooseSessionInstructionForTests =
 export const __applyAudioMixPlanAtFrameForTests = applyAudioMixPlanAtFrame;
 export const __resolveExportAudioTransitionFrameStateForTests =
 	resolveExportAudioTransitionFrameState;
+export const __createSurfaceForExportForTests = createSurfaceForExport;
 
 export const exportTimelineAsVideoCore = async (
 	options: ExportTimelineAsVideoOptions,
@@ -577,7 +569,7 @@ export const exportTimelineAsVideoCore = async (
 	const transitionCurveById = collectTransitionCurveById(options.elements);
 
 	let surface: JsiSkSurface | null = null;
-	let webglCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
+	let renderCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
 	let outputTarget: ExportOutputTarget | null = null;
 	let output: Output<Mp4OutputFormat, BufferTarget | StreamTarget> | null =
 		null;
@@ -622,23 +614,28 @@ export const exportTimelineAsVideoCore = async (
 		await output.start();
 		throwIfAborted(options.signal);
 
-		const webglResult = createWebGLSurfaceForExport(
-			exportCanvas,
-			width,
-			height,
-		);
-		if (!webglResult) {
-			throw new Error("导出失败：无法创建 WebGL Surface");
-		}
-		surface = webglResult.surface;
-		webglCanvas = webglResult.canvas;
-		if (!surface) {
-			throw new Error("导出失败：无法创建离屏画布");
-		}
-		const skiaCanvas = surface.getCanvas();
-		if (!webglCanvas) {
-			throw new Error("导出失败：无法获取 WebGL 画布");
-		}
+		const renderBackend = getSkiaRenderBackend();
+		const usesFrameBoundCanvasSurface = renderBackend.kind === "webgpu";
+		let skiaCanvas: ReturnType<JsiSkSurface["getCanvas"]> | null = null;
+		const createActiveSurface = () => {
+			const surfaceResult = createSurfaceForExport(
+				exportCanvas,
+				width,
+				height,
+			);
+			if (!surfaceResult) {
+				throw new Error(
+					`导出失败：无法创建 ${renderBackend.kind} Surface`,
+				);
+			}
+			surface = surfaceResult.surface;
+			renderCanvas = surfaceResult.canvas;
+			skiaCanvas = surface.getCanvas();
+			if (!renderCanvas) {
+				throw new Error("导出失败：无法获取导出画布");
+			}
+		};
+		createActiveSurface();
 
 		const buildFrameSnapshot = (targetFrame: number) => {
 			return options.buildSkiaFrameSnapshot({
@@ -693,6 +690,14 @@ export const exportTimelineAsVideoCore = async (
 					throw new Error(
 						`导出失败：无法构建第 ${frame} 帧 picture（已中止导出）`,
 					);
+				}
+				if (usesFrameBoundCanvasSurface) {
+					surface?.dispose();
+					surface = null;
+					createActiveSurface();
+				}
+				if (!surface || !skiaCanvas) {
+					throw new Error("导出失败：无法创建当前帧 Surface");
 				}
 				skiaCanvas.drawPicture(picture);
 				surface.flush();
@@ -749,9 +754,8 @@ export const exportTimelineAsVideoCore = async (
 			await outputTarget?.cleanup();
 		}
 		try {
-			if (surface && webglCanvas) {
-				surface.ref.delete();
-				cleanupWebGLContext(webglCanvas);
+			if (surface && renderCanvas) {
+				surface.dispose();
 			}
 		} catch {}
 	}

@@ -52,7 +52,11 @@ export default defineConfig(() => {
 		},
 
 		optimizeDeps: {
-			include: ["canvaskit-wasm/bin/full/canvaskit"],
+			include: [
+				"canvaskit-wasm/bin/full/canvaskit",
+				"canvaskit-wasm/bin/full-webgl/canvaskit",
+				"canvaskit-wasm/bin/full-webgpu/canvaskit",
+			],
 			esbuildOptions: {
 				target: "esnext",
 			},

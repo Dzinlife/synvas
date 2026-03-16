@@ -1,0 +1,13 @@
+diff --git a/modules/canvaskit/webgpu.js b/modules/canvaskit/webgpu.js
+index 0e937d41b4..bfcae1195e 100644
+--- a/modules/canvaskit/webgpu.js
++++ b/modules/canvaskit/webgpu.js
+@@ -4,6 +4,8 @@
+ (function(CanvasKit){
+     CanvasKit._extraInitializations = CanvasKit._extraInitializations || [];
+     CanvasKit._extraInitializations.push(function() {
++      CanvasKit.webgpu = true;
++
+       CanvasKit.MakeGPUDeviceContext = function(device) {
+         if (!device) {
+           return null;

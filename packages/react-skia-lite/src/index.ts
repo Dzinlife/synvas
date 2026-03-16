@@ -13,5 +13,6 @@ export { useContextBridge } from "./renderer/ContextBridge";
 export * from "./skia";
 export { JsiSkImage } from "./skia/web/JsiSkImage";
 export { JsiSkSurface } from "./skia/web/JsiSkSurface";
+export * from "./skia/web/surfaceFactory";
 export * from "./sksg";
 export * from "./WithSkiaWeb";

@@ -1,0 +1,18 @@
+diff --git a/third_party/dawn/build_dawn.py b/third_party/dawn/build_dawn.py
+index 28e3112..f99c6d2 100644
+--- a/third_party/dawn/build_dawn.py
++++ b/third_party/dawn/build_dawn.py
+@@ -166,8 +166,12 @@ def main():
+   print(" ".join(configure_cmd))
+   print("with environment", env)
+   subprocess.run(configure_cmd, check=True, env=env)
+ 
+-  build_cmd = [ninja_exe, "-C", build_dir, "-dkeepdepfile"] + build_targets
++  build_cmd = [ninja_exe, "-C", build_dir, "-dkeepdepfile"]
++  ninja_jobs = os.environ.get("DAWN_BUILD_NINJA_JOBS")
++  if ninja_jobs:
++    build_cmd += ["-j", ninja_jobs]
++  build_cmd += build_targets
+   subprocess.run(build_cmd, check=True, env=env)
+ 
+   # The install target is broken, so we manually copy the headers.

@@ -1056,7 +1056,7 @@ function verticesTests(CK: CanvasKit) {
     const id = vertices.uniqueID(); // $ExpectType number
 }
 
-function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElement, texture?: GPUTexture) {
+function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElement | OffscreenCanvas, texture?: GPUTexture) {
     if (!device || !canvas || !texture) {
         return;
     }
@@ -1064,7 +1064,7 @@ function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElemen
     const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType GrDirectContext
 
     // Texture surface.
-    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, 800, 600, // $ExpectType Surface | null
+    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, "bgra8unorm", 800, 600, // $ExpectType Surface | null
                                               CK.ColorSpace.SRGB);
 
     // Canvas surfaces.

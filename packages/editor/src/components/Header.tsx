@@ -1,5 +1,6 @@
 import { Check, FolderPlus, Save } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import type { ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -16,6 +17,11 @@ import {
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import { useOtLabStore } from "@/studio/history/otLabStore";
+import {
+	applyEditorSkiaBackendPreference,
+	getEditorSkiaBackendPreference,
+	type SkiaWebBackendPreference,
+} from "@/app/skiaBackendPreference";
 
 export default function Header() {
 	const timelineStore = useTimelineStoreApi();
@@ -38,6 +44,8 @@ export default function Header() {
 	const redo = useStudioHistoryStore((state) => state.redo);
 	const otLabOpen = useOtLabStore((state) => state.open);
 	const toggleOtLab = useOtLabStore((state) => state.toggleOpen);
+	const [skiaBackendPreference, setSkiaBackendPreferenceState] =
+		useState<SkiaWebBackendPreference>(() => getEditorSkiaBackendPreference());
 
 	useEffect(() => {
 		initialize();
@@ -67,6 +75,14 @@ export default function Header() {
 	const handleRedo = useCallback(() => {
 		redo({ timelineStore, runtimeManager });
 	}, [redo, runtimeManager, timelineStore]);
+	const handleSkiaBackendPreferenceChange = useCallback(
+		(event: ChangeEvent<HTMLSelectElement>) => {
+			const nextPreference = event.target.value as SkiaWebBackendPreference;
+			setSkiaBackendPreferenceState(nextPreference);
+			applyEditorSkiaBackendPreference(nextPreference);
+		},
+		[],
+	);
 
 	const menuDisabled = status !== "ready";
 	const displayName =
@@ -164,6 +180,20 @@ export default function Header() {
 				>
 					OT Lab
 				</button>
+				<label className="flex items-center gap-2 text-xs text-neutral-300">
+					<span>Skia</span>
+					<select
+						value={skiaBackendPreference}
+						onChange={handleSkiaBackendPreferenceChange}
+						className="rounded bg-neutral-800 border border-neutral-700 px-2 py-1 text-xs text-neutral-100"
+						title="切换 Skia 后端并刷新"
+					>
+						<option value="auto">Auto</option>
+						<option value="webgpu">WebGPU</option>
+						<option value="webgl">WebGL</option>
+						<option value="software">Software</option>
+					</select>
+				</label>
 			</div>
 		</header>
 	);

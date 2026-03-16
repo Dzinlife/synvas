@@ -1,0 +1,12 @@
+diff --git a/third_party/dawn/cmake_utils.py b/third_party/dawn/cmake_utils.py
+--- a/third_party/dawn/cmake_utils.py
++++ b/third_party/dawn/cmake_utils.py
+@@ -409,7 +409,7 @@
+     "-DDAWN_USE_X11=OFF",
+ 
+     # Explicitly mark third_party deps as not here to make debugging easier
+-    "-DDAWN_EMDAWNWEBGPU_DIR=NOT_SYNCED_BY_SKIA",
++    f"-DDAWN_EMDAWNWEBGPU_DIR={verify_and_get('dawn/third_party/emdawnwebgpu')}",
+     "-DDAWN_GLFW_DIR=NOT_SYNCED_BY_SKIA",
+     "-DDAWN_LPM_DIR=NOT_SYNCED_BY_SKIA",
+     "-DDAWN_PROTOBUF_DIR=NOT_SYNCED_BY_SKIA",

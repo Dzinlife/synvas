@@ -24,7 +24,8 @@
       "@/*": ["./src/*"],
       "core": ["../core/src/index.ts"],
       "core/*": ["../core/src/*"],
-      "react-skia-lite": ["../react-skia-lite/src/index.ts"]
+      "react-skia-lite": ["../react-skia-lite/src/index.ts"],
+      "react-skia-lite/*": ["../react-skia-lite/src/*"]
     }
   }
 }

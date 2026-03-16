@@ -1,0 +1,12 @@
+diff --git a/third_party/dawn/build_dawn.py b/third_party/dawn/build_dawn.py
+--- a/third_party/dawn/build_dawn.py
++++ b/third_party/dawn/build_dawn.py
+@@ -73,6 +73,8 @@
+   # The headers are a dependency for all libraries.
+   # We want to build the other listed dawn components into one big library.
+   build_targets = ["webgpu_headers_gen", "dawn_proc", "dawn_native"]
++  if target_os == "wasm":
++    build_targets = ["webgpu_headers_gen", "emdawnwebgpu_c"]
+   depfile_path = args.depfile_path
+ 
+   script_dir = os.path.dirname(os.path.realpath(__file__))

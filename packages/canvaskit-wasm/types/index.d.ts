@@ -288,8 +288,8 @@ export interface CanvasKit {
      * @param height - Height of the visible region in pixels.
      * @param colorSpace
      */
-    MakeGPUTextureSurface(ctx: WebGPUDeviceContext, texture: GPUTexture, width: number, height: number,
-                          colorSpace: ColorSpace): Surface | null;
+    MakeGPUTextureSurface(ctx: WebGPUDeviceContext, texture: GPUTexture, textureFormat: GPUTextureFormat,
+                          width: number, height: number, colorSpace: ColorSpace): Surface | null;
 
     /**
      * Creates and configures a WebGPU context for the given canvas.
@@ -297,7 +297,7 @@ export interface CanvasKit {
      * @param canvas
      * @param opts
      */
-    MakeGPUCanvasContext(ctx: WebGPUDeviceContext, canvas: HTMLCanvasElement,
+    MakeGPUCanvasContext(ctx: WebGPUDeviceContext, canvas: HTMLCanvasElement | OffscreenCanvas,
                          opts?: WebGPUCanvasOptions): WebGPUCanvasContext | null;
 
     /**

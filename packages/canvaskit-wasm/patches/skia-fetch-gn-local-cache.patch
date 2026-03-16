@@ -1,0 +1,32 @@
+diff --git a/bin/fetch-gn b/bin/fetch-gn
+index ebdc31c449..e2877198c8 100755
+--- a/bin/fetch-gn
++++ b/bin/fetch-gn
+@@ -17,6 +17,14 @@ from urllib.request import urlopen
+ 
+ os.chdir(os.path.join(os.path.dirname(__file__), os.pardir))
+ 
++gn_filename = 'gn.exe' if 'win32' in sys.platform else 'gn'
++gn_path = os.path.join('bin', gn_filename)
++if os.path.isfile(gn_path) and os.access(gn_path, os.X_OK):
++  depot_tools_gn_dir = os.path.join('third_party', 'gn')
++  os.makedirs(depot_tools_gn_dir, exist_ok=True)
++  shutil.copy(gn_path, os.path.join(depot_tools_gn_dir, gn_filename))
++  sys.exit(0)
++
+ gnzip = os.path.join(tempfile.mkdtemp(), 'gn.zip')
+ with open(gnzip, 'wb') as f:
+   OS  = {'darwin': 'mac', 'linux': 'linux', 'linux2': 'linux', 'win32': 'windows'}[sys.platform]
+@@ -27,12 +35,9 @@ with open(gnzip, 'wb') as f:
+           OS,cpu,rev)
+   f.write(urlopen(url).read())
+ 
+-gn_filename = 'gn.exe' if 'win32' in sys.platform else 'gn'
+ with zipfile.ZipFile(gnzip, 'r') as f:
+   f.extract(gn_filename, 'bin')
+ 
+-gn_path = os.path.join('bin', gn_filename)
+-
+ os.chmod(gn_path,
+          stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
+          stat.S_IRGRP                | stat.S_IXGRP |

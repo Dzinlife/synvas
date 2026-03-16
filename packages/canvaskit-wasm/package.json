@@ -40,6 +40,16 @@
       "import": "./bin/full/canvaskit.js",
       "types": "./types/index.d.ts"
     },
+    "./full-webgl": {
+      "require": "./bin/full-webgl/canvaskit.js",
+      "import": "./bin/full-webgl/canvaskit.js",
+      "types": "./types/index.d.ts"
+    },
+    "./full-webgpu": {
+      "require": "./bin/full-webgpu/canvaskit.js",
+      "import": "./bin/full-webgpu/canvaskit.js",
+      "types": "./types/index.d.ts"
+    },
     "./profiling": {
       "require": "./bin/profiling/canvaskit.js",
       "import": "./bin/profiling/canvaskit.js",
@@ -67,6 +77,28 @@
       "types": "./types/index.d.ts"
     },
     "./bin/full/canvaskit.wasm": "./bin/full/canvaskit.wasm",
+    "./bin/full-webgl/canvaskit": {
+      "require": "./bin/full-webgl/canvaskit.js",
+      "import": "./bin/full-webgl/canvaskit.js",
+      "types": "./types/index.d.ts"
+    },
+    "./bin/full-webgl/canvaskit.js": {
+      "require": "./bin/full-webgl/canvaskit.js",
+      "import": "./bin/full-webgl/canvaskit.js",
+      "types": "./types/index.d.ts"
+    },
+    "./bin/full-webgl/canvaskit.wasm": "./bin/full-webgl/canvaskit.wasm",
+    "./bin/full-webgpu/canvaskit": {
+      "require": "./bin/full-webgpu/canvaskit.js",
+      "import": "./bin/full-webgpu/canvaskit.js",
+      "types": "./types/index.d.ts"
+    },
+    "./bin/full-webgpu/canvaskit.js": {
+      "require": "./bin/full-webgpu/canvaskit.js",
+      "import": "./bin/full-webgpu/canvaskit.js",
+      "types": "./types/index.d.ts"
+    },
+    "./bin/full-webgpu/canvaskit.wasm": "./bin/full-webgpu/canvaskit.wasm",
     "./bin/profiling/canvaskit": {
       "require": "./bin/profiling/canvaskit.js",
       "import": "./bin/profiling/canvaskit.js",

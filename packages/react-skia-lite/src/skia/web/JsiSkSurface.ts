@@ -11,12 +11,26 @@ export class JsiSkSurface
   extends HostObject<Surface, "Surface">
   implements SkSurface
 {
-  constructor(CanvasKit: CanvasKit, ref: Surface) {
+  private cleanup?: () => void;
+
+  constructor(CanvasKit: CanvasKit, ref: Surface, cleanup?: () => void) {
     super(CanvasKit, ref, "Surface");
+    this.cleanup = cleanup;
   }
 
   [Symbol.dispose]() {
-    this.ref.dispose();
+    const ref = this.ref;
+    this.ref = null as unknown as Surface;
+    try {
+      if (ref && typeof ref.dispose === "function") {
+        ref.dispose();
+      } else if (ref && typeof ref.delete === "function") {
+        ref.delete();
+      }
+    } finally {
+      this.cleanup?.();
+      this.cleanup = undefined;
+    }
   }
 
   flush() {

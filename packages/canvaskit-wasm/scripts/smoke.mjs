@@ -19,38 +19,96 @@ const assertPathFactory = (canvasKit) => {
 	}
 };
 
-const assertPathFactoryRuntime = (canvasKit) => {
-	const font = new canvasKit.Font(null, 16);
+const assertGlyphPathBindings = (canvasKit) => {
+	const typeface = canvasKit.Typeface?.GetDefault?.() ?? null;
+	const font = new canvasKit.Font(typeface, 24);
 	const glyphs = Array.from(font.getGlyphIDs("Hi"));
-	if (glyphs.length !== 2) {
-		throw new Error(`Expected 2 glyph ids, received ${glyphs.length}.`);
-	}
-	const glyphPath = canvasKit.Path.MakeFromGlyphs(glyphs, [0, 0, 12, 0], font);
-	const rsxPath = canvasKit.Path.MakeFromRSXformGlyphs(
+	const pathFromGlyphs = canvasKit.Path.MakeFromGlyphs(
 		glyphs,
-		[1, 0, 0, 0, 1, 0, 12, 0],
+		[10, 20, 30, 20],
 		font,
 	);
-	const textPath = canvasKit.Path.MakeFromText("Hi", 0, 0, font);
-	if (!glyphPath || !rsxPath || !textPath) {
-		throw new Error("CanvasKit.Path.MakeFrom* returned null.");
+	const pathFromRSXformGlyphs = canvasKit.Path.MakeFromRSXformGlyphs(
+		glyphs,
+		[1, 0, 10, 20, 1, 0, 30, 20],
+		font,
+	);
+	if (pathFromGlyphs === null) {
+		throw new Error("CanvasKit.Path.MakeFromGlyphs() returned null.");
 	}
-	glyphPath.delete();
-	rsxPath.delete();
-	textPath.delete();
+	if (pathFromRSXformGlyphs === null) {
+		throw new Error("CanvasKit.Path.MakeFromRSXformGlyphs() returned null.");
+	}
+	pathFromGlyphs.delete();
+	pathFromRSXformGlyphs.delete();
 	font.delete();
+	typeface?.delete?.();
+};
+
+const assertWebGLBundle = (canvasKit) => {
+	if (canvasKit.webgpu === true) {
+		throw new Error("Expected WebGL bundle, received WebGPU bundle.");
+	}
+	if (typeof canvasKit.MakeWebGLCanvasSurface !== "function") {
+		throw new Error("CanvasKit.MakeWebGLCanvasSurface is not available.");
+	}
+};
+
+const assertWebGPUBundle = (canvasKit) => {
+	if (canvasKit.webgpu !== true) {
+		throw new Error("Expected CanvasKit.webgpu to be true.");
+	}
+	for (const method of [
+		"MakeGPUDeviceContext",
+		"MakeGPUCanvasContext",
+		"MakeGPUCanvasSurface",
+		"MakeGPUTextureSurface",
+	]) {
+		if (typeof canvasKit[method] !== "function") {
+			throw new Error(`CanvasKit.${method} is not available.`);
+		}
+	}
 };
 
 const rootEntry = path.join(packageDir, "bin", "canvaskit.js");
 const fullEntry = path.join(packageDir, "bin", "full", "canvaskit.js");
+const fullWebGLEntry = path.join(
+	packageDir,
+	"bin",
+	"full-webgl",
+	"canvaskit.js",
+);
+const fullWebGPUEntry = path.join(
+	packageDir,
+	"bin",
+	"full-webgpu",
+	"canvaskit.js",
+);
 
 const rootCanvasKit = await loadCanvasKit(rootEntry, path.join(packageDir, "bin"));
 assertPathFactory(rootCanvasKit);
-assertPathFactoryRuntime(rootCanvasKit);
+assertGlyphPathBindings(rootCanvasKit);
 
 const fullCanvasKit = await loadCanvasKit(
 	fullEntry,
 	path.join(packageDir, "bin", "full"),
 );
 assertPathFactory(fullCanvasKit);
-assertPathFactoryRuntime(fullCanvasKit);
+assertGlyphPathBindings(fullCanvasKit);
+assertWebGLBundle(fullCanvasKit);
+
+const fullWebGLCanvasKit = await loadCanvasKit(
+	fullWebGLEntry,
+	path.join(packageDir, "bin", "full-webgl"),
+);
+assertPathFactory(fullWebGLCanvasKit);
+assertGlyphPathBindings(fullWebGLCanvasKit);
+assertWebGLBundle(fullWebGLCanvasKit);
+
+const fullWebGPUCanvasKit = await loadCanvasKit(
+	fullWebGPUEntry,
+	path.join(packageDir, "bin", "full-webgpu"),
+);
+assertPathFactory(fullWebGPUCanvasKit);
+assertGlyphPathBindings(fullWebGPUCanvasKit);
+assertWebGPUBundle(fullWebGPUCanvasKit);

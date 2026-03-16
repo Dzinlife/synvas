@@ -20,6 +20,10 @@ export default defineConfig({
 				find: /^react-skia-lite$/,
 				replacement: path.resolve(__dirname, "../react-skia-lite/src/index.ts"),
 			},
+			{
+				find: /^react-skia-lite\/(.*)$/,
+				replacement: path.resolve(__dirname, "../react-skia-lite/src/$1"),
+			},
 		],
 	},
 });
