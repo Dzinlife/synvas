@@ -5,11 +5,18 @@ import {
 	StreamSource,
 	UrlSource,
 } from "mediabunny";
-import type { SkImage } from "react-skia-lite";
+import { getSkiaRenderBackend, type SkImage } from "react-skia-lite";
 import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
 import { type AssetHandle, assetStore } from "./AssetStore";
 
 const DEFAULT_MAX_CACHE_SIZE = 500;
+const WEBGPU_MAX_CACHE_SIZE = 48;
+
+const resolveVideoFrameCacheSize = () => {
+	return getSkiaRenderBackend().kind === "webgpu"
+		? WEBGPU_MAX_CACHE_SIZE
+		: DEFAULT_MAX_CACHE_SIZE;
+};
 
 export type VideoAsset = {
 	uri: string;
@@ -170,11 +177,13 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 		cacheAccessOrder.push(key);
 	};
 
+	const maxCacheSize = resolveVideoFrameCacheSize();
+
 	const cleanupCache = () => {
-		if (frameCache.size <= DEFAULT_MAX_CACHE_SIZE) return;
+		if (frameCache.size <= maxCacheSize) return;
 		let guard = cacheAccessOrder.length;
 		while (
-			frameCache.size > DEFAULT_MAX_CACHE_SIZE &&
+			frameCache.size > maxCacheSize &&
 			cacheAccessOrder.length > 0 &&
 			guard > 0
 		) {
@@ -215,7 +224,7 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 		createVideoSink: buildVideoSink,
 		frameCache,
 		cacheAccessOrder,
-		maxCacheSize: DEFAULT_MAX_CACHE_SIZE,
+		maxCacheSize,
 		getCachedFrame: (timestamp) => {
 			const cached = frameCache.get(timestamp);
 			if (cached) {

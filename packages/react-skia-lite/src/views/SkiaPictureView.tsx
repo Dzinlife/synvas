@@ -12,6 +12,7 @@ import {
 import {
 	assignCurrentSkiaSwapChainTexture,
 	createSkiaCanvasSurface,
+	invalidateSkiaWebGPUCanvasContext,
 } from "../skia/web/surfaceFactory";
 import { SkiaViewApi } from "./api";
 import { SkiaViewNativeId } from "./SkiaViewNativeId";
@@ -103,6 +104,10 @@ class CanvasSurfaceRenderer implements Renderer {
 
 	onResize() {
 		resizeCanvasElement(this.canvas, this.pd);
+		if (this.backend.kind === "webgpu") {
+			invalidateSkiaWebGPUCanvasContext(this.canvas);
+			return;
+		}
 		this.disposeSurface();
 		const surface = createSkiaCanvasSurface(
 			CanvasKit,
@@ -136,6 +141,23 @@ class CanvasSurfaceRenderer implements Renderer {
 	}
 
 	draw(picture: SkPicture) {
+		if (this.backend.kind === "webgpu") {
+			const surface = createSkiaCanvasSurface(
+				CanvasKit,
+				this.canvas,
+				this.backend,
+			);
+			if (!surface) {
+				return;
+			}
+			try {
+				drawPictureOnSurface(surface, this.pd, picture);
+				surface.ref.flush();
+			} finally {
+				surface.dispose();
+			}
+			return;
+		}
 		if (!this.surface) {
 			return;
 		}
@@ -148,6 +170,9 @@ class CanvasSurfaceRenderer implements Renderer {
 	}
 
 	dispose(): void {
+		if (this.backend.kind === "webgpu") {
+			invalidateSkiaWebGPUCanvasContext(this.canvas);
+		}
 		this.disposeSurface();
 	}
 }

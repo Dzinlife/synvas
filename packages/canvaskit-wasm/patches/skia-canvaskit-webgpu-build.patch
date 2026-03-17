@@ -39,6 +39,7 @@ index 59c6249124..a8f0e9d143 100644
 +#include "include/gpu/graphite/dawn/DawnBackendContext.h"
 +#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
 +#include "src/gpu/graphite/ContextOptionsPriv.h"
++#include <unordered_map>
  #include <emscripten/html5_webgpu.h>
  #include <webgpu/webgpu.h>
  #include <webgpu/webgpu_cpp.h>
@@ -55,11 +56,29 @@ index 59c6249124..a8f0e9d143 100644
 +    sk_sp<SkImage> findOrCreate(skgpu::graphite::Recorder* recorder,
 +                                const SkImage* image,
 +                                SkImage::RequiredProperties requiredProps) override {
-+        return SkImages::TextureFromImage(recorder, image, requiredProps);
++        const uint64_t cacheKey = MakeCacheKey(image, requiredProps);
++        auto found = fCache.find(cacheKey);
++        if (found != fCache.end()) {
++            return found->second;
++        }
++
++        sk_sp<SkImage> graphiteImage = SkImages::TextureFromImage(recorder, image, requiredProps);
++        if (graphiteImage) {
++            fCache.emplace(cacheKey, graphiteImage);
++        }
++        return graphiteImage;
 +    }
 +
 +private:
 +    WebGPUImageProvider() = default;
++
++    static uint64_t MakeCacheKey(const SkImage* image,
++                                 SkImage::RequiredProperties requiredProps) {
++        return (static_cast<uint64_t>(image->uniqueID()) << 1) |
++               (requiredProps.fMipmapped ? 1ull : 0ull);
++    }
++
++    std::unordered_map<uint64_t, sk_sp<SkImage>> fCache;
 +};
 +
 +class WebGPUDeviceContext {
@@ -178,8 +197,61 @@ index 59c6249124..a8f0e9d143 100644
 -            colorSpace->isSRGB() ? kRGBA_8888_SkColorType : kRGBA_F16_SkColorType,
              colorSpace,
              nullptr);
- }
- 
+}
+
+SkColorType ResolveWebGPUTextureColorType(wgpu::TextureFormat textureFormat) {
+    switch (textureFormat) {
+        case wgpu::TextureFormat::BGRA8Unorm:
+        case wgpu::TextureFormat::BGRA8UnormSrgb:
+            return SkColorType::kBGRA_8888_SkColorType;
+        case wgpu::TextureFormat::RGBA8Unorm:
+        case wgpu::TextureFormat::RGBA8UnormSrgb:
+        default:
+            return SkColorType::kRGBA_8888_SkColorType;
+    }
+}
+
+sk_sp<SkImage> MakeGPUTextureImage(WebGPUDeviceContext& dContext,
+                                   uint32_t textureHandle,
+                                   uint32_t textureFormat,
+                                   uint32_t textureUsage,
+                                   int width,
+                                   int height,
+                                   sk_sp<SkColorSpace> colorSpace,
+                                   bool srcIsPremul) {
+    if (!colorSpace) {
+        colorSpace = SkColorSpace::MakeSRGB();
+    }
+
+    WGPUTexture rawTexture = emscripten_webgpu_import_texture(textureHandle);
+    emscripten_webgpu_release_js_handle(textureHandle);
+    if (!rawTexture) {
+        return nullptr;
+    }
+
+    const auto dawnTextureFormat = static_cast<wgpu::TextureFormat>(textureFormat);
+    auto target = skgpu::graphite::BackendTextures::MakeDawn(
+            {width, height},
+            skgpu::graphite::DawnTextureInfo(
+                    skgpu::graphite::SampleCount::k1,
+                    skgpu::Mipmapped::kNo,
+                    dawnTextureFormat,
+                    static_cast<wgpu::TextureUsage>(textureUsage),
+                    wgpu::TextureAspect::All),
+            rawTexture);
+    if (!target.isValid()) {
+        return nullptr;
+    }
+
+    return SkImages::WrapTexture(
+            dContext.recorder(),
+            target,
+            ResolveWebGPUTextureColorType(dawnTextureFormat),
+            srcIsPremul ? SkAlphaType::kPremul_SkAlphaType
+                        : SkAlphaType::kUnpremul_SkAlphaType,
+            colorSpace);
+}
+
 -bool ReplaceBackendTexture(
 -        SkSurface& surface, uint32_t textureHandle, uint32_t textureFormat, int width, int height) {
 -    wgpu::TextureFormat format = static_cast<wgpu::TextureFormat>(textureFormat);
@@ -224,13 +296,14 @@ index 59c6249124..a8f0e9d143 100644
               select_overload<sk_sp<SkSurface>(
 @@ -1141,6 +1180,9 @@ EMSCRIPTEN_BINDINGS(Skia) {
  
- #ifdef CK_ENABLE_WEBGPU
-     constant("webgpu", true);
+#ifdef CK_ENABLE_WEBGPU
+    constant("webgpu", true);
 +    class_<WebGPUDeviceContext>("WebGPUDeviceContext")
 +            .function("_submit", &WebGPUDeviceContext::submit);
 +    function("_MakeWebGPUDeviceContext", &MakeWebGPUDeviceContext, allow_raw_pointers());
-     function("_MakeGPUTextureSurface", &MakeGPUTextureSurface);
- #endif  // CK_ENABLE_WEBGPU
+    function("_MakeGPUTextureSurface", &MakeGPUTextureSurface);
+    function("_MakeGPUTextureImage", &MakeGPUTextureImage);
+#endif  // CK_ENABLE_WEBGPU
  
 @@ -2893,16 +2935,6 @@ EMSCRIPTEN_BINDINGS(Skia) {
                                    releaseCtx);

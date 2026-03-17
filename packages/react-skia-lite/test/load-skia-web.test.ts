@@ -166,12 +166,13 @@ describe("LoadSkiaWeb", () => {
 	});
 
 	it("真实 WebGPU bundle 缺少私有导出挂载时仍保留官方 helper", async () => {
+		const makeGPUDeviceContext = vi.fn(() => ({ id: "gpu-context" }));
 		const webgpuCanvasKit = {
 			webgpu: true,
 			Surface: {
 				prototype: {},
 			},
-			MakeGPUDeviceContext: vi.fn(() => ({ id: "gpu-context" })),
+			MakeGPUDeviceContext: makeGPUDeviceContext,
 			MakeGPUCanvasContext: vi.fn(),
 			MakeGPUCanvasSurface: vi.fn(),
 			MakeGPUTextureSurface: vi.fn(),
@@ -203,7 +204,7 @@ describe("LoadSkiaWeb", () => {
 			bundle: "webgpu",
 			kind: "webgpu",
 		});
-		expect(webgpuCanvasKit.MakeGPUDeviceContext).toHaveBeenCalledTimes(1);
+		expect(makeGPUDeviceContext).toHaveBeenCalledTimes(1);
 		expect(
 			(globalThis as typeof globalThis & { JsValStore?: { add?: unknown } }).JsValStore
 				?.add,

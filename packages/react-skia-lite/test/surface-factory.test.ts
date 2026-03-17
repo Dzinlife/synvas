@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createSkiaOffscreenSurface } from "../src/skia/web/surfaceFactory";
+import {
+	createSkiaCanvasSurface,
+	createSkiaOffscreenSurface,
+	invalidateSkiaWebGPUCanvasContext,
+} from "../src/skia/web/surfaceFactory";
 
 describe("surfaceFactory", () => {
 	afterEach(() => {
@@ -114,5 +118,69 @@ describe("surfaceFactory", () => {
 		expect(textureA.destroy).toHaveBeenCalledTimes(1);
 		expect(textureB.destroy).toHaveBeenCalledTimes(1);
 		expect(snapshotDeleteMock).not.toHaveBeenCalled();
+	});
+
+	it("WebGPU canvas surface 会复用已配置的 canvas context", () => {
+		const gpuCanvasContext = {
+			id: "canvas-context",
+		};
+		const makeGPUCanvasContextMock = vi.fn(() => gpuCanvasContext);
+		const makeGPUCanvasSurfaceMock = vi.fn(() => ({
+			delete: vi.fn(),
+			flush: vi.fn(),
+			width: () => 64,
+			height: () => 32,
+			getCanvas: () => ({
+				clear: vi.fn(),
+				save: vi.fn(),
+				restore: vi.fn(),
+				scale: vi.fn(),
+				drawPicture: vi.fn(),
+			}),
+			makeImageSnapshot: vi.fn(),
+		}));
+		const canvasKit = {
+			MakeGPUCanvasContext: makeGPUCanvasContextMock,
+			MakeGPUCanvasSurface: makeGPUCanvasSurfaceMock,
+		} as never;
+		const canvas = {} as HTMLCanvasElement;
+		const backend = {
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: { id: "ctx" },
+		} as const;
+		vi.stubGlobal("navigator", {
+			gpu: {
+				getPreferredCanvasFormat: vi.fn(() => "rgba8unorm"),
+			},
+		});
+
+		const firstSurface = createSkiaCanvasSurface(canvasKit, canvas, backend);
+		const secondSurface = createSkiaCanvasSurface(canvasKit, canvas, backend);
+		invalidateSkiaWebGPUCanvasContext(canvas);
+		const thirdSurface = createSkiaCanvasSurface(canvasKit, canvas, backend);
+
+		firstSurface?.dispose();
+		secondSurface?.dispose();
+		thirdSurface?.dispose();
+
+		expect(makeGPUCanvasContextMock).toHaveBeenCalledTimes(2);
+		expect(makeGPUCanvasContextMock).toHaveBeenNthCalledWith(
+			1,
+			backend.deviceContext,
+			canvas,
+			{ format: "rgba8unorm" },
+		);
+		expect(makeGPUCanvasContextMock).toHaveBeenNthCalledWith(
+			2,
+			backend.deviceContext,
+			canvas,
+			{ format: "rgba8unorm" },
+		);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenCalledTimes(3);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(1, gpuCanvasContext);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(2, gpuCanvasContext);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(3, gpuCanvasContext);
 	});
 });

@@ -1,4 +1,4 @@
-import type { CanvasKit } from "canvaskit-wasm";
+import type { CanvasKit, WebGPUCanvasContext, WebGPUDeviceContext } from "canvaskit-wasm";
 
 import { JsiSkSurface } from "./JsiSkSurface";
 import {
@@ -9,8 +9,17 @@ import {
 } from "./renderBackend";
 
 type CanvasElement = HTMLCanvasElement | OffscreenCanvas;
+type CachedWebGPUCanvasContext = {
+	deviceContext: WebGPUDeviceContext;
+	textureFormat: GPUTextureFormat;
+	canvasContext: WebGPUCanvasContext;
+};
 
 const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
+const webgpuCanvasContextCache = new WeakMap<
+	CanvasElement,
+	CachedWebGPUCanvasContext
+>();
 
 const getWebGPUTextureUsage = () => {
 	if (typeof GPUTextureUsage === "undefined") {
@@ -41,6 +50,40 @@ const setCanvasDisplayP3IfPossible = (canvas: CanvasElement) => {
 	}
 };
 
+const getOrCreateWebGPUCanvasContext = (
+	CanvasKit: CanvasKit,
+	canvas: CanvasElement,
+	backend: Extract<SkiaRenderBackend, { kind: "webgpu" }>,
+) => {
+	const textureFormat = getPreferredWebGPUTextureFormat();
+	const cachedContext = webgpuCanvasContextCache.get(canvas);
+	if (
+		cachedContext &&
+		cachedContext.deviceContext === backend.deviceContext &&
+		cachedContext.textureFormat === textureFormat
+	) {
+		return cachedContext.canvasContext;
+	}
+	const canvasContext = toCanvasKitWebGPU(CanvasKit).MakeGPUCanvasContext?.(
+		backend.deviceContext,
+		canvas,
+		{ format: textureFormat },
+	);
+	if (!canvasContext) {
+		return null;
+	}
+	webgpuCanvasContextCache.set(canvas, {
+		deviceContext: backend.deviceContext,
+		textureFormat,
+		canvasContext,
+	});
+	return canvasContext;
+};
+
+export const invalidateSkiaWebGPUCanvasContext = (canvas: CanvasElement) => {
+	webgpuCanvasContextCache.delete(canvas);
+};
+
 export const createSkiaCanvasSurface = (
 	CanvasKit: CanvasKit,
 	canvas: CanvasElement,
@@ -48,9 +91,10 @@ export const createSkiaCanvasSurface = (
 ) => {
 	if (backend.kind === "webgpu") {
 		const webgpuCanvasKit = toCanvasKitWebGPU(CanvasKit);
-		const canvasContext = webgpuCanvasKit.MakeGPUCanvasContext?.(
-			backend.deviceContext,
+		const canvasContext = getOrCreateWebGPUCanvasContext(
+			CanvasKit,
 			canvas,
+			backend,
 		);
 		if (!canvasContext) {
 			return null;
