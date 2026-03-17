@@ -124,7 +124,7 @@ export class JsiSkImageFactory extends Host implements ImageFactory {
 			image.ref,
 			buffer as CanvasImageSource,
 		);
-		return new JsiSkImage(this.CanvasKit, img);
+		return this.replaceImageRef(image, img);
 	}
 
 	MakeImageFromEncoded(encoded: SkData) {

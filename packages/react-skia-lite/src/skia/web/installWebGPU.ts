@@ -54,6 +54,17 @@ type InternalWebGPUSurface = Surface & {
 	) => number;
 	_drawOnceInternal?: (callback: (_: Canvas) => void, dirtyRect?: number[]) => void;
 	assignCurrentSwapChainTexture?: () => boolean;
+	makeImageFromTextureSource?: (
+		source: TextureSource | VideoFrame,
+		info?: ImageInfo | PartialImageInfo,
+		srcIsPremul?: boolean,
+	) => Image;
+	updateTextureFromSource?: (
+		image: Image,
+		source: TextureSource | VideoFrame,
+		srcIsPremul?: boolean,
+		info?: ImageInfo | PartialImageInfo,
+	) => Image;
 	requestAnimationFrame: (
 		callback: (_: Canvas) => void,
 		dirtyRect?: number[],
@@ -94,9 +105,25 @@ type InternalCanvasKitWebGPU = Omit<
 		colorSpace: unknown,
 		srcIsPremul: boolean,
 	) => Image | null;
+	_MakeGPUTexturePromiseImage?: (
+		context: InternalWebGPUDeviceContext,
+		textureFormatIndex: number,
+		textureUsage: number,
+		width: number,
+		height: number,
+		colorSpace: unknown,
+		srcIsPremul: boolean,
+		callback: {
+			makeTexture: () => number;
+			releaseTexture: (textureHandle: number) => void;
+			freeSrc: () => void;
+		},
+	) => Image | null;
 	_defaultWebGPUDeviceContext?: InternalWebGPUDeviceContext;
 	JsValStore?: {
 		add: (value: unknown) => number;
+		get: (handle: number) => unknown;
+		remove: (handle: number) => void;
 	};
 	WebGPU?: {
 		TextureFormat?: GPUTextureFormat[];
@@ -259,6 +286,22 @@ const closeTextureSourceIfNeeded = (source: WebGPUExternalTextureSource) => {
 	if (isVideoFrameSource(source)) {
 		source.close();
 	}
+};
+
+const getJsValStore = (canvasKit: InternalCanvasKitWebGPU) => {
+	return canvasKit.JsValStore ?? ensureGlobalJsValStore();
+};
+
+const releaseWebGPUTextureHandle = (
+	canvasKit: InternalCanvasKitWebGPU,
+	textureHandle: number,
+) => {
+	const store = getJsValStore(canvasKit);
+	const texture = store.get(textureHandle) as GPUTexture | undefined;
+	try {
+		texture?.destroy?.();
+	} catch {}
+	store.remove(textureHandle);
 };
 
 const attachWebGPUTextureCleanup = (image: Image, texture: GPUTexture) => {
@@ -452,7 +495,8 @@ const installWebGPUTextureSourceHelpers = (
 		if (
 			!deviceContext ||
 			!device ||
-			typeof canvasKit._MakeGPUTextureImage !== "function"
+			(typeof canvasKit._MakeGPUTexturePromiseImage !== "function" &&
+				typeof canvasKit._MakeGPUTextureImage !== "function")
 		) {
 			return makeImageFromTextureSourceData(
 				canvasKit,
@@ -468,13 +512,75 @@ const installWebGPUTextureSourceHelpers = (
 			info,
 			srcIsPremul,
 		);
+		const textureUsage = getWebGPUTextureUsage();
+		const textureFormatIndex = getTextureFormatIndex(
+			canvasKit,
+			WEBGPU_TEXTURE_SOURCE_FORMAT,
+		);
+		if (textureFormatIndex < 0) {
+			try {
+				return canvasKit.MakeImageFromCanvasImageSource(source);
+			} finally {
+				closeTextureSourceIfNeeded(source);
+			}
+		}
+
+		if (typeof canvasKit._MakeGPUTexturePromiseImage === "function") {
+			const promiseImage = canvasKit._MakeGPUTexturePromiseImage(
+				deviceContext,
+				textureFormatIndex,
+				textureUsage,
+				resolvedInfo.width,
+				resolvedInfo.height,
+				resolvedInfo.colorSpace ?? null,
+				resolvedInfo.srcIsPremul,
+				{
+					makeTexture: () => {
+						try {
+							const texture = device.createTexture({
+								size: {
+									width: resolvedInfo.width,
+									height: resolvedInfo.height,
+								},
+								format: WEBGPU_TEXTURE_SOURCE_FORMAT,
+								usage: textureUsage,
+							});
+							device.queue.copyExternalImageToTexture(
+								{
+									source: makeCopyExternalImageSource(source),
+								},
+								{ texture },
+								{
+									width: resolvedInfo.width,
+									height: resolvedInfo.height,
+								},
+							);
+							return getJsValStore(canvasKit).add(texture);
+						} catch (error) {
+							console.warn("Failed to fulfill WebGPU texture promise", error);
+							return 0;
+						}
+					},
+					releaseTexture: (textureHandle) => {
+						releaseWebGPUTextureHandle(canvasKit, textureHandle);
+					},
+					freeSrc: () => {
+						closeTextureSourceIfNeeded(source);
+					},
+				},
+			);
+			if (promiseImage) {
+				return promiseImage;
+			}
+		}
+
 		const texture = device.createTexture({
 			size: {
 				width: resolvedInfo.width,
 				height: resolvedInfo.height,
 			},
 			format: WEBGPU_TEXTURE_SOURCE_FORMAT,
-			usage: getWebGPUTextureUsage(),
+			usage: textureUsage,
 		});
 
 		try {
@@ -488,16 +594,8 @@ const installWebGPUTextureSourceHelpers = (
 					height: resolvedInfo.height,
 				},
 			);
-			const textureHandle = canvasKit.JsValStore?.add(texture);
-			const textureFormatIndex = getTextureFormatIndex(
-				canvasKit,
-				WEBGPU_TEXTURE_SOURCE_FORMAT,
-			);
-			if (typeof textureHandle !== "number" || textureFormatIndex < 0) {
-				texture.destroy();
-				return canvasKit.MakeImageFromCanvasImageSource(source);
-			}
-			const image = canvasKit._MakeGPUTextureImage(
+			const textureHandle = getJsValStore(canvasKit).add(texture);
+			const image = canvasKit._MakeGPUTextureImage?.(
 				deviceContext,
 				textureHandle,
 				textureFormatIndex,
@@ -573,6 +671,29 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 	) => void;
 	surfacePrototype.__aiNLEWebGPUPatched = true;
 	surfacePrototype.assignCurrentSwapChainTexture = () => false;
+	surfacePrototype.makeImageFromTextureSource = function (
+		_source: TextureSource | VideoFrame,
+		info?: ImageInfo | PartialImageInfo,
+		srcIsPremul?: boolean,
+	) {
+		return canvasKit.MakeLazyImageFromTextureSource?.(_source, info, srcIsPremul);
+	};
+	surfacePrototype.updateTextureFromSource = function (
+		image: Image,
+		source: TextureSource | VideoFrame,
+		srcIsPremul?: boolean,
+		info?: ImageInfo | PartialImageInfo,
+	) {
+		const nextImage = canvasKit.MakeLazyImageFromTextureSource?.(
+			source,
+			info,
+			srcIsPremul,
+		);
+		if (!nextImage) {
+			return image;
+		}
+		return nextImage;
+	};
 	const requestAnimationFrameInternal = (
 		surface: InternalWebGPUSurface,
 		callback: (_: Canvas) => void,

@@ -52,7 +52,7 @@ export class JsiVideo implements Video {
       this.webglBuffer = null;
       return;
     }
-    // 只有 WebGL 需要借助共享纹理路径，Graphite/WebGPU 下直接走光栅图像。
+    // 只有 WebGL 需要借助 surface 级共享纹理复用；WebGPU 走独立的 lazy texture 路径。
     this.webglBuffer = new CanvasKitWebGLBufferImpl(surface, this.videoElement);
   }
 

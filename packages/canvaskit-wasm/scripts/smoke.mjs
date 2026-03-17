@@ -72,7 +72,11 @@ const assertWebGPUBundle = (canvasKit) => {
 			throw new Error(`CanvasKit.${method} is not available.`);
 		}
 	}
-	for (const method of ["_MakeWebGPUDeviceContext", "_MakeGPUTextureSurface"]) {
+	for (const method of [
+		"_MakeWebGPUDeviceContext",
+		"_MakeGPUTextureSurface",
+		"_MakeGPUTexturePromiseImage",
+	]) {
 		if (typeof canvasKit[method] !== "function") {
 			throw new Error(`CanvasKit.${method} is not available.`);
 		}
