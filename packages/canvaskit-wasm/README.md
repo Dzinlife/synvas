@@ -2,6 +2,22 @@ A WASM version of Skia's Canvas API.
 
 See https://skia.org/user/modules/canvaskit for more background information.
 
+# Local build workflows
+
+Use the full build when you need a release-complete package:
+
+```bash
+pnpm --filter canvaskit-wasm build:docker
+```
+
+Use the fast build when iterating on embind changes. It refreshes `bin/full`,
+`bin/full-webgl`, `bin/full-webgpu`, and the root `bin/canvaskit.*` files, but
+it does not refresh `bin/profiling`.
+
+```bash
+pnpm --filter canvaskit-wasm build:docker:fast
+```
+
 # Getting Started
 
 ## Browser

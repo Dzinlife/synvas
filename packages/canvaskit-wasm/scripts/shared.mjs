@@ -3,6 +3,7 @@ import {
 	cpSync,
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	statSync,
@@ -84,6 +85,57 @@ export const dockerImage =
 	process.env.AI_NLE_CANVASKIT_DOCKER_IMAGE ?? "ai-nle-canvaskit-emsdk:4.0.7";
 export const dawnBuildNinjaJobs =
 	process.env.AI_NLE_CANVASKIT_DAWN_BUILD_NINJA_JOBS ?? "1";
+
+const canvaskitModuleDir = path.join(skiaDir, "modules", "canvaskit");
+const npmBuildDir = path.join(canvaskitModuleDir, "npm_build");
+const npmBuildBinDir = path.join(npmBuildDir, "bin");
+const npmBuildTypesDir = path.join(npmBuildDir, "types");
+const releaseBuildDir = path.join(skiaDir, "out", "canvaskit_wasm");
+const webGPUBuildDir = path.join(skiaDir, "out", "canvaskit_wasm_webgpu");
+const packageBinDir = path.join(packageDir, "bin");
+const packageTypesDir = path.join(packageDir, "types");
+const bundleArtifactFiles = ["canvaskit.js", "canvaskit.wasm"];
+const releaseBuildInputs = [
+	path.join(canvaskitModuleDir, "BUILD.gn"),
+	path.join(canvaskitModuleDir, "canvaskit_bindings.cpp"),
+	path.join(canvaskitModuleDir, "externs.js"),
+	path.join(canvaskitModuleDir, "font.js"),
+];
+const webGPUBuildInputs = [
+	...releaseBuildInputs,
+	path.join(canvaskitModuleDir, "webgpu.js"),
+	path.join(skiaDir, "third_party", "dawn", "BUILD.gn"),
+	path.join(skiaDir, "third_party", "dawn", "build_dawn.py"),
+	path.join(skiaDir, "third_party", "dawn", "cmake_utils.py"),
+	path.join(
+		skiaDir,
+		"third_party",
+		"externals",
+		"dawn",
+		"include",
+		"tint",
+		"tint.h",
+	),
+	path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnBuffer.cpp"),
+	path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnCaps.cpp"),
+	path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnCommandBuffer.cpp"),
+	path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnErrorChecker.cpp"),
+	path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnGraphiteUtils.cpp"),
+];
+const typeBuildInputs = [
+	path.join(npmBuildTypesDir, "index.d.ts"),
+	path.join(npmBuildTypesDir, "canvaskit-wasm-tests.ts"),
+];
+const viteDepArtifacts = [
+	"canvaskit-wasm_bin_full_canvaskit.js",
+	"canvaskit-wasm_bin_full_canvaskit.js.map",
+	"canvaskit-wasm_bin_full-webgl_canvaskit.js",
+	"canvaskit-wasm_bin_full-webgl_canvaskit.js.map",
+	"canvaskit-wasm_bin_full-webgpu_canvaskit.js",
+	"canvaskit-wasm_bin_full-webgpu_canvaskit.js.map",
+].map((file) =>
+	path.join(repoRoot, "packages", "web", "node_modules", ".vite", "deps", file),
+);
 
 const webGPUJsValStorePrelude =
 	'var JsValStore=globalThis.JsValStore&&typeof globalThis.JsValStore.add==="function"&&typeof globalThis.JsValStore.get==="function"&&typeof globalThis.JsValStore.remove==="function"?globalThis.JsValStore:(function(){var nextHandle=1;var values=new Map;var store={add:function(value){var handle=nextHandle++;values.set(handle,value);return handle},get:function(handle){return values.get(handle)},remove:function(handle){values.delete(handle)}};globalThis.JsValStore=store;return store})();';
@@ -376,131 +428,134 @@ export const ensureDocker = () => {
 	]);
 };
 
-export const syncPackageArtifacts = () => {
-	const npmBuildDir = path.join(skiaDir, "modules", "canvaskit", "npm_build");
-	const sourceBinDir = path.join(npmBuildDir, "bin");
-	const sourceTypesDir = path.join(npmBuildDir, "types");
-	if (!existsSync(sourceBinDir) || !existsSync(sourceTypesDir)) {
-		throw new Error("CanvasKit npm_build artifacts are missing. Run build:docker first.");
+const getMTimeMs = (file) => (existsSync(file) ? statSync(file).mtimeMs : 0);
+
+const getFileSize = (file) => (existsSync(file) ? statSync(file).size : 0);
+
+const getBundleArtifactPaths = (dir) =>
+	bundleArtifactFiles.map((file) => path.join(dir, file));
+
+const createFileEntries = (sourceDir, targetDir, files) =>
+	files.map((file) => ({
+		source: path.join(sourceDir, file),
+		target: path.join(targetDir, file),
+	}));
+
+const createTypeEntries = (sourceDir, targetDir) => {
+	if (!existsSync(sourceDir)) {
+		throw new Error("CanvasKit type artifacts are missing. Run build:docker first.");
 	}
-	rmSync(path.join(packageDir, "bin"), { recursive: true, force: true });
-	rmSync(path.join(packageDir, "types"), { recursive: true, force: true });
-	cpSync(sourceBinDir, path.join(packageDir, "bin"), { recursive: true });
-	cpSync(sourceTypesDir, path.join(packageDir, "types"), { recursive: true });
-	const packageBinDir = path.join(packageDir, "bin");
-	const packageDefaultBinDir = path.join(packageBinDir, "full");
-	const packageWebGPUJsFile = path.join(packageBinDir, "full-webgpu", "canvaskit.js");
-	const packageRootJsFile = path.join(packageBinDir, "canvaskit.js");
-	const packageRootWasmFile = path.join(packageBinDir, "canvaskit.wasm");
-	ensureWebGPUJsValStoreInterop(packageWebGPUJsFile);
-	if (!existsSync(packageRootJsFile) && existsSync(path.join(packageDefaultBinDir, "canvaskit.js"))) {
-		cpSync(path.join(packageDefaultBinDir, "canvaskit.js"), packageRootJsFile);
-	}
-	if (
-		!existsSync(packageRootWasmFile) &&
-		existsSync(path.join(packageDefaultBinDir, "canvaskit.wasm"))
-	) {
-		cpSync(path.join(packageDefaultBinDir, "canvaskit.wasm"), packageRootWasmFile);
-	}
-	rmSync(
-		path.join(
-			repoRoot,
-			"packages",
-			"web",
-			"node_modules",
-			".vite",
-			"deps",
-			"canvaskit-wasm_bin_full_canvaskit.js",
-		),
-		{ force: true },
-	);
-	rmSync(
-		path.join(
-			repoRoot,
-			"packages",
-			"web",
-			"node_modules",
-			".vite",
-			"deps",
-			"canvaskit-wasm_bin_full_canvaskit.js.map",
-		),
-		{ force: true },
-	);
-	rmSync(
-		path.join(
-			repoRoot,
-			"packages",
-			"web",
-			"node_modules",
-			".vite",
-			"deps",
-			"canvaskit-wasm_bin_full-webgl_canvaskit.js",
-		),
-		{ force: true },
-	);
-	rmSync(
-		path.join(
-			repoRoot,
-			"packages",
-			"web",
-			"node_modules",
-			".vite",
-			"deps",
-			"canvaskit-wasm_bin_full-webgl_canvaskit.js.map",
-		),
-		{ force: true },
-	);
-	rmSync(
-		path.join(
-			repoRoot,
-			"packages",
-			"web",
-			"node_modules",
-			".vite",
-			"deps",
-			"canvaskit-wasm_bin_full-webgpu_canvaskit.js",
-		),
-		{ force: true },
-	);
-	rmSync(
-		path.join(
-			repoRoot,
-			"packages",
-			"web",
-			"node_modules",
-			".vite",
-			"deps",
-			"canvaskit-wasm_bin_full-webgpu_canvaskit.js.map",
-		),
-		{ force: true },
-	);
+	return readdirSync(sourceDir, { withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => ({
+			source: path.join(sourceDir, entry.name),
+			target: path.join(targetDir, entry.name),
+		}));
 };
 
-export const buildCanvasKitInDocker = () => {
-	ensureDocker();
-	ensureSkiaCheckout();
-	applySkiaPatch();
-	const npmBuildDir = path.join(skiaDir, "modules", "canvaskit", "npm_build");
-	const npmBuildTypesFile = path.join(npmBuildDir, "types", "index.d.ts");
-	const npmBuildFullJsFile = path.join(npmBuildDir, "bin", "full", "canvaskit.js");
-	const npmBuildFullWasmFile = path.join(npmBuildDir, "bin", "full", "canvaskit.wasm");
-	const npmBuildInputs = [
-		path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"),
-		path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
-		path.join(skiaDir, "modules", "canvaskit", "externs.js"),
-		path.join(skiaDir, "modules", "canvaskit", "font.js"),
-		path.join(skiaDir, "modules", "canvaskit", "webgpu.js"),
-		path.join(npmBuildDir, "types", "index.d.ts"),
-		path.join(npmBuildDir, "types", "canvaskit-wasm-tests.ts"),
-	];
-	const npmBuildFullJsMTime = existsSync(npmBuildFullJsFile)
-		? statSync(npmBuildFullJsFile).mtimeMs
-		: 0;
-	const shouldRebuildNpmArtifacts =
-		!existsSync(npmBuildTypesFile) ||
-		!existsSync(npmBuildFullJsFile) ||
-		!existsSync(npmBuildFullWasmFile) ||
-		npmBuildInputs.some((file) => existsSync(file) && statSync(file).mtimeMs > npmBuildFullJsMTime);
+const areArtifactsStale = (inputs, outputs) => {
+	if (outputs.some((file) => !existsSync(file))) {
+		return true;
+	}
+	const newestInput = inputs.reduce((latest, file) => Math.max(latest, getMTimeMs(file)), 0);
+	const oldestOutput = outputs.reduce(
+		(oldest, file) => Math.min(oldest, getMTimeMs(file)),
+		Number.POSITIVE_INFINITY,
+	);
+	return newestInput > oldestOutput;
+};
+
+const syncEntriesIfNeeded = (entries, prepareTargets) => {
+	const missingSources = entries
+		.filter(({ source }) => !existsSync(source))
+		.map(({ source }) => source);
+	if (missingSources.length > 0) {
+		throw new Error(`Missing source artifacts: ${missingSources.join(", ")}`);
+	}
+	const shouldSync =
+		entries.some(({ target }) => !existsSync(target)) ||
+		entries.some(
+			({ source, target }) =>
+				getMTimeMs(source) !== getMTimeMs(target) || getFileSize(source) !== getFileSize(target),
+		);
+	if (!shouldSync) {
+		return false;
+	}
+	prepareTargets?.();
+	for (const { source, target } of entries) {
+		mkdirSync(path.dirname(target), { recursive: true });
+		cpSync(source, target, { preserveTimestamps: true });
+	}
+	return true;
+};
+
+const syncBundleArtifacts = (sourceDir, targetDir) => {
+	const entries = createFileEntries(sourceDir, targetDir, bundleArtifactFiles);
+	return syncEntriesIfNeeded(entries, () => {
+		rmSync(targetDir, { recursive: true, force: true });
+		mkdirSync(targetDir, { recursive: true });
+	});
+};
+
+const syncRootBundleArtifacts = (sourceDir) => {
+	const entries = createFileEntries(sourceDir, packageBinDir, bundleArtifactFiles);
+	return syncEntriesIfNeeded(entries);
+};
+
+const syncTypeArtifacts = () => {
+	const entries = createTypeEntries(npmBuildTypesDir, packageTypesDir);
+	return syncEntriesIfNeeded(entries, () => {
+		rmSync(packageTypesDir, { recursive: true, force: true });
+		mkdirSync(packageTypesDir, { recursive: true });
+	});
+};
+
+const clearViteDepsCache = () => {
+	for (const artifact of viteDepArtifacts) {
+		rmSync(artifact, { force: true });
+	}
+};
+
+const syncFullPackageArtifacts = () => {
+	if (!existsSync(npmBuildBinDir) || !existsSync(npmBuildTypesDir)) {
+		throw new Error("CanvasKit npm_build artifacts are missing. Run build:docker first.");
+	}
+	syncRootBundleArtifacts(npmBuildBinDir);
+	syncBundleArtifacts(path.join(npmBuildBinDir, "full"), path.join(packageBinDir, "full"));
+	syncBundleArtifacts(
+		path.join(npmBuildBinDir, "full-webgl"),
+		path.join(packageBinDir, "full-webgl"),
+	);
+	syncBundleArtifacts(
+		path.join(npmBuildBinDir, "full-webgpu"),
+		path.join(packageBinDir, "full-webgpu"),
+	);
+	ensureWebGPUJsValStoreInterop(path.join(packageBinDir, "full-webgpu", "canvaskit.js"));
+	syncBundleArtifacts(
+		path.join(npmBuildBinDir, "profiling"),
+		path.join(packageBinDir, "profiling"),
+	);
+	syncTypeArtifacts();
+	clearViteDepsCache();
+};
+
+const syncFastPackageArtifacts = () => {
+	syncRootBundleArtifacts(releaseBuildDir);
+	syncBundleArtifacts(releaseBuildDir, path.join(packageBinDir, "full"));
+	syncBundleArtifacts(releaseBuildDir, path.join(packageBinDir, "full-webgl"));
+	syncBundleArtifacts(webGPUBuildDir, path.join(packageBinDir, "full-webgpu"));
+	ensureWebGPUJsValStoreInterop(path.join(packageBinDir, "full-webgpu", "canvaskit.js"));
+	syncTypeArtifacts();
+	clearViteDepsCache();
+};
+
+const formatConditionalShell = (condition, commands) =>
+	`if ${condition ? "true" : "false"}; then ${commands.join(" ")} fi`;
+
+const runCanvasKitDockerSteps = (steps) => {
+	if (steps.length === 0) {
+		return;
+	}
 	run("docker", [
 		"run",
 		"--rm",
@@ -516,19 +571,90 @@ export const buildCanvasKitInDocker = () => {
 			"cd /SRC/modules/canvaskit",
 			'export PATH="/SRC/third_party/ninja:$PATH"',
 			`export DAWN_BUILD_NINJA_JOBS=${JSON.stringify(dawnBuildNinjaJobs)}`,
-			[
-				`if ${shouldRebuildNpmArtifacts ? "true" : "false"}; then`,
-				'rm -rf "./npm_build/bin";',
-				"make npm;",
-				"fi",
-			].join(" "),
-			"rm -rf ./npm_build/bin/full-webgl ./npm_build/bin/full-webgpu",
-			"cp -R ./npm_build/bin/full ./npm_build/bin/full-webgl",
-			"mkdir -p ./npm_build/bin/full-webgpu",
-			"BUILD_DIR=out/canvaskit_wasm_webgpu ./compile.sh release webgpu",
-			"cp ../../out/canvaskit_wasm_webgpu/canvaskit.js ./npm_build/bin/full-webgpu",
-			"cp ../../out/canvaskit_wasm_webgpu/canvaskit.wasm ./npm_build/bin/full-webgpu",
+			...steps,
 		].join(" && "),
 	]);
-	syncPackageArtifacts();
+};
+
+export const syncPackageArtifacts = () => {
+	syncFullPackageArtifacts();
+};
+
+export const buildCanvasKitInDocker = () => {
+	ensureDocker();
+	ensureSkiaCheckout();
+	applySkiaPatch();
+	const shouldRebuildNpmArtifacts = areArtifactsStale(
+		[...releaseBuildInputs, ...typeBuildInputs],
+		[
+		path.join(npmBuildBinDir, "canvaskit.js"),
+		path.join(npmBuildBinDir, "canvaskit.wasm"),
+		path.join(npmBuildBinDir, "full", "canvaskit.js"),
+		path.join(npmBuildBinDir, "full", "canvaskit.wasm"),
+		path.join(npmBuildBinDir, "profiling", "canvaskit.js"),
+		path.join(npmBuildBinDir, "profiling", "canvaskit.wasm"),
+		],
+	);
+	const shouldRebuildWebGPUArtifacts = areArtifactsStale(
+		webGPUBuildInputs,
+		getBundleArtifactPaths(webGPUBuildDir),
+	);
+	const shouldRefreshNpmBuildFullWebGLArtifacts =
+		shouldRebuildNpmArtifacts ||
+		areArtifactsStale(
+			getBundleArtifactPaths(path.join(npmBuildBinDir, "full")),
+			getBundleArtifactPaths(path.join(npmBuildBinDir, "full-webgl")),
+		);
+	const shouldRefreshNpmBuildWebGPUArtifacts =
+		shouldRebuildNpmArtifacts ||
+		shouldRebuildWebGPUArtifacts ||
+		areArtifactsStale(
+			getBundleArtifactPaths(webGPUBuildDir),
+			getBundleArtifactPaths(path.join(npmBuildBinDir, "full-webgpu")),
+		);
+	const dockerSteps = [
+		formatConditionalShell(shouldRebuildNpmArtifacts, [
+			'rm -rf "./npm_build/bin";',
+			"make npm;",
+		]),
+		formatConditionalShell(shouldRefreshNpmBuildFullWebGLArtifacts, [
+			'rm -rf "./npm_build/bin/full-webgl";',
+			'mkdir -p "./npm_build/bin/full-webgl";',
+			'cp "./npm_build/bin/full/canvaskit.js" "./npm_build/bin/full-webgl/canvaskit.js";',
+			'cp "./npm_build/bin/full/canvaskit.wasm" "./npm_build/bin/full-webgl/canvaskit.wasm";',
+		]),
+		formatConditionalShell(shouldRebuildWebGPUArtifacts, [
+			"BUILD_DIR=out/canvaskit_wasm_webgpu ./compile.sh release webgpu;",
+		]),
+		formatConditionalShell(shouldRefreshNpmBuildWebGPUArtifacts, [
+			'rm -rf "./npm_build/bin/full-webgpu";',
+			'mkdir -p "./npm_build/bin/full-webgpu";',
+			'cp "../../out/canvaskit_wasm_webgpu/canvaskit.js" "./npm_build/bin/full-webgpu/canvaskit.js";',
+			'cp "../../out/canvaskit_wasm_webgpu/canvaskit.wasm" "./npm_build/bin/full-webgpu/canvaskit.wasm";',
+		]),
+	].filter((step) => step.includes("true"));
+	runCanvasKitDockerSteps(dockerSteps);
+	syncFullPackageArtifacts();
+};
+
+export const buildCanvasKitFastInDocker = () => {
+	ensureDocker();
+	ensureSkiaCheckout();
+	applySkiaPatch();
+	const shouldRebuildReleaseArtifacts = areArtifactsStale(
+		releaseBuildInputs,
+		getBundleArtifactPaths(releaseBuildDir),
+	);
+	const shouldRebuildWebGPUArtifacts = areArtifactsStale(
+		webGPUBuildInputs,
+		getBundleArtifactPaths(webGPUBuildDir),
+	);
+	const dockerSteps = [
+		formatConditionalShell(shouldRebuildReleaseArtifacts, ["./compile.sh release;"]),
+		formatConditionalShell(shouldRebuildWebGPUArtifacts, [
+			"BUILD_DIR=out/canvaskit_wasm_webgpu ./compile.sh release webgpu;",
+		]),
+	].filter((step) => step.includes("true"));
+	runCanvasKitDockerSteps(dockerSteps);
+	syncFastPackageArtifacts();
 };

@@ -16,6 +16,7 @@
     "sync-skia": "node ./scripts/sync-skia.mjs",
     "apply-patch": "node ./scripts/apply-patch.mjs",
     "build:docker": "node ./scripts/build-docker.mjs",
+    "build:docker:fast": "node ./scripts/build-docker-fast.mjs",
     "test": "node ./scripts/smoke.mjs",
     "dtslint": "dtslint types"
   },
