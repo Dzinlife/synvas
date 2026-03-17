@@ -174,6 +174,7 @@ type GlobalThisWithJsValStore = typeof globalThis & {
 
 const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
 const WEBGPU_TEXTURE_SOURCE_FORMAT = "rgba8unorm";
+const DEFAULT_WEBGPU_CANVAS_ALPHA_MODE = "premultiplied" as const;
 
 const getRequestAnimationFrame = () => {
 	if (typeof globalThis.requestAnimationFrame === "function") {
@@ -650,6 +651,15 @@ const getPreferredCanvasFormat = (): GPUTextureFormat => {
 	return gpuNavigator.gpu?.getPreferredCanvasFormat?.() ?? "bgra8unorm";
 };
 
+const normalizeWebGPUCanvasOptions = (
+	opts?: WebGPUCanvasOptions,
+): WebGPUCanvasOptions => {
+	return {
+		...(opts ?? {}),
+		alphaMode: opts?.alphaMode ?? DEFAULT_WEBGPU_CANVAS_ALPHA_MODE,
+	};
+};
+
 const disposeSurface = (surface: InternalWebGPUSurface) => {
 	if (typeof surface.dispose === "function") {
 		surface.dispose();
@@ -828,11 +838,12 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 		if (!canvasContext || !deviceContext._device) {
 			return null;
 		}
-		const textureFormat = opts?.format ?? getPreferredCanvasFormat();
+		const resolvedOptions = normalizeWebGPUCanvasOptions(opts);
+		const textureFormat = resolvedOptions.format ?? getPreferredCanvasFormat();
 		canvasContext.configure({
 			device: deviceContext._device,
 			format: textureFormat,
-			alphaMode: opts?.alphaMode,
+			alphaMode: resolvedOptions.alphaMode,
 		});
 		const webgpuCanvasContext = {
 			_inner: canvasContext,
@@ -892,6 +903,8 @@ export const installCanvasKitWebGPU = (canvasKit: CanvasKit) => {
 	if (hasPublicWebGPUHelpers(internalCanvasKit)) {
 		const originalMakeGPUDeviceContext =
 			internalCanvasKit.MakeGPUDeviceContext?.bind(internalCanvasKit);
+		const originalMakeGPUCanvasContext =
+			internalCanvasKit.MakeGPUCanvasContext?.bind(internalCanvasKit);
 		if (originalMakeGPUDeviceContext) {
 			internalCanvasKit.MakeGPUDeviceContext = (device) => {
 				const context = originalMakeGPUDeviceContext(device);
@@ -899,6 +912,15 @@ export const installCanvasKitWebGPU = (canvasKit: CanvasKit) => {
 					internalCanvasKit._defaultWebGPUDeviceContext = context;
 				}
 				return context;
+			};
+		}
+		if (originalMakeGPUCanvasContext) {
+			internalCanvasKit.MakeGPUCanvasContext = (context, canvas, opts) => {
+				return originalMakeGPUCanvasContext(
+					context,
+					canvas,
+					normalizeWebGPUCanvasOptions(opts),
+				);
 			};
 		}
 		installWebGPUTextureSourceHelpers(internalCanvasKit);

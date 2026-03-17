@@ -219,6 +219,50 @@ describe("LoadSkiaWeb", () => {
 		expect(webglCanvasKit.MakeWebGLCanvasSurface).not.toHaveBeenCalled();
 	});
 
+	it("真实 WebGPU bundle 的 canvas helper 默认使用透明 alphaMode", async () => {
+		const makeGPUDeviceContext = vi.fn(() => ({ id: "gpu-context" }));
+		const originalMakeGPUCanvasContext = vi.fn(() => ({
+			id: "canvas-context",
+		}));
+		const webgpuCanvasKit = {
+			webgpu: true,
+			Surface: {
+				prototype: {},
+			},
+			MakeGPUDeviceContext: makeGPUDeviceContext,
+			MakeGPUCanvasContext: originalMakeGPUCanvasContext,
+			MakeGPUCanvasSurface: vi.fn(),
+			MakeGPUTextureSurface: vi.fn(),
+		};
+		vi.stubGlobal("navigator", {
+			gpu: {
+				requestAdapter: vi.fn(async () => ({
+					requestDevice: vi.fn(async () => ({ createTexture: vi.fn() })),
+				})),
+			},
+		});
+		const {
+			LoadSkiaWeb,
+			__setSkiaBundleLoadersForTests,
+		} = await loadSkiaModules();
+		__setSkiaBundleLoadersForTests({
+			webgpu: createBundleLoader(webgpuCanvasKit),
+		});
+
+		const canvasKit = await LoadSkiaWeb({ backendPreference: "webgpu" });
+		const context = { id: "ctx" };
+		const canvas = document.createElement("canvas");
+
+		canvasKit.MakeGPUCanvasContext?.(context as never, canvas, {
+			format: "rgba8unorm",
+		});
+
+		expect(originalMakeGPUCanvasContext).toHaveBeenCalledWith(context, canvas, {
+			format: "rgba8unorm",
+			alphaMode: "premultiplied",
+		});
+	});
+
 	it("缺少官方 helper 且缺少底层导出时会回退到 WebGL bundle", async () => {
 		const webgpuCanvasKit = {
 			webgpu: true,

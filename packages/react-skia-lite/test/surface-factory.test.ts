@@ -170,13 +170,19 @@ describe("surfaceFactory", () => {
 			1,
 			backend.deviceContext,
 			canvas,
-			{ format: "rgba8unorm" },
+			{
+				format: "rgba8unorm",
+				alphaMode: "premultiplied",
+			},
 		);
 		expect(makeGPUCanvasContextMock).toHaveBeenNthCalledWith(
 			2,
 			backend.deviceContext,
 			canvas,
-			{ format: "rgba8unorm" },
+			{
+				format: "rgba8unorm",
+				alphaMode: "premultiplied",
+			},
 		);
 		expect(makeGPUCanvasSurfaceMock).toHaveBeenCalledTimes(3);
 		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(1, gpuCanvasContext);

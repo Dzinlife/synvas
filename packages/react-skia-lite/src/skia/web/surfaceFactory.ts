@@ -16,6 +16,7 @@ type CachedWebGPUCanvasContext = {
 };
 
 const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
+const WEBGPU_CANVAS_ALPHA_MODE = "premultiplied" as const;
 const webgpuCanvasContextCache = new WeakMap<
 	CanvasElement,
 	CachedWebGPUCanvasContext
@@ -67,7 +68,10 @@ const getOrCreateWebGPUCanvasContext = (
 	const canvasContext = toCanvasKitWebGPU(CanvasKit).MakeGPUCanvasContext?.(
 		backend.deviceContext,
 		canvas,
-		{ format: textureFormat },
+		{
+			format: textureFormat,
+			alphaMode: WEBGPU_CANVAS_ALPHA_MODE,
+		},
 	);
 	if (!canvasContext) {
 		return null;
