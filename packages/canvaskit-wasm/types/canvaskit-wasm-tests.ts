@@ -1061,7 +1061,8 @@ function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElemen
         return;
     }
 
-    const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType GrDirectContext
+    const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType WebGPUDeviceContext
+    const submitResult = gpuContext.submit(); // $ExpectType boolean
 
     // Texture surface.
     const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, "bgra8unorm", 800, 600, // $ExpectType Surface | null

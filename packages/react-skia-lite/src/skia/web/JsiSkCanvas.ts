@@ -38,7 +38,6 @@ import { getEnum, HostObject } from "./Host";
 import { JsiSkPaint } from "./JsiSkPaint";
 import { JsiSkRect } from "./JsiSkRect";
 import { JsiSkRRect } from "./JsiSkRRect";
-import { JsiSkImage } from "./JsiSkImage";
 import { JsiSkVertices } from "./JsiSkVertices";
 import { JsiSkPath } from "./JsiSkPath";
 import { JsiSkFont } from "./JsiSkFont";
@@ -67,7 +66,7 @@ export class JsiSkCanvas
 
   drawImage(image: SkImage, x: number, y: number, paint?: SkPaint) {
     this.ref.drawImage(
-      JsiSkImage.fromValue(image),
+      HostObject.fromValue(image),
       x,
       y,
       paint ? JsiSkPaint.fromValue(paint) : paint
@@ -82,7 +81,7 @@ export class JsiSkCanvas
     fastSample?: boolean
   ) {
     this.ref.drawImageRect(
-      JsiSkImage.fromValue(img),
+      HostObject.fromValue(img),
       JsiSkRect.fromValue(this.CanvasKit, src),
       JsiSkRect.fromValue(this.CanvasKit, dest),
       JsiSkPaint.fromValue(paint),
@@ -99,7 +98,7 @@ export class JsiSkCanvas
     paint?: SkPaint | null
   ) {
     this.ref.drawImageCubic(
-      JsiSkImage.fromValue(img),
+      HostObject.fromValue(img),
       left,
       top,
       B,
@@ -117,7 +116,7 @@ export class JsiSkCanvas
     paint?: SkPaint | null
   ) {
     this.ref.drawImageOptions(
-      JsiSkImage.fromValue(img),
+      HostObject.fromValue(img),
       left,
       top,
       getEnum(this.CanvasKit, "FilterMode", fm),
@@ -134,7 +133,7 @@ export class JsiSkCanvas
     paint?: SkPaint | null
   ) {
     this.ref.drawImageNine(
-      JsiSkImage.fromValue(img),
+      HostObject.fromValue(img),
       Array.from(JsiSkRect.fromValue(this.CanvasKit, center)),
       JsiSkRect.fromValue(this.CanvasKit, dest),
       getEnum(this.CanvasKit, "FilterMode", filter),
@@ -151,7 +150,7 @@ export class JsiSkCanvas
     paint?: SkPaint | null
   ) {
     this.ref.drawImageRectCubic(
-      JsiSkImage.fromValue(img),
+      HostObject.fromValue(img),
       JsiSkRect.fromValue(this.CanvasKit, src),
       JsiSkRect.fromValue(this.CanvasKit, dest),
       B,
@@ -169,7 +168,7 @@ export class JsiSkCanvas
     paint?: SkPaint | null
   ) {
     this.ref.drawImageRectOptions(
-      JsiSkImage.fromValue(img),
+      HostObject.fromValue(img),
       JsiSkRect.fromValue(this.CanvasKit, src),
       JsiSkRect.fromValue(this.CanvasKit, dest),
       getEnum(this.CanvasKit, "FilterMode", fm),
@@ -436,7 +435,7 @@ export class JsiSkCanvas
       };
     }
     this.ref.drawAtlas(
-      JsiSkImage.fromValue(atlas),
+      HostObject.fromValue(atlas),
       src,
       dst,
       JsiSkPaint.fromValue(paint),

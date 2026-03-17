@@ -12,6 +12,7 @@ import {
 	resolveSkiaRenderBackendForBundle,
 	setSkiaRenderBackend,
 } from "./skia/web/renderBackend";
+import { installCanvasKitWebGPU } from "./skia/web/installWebGPU";
 export { getSkiaRenderBackend } from "./skia/web/renderBackend";
 export type {
 	SkiaRenderBackend,
@@ -25,6 +26,8 @@ declare global {
 
 type CanvasKitInitModule = {
 	default?: (opts?: CanvasKitInitOptions) => Promise<CanvasKitType>;
+	c?: unknown;
+	[key: string]: unknown;
 };
 
 type CanvasKitInitModuleLoader = () => Promise<CanvasKitInitModule>;
@@ -55,6 +58,12 @@ const defaultBundleModuleLoaders: Record<
 > = {
 	webgl: () => import("canvaskit-wasm/bin/full-webgl/canvaskit"),
 	webgpu: () => import("canvaskit-wasm/bin/full-webgpu/canvaskit"),
+};
+
+const optimizedBundleModuleUrls: Record<SkiaBundleKind, string> = {
+	webgl: "/node_modules/.vite/deps/canvaskit-wasm_bin_full-webgl_canvaskit.js",
+	webgpu:
+		"/node_modules/.vite/deps/canvaskit-wasm_bin_full-webgpu_canvaskit.js",
 };
 
 const defaultBundleWasmUrls: Record<SkiaBundleKind, string> = {
@@ -187,6 +196,49 @@ const buildBundleCandidates = (preference: SkiaWebBackendPreference) => {
 	}
 };
 
+const resolveCanvasKitInit = (imported: CanvasKitInitModule) => {
+	const candidates = [
+		imported,
+		imported.default,
+		typeof imported.default === "object" && imported.default
+			? (imported.default as CanvasKitInitModule).default
+			: undefined,
+		imported.c,
+		typeof imported.c === "object" && imported.c
+			? (imported.c as CanvasKitInitModule).default
+			: undefined,
+		...Object.values(imported),
+		...Object.values(imported)
+			.filter(
+				(value): value is CanvasKitInitModule =>
+					typeof value === "object" && value !== null,
+			)
+			.map((value) => value.default),
+	];
+	return (
+		candidates.find(
+			(
+				value,
+			): value is (opts?: CanvasKitInitOptions) => Promise<CanvasKitType> => {
+				return typeof value === "function";
+			},
+		) ?? null
+	);
+};
+
+const loadOptimizedCanvasKitBundle = async (bundle: SkiaBundleKind) => {
+	if (typeof window === "undefined") {
+		return null;
+	}
+	try {
+		return await import(
+			/* @vite-ignore */ optimizedBundleModuleUrls[bundle]
+		);
+	} catch {
+		return null;
+	}
+};
+
 const loadCanvasKitBundle = async (
 	bundle: SkiaBundleKind,
 	opts?: LoadSkiaWebOptions,
@@ -200,12 +252,20 @@ const loadCanvasKitBundle = async (
 		}
 		return initOptions.locateFile ? initOptions.locateFile(file) : file;
 	};
-	const imported = await bundleModuleLoaders[bundle]();
-	const init = imported.default;
-	if (typeof init !== "function") {
-		throw new Error(`CanvasKit init module for ${bundle} bundle is invalid`);
+	const imported =
+		(await loadOptimizedCanvasKitBundle(bundle)) ??
+		(await bundleModuleLoaders[bundle]());
+	const init = resolveCanvasKitInit(imported);
+	if (!init) {
+		throw new Error(
+			`CanvasKit init module for ${bundle} bundle is invalid (exports: ${Object.keys(imported).join(", ") || "<none>"}).`,
+		);
 	}
-	return init({ ...initOptions, locateFile });
+	const CanvasKit = await init({ ...initOptions, locateFile });
+	if (bundle === "webgpu") {
+		installCanvasKitWebGPU(CanvasKit);
+	}
+	return CanvasKit;
 };
 
 const tryResolveCanvasKit = async (

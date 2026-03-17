@@ -1,0 +1,380 @@
+diff --git a/modules/canvaskit/BUILD.gn b/modules/canvaskit/BUILD.gn
+index 9090ce305c..b765b66341 100644
+--- a/modules/canvaskit/BUILD.gn
++++ b/modules/canvaskit/BUILD.gn
+@@ -194,7 +194,6 @@ skia_wasm_lib("canvaskit") {
+       "--pre-js",
+       rebase_path("webgpu.js"),
+       "-sUSE_WEBGL2=0",
+-      "-sUSE_WEBGPU=1",
+       "-sASYNCIFY",
+ 
+       # Modules from html5_webgpu for JS<->WASM interop
+@@ -391,6 +390,10 @@ skia_wasm_lib("canvaskit") {
+         "SK_GL",
+         "CK_ENABLE_WEBGL",
+       ]
++    } else if (skia_canvaskit_enable_webgpu) {
++      defines += [
++        "CK_ENABLE_WEBGPU",
++      ]
+     }
+   }
+ 
+diff --git a/modules/canvaskit/canvaskit_bindings.cpp b/modules/canvaskit/canvaskit_bindings.cpp
+index 59c6249124..a8f0e9d143 100644
+--- a/modules/canvaskit/canvaskit_bindings.cpp
++++ b/modules/canvaskit/canvaskit_bindings.cpp
+@@ -103,6 +103,14 @@
+ #endif  // CK_ENABLE_WEBGL
+ 
+ #ifdef CK_ENABLE_WEBGPU
++#include "include/gpu/graphite/BackendTexture.h"
++#include "include/gpu/graphite/Context.h"
++#include "include/gpu/graphite/ContextOptions.h"
++#include "include/gpu/graphite/Image.h"
++#include "include/gpu/graphite/ImageProvider.h"
++#include "include/gpu/graphite/Recorder.h"
++#include "include/gpu/graphite/Surface.h"
++#include "include/gpu/graphite/dawn/DawnBackendContext.h"
++#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
++#include "src/gpu/graphite/ContextOptionsPriv.h"
+ #include <emscripten/html5_webgpu.h>
+ #include <webgpu/webgpu.h>
+ #include <webgpu/webgpu_cpp.h>
+@@ -367,15 +375,71 @@ sk_sp<SkSurface> MakeRenderTarget(sk_sp<GrDirectContext> dContext, SimpleImageIn
+ 
+ #ifdef CK_ENABLE_WEBGPU
+ 
+-sk_sp<GrDirectContext> MakeGrContext() {
+-    GrContextOptions options;
++class WebGPUImageProvider final : public skgpu::graphite::ImageProvider {
++public:
++    static sk_sp<WebGPUImageProvider> Make() { return sk_sp(new WebGPUImageProvider); }
++
++    sk_sp<SkImage> findOrCreate(skgpu::graphite::Recorder* recorder,
++                                const SkImage* image,
++                                SkImage::RequiredProperties requiredProps) override {
++        return SkImages::TextureFromImage(recorder, image, requiredProps);
++    }
++
++private:
++    WebGPUImageProvider() = default;
++};
++
++class WebGPUDeviceContext {
++public:
++    WebGPUDeviceContext(std::unique_ptr<skgpu::graphite::Context> context,
++                        std::unique_ptr<skgpu::graphite::Recorder> recorder)
++            : fContext(std::move(context))
++            , fRecorder(std::move(recorder)) {}
++
++    bool submit() {
++        if (!fContext || !fRecorder) {
++            return false;
++        }
++
++        std::unique_ptr<skgpu::graphite::Recording> recording = fRecorder->snap();
++        if (!recording) {
++            return false;
++        }
++
++        skgpu::graphite::InsertRecordingInfo info;
++        info.fRecording = recording.get();
++        if (fContext->insertRecording(info) != skgpu::graphite::InsertStatus::kSuccess) {
++            return false;
++        }
++
++        return fContext->submit();
++    }
++
++    skgpu::graphite::Recorder* recorder() const { return fRecorder.get(); }
++
++private:
++    std::unique_ptr<skgpu::graphite::Context> fContext;
++    std::unique_ptr<skgpu::graphite::Recorder> fRecorder;
++};
++
++WebGPUDeviceContext* MakeWebGPUDeviceContext() {
+     wgpu::Device device = wgpu::Device::Acquire(emscripten_webgpu_get_device());
+-    return GrDirectContext::MakeDawn(device, options);
++    if (!device) {
++        return nullptr;
++    }
++
++    skgpu::graphite::DawnBackendContext backendContext;
++    backendContext.fDevice = device;
++    backendContext.fQueue = device.GetQueue();
++
++    skgpu::graphite::ContextOptions options;
++    skgpu::graphite::ContextOptionsPriv optionsPriv;
++    optionsPriv.fStoreContextRefInRecorder = true;
++    options.fOptionsPriv = &optionsPriv;
++
++    auto context = skgpu::graphite::ContextFactory::MakeDawn(backendContext, options);
++    if (!context) {
++        return nullptr;
++    }
++
++    skgpu::graphite::RecorderOptions recorderOptions;
++    recorderOptions.fImageProvider = WebGPUImageProvider::Make();
++
++    auto recorder = context->makeRecorder(recorderOptions);
++    if (!recorder) {
++        return nullptr;
++    }
++
++    return new WebGPUDeviceContext(std::move(context), std::move(recorder));
+ }
+ 
+-sk_sp<SkSurface> MakeGPUTextureSurface(sk_sp<GrDirectContext> dContext,
++sk_sp<SkSurface> MakeGPUTextureSurface(WebGPUDeviceContext& dContext,
+                                        uint32_t textureHandle,
+                                        uint32_t textureFormat,
++                                       uint32_t textureUsage,
+                                        int width,
+                                        int height,
+                                        sk_sp<SkColorSpace> colorSpace) {
+@@ -383,57 +447,32 @@ sk_sp<SkSurface> MakeGPUTextureSurface(sk_sp<GrDirectContext> dContext,
+         colorSpace = SkColorSpace::MakeSRGB();
+     }
+ 
+-    wgpu::TextureFormat format = static_cast<wgpu::TextureFormat>(textureFormat);
+-    wgpu::Texture texture(emscripten_webgpu_import_texture(textureHandle));
++    WGPUTexture rawTexture = emscripten_webgpu_import_texture(textureHandle);
+     emscripten_webgpu_release_js_handle(textureHandle);
++    if (!rawTexture) {
++        return nullptr;
++    }
+ 
+-    // GrDawnRenderTargetInfo currently only supports a 1-mip TextureView.
+-    constexpr uint32_t mipLevelCount = 1;
+-    constexpr uint32_t sampleCount = 1;
+-
+-    GrDawnTextureInfo info;
+-    info.fTexture = texture;
+-    info.fFormat = format;
+-    info.fLevelCount = mipLevelCount;
++    auto target = skgpu::graphite::BackendTextures::MakeDawn(
++            {width, height},
++            skgpu::graphite::DawnTextureInfo(
++                    skgpu::graphite::SampleCount::k1,
++                    skgpu::Mipmapped::kNo,
++                    static_cast<wgpu::TextureFormat>(textureFormat),
++                    static_cast<wgpu::TextureUsage>(textureUsage),
++                    wgpu::TextureAspect::All),
++            rawTexture);
++    if (!target.isValid()) {
++        return nullptr;
++    }
+ 
+-    GrBackendTexture target(width, height, info);
+     return SkSurfaces::WrapBackendTexture(
+-            dContext.get(),
++            dContext.recorder(),
+             target,
+-            kTopLeft_GrSurfaceOrigin,
+-            sampleCount,
+-            colorSpace->isSRGB() ? kRGBA_8888_SkColorType : kRGBA_F16_SkColorType,
+             colorSpace,
+             nullptr);
+ }
+ 
+-bool ReplaceBackendTexture(
+-        SkSurface& surface, uint32_t textureHandle, uint32_t textureFormat, int width, int height) {
+-    wgpu::TextureFormat format = static_cast<wgpu::TextureFormat>(textureFormat);
+-    wgpu::Texture texture(emscripten_webgpu_import_texture(textureHandle));
+-    emscripten_webgpu_release_js_handle(textureHandle);
+-
+-    GrDawnTextureInfo info;
+-    info.fTexture = texture;
+-    info.fFormat = format;
+-    info.fLevelCount = 1;
+-
+-    // Use kDiscard_ContentChangeMode to discard the contents of the old backing texture. This not
+-    // only avoids an unnecessary blit, we also don't support copying the contents of a swapchain
+-    // texture due to the default GPUCanvasConfiguration usage bits we used when configuring the
+-    // GPUCanvasContext in JS.
+-    //
+-    // The default usage bits only contain GPUTextureUsage.RENDER_ATTACHMENT. To support a copy we
+-    // would need to also set GPUTextureUsage.TEXTURE_BINDING (to sample it in a shader) or
+-    // GPUTextureUsage.COPY_SRC (for a copy command).
+-    //
+-    // See https://www.w3.org/TR/webgpu/#namespacedef-gputextureusage and
+-    // https://www.w3.org/TR/webgpu/#dictdef-gpucanvasconfiguration.
+-    GrBackendTexture target(width, height, info);
+-    return surface.replaceBackendTexture(
+-            target, kTopLeft_GrSurfaceOrigin, SkSurface::kDiscard_ContentChangeMode);
+-}
+-
+ #endif  // CK_ENABLE_WEBGPU
+ 
+ //========================================================================================
+@@ -1118,10 +1157,10 @@ private:
+ EMSCRIPTEN_BINDINGS(Skia) {
+ #ifdef ENABLE_GPU
+     constant("gpu", true);
+-    function("_MakeGrContext", &MakeGrContext);
+ #endif  // ENABLE_GPU
+ 
+ #ifdef CK_ENABLE_WEBGL
++    function("_MakeGrContext", &MakeGrContext);
+     constant("webgl", true);
+     function("_MakeOnScreenGLSurface",
+              select_overload<sk_sp<SkSurface>(
+@@ -1141,6 +1180,9 @@ EMSCRIPTEN_BINDINGS(Skia) {
+ 
+ #ifdef CK_ENABLE_WEBGPU
+     constant("webgpu", true);
++    class_<WebGPUDeviceContext>("WebGPUDeviceContext")
++            .function("_submit", &WebGPUDeviceContext::submit);
++    function("_MakeWebGPUDeviceContext", &MakeWebGPUDeviceContext, allow_raw_pointers());
+     function("_MakeGPUTextureSurface", &MakeGPUTextureSurface);
+ #endif  // CK_ENABLE_WEBGPU
+ 
+@@ -2893,16 +2935,6 @@ EMSCRIPTEN_BINDINGS(Skia) {
+                                   releaseCtx);
+                       }))
+ #endif  // CK_ENABLE_WEBGL
+-#ifdef CK_ENABLE_WEBGPU
+-            .function("_replaceBackendTexture",
+-                      optional_override([](SkSurface& self,
+-                                           uint32_t texHandle,
+-                                           uint32_t texFormat,
+-                                           int width,
+-                                           int height) {
+-                          return ReplaceBackendTexture(self, texHandle, texFormat, width, height);
+-                      }))
+-#endif  // CK_ENABLE_WEBGPU
+             .function("_makeImageSnapshot",
+                       optional_override([](SkSurface& self, WASMPointerU32 iPtr) -> sk_sp<SkImage> {
+                           SkIRect* bounds = reinterpret_cast<SkIRect*>(iPtr);
+diff --git a/modules/canvaskit/compile.sh b/modules/canvaskit/compile.sh
+index c56d1d08ce..d12e547807 100755
+--- a/modules/canvaskit/compile.sh
++++ b/modules/canvaskit/compile.sh
+@@ -48,9 +48,9 @@ if [[ $@ == *cpu* ]]; then
+   ENABLE_GANESH="false"
+ elif [[ $@ == *webgpu* ]]; then
+   echo "Using WebGPU instead of WebGL"
++  ENABLE_GANESH="true"
+   ENABLE_WEBGPU="true"
+   ENABLE_GRAPHITE="true"
+-  ENABLE_GANESH="false"
+ else
+   ENABLE_WEBGL="true"
+ fi
+diff --git a/third_party/dawn/BUILD.gn b/third_party/dawn/BUILD.gn
+index 128fac0650..5ad71c1532 100644
+--- a/third_party/dawn/BUILD.gn
++++ b/third_party/dawn/BUILD.gn
+@@ -132,18 +132,41 @@ group("tint") {
+ }
+ 
+ config("dawn_api_config") {
++  ldflags = []
+   if (!is_canvaskit) {
+     include_dirs = [
+       "../externals/dawn",
+       "../externals/dawn/include",
+       "$target_gen_dir/include",
+     ]
++  } else if (is_wasm) {
++    include_dirs = [
++      "$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/include",
++      "../externals/dawn",
++      "../externals/dawn/include",
++    ]
++    ldflags += [
++      "--js-library=" + rebase_path(
++              "$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/library_webgpu_enum_tables.js",
++              root_build_dir),
++      "--js-library=" + rebase_path(
++              "$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/library_webgpu_generated_struct_info.js",
++              root_build_dir),
++      "--js-library=" + rebase_path(
++              "$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/library_webgpu_generated_sig_info.js",
++              root_build_dir),
++      "--js-library=" + rebase_path(
++              "../externals/dawn/third_party/emdawnwebgpu/pkg/webgpu/src/library_webgpu.js",
++              root_build_dir),
++      "--closure-args=--externs=" + rebase_path(
++              "../externals/dawn/third_party/emdawnwebgpu/pkg/webgpu/src/webgpu-externs.js",
++              root_build_dir),
++    ]
+   } else {
+-    # Emscripten includes its own WebGPU headers.
+     include_dirs = []
+   }
+   if (is_win) {
+-    ldflags = [ "/WHOLEARCHIVE:dawn_combined.lib" ]
++    ldflags += [ "/WHOLEARCHIVE:dawn_combined.lib" ]
+     libs = [
+       "onecore.lib",
+       "user32.lib",
+diff --git a/modules/canvaskit/BUILD.gn b/modules/canvaskit/BUILD.gn
+index 9ddb8833fa..bf00a7fdb9 100644
+--- a/modules/canvaskit/BUILD.gn
++++ b/modules/canvaskit/BUILD.gn
+@@ -120,6 +120,9 @@ skia_wasm_lib("canvaskit") {
+   if (skia_canvaskit_enable_embedded_font) {
+     deps += [ ":create_notomono_cpp" ]
+   }
++  if (skia_canvaskit_enable_webgpu) {
++    public_configs = [ "../../third_party/dawn:dawn_api_config" ]
++  }
+ 
+   sources = [
+     "WasmCommon.h",
+diff --git a/modules/canvaskit/canvaskit_bindings.cpp b/modules/canvaskit/canvaskit_bindings.cpp
+index a8f0e9d143..a65fd92212 100644
+--- a/modules/canvaskit/canvaskit_bindings.cpp
++++ b/modules/canvaskit/canvaskit_bindings.cpp
+@@ -113,9 +113,21 @@
+ #include "include/gpu/graphite/dawn/DawnBackendContext.h"
+ #include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
+ #include "src/gpu/graphite/ContextOptionsPriv.h"
+-#include <emscripten/html5_webgpu.h>
++#include <emscripten/emscripten.h>
+ #include <webgpu/webgpu.h>
+ #include <webgpu/webgpu_cpp.h>
++
++extern "C" {
++WGPUDevice emscripten_webgpu_get_device(void);
++}
++
++EM_JS(WGPUTexture, canvaskit_import_webgpu_texture, (int textureHandle), {
++    return WebGPU.importJsTexture(JsValStore.get(textureHandle));
++});
++
++EM_JS(void, canvaskit_release_webgpu_js_handle, (int textureHandle), {
++    JsValStore.remove(textureHandle);
++});
+ #endif  // CK_ENABLE_WEBGPU
+ 
+ #ifndef CK_NO_FONTS
+@@ -449,8 +461,8 @@ sk_sp<SkSurface> MakeGPUTextureSurface(WebGPUDeviceContext& dContext,
+         colorSpace = SkColorSpace::MakeSRGB();
+     }
+ 
+-    WGPUTexture rawTexture = emscripten_webgpu_import_texture(textureHandle);
+-    emscripten_webgpu_release_js_handle(textureHandle);
++    WGPUTexture rawTexture = canvaskit_import_webgpu_texture(textureHandle);
++    canvaskit_release_webgpu_js_handle(textureHandle);
+     if (!rawTexture) {
+         return nullptr;
+     }
+diff --git a/third_party/dawn/BUILD.gn b/third_party/dawn/BUILD.gn
+index 5ad71c1532..55b15ef797 100644
+--- a/third_party/dawn/BUILD.gn
++++ b/third_party/dawn/BUILD.gn
+@@ -178,6 +178,9 @@ config("dawn_api_config") {
+     libs = []
+   }
+   libs += [ "$root_out_dir/$_dawn_lib_name" ]
++  if (is_canvaskit && is_wasm) {
++    libs += [ "$root_out_dir/cmake_dawn/src/emdawnwebgpu/libemdawnwebgpu_c.a" ]
++  }
+ 
+   # https://dawn.googlesource.com/dawn/+/647c352f57aa8a4c2666258455158a36c0c385af/src/dawn/native/BUILD.gn#645
+   if (is_mac || is_ios) {

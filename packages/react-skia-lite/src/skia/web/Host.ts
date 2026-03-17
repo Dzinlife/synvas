@@ -1,4 +1,4 @@
-import type { CanvasKit, EmbindEnumEntity } from "canvaskit-wasm";
+import type { CanvasKit, EmbindEnum, EmbindEnumEntity } from "canvaskit-wasm";
 
 import type { SkJSIInstance } from "../types";
 
@@ -66,8 +66,9 @@ export const getEnum = (
 	name: keyof CanvasKit,
 	v: number,
 ): EmbindEnumEntity => {
-	const e = CanvasKit[name];
-	if (typeof e !== "function") {
+	const e = CanvasKit[name] as unknown as (EmbindEnum &
+		Record<string, unknown>) | null;
+	if (!e || (typeof e !== "function" && typeof e !== "object")) {
 		throw new Error(`${name} is not an number`);
 	}
 	const enumEntries = [

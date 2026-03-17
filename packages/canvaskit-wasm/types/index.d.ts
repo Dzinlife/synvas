@@ -693,9 +693,14 @@ export interface GrDirectContext extends EmbindObject<"GrDirectContext"> {
 }
 
 /**
- * Represents the context backed by a WebGPU device instance.
+ * Represents the Graphite recorder/context pair backed by a WebGPU device instance.
  */
-export type WebGPUDeviceContext = GrDirectContext;
+export interface WebGPUDeviceContext extends EmbindObject<"WebGPUDeviceContext"> {
+    /**
+     * Flushes recorded work into the Graphite context and submits it to WebGPU.
+     */
+    submit(): boolean;
+}
 
 /**
  * Represents the canvas context and swapchain backed by a WebGPU device.

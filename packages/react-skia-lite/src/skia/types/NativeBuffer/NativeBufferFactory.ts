@@ -21,13 +21,18 @@ export const isNativeBufferAddr = (
 export const isNativeBufferWeb = (
   buffer: NativeBuffer
 ): buffer is NativeBufferWeb =>
-  buffer instanceof HTMLVideoElement ||
-  buffer instanceof HTMLCanvasElement ||
-  buffer instanceof ImageBitmap ||
-  buffer instanceof OffscreenCanvas ||
+  (typeof HTMLVideoElement !== "undefined" &&
+    buffer instanceof HTMLVideoElement) ||
+  (typeof HTMLCanvasElement !== "undefined" &&
+    buffer instanceof HTMLCanvasElement) ||
+  (typeof ImageBitmap !== "undefined" && buffer instanceof ImageBitmap) ||
+  (typeof OffscreenCanvas !== "undefined" &&
+    buffer instanceof OffscreenCanvas) ||
   (typeof VideoFrame !== "undefined" && buffer instanceof VideoFrame) ||
-  buffer instanceof HTMLImageElement ||
-  buffer instanceof SVGImageElement ||
+  (typeof HTMLImageElement !== "undefined" &&
+    buffer instanceof HTMLImageElement) ||
+  (typeof SVGImageElement !== "undefined" &&
+    buffer instanceof SVGImageElement) ||
   buffer instanceof CanvasKitWebGLBuffer;
 
 export const isNativeBufferNode = (

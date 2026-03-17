@@ -49,12 +49,32 @@ export const toBase64String = (bytes: Uint8Array) => {
       index += CHUNK_SIZE;
     }
     return btoa(result);
-  }
+	}
 };
 
 export class JsiSkImage extends HostObject<Image, "Image"> implements SkImage {
   constructor(CanvasKit: CanvasKit, ref: Image) {
     super(CanvasKit, ref, "Image");
+  }
+
+  private createRasterImage() {
+    const partialInfo = this.ref.getImageInfo();
+    const info = {
+      width: partialInfo.width,
+      height: partialInfo.height,
+      alphaType: partialInfo.alphaType,
+      colorType: this.CanvasKit.ColorType.RGBA_8888,
+      colorSpace: this.CanvasKit.ColorSpace.SRGB,
+    };
+    const pixels = this.ref.readPixels(0, 0, info) as Uint8Array | null;
+    if (!pixels) {
+      throw new Error("Could not read pixels from image");
+    }
+    const image = this.CanvasKit.MakeImage(info, pixels, info.width * 4);
+    if (!image) {
+      throw new Error("Could not create image from bytes");
+    }
+    return image;
   }
 
   height() {
@@ -161,22 +181,7 @@ export class JsiSkImage extends HostObject<Image, "Image"> implements SkImage {
   }
 
   makeNonTextureImage(): SkImage {
-    // if the image is already a non-texture image, this is a no-op
-    const partialInfo = this.ref.getImageInfo();
-    const colorSpace = this.ref.getColorSpace();
-    const info = {
-      ...partialInfo,
-      colorSpace,
-    };
-    const pixels = this.ref.readPixels(0, 0, info) as Uint8Array | null;
-    if (!pixels) {
-      throw new Error("Could not read pixels from image");
-    }
-    const img = this.CanvasKit.MakeImage(info, pixels, info.width * 4);
-    if (!img) {
-      throw new Error("Could not create image from bytes");
-    }
-    return new JsiSkImage(this.CanvasKit, img);
+    return new JsiSkImage(this.CanvasKit, this.createRasterImage());
   }
 
   getNativeTextureUnstable(): unknown {

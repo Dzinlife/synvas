@@ -17,7 +17,9 @@ import {
 	loadTimelineFromObject,
 	saveTimelineToObject,
 	type TimelineJSON,
+	type TimelineTrackJSON,
 } from "core/editor/timelineLoader";
+import type { TimelineTrack } from "core/editor/timeline/types";
 import { mergeStudioOtSnapshot } from "core/studio/ot";
 import type {
 	CanvasDocument,
@@ -616,6 +618,19 @@ const cloneTimelineAudioSettings = (
 	};
 };
 
+const normalizeStoredTracks = (
+	tracks: TimelineJSON["tracks"],
+): TimelineTrack[] => {
+	return (tracks ?? []).map((track: TimelineTrackJSON, index) => ({
+		id: track.id,
+		role: track.role ?? (index === 0 ? "clip" : "overlay"),
+		hidden: track.hidden ?? false,
+		locked: track.locked ?? false,
+		muted: track.muted ?? false,
+		solo: track.solo ?? false,
+	}));
+};
+
 const stabilizeTimelineAfterOtApply = (params: {
 	elements: TimelineJSON["elements"];
 	tracks: TimelineJSON["tracks"];
@@ -626,21 +641,28 @@ const stabilizeTimelineAfterOtApply = (params: {
 }) => {
 	const {
 		elements,
-		tracks,
+		tracks = [],
 		audioTrackStates,
 		rippleEditingEnabled,
 		fps,
 		autoAttach,
 	} = params;
-	const trackLockedMap = createTrackLockedMap(tracks, audioTrackStates);
+	const normalizedTracks = normalizeStoredTracks(tracks);
+	const trackLockedMap = createTrackLockedMap(
+		normalizedTracks,
+		audioTrackStates,
+	);
 	const finalizedElements = finalizeTimelineElements(elements, {
 		rippleEditingEnabled,
 		attachments: findAttachments(elements),
 		autoAttach,
-		fps,
-		trackLockedMap,
-	});
-	const reconcileResult = reconcileTracks(finalizedElements, tracks);
+			fps,
+			trackLockedMap,
+		});
+	const reconcileResult = reconcileTracks(
+		finalizedElements,
+		normalizedTracks,
+	);
 	const nextAudioTrackStates = pruneAudioTrackStates(
 		reconcileResult.elements,
 		audioTrackStates,

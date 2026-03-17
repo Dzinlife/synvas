@@ -1,8 +1,8 @@
 diff --git a/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts b/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
-index 99bcc75317..8b8279fd57 100644
+index 99bcc75317..7364950ec5 100644
 --- a/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
 +++ b/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
-@@ -1056,7 +1056,7 @@ function verticesTests(CK: CanvasKit) {
+@@ -1056,15 +1056,16 @@ function verticesTests(CK: CanvasKit) {
      const id = vertices.uniqueID(); // $ExpectType number
  }
  
@@ -11,8 +11,10 @@ index 99bcc75317..8b8279fd57 100644
      if (!device || !canvas || !texture) {
          return;
      }
-@@ -1064,7 +1064,7 @@ function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElemen
-     const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType GrDirectContext
+ 
+-    const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType GrDirectContext
++    const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType WebGPUDeviceContext
++    const submitResult = gpuContext.submit(); // $ExpectType boolean
  
      // Texture surface.
 -    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, 800, 600, // $ExpectType Surface | null
@@ -21,7 +23,7 @@ index 99bcc75317..8b8279fd57 100644
  
      // Canvas surfaces.
 diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
-index 892a27ebe3..22129214be 100644
+index 892a27ebe3..b06dd3bb7e 100644
 --- a/modules/canvaskit/npm_build/types/index.d.ts
 +++ b/modules/canvaskit/npm_build/types/index.d.ts
 @@ -288,8 +288,8 @@ export interface CanvasKit {
@@ -44,3 +46,17 @@ index 892a27ebe3..22129214be 100644
                           opts?: WebGPUCanvasOptions): WebGPUCanvasContext | null;
  
      /**
+@@ -693,9 +693,14 @@ export interface GrDirectContext extends EmbindObject<"GrDirectContext"> {
+ }
+ 
+ /**
+- * Represents the context backed by a WebGPU device instance.
++ * Represents the Graphite recorder/context pair backed by a WebGPU device instance.
+  */
+-export type WebGPUDeviceContext = GrDirectContext;
++export interface WebGPUDeviceContext extends EmbindObject<"WebGPUDeviceContext"> {
++    /**
++     * Flushes recorded work into the Graphite context and submits it to WebGPU.
++     */
++    submit(): boolean;
++}

@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,6 +62,11 @@ export const canvasKitWebGPUTypesPatchFile = path.join(
 	"patches",
 	"skia-canvaskit-webgpu-types.patch",
 );
+export const canvasKitWebGPUBuildPatchFile = path.join(
+	packageDir,
+	"patches",
+	"skia-canvaskit-webgpu-build.patch",
+);
 export const canvasKitWebGPUFlagPatchFile = path.join(
 	packageDir,
 	"patches",
@@ -72,8 +85,29 @@ export const dockerImage =
 export const dawnBuildNinjaJobs =
 	process.env.AI_NLE_CANVASKIT_DAWN_BUILD_NINJA_JOBS ?? "1";
 
+const webGPUJsValStorePrelude =
+	'var JsValStore=globalThis.JsValStore&&typeof globalThis.JsValStore.add==="function"&&typeof globalThis.JsValStore.get==="function"&&typeof globalThis.JsValStore.remove==="function"?globalThis.JsValStore:(function(){var nextHandle=1;var values=new Map;var store={add:function(value){var handle=nextHandle++;values.set(handle,value);return handle},get:function(handle){return values.get(handle)},remove:function(handle){values.delete(handle)}};globalThis.JsValStore=store;return store})();';
+
 const formatCommand = (command, args) =>
 	[command, ...args].map((part) => JSON.stringify(part)).join(" ");
+
+const ensureWebGPUJsValStoreInterop = (entryPath) => {
+	if (!existsSync(entryPath)) {
+		return;
+	}
+	const source = readFileSync(entryPath, "utf8");
+	if (source.includes("var JsValStore=globalThis.JsValStore")) {
+		return;
+	}
+	const runtimePrelude = "var IsDebug=false;";
+	if (!source.includes(runtimePrelude)) {
+		throw new Error(`Could not find WebGPU runtime prelude in ${entryPath}`);
+	}
+	writeFileSync(
+		entryPath,
+		source.replace(runtimePrelude, `${runtimePrelude}${webGPUJsValStorePrelude}`),
+	);
+};
 
 export const run = (command, args, options = {}) => {
 	console.log(`$ ${formatCommand(command, args)}`);
@@ -178,6 +212,10 @@ export const applySkiaPatch = () => {
 				"utf8",
 			).includes("canvas: HTMLCanvasElement | OffscreenCanvas,") &&
 			readFileSync(
+				path.join(skiaDir, "modules", "canvaskit", "npm_build", "types", "index.d.ts"),
+				"utf8",
+			).includes('export interface WebGPUDeviceContext extends EmbindObject<"WebGPUDeviceContext">') &&
+			readFileSync(
 				path.join(
 					skiaDir,
 					"modules",
@@ -187,14 +225,78 @@ export const applySkiaPatch = () => {
 					"canvaskit-wasm-tests.ts",
 				),
 				"utf8",
-			).includes('texture, "bgra8unorm", 800, 600,')
+			).includes('texture, "bgra8unorm", 800, 600,') &&
+			readFileSync(
+				path.join(
+					skiaDir,
+					"modules",
+					"canvaskit",
+					"npm_build",
+					"types",
+					"canvaskit-wasm-tests.ts",
+				),
+				"utf8",
+			).includes("const submitResult = gpuContext.submit();")
+		);
+	});
+	applyGitPatch("CanvasKit WebGPU build", canvasKitWebGPUBuildPatchFile, () => {
+		return (
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"), "utf8").includes(
+				'"CK_ENABLE_WEBGPU"',
+			) &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"), "utf8").includes(
+				'public_configs = [ "../../third_party/dawn:dawn_api_config" ]',
+			) &&
+			!readFileSync(path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"), "utf8").includes(
+				'"-sUSE_WEBGPU=1"',
+			) &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "compile.sh"), "utf8").includes(
+				'ENABLE_GANESH="true"\n  ENABLE_WEBGPU="true"\n  ENABLE_GRAPHITE="true"',
+			) &&
+			readFileSync(
+				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
+				"utf8",
+			).includes('class WebGPUDeviceContext {') &&
+			readFileSync(
+				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
+				"utf8",
+			).includes('"_MakeWebGPUDeviceContext"') &&
+			readFileSync(
+				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
+				"utf8",
+			).includes("canvaskit_import_webgpu_texture") &&
+			readFileSync(
+				path.join(skiaDir, "third_party", "dawn", "BUILD.gn"),
+				"utf8",
+			).includes('libs += [ "$root_out_dir/cmake_dawn/src/emdawnwebgpu/libemdawnwebgpu_c.a" ]') &&
+			readFileSync(path.join(skiaDir, "third_party", "dawn", "BUILD.gn"), "utf8").includes(
+				'$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/include',
+			)
 		);
 	});
 	applyGitPatch("CanvasKit WebGPU flag", canvasKitWebGPUFlagPatchFile, () => {
 		return readFileSync(
 			path.join(skiaDir, "modules", "canvaskit", "webgpu.js"),
 			"utf8",
-		).includes("CanvasKit.webgpu = true;");
+		).includes("var context = this._MakeWebGPUDeviceContext();") &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"texture.usage,",
+			) &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"JsValStore.add(texture)",
+			) &&
+			!readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"this.JsValStore.add(texture)",
+			) &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"WebGPU.TextureFormat.indexOf(textureFormat)",
+			) &&
+			!readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"this.WebGPU.TextureFormat.indexOf(textureFormat)",
+			) &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"CanvasKit.Surface.prototype.assignCurrentSwapChainTexture = function() {\n        return false;",
+			);
 	});
 	applyGitPatch("Skia Dawn build jobs", dawnPatchFile, () => {
 		return readFileSync(path.join(skiaDir, "third_party", "dawn", "build_dawn.py"), "utf8")
@@ -228,11 +330,23 @@ export const applySkiaPatch = () => {
 			readFileSync(
 				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnBuffer.cpp"),
 				"utf8",
-			).includes("bool isDebugLog = false;") &&
+			).includes("bool is_map_succeeded(wgpu::MapAsyncStatus status)") &&
 			readFileSync(
 				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnCaps.cpp"),
 				"utf8",
-			).includes("#if defined(__EMSCRIPTEN__)\n        info->fFlags &= ~FormatInfo::kStorage_Flag;")
+			).includes("wgpu::Limits limits = {};") &&
+			readFileSync(
+				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnCommandBuffer.cpp"),
+				"utf8",
+			).includes("wgpu::PassTimestampWrites wgpuTimestampWrites;") &&
+			readFileSync(
+				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnErrorChecker.cpp"),
+				"utf8",
+			).includes("wgpu::CallbackMode::AllowSpontaneous") &&
+			readFileSync(
+				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnGraphiteUtils.cpp"),
+				"utf8",
+			).includes("wgpu::ShaderSourceWGSL wgslDesc;")
 		);
 	});
 };
@@ -273,6 +387,21 @@ export const syncPackageArtifacts = () => {
 	rmSync(path.join(packageDir, "types"), { recursive: true, force: true });
 	cpSync(sourceBinDir, path.join(packageDir, "bin"), { recursive: true });
 	cpSync(sourceTypesDir, path.join(packageDir, "types"), { recursive: true });
+	const packageBinDir = path.join(packageDir, "bin");
+	const packageDefaultBinDir = path.join(packageBinDir, "full");
+	const packageWebGPUJsFile = path.join(packageBinDir, "full-webgpu", "canvaskit.js");
+	const packageRootJsFile = path.join(packageBinDir, "canvaskit.js");
+	const packageRootWasmFile = path.join(packageBinDir, "canvaskit.wasm");
+	ensureWebGPUJsValStoreInterop(packageWebGPUJsFile);
+	if (!existsSync(packageRootJsFile) && existsSync(path.join(packageDefaultBinDir, "canvaskit.js"))) {
+		cpSync(path.join(packageDefaultBinDir, "canvaskit.js"), packageRootJsFile);
+	}
+	if (
+		!existsSync(packageRootWasmFile) &&
+		existsSync(path.join(packageDefaultBinDir, "canvaskit.wasm"))
+	) {
+		cpSync(path.join(packageDefaultBinDir, "canvaskit.wasm"), packageRootWasmFile);
+	}
 	rmSync(
 		path.join(
 			repoRoot,

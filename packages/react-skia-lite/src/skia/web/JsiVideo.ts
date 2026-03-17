@@ -5,6 +5,7 @@ import type { CanvasKitWebGLBuffer, Video, ImageFactory } from "../types";
 import { CanvasKitWebGLBufferImpl } from "./CanvasKitWebGLBufferImpl";
 import { JsiSkImageFactory } from "./JsiSkImageFactory";
 import { throwNotImplementedOnRNWeb } from "./Host";
+import { getSkiaRenderBackend } from "./renderBackend";
 
 export const createVideo = async (
   CanvasKit: CanvasKit,
@@ -47,9 +48,11 @@ export class JsiVideo implements Video {
   }
 
   setSurface(surface: Surface) {
-    // If we have the surface, we can use the WebGL buffer which is slightly faster
-    // This is because WebGL cannot be shared across contextes.
-    // This can be removed with WebGPU
+    if (getSkiaRenderBackend().kind !== "webgl") {
+      this.webglBuffer = null;
+      return;
+    }
+    // 只有 WebGL 需要借助共享纹理路径，Graphite/WebGPU 下直接走光栅图像。
     this.webglBuffer = new CanvasKitWebGLBufferImpl(surface, this.videoElement);
   }
 

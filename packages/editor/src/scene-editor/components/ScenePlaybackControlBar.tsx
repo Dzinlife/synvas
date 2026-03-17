@@ -1,5 +1,5 @@
 import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import { EllipsisIcon, X } from "lucide-react";
+import { EllipsisIcon } from "lucide-react";
 import type React from "react";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -33,7 +33,7 @@ interface ScenePlaybackControlBarProps {
 }
 
 const ScenePlaybackControlBar: React.FC<ScenePlaybackControlBarProps> = ({
-	onExitFocus,
+	onExitFocus: _onExitFocus,
 }) => {
 	const runtime = useEditorRuntime();
 	const activeTimelineRuntime = useActiveTimelineRuntime();

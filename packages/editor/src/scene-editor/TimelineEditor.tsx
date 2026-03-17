@@ -10,7 +10,6 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { ProgressiveBlur } from "@/components/ui/progressive-blur";
 import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/projects/projectStore";
 import { useProjectAssets } from "@/projects/useProjectAssets";

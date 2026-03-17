@@ -116,14 +116,23 @@ class CanvasSurfaceRenderer implements Renderer {
 	}
 
 	private ensureCurrentSwapChainTexture() {
-		if (
-			this.backend.kind !== "webgpu" ||
-			!this.surface ||
-			assignCurrentSkiaSwapChainTexture(this.surface)
-		) {
+		if (this.backend.kind !== "webgpu") {
+			if (!this.surface || assignCurrentSkiaSwapChainTexture(this.surface)) {
+				return;
+			}
+			this.onResize();
 			return;
 		}
-		this.onResize();
+		this.disposeSurface();
+		const surface = createSkiaCanvasSurface(
+			CanvasKit,
+			this.canvas,
+			this.backend,
+		);
+		if (!surface) {
+			throw new Error("Could not create WebGPU surface");
+		}
+		this.surface = surface;
 	}
 
 	draw(picture: SkPicture) {

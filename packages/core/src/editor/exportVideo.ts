@@ -614,28 +614,33 @@ export const exportTimelineAsVideoCore = async (
 		await output.start();
 		throwIfAborted(options.signal);
 
-		const renderBackend = getSkiaRenderBackend();
-		const usesFrameBoundCanvasSurface = renderBackend.kind === "webgpu";
-		let skiaCanvas: ReturnType<JsiSkSurface["getCanvas"]> | null = null;
-		const createActiveSurface = () => {
+			const renderBackend = getSkiaRenderBackend();
+			const usesFrameBoundCanvasSurface = renderBackend.kind === "webgpu";
+			let skiaCanvas: ReturnType<JsiSkSurface["getCanvas"]> | null = null;
+			const createActiveSurface = () => {
 			const surfaceResult = createSurfaceForExport(
 				exportCanvas,
 				width,
 				height,
 			);
-			if (!surfaceResult) {
-				throw new Error(
-					`导出失败：无法创建 ${renderBackend.kind} Surface`,
-				);
-			}
-			surface = surfaceResult.surface;
-			renderCanvas = surfaceResult.canvas;
-			skiaCanvas = surface.getCanvas();
-			if (!renderCanvas) {
-				throw new Error("导出失败：无法获取导出画布");
-			}
-		};
-		createActiveSurface();
+				if (!surfaceResult) {
+					throw new Error(
+						`导出失败：无法创建 ${renderBackend.kind} Surface`,
+					);
+				}
+				const nextSurface = surfaceResult.surface;
+				const nextRenderCanvas = surfaceResult.canvas;
+				const nextSkiaCanvas = nextSurface.getCanvas();
+				if (!nextRenderCanvas) {
+					throw new Error("导出失败：无法获取导出画布");
+				}
+				return {
+					surface: nextSurface,
+					renderCanvas: nextRenderCanvas,
+					skiaCanvas: nextSkiaCanvas,
+				};
+			};
+			({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
 
 		const buildFrameSnapshot = (targetFrame: number) => {
 			return options.buildSkiaFrameSnapshot({
@@ -690,15 +695,14 @@ export const exportTimelineAsVideoCore = async (
 					throw new Error(
 						`导出失败：无法构建第 ${frame} 帧 picture（已中止导出）`,
 					);
-				}
-				if (usesFrameBoundCanvasSurface) {
-					surface?.dispose();
-					surface = null;
-					createActiveSurface();
-				}
-				if (!surface || !skiaCanvas) {
-					throw new Error("导出失败：无法创建当前帧 Surface");
-				}
+					}
+					if (usesFrameBoundCanvasSurface) {
+						surface?.dispose();
+						({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
+					}
+					if (!surface || !skiaCanvas) {
+						throw new Error("导出失败：无法创建当前帧 Surface");
+					}
 				skiaCanvas.drawPicture(picture);
 				surface.flush();
 				throwIfAborted(options.signal);

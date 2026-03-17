@@ -1,13 +1,121 @@
 diff --git a/modules/canvaskit/webgpu.js b/modules/canvaskit/webgpu.js
-index 0e937d41b4..bfcae1195e 100644
+index 0e937d41b4..879c56db23 100644
 --- a/modules/canvaskit/webgpu.js
 +++ b/modules/canvaskit/webgpu.js
-@@ -4,6 +4,8 @@
+@@ -4,6 +4,10 @@
  (function(CanvasKit){
      CanvasKit._extraInitializations = CanvasKit._extraInitializations || [];
      CanvasKit._extraInitializations.push(function() {
 +      CanvasKit.webgpu = true;
 +
++      var originalSurfaceFlush = CanvasKit.Surface.prototype.flush;
++
        CanvasKit.MakeGPUDeviceContext = function(device) {
          if (!device) {
            return null;
+@@ -12,8 +16,14 @@
+         // This allows native code to access this device by calling
+         // `emscripten_webgpu_get_device().`
+         CanvasKit.preinitializedWebGPUDevice = device;
+-        var context = this._MakeGrContext();
++        var context = this._MakeWebGPUDeviceContext();
++        if (!context) {
++          return null;
++        }
+         context._device = device;
++        context.submit = function() {
++          return this._submit();
++        };
+ 
+         return context;
+       };
+@@ -64,6 +74,9 @@
+                                                  context.getCurrentTexture(),
+                                                  canvasCtx._textureFormat,
+                                                  width, height, colorSpace);
++        if (!surface) {
++          return null;
++        }
+         surface._canvasContext = canvasCtx;
+         return surface;
+       };
+@@ -81,25 +94,29 @@
+           // (see
+           // https://github.com/emscripten-core/emscripten/blob/0e63f74f36b06849ef1c777b130783a43316ade0/src/library_html5_webgpu.js
+           // for reference)
+-          return this._MakeGPUTextureSurface(
++          var surface = this._MakeGPUTextureSurface(
+               devCtx,
+               JsValStore.add(texture),
+               WebGPU.TextureFormat.indexOf(textureFormat),
++              texture.usage,
+               width, height,
+               colorSpace);
++          if (!surface) {
++            return null;
++          }
++          surface._deviceContext = devCtx;
++          return surface;
+       };
+ 
+       CanvasKit.Surface.prototype.assignCurrentSwapChainTexture = function() {
+-        // This feature is only supported for a Surface that was created via MakeGPUCanvasSurface.
+-        if (!this._canvasContext) {
+-          console.log('Surface is not bound to a canvas context');
+-          return false;
++        return false;
++      };
++
++      CanvasKit.Surface.prototype.flush = function(dirtyRect) {
++        originalSurfaceFlush.call(this, dirtyRect);
++        if (this._deviceContext) {
++          this._deviceContext.submit();
+         }
+-        let ctx = this._canvasContext._inner;
+-        return this._replaceBackendTexture(
+-            CanvasKit.JsValStore.add(ctx.getCurrentTexture()),
+-            CanvasKit.WebGPU.TextureFormat.indexOf(this._canvasContext._textureFormat),
+-            ctx.canvas.width, ctx.canvas.height);
+       };
+ 
+       CanvasKit.Surface.prototype.requestAnimationFrame = function(callback, dirtyRect) {
+@@ -108,10 +125,15 @@
+         }
+ 
+         return requestAnimationFrame(function() {
+-          // Replace the render target of the Surface with the current swapchain surface if this is
+-          // bound to a canvas context.
+-          if (this._canvasContext && !this.assignCurrentSwapChainTexture()) {
+-            console.log('failed to replace GPU backend texture');
++          if (this._canvasContext) {
++            var surface = CanvasKit.MakeGPUCanvasSurface(this._canvasContext);
++            if (!surface) {
++              console.log('failed to acquire current GPU canvas texture');
++              return;
++            }
++            callback(surface.getCanvas());
++            surface.flush(dirtyRect);
++            surface.dispose();
+             return;
+           }
+           callback(this.getCanvas());
+@@ -126,10 +148,15 @@
+         }
+ 
+         requestAnimationFrame(function() {
+-          // Replace the render target of the Surface with the current swapchain surface if this is
+-          // bound to a canvas context.
+-          if (this._canvasContext && !this.assignCurrentSwapChainTexture()) {
+-            console.log('failed to replace GPU backend texture');
++          if (this._canvasContext) {
++            var surface = CanvasKit.MakeGPUCanvasSurface(this._canvasContext);
++            if (!surface) {
++              console.log('failed to acquire current GPU canvas texture');
++              return;
++            }
++            callback(surface.getCanvas());
++            surface.flush(dirtyRect);
++            surface.dispose();
+             return;
+           }
+           callback(this.getCanvas());

@@ -13,6 +13,8 @@ import viteTsConfigPaths from "vite-tsconfig-paths";
 // import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const canvaskitPackageDir = path.resolve(__dirname, "../canvaskit-wasm");
+const canvaskitBrokenWorkspaceDir = path.resolve(__dirname, "../../canvaskit-wasm");
 
 export default defineConfig(() => {
 	return {
@@ -41,14 +43,47 @@ export default defineConfig(() => {
 		],
 
 		resolve: {
-			alias: {
-				"@nle/editor": path.resolve(__dirname, "../editor/src"),
+			alias: [
+				{
+					find: "@nle/editor",
+					replacement: path.resolve(__dirname, "../editor/src"),
+				},
 				// react-skia-lite 的 dist 目前不完整，这里先统一走源码。
-				"react-skia-lite": path.resolve(__dirname, "../react-skia-lite/src"),
-				// 明确指向 workspace 包，避免 SSR 解析子路径 wasm 时丢失 packages 前缀。
-				"canvaskit-wasm": path.resolve(__dirname, "../canvaskit-wasm"),
-				core: path.resolve(__dirname, "../core/src"),
-			},
+				{
+					find: "react-skia-lite",
+					replacement: path.resolve(__dirname, "../react-skia-lite/src"),
+				},
+				// SSR 有时会把 workspace 包子路径误解析到仓库根目录，统一拉回真实包目录。
+				{
+					find: canvaskitBrokenWorkspaceDir,
+					replacement: canvaskitPackageDir,
+				},
+				{
+					find: "canvaskit-wasm/bin/full/canvaskit.wasm",
+					replacement: path.resolve(
+						canvaskitPackageDir,
+						"bin/full/canvaskit.wasm",
+					),
+				},
+				{
+					find: "canvaskit-wasm/bin/full-webgl/canvaskit.wasm",
+					replacement: path.resolve(
+						canvaskitPackageDir,
+						"bin/full-webgl/canvaskit.wasm",
+					),
+				},
+				{
+					find: "canvaskit-wasm/bin/full-webgpu/canvaskit.wasm",
+					replacement: path.resolve(
+						canvaskitPackageDir,
+						"bin/full-webgpu/canvaskit.wasm",
+					),
+				},
+				{
+					find: "core",
+					replacement: path.resolve(__dirname, "../core/src"),
+				},
+			],
 		},
 
 		optimizeDeps: {

@@ -1,4 +1,11 @@
-import type { CanvasKit, Matrix3x3, Path } from "canvaskit-wasm";
+import type {
+  CanvasKit,
+  Matrix3x3,
+  Path,
+  PathBuilder,
+  PathOp as CanvasKitPathOp,
+  StrokeOpts as CanvasKitStrokeOpts,
+} from "canvaskit-wasm";
 
 import { PathVerb } from "../types";
 import type {
@@ -31,9 +38,43 @@ const CommandCount = {
 
 const pinT = (t: number) => Math.min(Math.max(t, 0), 1);
 
-export class JsiSkPath extends HostObject<Path, "Path"> implements SkPath {
+type MutablePath = Path &
+	Pick<
+		PathBuilder,
+		| "addArc"
+		| "addOval"
+		| "addPath"
+		| "addCircle"
+		| "addRect"
+		| "addRRect"
+		| "arcToOval"
+		| "arcToRotated"
+		| "arcToTangent"
+		| "close"
+		| "conicTo"
+		| "cubicTo"
+		| "lineTo"
+		| "moveTo"
+		| "offset"
+		| "quadTo"
+		| "rArcTo"
+		| "rConicTo"
+		| "rCubicTo"
+		| "rLineTo"
+		| "rMoveTo"
+		| "rQuadTo"
+		| "transform"
+	> & {
+		addPoly(points: number[], close: boolean): void;
+		isVolatile(): boolean;
+		rewind(): void;
+		reset(): void;
+		setIsVolatile(isVolatile: boolean): void;
+	};
+
+export class JsiSkPath extends HostObject<MutablePath, "Path"> implements SkPath {
   constructor(CanvasKit: CanvasKit, ref: Path) {
-    super(CanvasKit, ref, "Path");
+    super(CanvasKit, ref as MutablePath, "Path");
   }
 
   addPath(src: SkPath, matrix?: SkMatrix, extend = false) {
@@ -92,7 +133,11 @@ export class JsiSkPath extends HostObject<Path, "Path"> implements SkPath {
 
   makeAsWinding() {
     const result = this.ref.makeAsWinding();
-    return result === null ? result : this;
+    if (result === null) {
+      return result;
+    }
+    this.ref = result as MutablePath;
+    return this;
   }
 
   offset(dx: number, dy: number) {
@@ -156,19 +201,25 @@ export class JsiSkPath extends HostObject<Path, "Path"> implements SkPath {
   }
 
   stroke(opts?: StrokeOpts) {
-    const result = this.ref.stroke(
+    const strokeOptions =
       opts === undefined
         ? undefined
-        : {
+        : ({
             width: opts.width,
             // eslint-disable-next-line camelcase
             miter_limit: opts.width,
             precision: opts.width,
             join: optEnum(this.CanvasKit, "StrokeJoin", opts.join),
             cap: optEnum(this.CanvasKit, "StrokeCap", opts.cap),
-          }
+          } as unknown as CanvasKitStrokeOpts);
+    const result = this.ref.makeStroked(
+      strokeOptions
     );
-    return result === null ? result : this;
+    if (result === null) {
+      return result;
+    }
+    this.ref = result as MutablePath;
+    return this;
   }
 
   close() {
@@ -257,7 +308,12 @@ export class JsiSkPath extends HostObject<Path, "Path"> implements SkPath {
   }
 
   dash(on: number, off: number, phase: number) {
-    return this.ref.dash(on, off, phase);
+    const dashed = this.ref.makeDashed(on, off, phase);
+    if (dashed === null) {
+      return false;
+    }
+    this.ref = dashed as MutablePath;
+    return true;
   }
 
   equals(other: SkPath) {
@@ -312,14 +368,24 @@ export class JsiSkPath extends HostObject<Path, "Path"> implements SkPath {
   }
 
   op(path: SkPath, op: PathOp) {
-    return this.ref.op(
+    const result = this.ref.makeCombined(
       JsiSkPath.fromValue(path),
-      getEnum(this.CanvasKit, "PathOp", op)
+      getEnum(this.CanvasKit, "PathOp", op) as CanvasKitPathOp
     );
+    if (result === null) {
+      return false;
+    }
+    this.ref = result as MutablePath;
+    return true;
   }
 
   simplify() {
-    return this.ref.simplify();
+    const result = this.ref.makeSimplified();
+    if (result === null) {
+      return false;
+    }
+    this.ref = result as MutablePath;
+    return true;
   }
 
   toSVGString() {
@@ -332,8 +398,12 @@ export class JsiSkPath extends HostObject<Path, "Path"> implements SkPath {
     if (startT === 0 && stopT === 1) {
       return this;
     }
-    const result = this.ref.trim(startT, stopT, isComplement);
-    return result === null ? result : this;
+    const result = this.ref.makeTrimmed(startT, stopT, isComplement);
+    if (result === null) {
+      return result;
+    }
+    this.ref = result as MutablePath;
+    return this;
   }
 
   transform(m: InputMatrix) {
@@ -370,8 +440,9 @@ export class JsiSkPath extends HostObject<Path, "Path"> implements SkPath {
       return null;
     }
     if (output) {
-      (output as JsiSkPath).ref = path;
-      return output;
+      const outputPath = output as unknown as JsiSkPath;
+      outputPath.ref = path as MutablePath;
+      return outputPath;
     } else {
       return new JsiSkPath(this.CanvasKit, path);
     }

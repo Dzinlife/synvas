@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { packageDir } from "./shared.mjs";
 
@@ -58,6 +59,9 @@ const assertWebGPUBundle = (canvasKit) => {
 	if (canvasKit.webgpu !== true) {
 		throw new Error("Expected CanvasKit.webgpu to be true.");
 	}
+	if (canvasKit.gpu !== true) {
+		throw new Error("Expected CanvasKit.gpu to be true.");
+	}
 	for (const method of [
 		"MakeGPUDeviceContext",
 		"MakeGPUCanvasContext",
@@ -67,6 +71,32 @@ const assertWebGPUBundle = (canvasKit) => {
 		if (typeof canvasKit[method] !== "function") {
 			throw new Error(`CanvasKit.${method} is not available.`);
 		}
+	}
+	for (const method of ["_MakeWebGPUDeviceContext", "_MakeGPUTextureSurface"]) {
+		if (typeof canvasKit[method] !== "function") {
+			throw new Error(`CanvasKit.${method} is not available.`);
+		}
+	}
+};
+
+const assertWebGPUHelperInterop = (entryPath) => {
+	const source = readFileSync(entryPath, "utf8");
+	if (!source.includes("var JsValStore=globalThis.JsValStore")) {
+		throw new Error("Expected WebGPU bundle to inject a module-scoped JsValStore.");
+	}
+	if (source.includes("this.JsValStore.add(texture)")) {
+		throw new Error("Expected WebGPU helper to use module-scoped JsValStore.");
+	}
+	if (source.includes("this.WebGPU.TextureFormat.indexOf(textureFormat)")) {
+		throw new Error("Expected WebGPU helper to use module-scoped WebGPU enum table.");
+	}
+	if (!source.includes("JsValStore.add(texture)")) {
+		throw new Error("Expected WebGPU helper to reference JsValStore.add(texture).");
+	}
+	if (!source.includes("WebGPU.TextureFormat.indexOf(textureFormat)")) {
+		throw new Error(
+			"Expected WebGPU helper to reference WebGPU.TextureFormat.indexOf(textureFormat).",
+		);
 	}
 };
 
@@ -112,3 +142,4 @@ const fullWebGPUCanvasKit = await loadCanvasKit(
 assertPathFactory(fullWebGPUCanvasKit);
 assertGlyphPathBindings(fullWebGPUCanvasKit);
 assertWebGPUBundle(fullWebGPUCanvasKit);
+assertWebGPUHelperInterop(fullWebGPUEntry);

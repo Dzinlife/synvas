@@ -13,9 +13,47 @@ import { JsiSkData } from "./JsiSkData";
 import { JsiSkImage } from "./JsiSkImage";
 import type { JsiSkSurface } from "./JsiSkSurface";
 
+const isHTMLImageElement = (
+	value: CanvasImageSource | NativeBuffer,
+): value is HTMLImageElement =>
+	typeof HTMLImageElement !== "undefined" && value instanceof HTMLImageElement;
+
+const isHTMLVideoElement = (
+	value: CanvasImageSource | NativeBuffer,
+): value is HTMLVideoElement =>
+	typeof HTMLVideoElement !== "undefined" && value instanceof HTMLVideoElement;
+
+const isImageBitmap = (
+	value: CanvasImageSource | NativeBuffer,
+): value is ImageBitmap =>
+	typeof ImageBitmap !== "undefined" && value instanceof ImageBitmap;
+
 export class JsiSkImageFactory extends Host implements ImageFactory {
 	constructor(CanvasKit: CanvasKit) {
 		super(CanvasKit);
+	}
+
+	private replaceImageRef(image: JsiSkImage, nextImage: Image) {
+		const previousImage = image.ref;
+		image.ref = nextImage;
+		if (previousImage === nextImage) {
+			return image;
+		}
+		try {
+			previousImage?.delete?.();
+		} catch {}
+		return image;
+	}
+
+	private makeImageFromCanvasImageSource(source: CanvasImageSource) {
+		if (
+			isHTMLImageElement(source) ||
+			isHTMLVideoElement(source) ||
+			isImageBitmap(source)
+		) {
+			return this.CanvasKit.MakeLazyImageFromTextureSource(source);
+		}
+		return this.CanvasKit.MakeImageFromCanvasImageSource(source);
 	}
 
 	MakeNull() {
@@ -39,32 +77,54 @@ export class JsiSkImageFactory extends Host implements ImageFactory {
 		}
 		if (!surface) {
 			let img: Image;
-			if (
-				buffer instanceof HTMLImageElement ||
-				buffer instanceof HTMLVideoElement ||
-				buffer instanceof ImageBitmap
-			) {
-				img = this.CanvasKit.MakeLazyImageFromTextureSource(buffer);
-			} else if (buffer instanceof CanvasKitWebGLBuffer) {
+			if (buffer instanceof CanvasKitWebGLBuffer) {
 				img = (
 					buffer as CanvasKitWebGLBuffer as CanvasKitWebGLBufferImpl
 				).toImage();
 			} else {
-				img = this.CanvasKit.MakeImageFromCanvasImageSource(buffer);
+				img = this.makeImageFromCanvasImageSource(buffer as CanvasImageSource);
 			}
 			return new JsiSkImage(this.CanvasKit, img);
-		} else if (!image) {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const img = (surface as any).makeImageFromTextureSource(buffer) as Image;
-			return new JsiSkImage(this.CanvasKit, img);
-		} else {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const img = (surface as any).updateTextureFromSource(
-				image,
-				buffer,
-			) as Image;
+		}
+		if (buffer instanceof CanvasKitWebGLBuffer) {
+			const nextImage = (
+				buffer as CanvasKitWebGLBuffer as CanvasKitWebGLBufferImpl
+			).toImage();
+			if (image) {
+				return this.replaceImageRef(image, nextImage);
+			}
+			return new JsiSkImage(this.CanvasKit, nextImage);
+		}
+		const textureSourceSurface = surface.ref as unknown as {
+			makeImageFromTextureSource?: (source: CanvasImageSource) => Image;
+			updateTextureFromSource?: (
+				image: Image,
+				source: CanvasImageSource,
+			) => Image;
+		};
+		if (
+			typeof textureSourceSurface.makeImageFromTextureSource !== "function" ||
+			typeof textureSourceSurface.updateTextureFromSource !== "function"
+		) {
+			const nextImage = this.makeImageFromCanvasImageSource(
+				buffer as CanvasImageSource,
+			);
+			if (image) {
+				return this.replaceImageRef(image, nextImage);
+			}
+			return new JsiSkImage(this.CanvasKit, nextImage);
+		}
+		if (!image) {
+			const img = textureSourceSurface.makeImageFromTextureSource(
+				buffer as CanvasImageSource,
+			);
 			return new JsiSkImage(this.CanvasKit, img);
 		}
+		const img = textureSourceSurface.updateTextureFromSource(
+			image.ref,
+			buffer as CanvasImageSource,
+		);
+		return new JsiSkImage(this.CanvasKit, img);
 	}
 
 	MakeImageFromEncoded(encoded: SkData) {
