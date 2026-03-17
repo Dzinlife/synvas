@@ -9,7 +9,15 @@ import { type SkImage } from "react-skia-lite";
 import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
 import { type AssetHandle, assetStore } from "./AssetStore";
 
-const DEFAULT_MAX_CACHE_SIZE = 500;
+const DEFAULT_MAX_CACHE_BYTES = 384 * 1024 * 1024;
+const ESTIMATED_FRAME_BYTES_PER_PIXEL = 4;
+
+const estimateFrameCacheBytes = (image: SkImage) => {
+	// 视频帧当前统一按 RGBA 纹理估算缓存占用，避免高分辨率素材按帧数缓存时挤爆显存。
+	const width = Math.max(1, Math.ceil(image.width()));
+	const height = Math.max(1, Math.ceil(image.height()));
+	return width * height * ESTIMATED_FRAME_BYTES_PER_PIXEL;
+};
 
 export type VideoAsset = {
 	uri: string;
@@ -19,7 +27,7 @@ export type VideoAsset = {
 	createVideoSink: () => CanvasSink;
 	frameCache: Map<number, SkImage>;
 	cacheAccessOrder: number[];
-	maxCacheSize: number;
+	maxCacheBytes: number;
 	getCachedFrame: (timestamp: number) => SkImage | undefined;
 	storeFrame: (timestamp: number, image: SkImage) => void;
 	clearCache: () => void;
@@ -158,9 +166,11 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 	const videoSink = buildVideoSink();
 
 	const frameCache = new Map<number, SkImage>();
+	const frameCacheBytes = new Map<number, number>();
 	const cacheAccessOrder: number[] = [];
 	// 记录仍在使用的帧，避免缓存回收时误释放
 	const pinnedFrames = new Map<SkImage, number>();
+	let currentCacheBytes = 0;
 
 	const updateCacheAccess = (key: number) => {
 		const index = cacheAccessOrder.indexOf(key);
@@ -170,13 +180,13 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 		cacheAccessOrder.push(key);
 	};
 
-	const maxCacheSize = DEFAULT_MAX_CACHE_SIZE;
+	const maxCacheBytes = DEFAULT_MAX_CACHE_BYTES;
 
 	const cleanupCache = () => {
-		if (frameCache.size <= maxCacheSize) return;
+		if (currentCacheBytes <= maxCacheBytes) return;
 		let guard = cacheAccessOrder.length;
 		while (
-			frameCache.size > maxCacheSize &&
+			currentCacheBytes > maxCacheBytes &&
 			cacheAccessOrder.length > 0 &&
 			guard > 0
 		) {
@@ -190,6 +200,8 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 				continue;
 			}
 			frameCache.delete(oldestKey);
+			currentCacheBytes -= frameCacheBytes.get(oldestKey) ?? 0;
+			frameCacheBytes.delete(oldestKey);
 			image.dispose();
 		}
 	};
@@ -217,7 +229,7 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 		createVideoSink: buildVideoSink,
 		frameCache,
 		cacheAccessOrder,
-		maxCacheSize,
+		maxCacheBytes,
 		getCachedFrame: (timestamp) => {
 			const cached = frameCache.get(timestamp);
 			if (cached) {
@@ -227,7 +239,10 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 		},
 		storeFrame: (timestamp, image) => {
 			if (!frameCache.has(timestamp)) {
+				const cacheBytes = estimateFrameCacheBytes(image);
 				frameCache.set(timestamp, image);
+				frameCacheBytes.set(timestamp, cacheBytes);
+				currentCacheBytes += cacheBytes;
 				updateCacheAccess(timestamp);
 				cleanupCache();
 			}
@@ -237,6 +252,8 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 				image.dispose();
 			}
 			frameCache.clear();
+			frameCacheBytes.clear();
+			currentCacheBytes = 0;
 			cacheAccessOrder.length = 0;
 			pinnedFrames.clear();
 		},
