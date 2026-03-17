@@ -1,8 +1,11 @@
 import type { TimelineElement } from "core/element/types";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { StudioRuntimeManager, TimelineRuntime } from "@/scene-editor/runtime/types";
-import { buildKonvaTree } from "@/scene-editor/preview/buildSkiaTree";
+import { resolveInteractiveTimelineElements } from "@/scene-editor/preview/buildSkiaTree";
+import type {
+	StudioRuntimeManager,
+	TimelineRuntime,
+} from "@/scene-editor/runtime/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 
 interface UseFocusSceneTimelineElementsOptions {
@@ -12,8 +15,8 @@ interface UseFocusSceneTimelineElementsOptions {
 
 export interface FocusSceneTimelineElementsResult {
 	runtime: TimelineRuntime | null;
-	renderElements: TimelineElement[];
-	renderElementsRef: React.MutableRefObject<TimelineElement[]>;
+	interactiveElements: TimelineElement[];
+	interactiveElementsRef: React.MutableRefObject<TimelineElement[]>;
 	sourceWidth: number;
 	sourceHeight: number;
 }
@@ -47,54 +50,56 @@ export const useFocusSceneTimelineElements = ({
 		return ensureTimelineRuntime(toSceneTimelineRef(sceneId));
 	}, [runtimeManager, sceneId]);
 	const timelineStore = runtime?.timelineStore ?? null;
-	const renderElementsRef = useRef<TimelineElement[]>([]);
-	const [renderElements, setRenderElements] = useState<TimelineElement[]>([]);
+	const interactiveElementsRef = useRef<TimelineElement[]>([]);
+	const [interactiveElements, setInteractiveElements] = useState<
+		TimelineElement[]
+	>([]);
 	const [canvasSize, setCanvasSize] = useState(() => {
 		return timelineStore?.getState().canvasSize ?? { width: 1, height: 1 };
 	});
 
 	useEffect(() => {
 		if (!timelineStore) {
-			renderElementsRef.current = [];
-			setRenderElements([]);
+			interactiveElementsRef.current = [];
+			setInteractiveElements([]);
 			return;
 		}
-		const updateVisibleElements = () => {
+		const updateInteractiveElements = () => {
 			const state = timelineStore.getState();
-			const ordered = buildKonvaTree({
+			const ordered = resolveInteractiveTimelineElements({
 				elements: state.elements,
 				displayTime: state.getRenderTime(),
 				tracks: state.tracks,
 				sortByTrackIndex,
 			});
-			const previous = renderElementsRef.current;
+			const previous = interactiveElementsRef.current;
 			if (
 				previous.length !== ordered.length ||
 				ordered.some((element, index) => previous[index] !== element)
 			) {
-				renderElementsRef.current = ordered;
-				setRenderElements(ordered);
+				interactiveElementsRef.current = ordered;
+				setInteractiveElements(ordered);
 			}
 		};
 
 		const unsubscribeCurrentTime = timelineStore.subscribe(
 			(state) => state.currentTime,
-			updateVisibleElements,
+			updateInteractiveElements,
 		);
 		const unsubscribePreviewTime = timelineStore.subscribe(
 			(state) => state.previewTime,
-			updateVisibleElements,
+			updateInteractiveElements,
 		);
 		const unsubscribeElements = timelineStore.subscribe(
 			(state) => state.elements,
-			updateVisibleElements,
+			updateInteractiveElements,
 		);
 		const unsubscribeTracks = timelineStore.subscribe(
 			(state) => state.tracks,
-			updateVisibleElements,
+			updateInteractiveElements,
 		);
 
-		updateVisibleElements();
+		updateInteractiveElements();
 
 		return () => {
 			unsubscribeCurrentTime();
@@ -120,8 +125,8 @@ export const useFocusSceneTimelineElements = ({
 
 	return {
 		runtime,
-		renderElements,
-		renderElementsRef,
+		interactiveElements,
+		interactiveElementsRef,
 		sourceWidth: Math.max(1, canvasSize.width),
 		sourceHeight: Math.max(1, canvasSize.height),
 	};

@@ -30,8 +30,8 @@ export const useSceneFocusEditorLayer = ({
 }: UseSceneFocusEditorLayerOptions): SceneFocusEditorLayerResult => {
 	const {
 		runtime: focusRuntime,
-		renderElements,
-		renderElementsRef,
+		interactiveElements,
+		interactiveElementsRef,
 		sourceWidth,
 		sourceHeight,
 	} = useFocusSceneTimelineElements({
@@ -45,8 +45,8 @@ export const useSceneFocusEditorLayer = ({
 		focusedNode,
 		sourceWidth,
 		sourceHeight,
-		renderElements,
-		renderElementsRef,
+		interactiveElements,
+		interactiveElementsRef,
 		timelineStore: focusRuntime?.timelineStore ?? null,
 		disabled: suspendHover || !focusedNode || !focusRuntime,
 	});

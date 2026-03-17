@@ -122,8 +122,8 @@ interface UseFocusSceneSkiaInteractionsOptions {
 	focusedNode: SceneNode | null;
 	sourceWidth: number;
 	sourceHeight: number;
-	renderElements: TimelineElement[];
-	renderElementsRef: React.MutableRefObject<TimelineElement[]>;
+	interactiveElements: TimelineElement[];
+	interactiveElementsRef: React.MutableRefObject<TimelineElement[]>;
 	timelineStore: TimelineStoreApi | null;
 	disabled?: boolean;
 }
@@ -794,8 +794,8 @@ export const useFocusSceneSkiaInteractions = ({
 	focusedNode,
 	sourceWidth,
 	sourceHeight,
-	renderElements,
-	renderElementsRef,
+	interactiveElements,
+	interactiveElementsRef,
 	timelineStore,
 	disabled = false,
 }: UseFocusSceneSkiaInteractionsOptions): UseFocusSceneSkiaInteractionsResult => {
@@ -998,7 +998,7 @@ export const useFocusSceneSkiaInteractions = ({
 	const elementLayouts = useMemo<FocusSceneElementLayout[]>(() => {
 		if (!ctx) return [];
 		const result: FocusSceneElementLayout[] = [];
-		for (const element of renderElements) {
+		for (const element of interactiveElements) {
 			if (!hasTransform(element)) continue;
 			const renderLayout = transformMetaToRenderLayout(
 				element.transform,
@@ -1032,7 +1032,7 @@ export const useFocusSceneSkiaInteractions = ({
 			});
 		}
 		return result;
-	}, [ctx, renderElements, sourceHeight, sourceWidth]);
+	}, [ctx, interactiveElements, sourceHeight, sourceWidth]);
 
 	const selectionFrameScene = useMemo(() => {
 		if (
@@ -1150,7 +1150,7 @@ export const useFocusSceneSkiaInteractions = ({
 		(excludeIds: string[]) => {
 			const guideX: number[] = [0, sourceWidth / 2, sourceWidth];
 			const guideY: number[] = [0, sourceHeight / 2, sourceHeight];
-			for (const element of renderElementsRef.current) {
+			for (const element of interactiveElementsRef.current) {
 				if (excludeIds.includes(element.id)) continue;
 				const layout = elementLayouts.find((item) => item.id === element.id);
 				if (!layout) continue;
@@ -1170,7 +1170,7 @@ export const useFocusSceneSkiaInteractions = ({
 				y: guideY,
 			};
 		},
-		[elementLayouts, renderElementsRef, sourceHeight, sourceWidth],
+		[elementLayouts, interactiveElementsRef, sourceHeight, sourceWidth],
 	);
 
 	const applyDragToElements = useCallback(
@@ -1457,8 +1457,8 @@ export const useFocusSceneSkiaInteractions = ({
 							return leftTrack - rightTrack;
 						}
 						return (
-							renderElements.findIndex((el) => el.id === left.id) -
-							renderElements.findIndex((el) => el.id === right.id)
+							interactiveElements.findIndex((el) => el.id === left.id) -
+							interactiveElements.findIndex((el) => el.id === right.id)
 						);
 					})
 					.map((layout) => layout.id);
@@ -2013,7 +2013,7 @@ export const useFocusSceneSkiaInteractions = ({
 			handleItems,
 			selectionFrameScreen,
 			timelineStore,
-			renderElements,
+			interactiveElements,
 			setSelection,
 			resolveGuides,
 			applyDragToElements,

@@ -166,7 +166,7 @@ const setupInteractions = (elements: TimelineElement[]) => {
 	const timelineStore = timelineRuntime.timelineStore;
 	timelineStore.getState().setCanvasSize(CANVAS_SIZE);
 	timelineStore.getState().setElements(elements, { history: false });
-	const renderElementsRef = { current: elements };
+	const interactiveElementsRef = { current: elements };
 	const hook = renderHook(
 		() =>
 			useFocusSceneSkiaInteractions({
@@ -176,8 +176,8 @@ const setupInteractions = (elements: TimelineElement[]) => {
 				focusedNode,
 				sourceWidth: 1000,
 				sourceHeight: 1000,
-				renderElements: elements,
-				renderElementsRef,
+				interactiveElements: elements,
+				interactiveElementsRef,
 				timelineStore,
 			}),
 		{

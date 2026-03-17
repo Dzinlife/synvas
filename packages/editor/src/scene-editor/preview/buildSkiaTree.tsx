@@ -53,7 +53,7 @@ export const buildSkiaTree = async (
 	return buildSkiaTreeCore(args, createBuildSkiaDeps(overrides));
 };
 
-export const buildKonvaTree = (
+export const resolveInteractiveTimelineElements = (
 	args: Pick<
 		Parameters<typeof buildSkiaRenderStateCore>[0],
 		"elements" | "displayTime" | "tracks" | "sortByTrackIndex"
