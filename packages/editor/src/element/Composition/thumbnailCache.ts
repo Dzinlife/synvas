@@ -1,7 +1,14 @@
 import { type ReactNode, createElement, type ComponentType } from "react";
-import { Skia } from "react-skia-lite";
+import {
+	AlphaType,
+	ColorType,
+	getSkiaRenderBackend,
+	Skia,
+	SkiaSGRoot,
+} from "react-skia-lite";
 import {
 	buildSkiaFrameSnapshot,
+	buildSkiaRenderState,
 } from "@/scene-editor/preview/buildSkiaTree";
 import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type {
@@ -170,29 +177,91 @@ const renderPictureToCanvas = async (params: {
 			skCanvas.scale(scale, scale);
 			skCanvas.drawPicture(picture);
 			surface.flush();
-			const snapshotRect = Skia.XYWHRect(0, 0, width, height);
-			const snapshotImage = surface.makeImageSnapshot(snapshotRect);
-			const image = snapshotImage.makeNonTextureImage();
-			try {
-				const info = image.getImageInfo();
-				const pixels = image.readPixels(0, 0, info);
-				if (!pixels) return null;
-				const canvas = document.createElement("canvas");
-				canvas.width = width;
-				canvas.height = height;
-				const ctx = canvas.getContext("2d");
-				if (!ctx) return null;
-				ctx.putImageData(
-					new ImageData(new Uint8ClampedArray(pixels), width, height),
-					0,
-					0,
-				);
-				return canvas;
-			} finally {
-				image.dispose();
-				snapshotImage.dispose();
-			}
+			const pixels = skCanvas.readPixels(0, 0, {
+				width,
+				height,
+				colorType: ColorType.RGBA_8888,
+				alphaType: AlphaType.Unpremul,
+			});
+			if (!pixels) return null;
+			const canvas = document.createElement("canvas");
+			canvas.width = width;
+			canvas.height = height;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return null;
+			ctx.putImageData(
+				new ImageData(new Uint8ClampedArray(pixels), width, height),
+				0,
+				0,
+			);
+			return canvas;
 		} finally {
+			skCanvas.restore();
+		}
+	});
+};
+
+const renderNodeToCanvas = async (params: {
+	node: ReactNode;
+	width: number;
+	height: number;
+	sourceCanvasSize: {
+		width: number;
+		height: number;
+	};
+}): Promise<HTMLCanvasElement | null> => {
+	return enqueueRasterTask(async () => {
+		const { node, width, height, sourceCanvasSize } = params;
+		if (width <= 0 || height <= 0) return null;
+		const surface = getSharedRasterSurface({ width, height });
+		if (!surface) return null;
+		const skCanvas = surface.getCanvas();
+		const root = new SkiaSGRoot(Skia);
+		const retainedResources: Array<() => void> = [];
+		skCanvas.save();
+		try {
+			skCanvas.clear(Float32Array.of(0, 0, 0, 0));
+			const safeSourceWidth = Math.max(1, sourceCanvasSize.width || width);
+			const safeSourceHeight = Math.max(1, sourceCanvasSize.height || height);
+			const scale = Math.min(width / safeSourceWidth, height / safeSourceHeight);
+			const scaledWidth = safeSourceWidth * scale;
+			const scaledHeight = safeSourceHeight * scale;
+			const offsetX = (width - scaledWidth) * 0.5;
+			const offsetY = (height - scaledHeight) * 0.5;
+			skCanvas.translate(offsetX, offsetY);
+			skCanvas.scale(scale, scale);
+			root.render(node);
+			retainedResources.push(
+				...root.drawOnCanvas(skCanvas, {
+					retainResources: true,
+				}),
+			);
+			surface.flush();
+			const pixels = skCanvas.readPixels(0, 0, {
+				width,
+				height,
+				colorType: ColorType.RGBA_8888,
+				alphaType: AlphaType.Unpremul,
+			});
+			if (!pixels) return null;
+			const canvas = document.createElement("canvas");
+			canvas.width = width;
+			canvas.height = height;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return null;
+			ctx.putImageData(
+				new ImageData(new Uint8ClampedArray(pixels), width, height),
+				0,
+				0,
+			);
+			return canvas;
+		} finally {
+			for (const cleanup of retainedResources) {
+				try {
+					cleanup();
+				} catch {}
+			}
+			root.unmount();
 			skCanvas.restore();
 		}
 	});
@@ -242,6 +311,7 @@ export const getCompositionThumbnail = async (params: {
 	const promise = (async () => {
 		await yieldToMainThread();
 		const state = sceneRuntime.timelineStore.getState();
+		const renderBackend = getSkiaRenderBackend();
 		const sourceCanvasSize =
 			state.canvasSize?.width > 0 && state.canvasSize?.height > 0
 				? state.canvasSize
@@ -250,59 +320,88 @@ export const getCompositionThumbnail = async (params: {
 						height: targetHeight,
 					};
 		const RuntimeProvider = EditorRuntimeProvider as RuntimeProviderComponent;
-		const frameSnapshot = await buildSkiaFrameSnapshot(
-			{
-				elements: state.elements,
-				displayTime: displayFrameKey,
-				tracks: state.tracks,
-				getTrackIndexForElement,
-				sortByTrackIndex,
-				prepare: {
-					isExporting: false,
-					fps: Math.max(1, Math.round(state.fps || 30)),
-					canvasSize: sourceCanvasSize,
-					prepareTransitionPictures: false,
-					forcePrepareFrames: true,
-					awaitReady: true,
-					getModelStore: (id) => sceneRuntime.modelRegistry.get(id),
-					compositionPath: [sceneRuntime.ref.sceneId],
-					frameChannel: "offscreen",
-				},
+		const sharedArgs = {
+			elements: state.elements,
+			displayTime: displayFrameKey,
+			tracks: state.tracks,
+			getTrackIndexForElement,
+			sortByTrackIndex,
+			prepare: {
+				isExporting: false,
+				fps: Math.max(1, Math.round(state.fps || 30)),
+				canvasSize: sourceCanvasSize,
+				prepareTransitionPictures: false,
+				forcePrepareFrames: true,
+				awaitReady: true,
+				getModelStore: (id: string) => sceneRuntime.modelRegistry.get(id),
+				compositionPath: [sceneRuntime.ref.sceneId],
+				frameChannel: "offscreen" as const,
 			},
-			{
-				wrapRenderNode: (node) =>
-					createElement(
+		};
+		const sharedOverrides = {
+			wrapRenderNode: (node: ReactNode) =>
+				createElement(
+					RuntimeProvider,
+					{
+						runtime: createScopedRuntime(sceneRuntime),
+					},
+					node,
+				),
+			resolveCompositionTimeline: (sceneId: string) => {
+				const childRuntime = runtimeManager.getTimelineRuntime(
+					toSceneTimelineRef(sceneId),
+				);
+				if (!childRuntime) return null;
+				const childState = childRuntime.timelineStore.getState();
+				return {
+					sceneId,
+					elements: childState.elements,
+					tracks: childState.tracks,
+					fps: childState.fps,
+					canvasSize: childState.canvasSize,
+					getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
+					wrapRenderNode: (childNode: ReactNode) =>
+						createElement(
+							RuntimeProvider,
+							{
+								runtime: createScopedRuntime(childRuntime),
+							},
+							childNode,
+						),
+				};
+			},
+		};
+
+		if (renderBackend.kind === "webgpu") {
+			const renderState = await buildSkiaRenderState(
+				sharedArgs,
+				sharedOverrides,
+			);
+			try {
+				await renderState.ready;
+				const canvas = await renderNodeToCanvas({
+					node: createElement(
 						RuntimeProvider,
 						{
 							runtime: createScopedRuntime(sceneRuntime),
 						},
-						node,
+						renderState.children,
 					),
-				resolveCompositionTimeline: (sceneId) => {
-					const childRuntime = runtimeManager.getTimelineRuntime(
-						toSceneTimelineRef(sceneId),
-					);
-					if (!childRuntime) return null;
-					const childState = childRuntime.timelineStore.getState();
-					return {
-						sceneId,
-						elements: childState.elements,
-						tracks: childState.tracks,
-						fps: childState.fps,
-						canvasSize: childState.canvasSize,
-						getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
-						wrapRenderNode: (childNode) =>
-							createElement(
-								RuntimeProvider,
-								{
-									runtime: createScopedRuntime(childRuntime),
-								},
-								childNode,
-							),
-					};
-				},
-			},
-		);
+					width: targetWidth,
+					height: targetHeight,
+					sourceCanvasSize,
+				});
+				if (!canvas) return null;
+				thumbnailCache.set(cacheKey, canvas);
+				touchThumbnailKey(cacheKey);
+				evictThumbnailsIfNeeded();
+				return canvas;
+			} finally {
+				renderState.dispose();
+			}
+		}
+
+		const frameSnapshot = await buildSkiaFrameSnapshot(sharedArgs, sharedOverrides);
 		try {
 			if (!frameSnapshot.picture) return null;
 			const canvas = await renderPictureToCanvas({

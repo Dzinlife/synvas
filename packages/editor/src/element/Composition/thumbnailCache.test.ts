@@ -5,6 +5,7 @@ import { getCompositionThumbnail } from "./thumbnailCache";
 
 const {
 	buildSkiaFrameSnapshotMock,
+	buildSkiaRenderStateMock,
 	makeSurfaceMock,
 	makeOffscreenMock,
 	drawPictureMock,
@@ -14,11 +15,14 @@ const {
 	scaleMock,
 	flushMock,
 	readPixelsMock,
-	imageDisposeMock,
-	snapshotDisposeMock,
 	surfaceDisposeMock,
+	getSkiaRenderBackendMock,
+	skiaRootRenderMock,
+	skiaRootDrawOnCanvasMock,
+	skiaRootUnmountMock,
 } = vi.hoisted(() => ({
 	buildSkiaFrameSnapshotMock: vi.fn(),
+	buildSkiaRenderStateMock: vi.fn(),
 	makeSurfaceMock: vi.fn(),
 	makeOffscreenMock: vi.fn(),
 	drawPictureMock: vi.fn(),
@@ -28,16 +32,26 @@ const {
 	scaleMock: vi.fn(),
 	flushMock: vi.fn(),
 	readPixelsMock: vi.fn(),
-	imageDisposeMock: vi.fn(),
-	snapshotDisposeMock: vi.fn(),
 	surfaceDisposeMock: vi.fn(),
+	getSkiaRenderBackendMock: vi.fn(),
+	skiaRootRenderMock: vi.fn(),
+	skiaRootDrawOnCanvasMock: vi.fn(() => []),
+	skiaRootUnmountMock: vi.fn(),
 }));
 
 vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
 	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
+	buildSkiaRenderState: buildSkiaRenderStateMock,
 }));
 
 vi.mock("react-skia-lite", () => ({
+	getSkiaRenderBackend: getSkiaRenderBackendMock,
+	ColorType: {
+		RGBA_8888: 4,
+	},
+	AlphaType: {
+		Unpremul: 3,
+	},
 	Skia: {
 		XYWHRect: (x: number, y: number, width: number, height: number) => ({
 			x,
@@ -50,11 +64,17 @@ vi.mock("react-skia-lite", () => ({
 			MakeOffscreen: makeOffscreenMock,
 		},
 	},
+	SkiaSGRoot: class {
+		render = skiaRootRenderMock;
+		drawOnCanvas = skiaRootDrawOnCanvasMock;
+		unmount = skiaRootUnmountMock;
+	},
 }));
 
 describe("Composition thumbnailCache", () => {
 	beforeEach(() => {
 		buildSkiaFrameSnapshotMock.mockReset();
+		buildSkiaRenderStateMock.mockReset();
 		makeSurfaceMock.mockReset();
 		makeOffscreenMock.mockReset();
 		drawPictureMock.mockReset();
@@ -64,9 +84,16 @@ describe("Composition thumbnailCache", () => {
 		scaleMock.mockReset();
 		flushMock.mockReset();
 		readPixelsMock.mockReset();
-		imageDisposeMock.mockReset();
-		snapshotDisposeMock.mockReset();
 		surfaceDisposeMock.mockReset();
+		getSkiaRenderBackendMock.mockReset();
+		skiaRootRenderMock.mockReset();
+		skiaRootDrawOnCanvasMock.mockReset();
+		skiaRootUnmountMock.mockReset();
+		skiaRootDrawOnCanvasMock.mockReturnValue([]);
+		getSkiaRenderBackendMock.mockReturnValue({
+			bundle: "webgl",
+			kind: "webgl",
+		});
 
 		readPixelsMock.mockReturnValue(new Uint8Array(4));
 		const surfaceMock = {
@@ -77,22 +104,20 @@ describe("Composition thumbnailCache", () => {
 				translate: translateMock,
 				scale: scaleMock,
 				drawPicture: drawPictureMock,
+				readPixels: readPixelsMock,
 			}),
 			flush: flushMock,
-			makeImageSnapshot: () => ({
-				makeNonTextureImage: () => ({
-					getImageInfo: () => ({}),
-					readPixels: readPixelsMock,
-					dispose: imageDisposeMock,
-				}),
-				dispose: snapshotDisposeMock,
-			}),
 			dispose: surfaceDisposeMock,
 		};
 		makeSurfaceMock.mockReturnValue(surfaceMock);
 		makeOffscreenMock.mockReturnValue(surfaceMock);
 		buildSkiaFrameSnapshotMock.mockResolvedValue({
 			picture: { id: "picture-1" },
+			dispose: vi.fn(),
+		});
+		buildSkiaRenderStateMock.mockResolvedValue({
+			children: ["live-node"],
+			ready: Promise.resolve(),
 			dispose: vi.fn(),
 		});
 		vi.stubGlobal(
@@ -201,7 +226,55 @@ describe("Composition thumbnailCache", () => {
 		expect(scaleMock).toHaveBeenCalledWith(80 / 1920, 80 / 1920);
 		expect(drawPictureMock).toHaveBeenCalledWith({ id: "picture-1" });
 		expect(restoreMock).toHaveBeenCalledTimes(2);
-		expect(snapshotDisposeMock).toHaveBeenCalledTimes(2);
-		expect(imageDisposeMock).toHaveBeenCalledTimes(2);
+		expect(readPixelsMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("WebGPU 下会直接渲染 live render state，而不是先录 picture", async () => {
+		getSkiaRenderBackendMock.mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+		});
+
+		const canvas = await getCompositionThumbnail({
+			sceneRuntime: {
+				ref: {
+					sceneId: "scene-live-thumb",
+				},
+				modelRegistry: {
+					get: vi.fn(),
+				},
+				timelineStore: {
+					getState: () => ({
+						elements: [],
+						tracks: [],
+						fps: 30,
+						canvasSize: {
+							width: 1920,
+							height: 1080,
+						},
+					}),
+				},
+			} as never,
+			runtimeManager: {
+				getTimelineRuntime: vi.fn(() => null),
+			} as never,
+			sceneRevision: 3,
+			displayFrame: 36,
+			width: 80,
+			height: 45,
+			pixelRatio: 1,
+		});
+
+		expect(canvas).toBeInstanceOf(HTMLCanvasElement);
+		expect(buildSkiaRenderStateMock).toHaveBeenCalledWith(
+			expect.objectContaining({}),
+			expect.any(Object),
+		);
+		expect(buildSkiaFrameSnapshotMock).not.toHaveBeenCalled();
+		expect(skiaRootRenderMock).toHaveBeenCalledTimes(1);
+		expect(skiaRootDrawOnCanvasMock).toHaveBeenCalledTimes(1);
+		expect(drawPictureMock).not.toHaveBeenCalled();
+		expect(readPixelsMock).toHaveBeenCalledTimes(1);
+		expect(skiaRootUnmountMock).toHaveBeenCalledTimes(1);
 	});
 });

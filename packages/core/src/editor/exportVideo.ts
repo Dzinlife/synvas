@@ -12,6 +12,8 @@ import {
 	createSkiaCanvasSurface,
 	getSkiaRenderBackend,
 	JsiSkSurface,
+	Skia,
+	SkiaSGRoot,
 } from "react-skia-lite";
 import type { TimelineElement } from "../element/types";
 import { resolveTimelineElementClipGainLinear } from "./audio/clipGain";
@@ -24,7 +26,10 @@ import {
 	buildTransitionAudioMixPlan,
 	type TransitionAudioCurve,
 } from "./audio/transitionAudioMix";
-import type { buildSkiaFrameSnapshotCore } from "./preview/buildSkiaTree";
+import type {
+	buildSkiaFrameSnapshotCore,
+	buildSkiaRenderStateCore,
+} from "./preview/buildSkiaTree";
 import {
 	resolveTransitionFrameState,
 	type TransitionFrameState,
@@ -38,6 +43,10 @@ import { isVideoSourceAudioMuted } from "./utils/videoSourceAudio";
 export type BuildSkiaFrameSnapshot = (
 	args: Parameters<typeof buildSkiaFrameSnapshotCore>[0],
 ) => ReturnType<typeof buildSkiaFrameSnapshotCore>;
+
+export type BuildSkiaRenderState = (
+	args: Parameters<typeof buildSkiaRenderStateCore>[0],
+) => ReturnType<typeof buildSkiaRenderStateCore>;
 
 export type ExportElementAudioSource = {
 	audioSink: AudioBufferSink | null;
@@ -62,6 +71,7 @@ export type ExportTimelineAsVideoOptions = {
 	fps: number;
 	canvasSize: { width: number; height: number };
 	buildSkiaFrameSnapshot: BuildSkiaFrameSnapshot;
+	buildSkiaRenderState?: BuildSkiaRenderState;
 	filename?: string;
 	startFrame?: number;
 	endFrame?: number;
@@ -574,6 +584,7 @@ export const exportTimelineAsVideoCore = async (
 	let output: Output<Mp4OutputFormat, BufferTarget | StreamTarget> | null =
 		null;
 	let shouldCleanupOutputTargetImmediately = true;
+	let liveRoot: SkiaSGRoot | null = null;
 
 	try {
 		throwIfAborted(options.signal);
@@ -614,79 +625,131 @@ export const exportTimelineAsVideoCore = async (
 		await output.start();
 		throwIfAborted(options.signal);
 
-			const renderBackend = getSkiaRenderBackend();
-			const usesFrameBoundCanvasSurface = renderBackend.kind === "webgpu";
-			let skiaCanvas: ReturnType<JsiSkSurface["getCanvas"]> | null = null;
-			const createActiveSurface = () => {
+		const renderBackend = getSkiaRenderBackend();
+		const usesFrameBoundCanvasSurface = renderBackend.kind === "webgpu";
+		const useLiveRenderState =
+			renderBackend.kind === "webgpu" &&
+			typeof options.buildSkiaRenderState === "function";
+		let skiaCanvas: ReturnType<JsiSkSurface["getCanvas"]> | null = null;
+		const createActiveSurface = () => {
 			const surfaceResult = createSurfaceForExport(
 				exportCanvas,
 				width,
 				height,
 			);
-				if (!surfaceResult) {
-					throw new Error(
-						`导出失败：无法创建 ${renderBackend.kind} Surface`,
-					);
-				}
-				const nextSurface = surfaceResult.surface;
-				const nextRenderCanvas = surfaceResult.canvas;
-				const nextSkiaCanvas = nextSurface.getCanvas();
-				if (!nextRenderCanvas) {
-					throw new Error("导出失败：无法获取导出画布");
-				}
-				return {
-					surface: nextSurface,
-					renderCanvas: nextRenderCanvas,
-					skiaCanvas: nextSkiaCanvas,
-				};
+			if (!surfaceResult) {
+				throw new Error(
+					`导出失败：无法创建 ${renderBackend.kind} Surface`,
+				);
+			}
+			const nextSurface = surfaceResult.surface;
+			const nextRenderCanvas = surfaceResult.canvas;
+			const nextSkiaCanvas = nextSurface.getCanvas();
+			if (!nextRenderCanvas) {
+				throw new Error("导出失败：无法获取导出画布");
+			}
+			return {
+				surface: nextSurface,
+				renderCanvas: nextRenderCanvas,
+				skiaCanvas: nextSkiaCanvas,
 			};
-			({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
+		};
+		({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
+		if (useLiveRenderState) {
+			liveRoot = new SkiaSGRoot(Skia);
+		}
+
+		const buildFrameArgs = (targetFrame: number) => ({
+			elements: options.elements,
+			displayTime: targetFrame,
+			tracks: options.tracks,
+			getTrackIndexForElement,
+			sortByTrackIndex,
+			prepare: {
+				isExporting: true,
+				fps,
+				canvasSize: { width, height },
+				getModelStore: options.getModelStore,
+				prepareTransitionPictures: true,
+				awaitReady: true,
+				forcePrepareFrames: true,
+			},
+		});
 
 		const buildFrameSnapshot = (targetFrame: number) => {
-			return options.buildSkiaFrameSnapshot({
-				elements: options.elements,
-				displayTime: targetFrame,
-				tracks: options.tracks,
-				getTrackIndexForElement,
-				sortByTrackIndex,
-				prepare: {
-					isExporting: true,
-					fps,
-					canvasSize: { width, height },
-					getModelStore: options.getModelStore,
-					prepareTransitionPictures: true,
-					awaitReady: true,
-					forcePrepareFrames: true,
-				},
-			});
+			return options.buildSkiaFrameSnapshot(buildFrameArgs(targetFrame));
+		};
+
+		const buildFrameRenderState = (targetFrame: number) => {
+			if (!options.buildSkiaRenderState) {
+				throw new Error("导出失败：缺少 buildSkiaRenderState");
+			}
+			return options.buildSkiaRenderState(buildFrameArgs(targetFrame));
 		};
 
 		for (let frame = startFrame; frame < endFrame; frame += 1) {
 			throwIfAborted(options.signal);
 			options.onFrame?.(frame);
-			const frameSnapshot = await buildFrameSnapshot(frame);
 
-			try {
-				throwIfAborted(options.signal);
-				if (audioTargetsBySessionKey.size > 0) {
-					const audioTransitionFrameState =
-						resolveExportAudioTransitionFrameState({
-							elements: options.elements,
-							tracks: options.tracks,
-							frame,
-						});
-					applyAudioMixPlanAtFrame({
+			throwIfAborted(options.signal);
+			if (audioTargetsBySessionKey.size > 0) {
+				const audioTransitionFrameState =
+					resolveExportAudioTransitionFrameState({
+						elements: options.elements,
+						tracks: options.tracks,
 						frame,
-						startFrame,
-						fps,
-						audioClips,
-						audioClipTargetsById,
-						audioTargetsBySessionKey,
-						transitionFrameState: audioTransitionFrameState,
-						transitionCurveById,
 					});
-				}
+				applyAudioMixPlanAtFrame({
+					frame,
+					startFrame,
+					fps,
+					audioClips,
+					audioClipTargetsById,
+					audioTargetsBySessionKey,
+					transitionFrameState: audioTransitionFrameState,
+					transitionCurveById,
+				});
+			}
 
+			if (useLiveRenderState) {
+				const renderState = await buildFrameRenderState(frame);
+				const retainedResources: Array<() => void> = [];
+				try {
+					await renderState.ready;
+					throwIfAborted(options.signal);
+
+					if (usesFrameBoundCanvasSurface) {
+						surface?.dispose();
+						({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
+					}
+					if (!surface || !skiaCanvas || !liveRoot) {
+						throw new Error("导出失败：无法创建当前帧 Surface");
+					}
+
+					liveRoot.render(renderState.children);
+					retainedResources.push(
+						...liveRoot.drawOnCanvas(skiaCanvas, {
+							retainResources: true,
+						}),
+					);
+					surface.flush();
+					throwIfAborted(options.signal);
+
+					await videoSource.add(frame / fps, 1 / fps);
+					throwIfAborted(options.signal);
+				} finally {
+					for (const cleanup of retainedResources) {
+						try {
+							cleanup();
+						} catch {}
+					}
+					renderState.dispose?.();
+				}
+				continue;
+			}
+
+			const frameSnapshot = await buildFrameSnapshot(frame);
+			try {
 				await frameSnapshot.ready;
 				throwIfAborted(options.signal);
 
@@ -695,14 +758,14 @@ export const exportTimelineAsVideoCore = async (
 					throw new Error(
 						`导出失败：无法构建第 ${frame} 帧 picture（已中止导出）`,
 					);
-					}
-					if (usesFrameBoundCanvasSurface) {
-						surface?.dispose();
-						({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
-					}
-					if (!surface || !skiaCanvas) {
-						throw new Error("导出失败：无法创建当前帧 Surface");
-					}
+				}
+				if (usesFrameBoundCanvasSurface) {
+					surface?.dispose();
+					({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
+				}
+				if (!surface || !skiaCanvas) {
+					throw new Error("导出失败：无法创建当前帧 Surface");
+				}
 				skiaCanvas.drawPicture(picture);
 				surface.flush();
 				throwIfAborted(options.signal);
@@ -754,6 +817,9 @@ export const exportTimelineAsVideoCore = async (
 		}
 		throw error;
 	} finally {
+		try {
+			liveRoot?.unmount();
+		} catch {}
 		if (shouldCleanupOutputTargetImmediately) {
 			await outputTarget?.cleanup();
 		}

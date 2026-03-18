@@ -21,6 +21,7 @@ import type {
   ParagraphProps,
   AtlasProps,
   DrawingNodeProps,
+  RenderTargetProps,
   SkottieProps,
 } from "../../dom/types";
 
@@ -44,6 +45,7 @@ export enum CommandType {
   RestoreBackdropFilter,
   SaveLayer,
   RestorePaintDeclaration,
+  RenderTarget,
   // Drawing
   DrawBox,
   DrawImage,
@@ -104,7 +106,21 @@ export const isGroup = (command: Command): command is GroupCommand => {
   return command.type === CommandType.Group;
 };
 
+export interface RenderTargetCommand
+  extends Command<CommandType.RenderTarget> {
+  props: RenderTargetProps;
+  children: Command[];
+}
+
+export const isRenderTarget = (
+  command: Command
+): command is RenderTargetCommand => {
+  "worklet";
+  return command.type === CommandType.RenderTarget;
+};
+
 interface Props {
+  [CommandType.RenderTarget]: RenderTargetProps;
   [CommandType.DrawImage]: ImageProps;
   [CommandType.DrawCircle]: CircleProps;
   [CommandType.SaveCTM]: CTMProps;

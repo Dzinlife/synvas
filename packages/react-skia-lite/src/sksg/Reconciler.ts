@@ -3,6 +3,7 @@ import type { OpaqueRoot } from "react-reconciler";
 import ReactReconciler from "react-reconciler";
 import { NodeType } from "../dom/types";
 import type { SkCanvas, Skia } from "../skia/types";
+import { attachDisposeCleanup } from "../skia/web/Host";
 import { createContainer } from "./Container";
 import { debug, sksgHostConfig } from "./HostConfig";
 import type { Container } from "./StaticContainer";
@@ -127,15 +128,30 @@ export class SkiaSGRoot {
 		this.updateContainer(nextElement);
 	}
 
-	drawOnCanvas(canvas: SkCanvas) {
-		this.container.drawOnCanvas(canvas);
+	drawOnCanvas(
+		canvas: SkCanvas,
+		options?: {
+			retainResources?: boolean;
+		},
+	) {
+		return this.container.drawOnCanvas(canvas, options);
 	}
 
 	getPicture() {
 		const recorder = this.Skia.PictureRecorder();
 		const canvas = recorder.beginRecording();
-		this.drawOnCanvas(canvas);
-		return recorder.finishRecordingAsPicture();
+		const retainedResources = this.drawOnCanvas(canvas, {
+			retainResources: true,
+		});
+		const picture = recorder.finishRecordingAsPicture();
+		if (retainedResources.length > 0) {
+			attachDisposeCleanup(picture, () => {
+				for (const cleanup of retainedResources) {
+					cleanup();
+				}
+			});
+		}
+		return picture;
 	}
 
 	unmount() {

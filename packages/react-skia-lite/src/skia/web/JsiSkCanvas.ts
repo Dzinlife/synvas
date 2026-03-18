@@ -301,12 +301,16 @@ export class JsiSkCanvas
     font: SkFont,
     paint: SkPaint
   ) {
+    const fontRef = JsiSkFont.fromValue(font);
+    if (!fontRef) {
+      return;
+    }
     this.ref.drawGlyphs(
       glyphs,
       positions.map((p) => [p.x, p.y]).flat(),
       x,
       y,
-      JsiSkFont.fromValue(font),
+      fontRef,
       JsiSkPaint.fromValue(paint)
     );
   }

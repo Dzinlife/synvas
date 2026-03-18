@@ -6,7 +6,11 @@ import {
 import type { TimelineTrack } from "core/editor/timeline/types";
 import type { TimelineElement, TransformMeta } from "core/element/types";
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { getSkiaRenderBackendMock } = vi.hoisted(() => ({
+	getSkiaRenderBackendMock: vi.fn(),
+}));
 
 vi.mock("react-skia-lite", async () => {
 	const ReactModule = await import("react");
@@ -26,6 +30,14 @@ vi.mock("react-skia-lite", async () => {
 		const { children, ...rest } = props;
 		return ReactModule.createElement(
 			"picture",
+			rest,
+			children as React.ReactNode,
+		);
+	};
+	const RenderTarget = (props: Record<string, unknown>) => {
+		const { children, ...rest } = props;
+		return ReactModule.createElement(
+			"render-target",
 			rest,
 			children as React.ReactNode,
 		);
@@ -55,8 +67,18 @@ vi.mock("react-skia-lite", async () => {
 		Group,
 		Fill,
 		Picture,
+		RenderTarget,
 		Skia,
+		getSkiaRenderBackend: getSkiaRenderBackendMock,
 	};
+});
+
+beforeEach(() => {
+	getSkiaRenderBackendMock.mockReset();
+	getSkiaRenderBackendMock.mockReturnValue({
+		bundle: "webgl",
+		kind: "webgl",
+	});
 });
 
 const PlainRenderer: React.FC<{ id: string }> = ({ id }) => {
@@ -731,6 +753,79 @@ describe("buildSkiaTree transform wrapper", () => {
 
 		renderState.dispose?.();
 		expect(childPictureDispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("开启 live composition 时会递归构建子 scene RenderTarget", async () => {
+		getSkiaRenderBackendMock.mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+		const composition = createElement({
+			id: "composition-live",
+			type: "Composition",
+			component: "composition",
+			props: { sceneId: "scene-live" },
+			transform: createTransform({
+				baseSize: { width: 1920, height: 1080 },
+			}),
+		});
+		const childClip = createElement({
+			id: "child-live-clip",
+			type: "Image",
+			component: "image",
+		});
+		const childWrapSpy = vi.fn((node: React.ReactNode) => node);
+		const renderNodeToPicture = vi.fn(async () => ({ dispose: vi.fn() }) as any);
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToPicture,
+			resolveCompositionTimeline: (sceneId) => {
+				if (sceneId !== "scene-live") return null;
+				return {
+					sceneId,
+					elements: [childClip],
+					tracks,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					wrapRenderNode: childWrapSpy,
+				};
+			},
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [composition],
+				displayTime: 10,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					compositionPath: ["scene-root"],
+				},
+			},
+			localDeps,
+		);
+
+		const renderTargetNodes = collectElements(
+			renderState.children,
+			(node) => node.props.debugLabel === "composition:composition-live",
+		);
+		const pictureNodes = collectElements(
+			renderState.children,
+			(node) => "picture" in node.props,
+		);
+		expect(renderTargetNodes.length).toBeGreaterThan(0);
+		expect(renderTargetNodes[0]?.props.debugLabel).toBe("composition:composition-live");
+		expect(pictureNodes.length).toBe(0);
+		expect(renderNodeToPicture).not.toHaveBeenCalled();
+		expect(childWrapSpy).toHaveBeenCalled();
+
+		renderState.dispose?.();
 	});
 
 	it("Composition 计算子场景时间时会叠加 offset", async () => {

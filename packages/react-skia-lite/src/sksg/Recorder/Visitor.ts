@@ -249,6 +249,14 @@ const getStackingContextProps = (
 };
 
 const visitNode = (recorder: BaseRecorder, node: Node<any>) => {
+  if (node.type === NodeType.RenderTarget) {
+    recorder.saveRenderTarget(node.props);
+    node.children.forEach((child) => {
+      visitNode(recorder, child);
+    });
+    recorder.restoreRenderTarget();
+    return;
+  }
   const { props } = node;
   const stackingContextProps = getStackingContextProps(
     props as AnimatedProps<DrawingNodeProps>

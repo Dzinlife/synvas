@@ -220,6 +220,8 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	const redrawRequestsRef = useRef(0);
 	const requestIdRef = useRef<number | null>(null);
 	const pictureRef = useRef<SkPicture | null>(null);
+	const deferredDisposePicturesRef = useRef<SkPicture[]>([]);
+	const deferredDisposeFrameRef = useRef<number | null>(null);
 
 	const { picture, onLayout } = props;
 
@@ -254,8 +256,21 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 
 	const setPicture = useCallback(
 		(newPicture: SkPicture) => {
+			const previousPicture = pictureRef.current;
 			pictureRef.current = newPicture;
 			redraw();
+			if (previousPicture && previousPicture !== newPicture) {
+				deferredDisposePicturesRef.current.push(previousPicture);
+				if (deferredDisposeFrameRef.current === null) {
+					deferredDisposeFrameRef.current = requestAnimationFrame(() => {
+						deferredDisposeFrameRef.current = null;
+						const pictures = deferredDisposePicturesRef.current.splice(0);
+						for (const picture of pictures) {
+							picture.dispose?.();
+						}
+					});
+				}
+			}
 		},
 		[redraw],
 	);
@@ -386,6 +401,16 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 				cancelAnimationFrame(requestIdRef.current);
 				requestIdRef.current = null;
 			}
+			if (deferredDisposeFrameRef.current !== null) {
+				cancelAnimationFrame(deferredDisposeFrameRef.current);
+				deferredDisposeFrameRef.current = null;
+			}
+			const deferredPictures = deferredDisposePicturesRef.current.splice(0);
+			for (const picture of deferredPictures) {
+				picture.dispose?.();
+			}
+			pictureRef.current?.dispose?.();
+			pictureRef.current = null;
 			if (renderer.current) {
 				renderer.current.dispose();
 				renderer.current = null;

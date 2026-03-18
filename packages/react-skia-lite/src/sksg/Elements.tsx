@@ -42,6 +42,7 @@ import type {
 	PointsProps,
 	RadialGradientProps,
 	RectProps,
+	RenderTargetProps,
 	RoundedRectProps,
 	RuntimeShaderImageFilterProps,
 	ShaderProps,
@@ -129,6 +130,7 @@ declare module "react" {
 			// Mixed declarations/drawings
 			skBlend: SkiaProps<BlendProps>;
 			skBackdropFilter: SkiaProps<ChildrenProps>;
+			skRenderTarget: SkiaProps<RenderTargetProps>;
 			skBox: SkiaProps<BoxProps>;
 			skBoxShadow: SkiaProps<BoxShadowProps>;
 

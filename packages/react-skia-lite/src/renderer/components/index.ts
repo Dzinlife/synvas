@@ -12,6 +12,7 @@ export * from "./Paint";
 export * from "./Picture";
 export * from "./paragraph";
 export * from "./pathEffects";
+export * from "./RenderTarget";
 export * from "./Skottie";
 export * from "./shaders";
 export * from "./shapes";

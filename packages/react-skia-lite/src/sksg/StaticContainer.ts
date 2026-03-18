@@ -1,6 +1,7 @@
 import { scheduleAnimationFrameTask } from "../animation/runtime/core";
 import type { SharedValue } from "../react-native-types";
 import type { SkCanvas, Skia, SkPaint } from "../skia/types";
+import { attachDisposeCleanup } from "../skia/web/Host";
 import { SkiaViewApi } from "../views/api";
 import {
 	handleContainerRedraw,
@@ -47,7 +48,12 @@ export abstract class Container {
 		this.paintPool.length = 0;
 	}
 
-	drawOnCanvas(canvas: SkCanvas) {
+	drawOnCanvas(
+		canvas: SkCanvas,
+		options?: {
+			retainResources?: boolean;
+		},
+	) {
 		if (!this.recording) {
 			throw new Error("No recording to draw");
 		}
@@ -55,8 +61,10 @@ export abstract class Container {
 			this.Skia,
 			this.paintPool,
 			canvas,
+			options,
 		);
 		replay(ctx, this.recording.commands);
+		return ctx.takeRetainedResources();
 	}
 
 	abstract redraw(): void;
@@ -106,8 +114,17 @@ export class StaticContainer extends Container {
 		}
 		const rec = this.Skia.PictureRecorder();
 		const canvas = rec.beginRecording();
-		this.drawOnCanvas(canvas);
+		const retainedResources = this.drawOnCanvas(canvas, {
+			retainResources: true,
+		});
 		const picture = rec.finishRecordingAsPicture();
+		if (retainedResources.length > 0) {
+			attachDisposeCleanup(picture, () => {
+				for (const cleanup of retainedResources) {
+					cleanup();
+				}
+			});
+		}
 		SkiaViewApi.setJsiProperty(this.nativeId, "picture", picture);
 	}
 

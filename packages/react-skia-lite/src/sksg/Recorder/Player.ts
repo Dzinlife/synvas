@@ -1,3 +1,4 @@
+import { processColor } from "../../dom/nodes";
 import type { DrawingNodeProps } from "../../dom/types";
 
 import {
@@ -47,10 +48,40 @@ import {
   isCommand,
   isDrawCommand,
   isGroup,
+  isRenderTarget,
   materializeCommand,
 } from "./Core";
-import type { Command, GroupCommand } from "./Core";
-import type { DrawingContext } from "./DrawingContext";
+import type {
+  Command,
+  GroupCommand,
+  RenderTargetCommand,
+} from "./Core";
+import {
+  createDrawingContext,
+  makeSurfaceSnapshotImage,
+  type DrawingContext,
+} from "./DrawingContext";
+
+const renderTargetFallbackWarnings = new Set<string>();
+
+const warnRenderTargetFallback = (debugLabel?: string) => {
+  const warningKey = debugLabel?.trim() || "__default__";
+  if (renderTargetFallbackWarnings.has(warningKey)) {
+    return;
+  }
+  renderTargetFallbackWarnings.add(warningKey);
+  console.warn(
+    `[react-skia-lite] RenderTarget ${
+      debugLabel ? `"${debugLabel}" ` : ""
+    }failed to allocate offscreen surface, fallback to direct replay`
+  );
+};
+
+const disposePaintPool = (paintPool: DrawingContext["paintPool"]) => {
+  paintPool.forEach((paint) => {
+    paint.dispose?.();
+  });
+};
 
 type PendingGroup = {
   command: GroupCommand;
@@ -107,6 +138,67 @@ const playGroup = (
     playFn(ctx, child);
   });
   flushPendingGroups(ctx, pending, playFn);
+};
+
+const playRenderTarget = (
+  ctx: DrawingContext,
+  command: RenderTargetCommand,
+  playFn: (ctx: DrawingContext, cmd: Command) => void
+) => {
+  const width = Math.max(1, Math.ceil(command.props.width));
+  const height = Math.max(1, Math.ceil(command.props.height));
+  const surface = ctx.Skia.Surface.MakeOffscreen(width, height);
+  if (!surface) {
+    warnRenderTargetFallback(command.props.debugLabel);
+    command.children.forEach((child) => {
+      playFn(ctx, child);
+    });
+    return;
+  }
+
+  const childPaintPool: DrawingContext["paintPool"] = [];
+  const childCanvas = surface.getCanvas();
+  childCanvas.clear(processColor(ctx.Skia, command.props.clearColor ?? "transparent"));
+  const childCtx = createDrawingContext(ctx.Skia, childPaintPool, childCanvas, {
+    renderTarget: {
+      surface,
+      width,
+      height,
+      debugLabel: command.props.debugLabel,
+    },
+    retainResources: ctx.retainResources,
+  });
+
+  let retainedSurfaceImage = false;
+  try {
+    command.children.forEach((child) => {
+      playFn(childCtx, child);
+    });
+    surface.flush();
+    const image = makeSurfaceSnapshotImage(surface);
+    try {
+      ctx.canvas.drawImage(image, 0, 0, ctx.paint);
+      if (ctx.retainResources) {
+        retainedSurfaceImage = true;
+        ctx.retainResource(() => {
+          image.dispose?.();
+          surface.dispose?.();
+        });
+      }
+    } finally {
+      if (!retainedSurfaceImage) {
+        image.dispose?.();
+      }
+    }
+  } finally {
+    disposePaintPool(childPaintPool);
+    childCtx.takeRetainedResources().forEach((cleanup) => {
+      ctx.retainResource(cleanup);
+    });
+    if (!retainedSurfaceImage) {
+      surface.dispose?.();
+    }
+  }
 };
 
 const play = (ctx: DrawingContext, _command: Command) => {
@@ -183,7 +275,9 @@ const play = (ctx: DrawingContext, _command: Command) => {
     try {
       paints.forEach((p) => {
         ctx.paints.push(p);
-        if (isBoxCommand(command)) {
+        if (isRenderTarget(command)) {
+          playRenderTarget(ctx, command, play);
+        } else if (isBoxCommand(command)) {
           drawBox(ctx, command);
         } else if (isCommand(command, CommandType.DrawPaint)) {
           ctx.canvas.drawPaint(ctx.paint);

@@ -19,6 +19,7 @@ import type {
 	PictureProps,
 	PointsProps,
 	RectProps,
+	RenderTargetProps,
 	RoundedRectProps,
 	SkottieProps,
 	TextBlobProps,
@@ -202,6 +203,16 @@ export class Recorder implements BaseRecorder {
 
 	restoreBackdropFilter() {
 		this.add({ type: CommandType.RestoreBackdropFilter });
+	}
+
+	saveRenderTarget(props: AnimatedProps<RenderTargetProps>) {
+		const children: Command[] = [];
+		this.add({ type: CommandType.RenderTarget, props, children });
+		this.cursors.push(children);
+	}
+
+	restoreRenderTarget() {
+		this.cursors.pop();
 	}
 
 	drawBox(

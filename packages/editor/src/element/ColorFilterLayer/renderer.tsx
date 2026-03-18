@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import { BackdropFilter, ImageFilter, Skia } from "react-skia-lite";
+import {
+	BackdropFilter,
+	ImageFilter,
+	type SkImageFilter,
+	Skia,
+} from "react-skia-lite";
 import type { ColorFilterLayerProps } from "./model";
 
 // 生成颜色调整矩阵
@@ -185,33 +190,43 @@ interface ColorFilterLayerRendererProps extends ColorFilterLayerProps {
 	contrast?: number; // 对比度调整，范围通常为 -1 到 1
 }
 
+export const createColorFilterImageFilter = ({
+	hue = 0,
+	saturation = 0,
+	brightness = 0,
+	contrast = 0,
+}: ColorFilterLayerProps): SkImageFilter | null => {
+	const hasColorAdjust =
+		hue !== 0 || saturation !== 0 || brightness !== 0 || contrast !== 0;
+	if (!hasColorAdjust) {
+		return null;
+	}
+	const colorMatrix = createColorAdjustMatrix(
+		hue,
+		saturation,
+		brightness,
+		contrast,
+	);
+	const colorFilter = Skia.ColorFilter.MakeMatrix(colorMatrix);
+	return Skia.ImageFilter.MakeColorFilter(colorFilter, null);
+};
+
 const ColorFilterLayer: React.FC<ColorFilterLayerRendererProps> = ({
 	hue = 0,
 	saturation = 0,
 	brightness = 0,
 	contrast = 0,
 }) => {
-	// 计算颜色矩阵
-	const colorMatrix = useMemo(
-		() => createColorAdjustMatrix(hue, saturation, brightness, contrast),
-		[hue, saturation, brightness, contrast],
-	);
-
-	// 创建 ColorFilter
-	const colorFilter = useMemo(() => {
-		return Skia.ColorFilter.MakeMatrix(colorMatrix);
-	}, [colorMatrix]);
-
-	// 将 ColorFilter 转换为 ImageFilter（BackdropFilter 需要 ImageFilter）
 	const imageFilter = useMemo(() => {
-		return Skia.ImageFilter.MakeColorFilter(colorFilter, null);
-	}, [colorFilter]);
+		return createColorFilterImageFilter({
+			hue,
+			saturation,
+			brightness,
+			contrast,
+		});
+	}, [hue, saturation, brightness, contrast]);
 
-	// 检查是否有调色配置
-	const hasColorAdjust =
-		hue !== 0 || saturation !== 0 || brightness !== 0 || contrast !== 0;
-
-	if (!hasColorAdjust) {
+	if (!imageFilter) {
 		return null;
 	}
 

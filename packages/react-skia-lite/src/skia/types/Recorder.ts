@@ -20,6 +20,7 @@ import type {
 	PictureProps,
 	PointsProps,
 	RectProps,
+	RenderTargetProps,
 	RoundedRectProps,
 	SkottieProps,
 	TextBlobProps,
@@ -63,6 +64,8 @@ export interface BaseRecorder {
 	saveLayer(): void;
 	saveBackdropFilter(): void;
 	restoreBackdropFilter(): void;
+	saveRenderTarget(props: AnimatedProps<RenderTargetProps>): void;
+	restoreRenderTarget(): void;
 	drawBox(
 		boxProps: AnimatedProps<BoxProps>,
 		shadows: {

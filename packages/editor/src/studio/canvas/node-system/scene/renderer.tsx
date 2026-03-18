@@ -6,16 +6,19 @@ import { createFramePrecompileController } from "core/editor/preview/framePrecom
 import { schedulePrecompileTask } from "core/editor/preview/framePrecompileScheduler";
 import type { TimelineElement } from "core/element/types";
 import type { SceneNode } from "core/studio/types";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	Group,
 	Picture,
 	Rect,
-	Skia,
-	type SkPicture,
-	useSharedValue,
+	RenderTarget,
+	getSkiaRenderBackend,
 } from "react-skia-lite";
-import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
+import {
+	buildSkiaFrameSnapshot,
+	buildSkiaRenderState,
+} from "@/scene-editor/preview/buildSkiaTree";
 import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type {
 	EditorRuntime,
@@ -27,6 +30,17 @@ import type { CanvasNodeSkiaRenderProps } from "../types";
 const PRECOMPILE_LOOKAHEAD_FRAMES = 2;
 
 type SceneFrameSnapshot = Awaited<ReturnType<typeof buildSkiaFrameSnapshot>>;
+type ScenePreviewFrame =
+	| {
+			kind: "picture";
+			picture: NonNullable<SceneFrameSnapshot["picture"]>;
+			dispose?: (() => void) | undefined;
+	  }
+	| {
+			kind: "render-target";
+			node: ReactNode;
+			dispose?: (() => void) | undefined;
+	  };
 const preemptedBuildErrorSymbol = Symbol("scene-build-preempted");
 type PreemptedBuildError = Error & {
 	[preemptedBuildErrorSymbol]: true;
@@ -72,15 +86,12 @@ const getTrackIndexForElement = (element: TimelineElement): number => {
 	return element.timeline.trackIndex ?? 0;
 };
 
-const createEmptyPicture = (): SkPicture => {
-	const recorder = Skia.PictureRecorder();
-	recorder.beginRecording();
-	return recorder.finishRecordingAsPicture();
-};
-
 export const SceneNodeSkiaRenderer: React.FC<
 	CanvasNodeSkiaRenderProps<SceneNode>
 > = ({ node, scene, runtimeManager }) => {
+	type ResolveCompositionTimeline = NonNullable<
+		NonNullable<Parameters<typeof buildSkiaRenderState>[1]>["resolveCompositionTimeline"]
+	>;
 	const sceneCanvasWidth = scene?.timeline.canvas.width ?? 1;
 	const sceneCanvasHeight = scene?.timeline.canvas.height ?? 1;
 	const runtime = useMemo(() => {
@@ -89,12 +100,12 @@ export const SceneNodeSkiaRenderer: React.FC<
 			toSceneTimelineRef(node.sceneId),
 		);
 	}, [node.sceneId, runtimeManager, scene]);
-	const emptyPicture = useMemo(() => {
-		return createEmptyPicture();
+	const useLiveRenderTarget = useMemo(() => {
+		return getSkiaRenderBackend().kind === "webgpu";
 	}, []);
-	const picture = useSharedValue<SkPicture>(emptyPicture);
-	const pictureOpacity = useSharedValue(0);
-	const fallbackOpacity = useSharedValue(1);
+	const [currentFrame, setCurrentFrame] = useState<ScenePreviewFrame | null>(
+		null,
+	);
 	const renderTokenRef = useRef(0);
 	const lastRequestedFrameRef = useRef<number | null>(null);
 	const disposeRef = useRef<(() => void) | null>(null);
@@ -104,7 +115,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 	const buildQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const buildQueueEpochRef = useRef(0);
 	const frameControllerRef = useRef(
-		createFramePrecompileController<SceneFrameSnapshot>({
+		createFramePrecompileController<ScenePreviewFrame>({
 			lookaheadFrames: PRECOMPILE_LOOKAHEAD_FRAMES,
 			scheduleTask: schedulePrecompileTask,
 			onPrefetchError: (error, frameIndex) => {
@@ -155,25 +166,22 @@ export const SceneNodeSkiaRenderer: React.FC<
 			}
 			deferredDisposeFrameRef.current = window.requestAnimationFrame(() => {
 				deferredDisposeFrameRef.current = null;
-				// 延后一帧再释放旧 picture，避免父画布尚未 present 新帧时读到已释放资源。
+				// 延后一帧再释放旧渲染资源，避免父画布尚未 present 新帧时读到已释放对象。
 				flushDeferredDisposeQueue();
 			});
 		},
 		[flushDeferredDisposeQueue],
 	);
 
-	const replaceCurrentPicture = useCallback(
-		(nextPicture: SkPicture, nextDispose: (() => void) | null = null) => {
+	const replaceCurrentFrame = useCallback(
+		(nextFrame: ScenePreviewFrame, nextDispose: (() => void) | null = null) => {
 			const previousDispose = disposeRef.current;
-			// SkPicture 是 JSI 对象，直接走 shared value 赋值会触发深比较，代价很高。
-			picture.modify(() => nextPicture, true);
-			pictureOpacity.value = 1;
-			fallbackOpacity.value = 0;
+			setCurrentFrame(nextFrame);
 			hasRenderedContentRef.current = true;
 			disposeRef.current = nextDispose;
 			scheduleDeferredDispose(previousDispose);
 		},
-		[fallbackOpacity, picture, pictureOpacity, scheduleDeferredDispose],
+		[scheduleDeferredDispose],
 	);
 
 	const preemptBuildQueue = useCallback(() => {
@@ -208,9 +216,8 @@ export const SceneNodeSkiaRenderer: React.FC<
 	const renderFallback = useCallback(() => {
 		if (hasRenderedContentRef.current) return;
 		hasRenderedContentRef.current = true;
-		fallbackOpacity.value = 1;
-		pictureOpacity.value = 0;
-	}, [fallbackOpacity, pictureOpacity]);
+		setCurrentFrame(null);
+	}, []);
 
 	const runRender = useCallback(
 		(elements: TimelineElement[], displayTime: number) => {
@@ -232,7 +239,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 			lastRequestedFrameRef.current = frameIndex;
 			frameControllerRef.current.reconcileFrame(frameIndex);
 
-			const buildFrameSnapshot = (targetFrame: number, useQueue = true) => {
+			const buildFrameState = (targetFrame: number, useQueue = true) => {
 				const targetDisplayTime =
 					targetFrame === frameIndex
 						? displayTime
@@ -248,8 +255,67 @@ export const SceneNodeSkiaRenderer: React.FC<
 						state.canvasSize.height || sceneCanvasHeight || 1,
 					),
 				};
-				const build = () =>
-					buildSkiaFrameSnapshot(
+				const resolveCompositionTimeline: ResolveCompositionTimeline = (sceneId) => {
+					const childRuntime = runtimeManager.getTimelineRuntime(
+						toSceneTimelineRef(sceneId),
+					);
+					if (!childRuntime) return null;
+					const childState = childRuntime.timelineStore.getState();
+					return {
+						sceneId,
+						elements: childState.elements,
+						tracks: childState.tracks,
+						fps: childState.fps,
+						canvasSize: childState.canvasSize,
+						getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
+						wrapRenderNode: (childNode: ReactNode) => (
+							<EditorRuntimeProvider runtime={createScopedRuntime(childRuntime)}>
+								{childNode}
+							</EditorRuntimeProvider>
+						),
+					};
+				};
+				const build = async (): Promise<ScenePreviewFrame> => {
+					if (useLiveRenderTarget) {
+						const renderState = await buildSkiaRenderState(
+							{
+								elements,
+								displayTime: targetDisplayTime,
+								tracks: state.tracks,
+								getTrackIndexForElement,
+								sortByTrackIndex,
+								prepare: {
+									isExporting: false,
+									fps: normalizedFps,
+									canvasSize: safeCanvasSize,
+									prepareTransitionPictures: true,
+									forcePrepareFrames: true,
+									awaitReady: true,
+									getModelStore: (id) => runtime.modelRegistry.get(id),
+									compositionPath: [node.sceneId],
+								},
+							},
+							{
+								wrapRenderNode: (renderNode) => (
+									<EditorRuntimeProvider runtime={createScopedRuntime(runtime)}>
+										{renderNode}
+									</EditorRuntimeProvider>
+								),
+								resolveCompositionTimeline,
+							},
+						);
+						await renderState.ready;
+						return {
+							kind: "render-target",
+							node: (
+								<EditorRuntimeProvider runtime={createScopedRuntime(runtime)}>
+									{renderState.children}
+								</EditorRuntimeProvider>
+							),
+							dispose: renderState.dispose,
+						};
+					}
+					const frameSnapshot = await buildSkiaFrameSnapshot(
 						{
 							elements,
 							displayTime: targetDisplayTime,
@@ -273,31 +339,18 @@ export const SceneNodeSkiaRenderer: React.FC<
 									{renderNode}
 								</EditorRuntimeProvider>
 							),
-							resolveCompositionTimeline: (sceneId) => {
-								const childRuntime = runtimeManager.getTimelineRuntime(
-									toSceneTimelineRef(sceneId),
-								);
-								if (!childRuntime) return null;
-								const childState = childRuntime.timelineStore.getState();
-								return {
-									sceneId,
-									elements: childState.elements,
-									tracks: childState.tracks,
-									fps: childState.fps,
-									canvasSize: childState.canvasSize,
-									getModelStore: (id: string) =>
-										childRuntime.modelRegistry.get(id),
-									wrapRenderNode: (childNode) => (
-										<EditorRuntimeProvider
-											runtime={createScopedRuntime(childRuntime)}
-										>
-											{childNode}
-										</EditorRuntimeProvider>
-									),
-								};
-							},
+							resolveCompositionTimeline,
 						},
 					);
+					if (!frameSnapshot.picture) {
+						throw new Error("Scene preview frame picture is null");
+					}
+					return {
+						kind: "picture",
+						picture: frameSnapshot.picture,
+						dispose: frameSnapshot.dispose,
+					};
+				};
 				const guardedBuild = async () => {
 					if (renderTokenRef.current !== renderToken) {
 						throw createPreemptedBuildError();
@@ -314,32 +367,17 @@ export const SceneNodeSkiaRenderer: React.FC<
 					: guardedBuild();
 			};
 
-			const resolveCurrentPicture = (
-				frameState: SceneFrameSnapshot | undefined,
-			): SkPicture | null => {
-				if (!frameState?.picture) {
-					renderFallback();
-					return null;
-				}
-				return frameState.picture;
-			};
-
 			if (!state.isPlaying) {
 				// 暂停/拖拽时直接渲染当前帧，避免 lookahead 造成视觉延迟。
 				preemptBuildQueue();
 				frameControllerRef.current.invalidateAll();
-				buildFrameSnapshot(frameIndex, false)
+				buildFrameState(frameIndex, false)
 					.then((frameState) => {
 						if (renderTokenRef.current !== renderToken) {
 							frameState.dispose?.();
 							return;
 						}
-						const nextPicture = resolveCurrentPicture(frameState);
-						if (!nextPicture) {
-							frameState.dispose?.();
-							return;
-						}
-						replaceCurrentPicture(nextPicture, frameState.dispose ?? null);
+						replaceCurrentFrame(frameState, frameState.dispose ?? null);
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) return;
@@ -357,21 +395,16 @@ export const SceneNodeSkiaRenderer: React.FC<
 				// 播放时发生跳帧/seek，优先直出当前帧并重建 lookahead。
 				preemptBuildQueue();
 				frameControllerRef.current.invalidateAll();
-				buildFrameSnapshot(frameIndex, false)
+				buildFrameState(frameIndex, false)
 					.then((frameState) => {
 						if (renderTokenRef.current !== renderToken) {
 							frameState.dispose?.();
 							return;
 						}
-						const nextPicture = resolveCurrentPicture(frameState);
-						if (!nextPicture) {
-							frameState.dispose?.();
-							return;
-						}
-						replaceCurrentPicture(nextPicture, frameState.dispose ?? null);
+						replaceCurrentFrame(frameState, frameState.dispose ?? null);
 						frameControllerRef.current.commitFrame(
 							frameIndex,
-							buildFrameSnapshot,
+							buildFrameState,
 						);
 					})
 					.catch((error) => {
@@ -387,18 +420,14 @@ export const SceneNodeSkiaRenderer: React.FC<
 			}
 
 			frameControllerRef.current
-				.getOrBuildCurrent(frameIndex, buildFrameSnapshot)
+				.getOrBuildCurrent(frameIndex, buildFrameState)
 				.then((entry) => {
 					if (renderTokenRef.current !== renderToken) return;
-					const nextPicture = resolveCurrentPicture(entry.state);
-					if (!nextPicture) return;
-					replaceCurrentPicture(
-						nextPicture,
-						frameControllerRef.current.takeDispose(entry) ?? null,
-					);
+					if (!entry.state) return;
+					replaceCurrentFrame(entry.state, frameControllerRef.current.takeDispose(entry) ?? null);
 					frameControllerRef.current.commitFrame(
 						frameIndex,
-						buildFrameSnapshot,
+						buildFrameState,
 					);
 				})
 				.catch((error) => {
@@ -415,12 +444,13 @@ export const SceneNodeSkiaRenderer: React.FC<
 			enqueueBuild,
 			node.sceneId,
 			preemptBuildQueue,
-			replaceCurrentPicture,
+			replaceCurrentFrame,
 			renderFallback,
 			runtime,
 			runtimeManager,
 			sceneCanvasHeight,
 			sceneCanvasWidth,
+			useLiveRenderTarget,
 		],
 	);
 
@@ -436,9 +466,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 			disposeRef.current?.();
 			disposeRef.current = null;
 			hasRenderedContentRef.current = false;
-			picture.modify(() => emptyPicture, true);
-			pictureOpacity.value = 0;
-			fallbackOpacity.value = 1;
+			setCurrentFrame(null);
 			return;
 		}
 
@@ -504,12 +532,8 @@ export const SceneNodeSkiaRenderer: React.FC<
 		};
 	}, [
 		cancelDeferredDisposeFrame,
-		emptyPicture,
-		fallbackOpacity,
 		flushDeferredDisposeQueue,
 		invalidateBuffer,
-		picture,
-		pictureOpacity,
 		runRender,
 		runtime,
 	]);
@@ -524,9 +548,8 @@ export const SceneNodeSkiaRenderer: React.FC<
 			disposeRef.current = null;
 			hasRenderedContentRef.current = false;
 			lastRequestedFrameRef.current = null;
-			emptyPicture.dispose?.();
 		};
-	}, [cancelDeferredDisposeFrame, emptyPicture, flushDeferredDisposeQueue]);
+	}, [cancelDeferredDisposeFrame, flushDeferredDisposeQueue]);
 
 	if (!scene) {
 		return (
@@ -553,9 +576,19 @@ export const SceneNodeSkiaRenderer: React.FC<
 				width={sourceWidth}
 				height={sourceHeight}
 				color="#171717"
-				opacity={fallbackOpacity}
 			/>
-			<Picture picture={picture} opacity={pictureOpacity} />
+			{currentFrame?.kind === "render-target" ? (
+				<RenderTarget
+					width={sourceWidth}
+					height={sourceHeight}
+					clearColor="transparent"
+					debugLabel={`scene-preview:${node.sceneId}`}
+				>
+					{currentFrame.node}
+				</RenderTarget>
+			) : currentFrame?.kind === "picture" ? (
+				<Picture picture={currentFrame.picture} />
+			) : null}
 		</Group>
 	);
 };

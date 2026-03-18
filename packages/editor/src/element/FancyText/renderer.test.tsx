@@ -9,10 +9,12 @@ const mocks = vi.hoisted(() => ({
 		internal: {
 			paragraph: null as any,
 			font: null as any,
+			typeface: null as any,
 			wordSegments: [] as Array<{ text: string; start: number; end: number }>,
 		},
 		props: {
 			color: "#ffffff",
+			fontSize: 48,
 			highlightColor: "#f59e0b",
 			waveRadius: 12,
 			waveTranslateY: 8,
@@ -62,7 +64,21 @@ vi.mock("react-skia-lite", async () => {
 		Group: createNode("group"),
 		Path: createNode("path"),
 		Paragraph: createNode("paragraph"),
+		FontEdging: {
+			SubpixelAntiAlias: 0,
+		},
+		FontHinting: {
+			None: 0,
+		},
 		Skia: {
+			Font: vi.fn(() => ({
+				setEdging: vi.fn(),
+				setEmbeddedBitmaps: vi.fn(),
+				setHinting: vi.fn(),
+				setSubpixel: vi.fn(),
+				setLinearMetrics: vi.fn(),
+				dispose: vi.fn(),
+			})),
 			RSXform: mocks.rsxform,
 			Path: {
 				MakeFromRSXformGlyphs: mocks.makePathFromRSXformGlyphs,
@@ -122,6 +138,7 @@ describe("FancyText renderer", () => {
 		};
 		mocks.modelState.internal.paragraph = paragraph;
 		mocks.modelState.internal.font = { dispose: vi.fn() };
+		mocks.modelState.internal.typeface = { id: "typeface" };
 		mocks.modelState.internal.wordSegments = [
 			{ text: "A", start: 0, end: 1 },
 			{ text: "BC", start: 1, end: 3 },
@@ -156,7 +173,9 @@ describe("FancyText renderer", () => {
 		expect(mocks.makePathFromRSXformGlyphs).toHaveBeenCalledWith(
 			[1, 2, 3, 4],
 			expect.any(Array),
-			mocks.modelState.internal.font,
+			expect.objectContaining({
+				dispose: expect.any(Function),
+			}),
 		);
 		const rsxforms = mocks.makePathFromRSXformGlyphs.mock.calls[0]?.[1] as Array<{
 			ty: number;

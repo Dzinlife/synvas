@@ -1,4 +1,9 @@
-import type { CanvasKit, WebGPUCanvasContext, WebGPUDeviceContext } from "canvaskit-wasm";
+import type {
+	CanvasKit,
+	GrDirectContext,
+	WebGPUCanvasContext,
+	WebGPUDeviceContext,
+} from "canvaskit-wasm";
 
 import { JsiSkSurface } from "./JsiSkSurface";
 import {
@@ -84,6 +89,23 @@ const getOrCreateWebGPUCanvasContext = (
 	return canvasContext;
 };
 
+const getCurrentWebGLGrContext = (CanvasKit: CanvasKit) => {
+	const canvasKit = CanvasKit as CanvasKit & {
+		getCurrentGrDirectContext?: () => GrDirectContext | null;
+	};
+	const currentContext = canvasKit.getCurrentGrDirectContext?.();
+	if (!currentContext) {
+		return null;
+	}
+	const isDeleted = (
+		currentContext as GrDirectContext & { isDeleted?: () => boolean }
+	).isDeleted;
+	if (typeof isDeleted === "function" && isDeleted.call(currentContext)) {
+		return null;
+	}
+	return currentContext;
+};
+
 export const invalidateSkiaWebGPUCanvasContext = (canvas: CanvasElement) => {
 	webgpuCanvasContextCache.delete(canvas);
 };
@@ -159,6 +181,22 @@ export const createSkiaOffscreenSurface = (
 		return new JsiSkSurface(CanvasKit, surface, () => {
 			texture.destroy();
 		});
+	}
+	if (
+		backend.kind === "webgl" &&
+		typeof CanvasKit.MakeRenderTarget === "function"
+	) {
+		const currentGrContext = getCurrentWebGLGrContext(CanvasKit);
+		if (currentGrContext) {
+			const surface = CanvasKit.MakeRenderTarget(
+				currentGrContext,
+				targetWidth,
+				targetHeight,
+			);
+			if (surface) {
+				return new JsiSkSurface(CanvasKit, surface);
+			}
+		}
 	}
 	if (
 		backend.kind === "webgl" &&

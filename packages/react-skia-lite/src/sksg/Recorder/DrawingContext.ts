@@ -2,17 +2,61 @@ import type {
   Skia,
   SkCanvas,
   SkColorFilter,
+  SkSurface,
   SkPaint,
   SkShader,
   SkImageFilter,
   SkPathEffect,
 } from "../../skia/types";
-import { BlendMode, PaintStyle, StrokeCap, StrokeJoin } from "../../skia/types";
+import {
+  BlendMode,
+  PaintStyle,
+  StrokeCap,
+  StrokeJoin,
+} from "../../skia/types";
+import { getSkiaRenderBackend } from "../../skia/web/renderBackend";
+
+export type ActiveRenderTarget = {
+  surface: SkSurface;
+  width: number;
+  height: number;
+  debugLabel?: string;
+};
+
+type DrawingContextOptions = {
+  renderTarget?: ActiveRenderTarget | null;
+  retainResources?: boolean;
+};
+
+type BackdropExecution = {
+  mode: "explicit" | "legacy";
+  paint?: SkPaint | null;
+};
+
+const IDENTITY_MATRIX = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+const MATRIX_EPSILON = 1e-6;
+
+const isCanvasMatrixIdentity = (canvas: SkCanvas) => {
+  const matrix = canvas.getTotalMatrix();
+  try {
+    const values = matrix.get();
+    return values.every((value, index) => {
+      return Math.abs(value - IDENTITY_MATRIX[index]) <= MATRIX_EPSILON;
+    });
+  } finally {
+    matrix.dispose?.();
+  }
+};
+
+export const makeSurfaceSnapshotImage = (surface: SkSurface) => {
+  return surface.makeImageSnapshot();
+};
 
 export const createDrawingContext = (
   Skia: Skia,
   paintPool: SkPaint[],
-  canvas: SkCanvas
+  canvas: SkCanvas,
+  options?: DrawingContextOptions
 ) => {
   "worklet";
 
@@ -24,6 +68,11 @@ export const createDrawingContext = (
   const pathEffects: SkPathEffect[] = [];
   const paintDeclarations: SkPaint[] = [];
   const opacities: number[] = [];
+  const backdropExecutions: BackdropExecution[] = [];
+  const retainedResources: Array<() => void> = [];
+  const renderTarget = options?.renderTarget ?? null;
+  const retainResources = options?.retainResources ?? false;
+  const renderBackend = getSkiaRenderBackend();
 
   let nextPaintIndex = 1;
 
@@ -71,7 +120,7 @@ export const createDrawingContext = (
     opacities[opacities.length - 1] = Math.max(0, Math.min(1, newOpacity));
   };
 
-  const saveBackdropFilter = () => {
+  const resolveBackdropFilter = () => {
     let imageFilter: SkImageFilter | null = null;
     const imgf = imageFilters.pop();
     if (imgf) {
@@ -82,13 +131,87 @@ export const createDrawingContext = (
         imageFilter = Skia.ImageFilter.MakeColorFilter(cf, null);
       }
     }
-    // saveLayer with backdrop filter - children will be drawn on top
-    // restore will be called by restoreBackdropFilter after children are drawn
-    canvas.saveLayer(undefined, null, imageFilter);
+    return imageFilter;
+  };
+
+  const retainResource = (cleanup: () => void) => {
+    retainedResources.push(cleanup);
+  };
+
+  const takeRetainedResources = () => {
+    const resources = [...retainedResources];
+    retainedResources.length = 0;
+    return resources;
+  };
+
+  const createBackdropPaint = () => {
+    const paint = getCurrentPaint().copy();
+    paint.setAlphaf(paint.getAlphaf() * getOpacity());
+    return paint;
+  };
+
+  const saveBackdropFilter = () => {
+    const imageFilter = resolveBackdropFilter();
+    if (
+      renderTarget &&
+      renderBackend.kind === "webgpu" &&
+      imageFilter &&
+      isCanvasMatrixIdentity(canvas)
+    ) {
+      const scratchSurface = Skia.Surface.MakeOffscreen(
+        renderTarget.width,
+        renderTarget.height
+      );
+      if (scratchSurface) {
+        const sourceImage = renderTarget.surface.makeImageSnapshot();
+        const filteredPaint = Skia.Paint();
+        const backdropPaint = createBackdropPaint();
+        let retainedFilteredImage = false;
+        try {
+          const scratchCanvas = scratchSurface.getCanvas();
+          filteredPaint.setImageFilter(imageFilter);
+          scratchCanvas.clear(Skia.Color("transparent"));
+          scratchCanvas.drawImage(sourceImage, 0, 0, filteredPaint);
+          scratchSurface.flush();
+          const filteredImage = makeSurfaceSnapshotImage(scratchSurface);
+          try {
+            canvas.drawImage(filteredImage, 0, 0, backdropPaint);
+            if (retainResources) {
+              retainedFilteredImage = true;
+              retainResource(() => {
+                filteredImage.dispose?.();
+                scratchSurface.dispose?.();
+              });
+            }
+            backdropExecutions.push({ mode: "explicit" });
+            return;
+          } finally {
+            if (!retainedFilteredImage) {
+              filteredImage.dispose?.();
+            }
+          }
+        } finally {
+          backdropPaint.dispose?.();
+          filteredPaint.dispose?.();
+          sourceImage.dispose?.();
+          if (!retainedFilteredImage) {
+            scratchSurface.dispose?.();
+          }
+        }
+      }
+    }
+    const backdropPaint = createBackdropPaint();
+    backdropExecutions.push({ mode: "legacy", paint: backdropPaint });
+    canvas.saveLayer(backdropPaint, null, imageFilter);
   };
 
   const restoreBackdropFilter = () => {
+    const execution = backdropExecutions.pop();
+    if (execution?.mode === "explicit") {
+      return;
+    }
     canvas.restore();
+    execution?.paint?.dispose?.();
   };
 
   // Equivalent to the `get paint()` getter in the original class
@@ -151,6 +274,8 @@ export const createDrawingContext = (
     pathEffects,
     paintDeclarations,
     paintPool,
+    renderTarget,
+    retainResources,
 
     // Public methods
     savePaint,
@@ -163,6 +288,8 @@ export const createDrawingContext = (
     materializePaint,
     getOpacity,
     setOpacity,
+    retainResource,
+    takeRetainedResources,
   };
 };
 

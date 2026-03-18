@@ -122,6 +122,75 @@ const createHalationPassFilter = ({
 	return Skia.ImageFilter.MakeOffset(shiftX, 0, tintFilter, null);
 };
 
+const resolveHalationLayerConfig = ({
+	intensity = 0.45,
+	threshold = 0.78,
+	radius = 8,
+	diffusion = 0.55,
+	warmness = 0.6,
+	chromaticShift = 1.2,
+}: HalationFilterLayerProps) => {
+	const safeIntensity = Math.min(2, clampNonNegative(intensity, 0.45));
+	const safeThreshold = clamp01(threshold);
+	const safeRadius = clampNonNegative(radius, 8);
+	const safeDiffusion = clamp01(diffusion);
+	const safeWarmness = clamp01(warmness);
+	const safeShift = clampNonNegative(chromaticShift, 1.2);
+	const globalMix = Math.min(1, safeIntensity * 0.85);
+	return {
+		safeIntensity,
+		safeThreshold,
+		safeRadius,
+		safeDiffusion,
+		safeWarmness,
+		safeShift,
+		globalMix,
+	};
+};
+
+export const createHalationImageFilter = (
+	props: HalationFilterLayerProps,
+): { filter: SkImageFilter; opacity: number } | null => {
+	const {
+		safeIntensity,
+		safeThreshold,
+		safeRadius,
+		safeDiffusion,
+		safeWarmness,
+		safeShift,
+		globalMix,
+	} = resolveHalationLayerConfig(props);
+	if (safeIntensity <= 0.001 || safeRadius <= 0.001) {
+		return null;
+	}
+	const primaryFilter = createHalationPassFilter({
+		threshold: safeThreshold,
+		radius: safeRadius,
+		warmness: safeWarmness,
+		highlightBoost: 0.8 + safeIntensity * 1.6,
+		tintStrength: safeIntensity * 0.65,
+		shiftX: safeShift,
+	});
+	const secondaryFilter = createHalationPassFilter({
+		threshold: Math.max(0, safeThreshold - 0.1 - safeDiffusion * 0.08),
+		radius: safeRadius * (1.7 + safeDiffusion * 1.2),
+		warmness: Math.min(1, safeWarmness + 0.08),
+		highlightBoost: 0.55 + safeIntensity * 1.1,
+		tintStrength: safeIntensity * (0.22 + safeDiffusion * 0.2),
+		shiftX: safeShift * (1.4 + safeDiffusion * 0.6),
+	});
+	const glow = Skia.ImageFilter.MakeBlend(
+		BlendMode.Screen,
+		primaryFilter,
+		secondaryFilter,
+		null,
+	);
+	return {
+		filter: Skia.ImageFilter.MakeBlend(BlendMode.Screen, glow, null, null),
+		opacity: globalMix,
+	};
+};
+
 const HalationFilterLayer: React.FC<HalationFilterLayerRendererProps> = ({
 	intensity = 0.45,
 	threshold = 0.78,
@@ -130,13 +199,22 @@ const HalationFilterLayer: React.FC<HalationFilterLayerRendererProps> = ({
 	warmness = 0.6,
 	chromaticShift = 1.2,
 }) => {
-	const safeIntensity = Math.min(2, clampNonNegative(intensity, 0.45));
-	const safeThreshold = clamp01(threshold);
-	const safeRadius = clampNonNegative(radius, 8);
-	const safeDiffusion = clamp01(diffusion);
-	const safeWarmness = clamp01(warmness);
-	const safeShift = clampNonNegative(chromaticShift, 1.2);
-	const globalMix = Math.min(1, safeIntensity * 0.85);
+	const {
+		safeIntensity,
+		safeThreshold,
+		safeRadius,
+		safeDiffusion,
+		safeWarmness,
+		safeShift,
+		globalMix,
+	} = resolveHalationLayerConfig({
+		intensity,
+		threshold,
+		radius,
+		diffusion,
+		warmness,
+		chromaticShift,
+	});
 
 	const primaryFilter = useMemo(
 		() =>

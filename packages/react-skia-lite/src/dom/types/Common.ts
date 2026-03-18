@@ -37,6 +37,13 @@ export interface ChildrenProps {
 	children?: ReactNode | ReactNode[];
 }
 
+export interface RenderTargetProps extends ChildrenProps {
+	width: number;
+	height: number;
+	clearColor?: Color;
+	debugLabel?: string;
+}
+
 export interface RectCtor {
 	x?: number;
 	y?: number;

@@ -2,12 +2,13 @@
 
 import { render, waitFor } from "@testing-library/react";
 import type { TimelineElement } from "core/element/types";
-import type React from "react";
+import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TimelineTrack } from "@/scene-editor/timeline/types";
 
 const {
 	rootRenderSpy,
+	buildSkiaRenderStateMock,
 	buildSkiaFrameSnapshotMock,
 	timelineStore,
 	modelRegistry,
@@ -94,6 +95,7 @@ const {
 
 	return {
 		rootRenderSpy: vi.fn(),
+		buildSkiaRenderStateMock: vi.fn(),
 		buildSkiaFrameSnapshotMock: vi.fn(),
 		modelRegistry: {
 			get: vi.fn(() => undefined),
@@ -130,14 +132,23 @@ vi.mock("react-skia-lite", async () => {
 		return ReactModule.createElement("fill", props);
 	};
 
-	const Picture = (props: Record<string, unknown>) => {
-		return ReactModule.createElement("picture", props);
+	const RenderTarget = (props: Record<string, unknown>) => {
+		return ReactModule.createElement("render-target", props);
 	};
 
 	return {
 		Canvas,
 		Fill,
-		Picture,
+		Picture: (props: Record<string, unknown>) => {
+			return ReactModule.createElement("picture", props);
+		},
+		RenderTarget,
+		getSkiaRenderBackend: () => ({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		}),
 		useContextBridge: () => {
 			return ({ children }: { children: React.ReactNode }) => children;
 		},
@@ -164,6 +175,7 @@ vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", async () => {
 });
 
 vi.mock("./buildSkiaTree", () => ({
+	buildSkiaRenderState: buildSkiaRenderStateMock,
 	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
 }));
 
@@ -184,9 +196,8 @@ const createElement = (id: string): TimelineElement => ({
 	props: {},
 });
 
-const createFrameSnapshot = (label: string) => ({
-	picture: { label, dispose: vi.fn() } as unknown as { dispose: () => void },
-	children: [],
+const createRenderState = (label: string) => ({
+	children: React.createElement("mock-frame", { label }),
 	orderedElements: [],
 	visibleElements: [],
 	transitionFrameState: {
@@ -213,9 +224,19 @@ const getTrackIndexForElement = (element: TimelineElement) =>
 
 const sortByTrackIndex = (elements: TimelineElement[]) => elements;
 
+const getCommittedFrameLabel = (node: React.ReactElement | undefined) => {
+	const bridgeNode = (node?.props as { children?: React.ReactElement | undefined })
+		?.children;
+	const frameNode = (bridgeNode?.props as {
+		children?: React.ReactElement<{ label?: string }> | undefined;
+	})?.children;
+	return frameNode?.props?.label;
+};
+
 describe("SkiaPreviewCanvas", () => {
 	beforeEach(() => {
 		rootRenderSpy.mockReset();
+		buildSkiaRenderStateMock.mockReset();
 		buildSkiaFrameSnapshotMock.mockReset();
 		timelineStore.reset();
 		timelineStore.setState({
@@ -223,10 +244,10 @@ describe("SkiaPreviewCanvas", () => {
 		});
 	});
 
-	it("渲染时只消费 picture 快照", async () => {
+	it("渲染时会提交 RenderTarget 包裹的 live subtree", async () => {
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) =>
-			createFrameSnapshot(`frame-${displayTime}`),
+		buildSkiaRenderStateMock.mockImplementation(async ({ displayTime }) =>
+			createRenderState(`frame-${displayTime}`),
 		);
 
 		render(
@@ -247,26 +268,26 @@ describe("SkiaPreviewCanvas", () => {
 		timelineStore.setState({ currentTime: 1 });
 
 		await waitFor(() => {
-			const hasPictureCommit = rootRenderSpy.mock.calls.some((call) => {
+			const hasRenderTargetCommit = rootRenderSpy.mock.calls.some((call) => {
 				const node = call[0] as React.ReactElement | undefined;
 				const typeName =
 					typeof node?.type === "function"
 						? node.type.name
 						: String(node?.type);
-				return typeName === "Picture";
+				return typeName === "RenderTarget";
 			});
-			expect(hasPictureCommit).toBe(true);
+			expect(hasRenderTargetCommit).toBe(true);
 		});
 		errorSpy.mockRestore();
 	});
 
 	it("构帧失败时保留上一帧，不触发新渲染提交", async () => {
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) => {
+		buildSkiaRenderStateMock.mockImplementation(async ({ displayTime }) => {
 			if (displayTime === 10) {
 				throw new Error("frame failed");
 			}
-			return createFrameSnapshot(`frame-${displayTime}`);
+			return createRenderState(`frame-${displayTime}`);
 		});
 
 		render(
@@ -287,7 +308,7 @@ describe("SkiaPreviewCanvas", () => {
 
 		timelineStore.setState({ currentTime: 10 });
 		await waitFor(() => {
-			expect(buildSkiaFrameSnapshotMock).toHaveBeenCalled();
+			expect(buildSkiaRenderStateMock).toHaveBeenCalled();
 		});
 
 		expect(rootRenderSpy).toHaveBeenCalledTimes(1);
@@ -296,7 +317,7 @@ describe("SkiaPreviewCanvas", () => {
 
 	it("首帧失败时回退黑帧", async () => {
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-		buildSkiaFrameSnapshotMock.mockRejectedValue(
+		buildSkiaRenderStateMock.mockRejectedValue(
 			new Error("first frame failed"),
 		);
 
@@ -327,15 +348,15 @@ describe("SkiaPreviewCanvas", () => {
 
 	it("非播放态连续拖拽时不应被慢帧阻塞", async () => {
 		let resolveSlowFrame: (() => void) | undefined;
-		buildSkiaFrameSnapshotMock.mockImplementation(({ displayTime }) => {
+		buildSkiaRenderStateMock.mockImplementation(({ displayTime }) => {
 			if (displayTime === 0) {
 				return new Promise((resolve) => {
 					resolveSlowFrame = () => {
-						resolve(createFrameSnapshot("frame-0"));
+						resolve(createRenderState("frame-0"));
 					};
 				});
 			}
-			return Promise.resolve(createFrameSnapshot(`frame-${displayTime}`));
+			return Promise.resolve(createRenderState(`frame-${displayTime}`));
 		});
 
 		render(
@@ -355,31 +376,29 @@ describe("SkiaPreviewCanvas", () => {
 		await waitFor(() => {
 			const hasFrame8Commit = rootRenderSpy.mock.calls.some((call) => {
 				const node = call[0] as React.ReactElement | undefined;
-				const picture = (node?.props as { picture?: { label?: string } })
-					?.picture;
-				return picture?.label === "frame-8";
+				return getCommittedFrameLabel(node) === "frame-8";
 			});
 			expect(hasFrame8Commit).toBe(true);
 		});
 
 		resolveSlowFrame?.();
 		await waitFor(() => {
-			expect(buildSkiaFrameSnapshotMock).toHaveBeenCalled();
+			expect(buildSkiaRenderStateMock).toHaveBeenCalled();
 		});
 	});
 
 	it("播放中 seek 跳帧时应优先显示目标帧", async () => {
 		let resolveSlowFrame: (() => void) | undefined;
 		timelineStore.setState({ isPlaying: true });
-		buildSkiaFrameSnapshotMock.mockImplementation(({ displayTime }) => {
+		buildSkiaRenderStateMock.mockImplementation(({ displayTime }) => {
 			if (displayTime === 0) {
 				return new Promise((resolve) => {
 					resolveSlowFrame = () => {
-						resolve(createFrameSnapshot("frame-0"));
+						resolve(createRenderState("frame-0"));
 					};
 				});
 			}
-			return Promise.resolve(createFrameSnapshot(`frame-${displayTime}`));
+			return Promise.resolve(createRenderState(`frame-${displayTime}`));
 		});
 
 		render(
@@ -399,9 +418,7 @@ describe("SkiaPreviewCanvas", () => {
 		await waitFor(() => {
 			const hasTargetFrameCommit = rootRenderSpy.mock.calls.some((call) => {
 				const node = call[0] as React.ReactElement | undefined;
-				const picture = (node?.props as { picture?: { label?: string } })
-					?.picture;
-				return picture?.label === "frame-100";
+				return getCommittedFrameLabel(node) === "frame-100";
 			});
 			expect(hasTargetFrameCommit).toBe(true);
 		});

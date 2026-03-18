@@ -14,6 +14,8 @@ vi.mock("react-skia-lite", () => ({
 	createSkiaCanvasSurface: createSkiaCanvasSurfaceMock,
 	getSkiaRenderBackend: getSkiaRenderBackendMock,
 	JsiSkSurface: class {},
+	Skia: { id: "skia" },
+	SkiaSGRoot: class {},
 }));
 
 import { __createSurfaceForExportForTests } from "./exportVideo";

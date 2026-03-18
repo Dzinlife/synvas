@@ -43,6 +43,7 @@ export const enum NodeType {
   // Mixed
   Blend = "skBlend",
   BackdropFilter = "skBackdropFilter",
+  RenderTarget = "skRenderTarget",
   Box = "skBox",
   BoxShadow = "skBoxShadow",
 

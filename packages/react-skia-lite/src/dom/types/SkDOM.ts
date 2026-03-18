@@ -1,4 +1,9 @@
-import type { ChildrenProps, GroupProps, PaintProps } from "./Common";
+import type {
+  ChildrenProps,
+  GroupProps,
+  PaintProps,
+  RenderTargetProps,
+} from "./Common";
 import type {
   BlendImageFilterProps,
   BlurImageFilterProps,
@@ -176,6 +181,7 @@ export interface SkDOM {
   // Mixed
   Blend(props: BlendProps): DeclarationNode<BlendProps>;
   BackdropFilter(props: ChildrenProps): RenderNode<ChildrenProps>;
+  RenderTarget(props: RenderTargetProps): RenderNode<RenderTargetProps>;
   Box(props: BoxProps): RenderNode<BoxProps>;
   BoxShadow(props: BoxShadowProps): DeclarationNode<BoxShadowProps>;
 

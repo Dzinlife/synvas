@@ -11,7 +11,10 @@ import {
 	type CompositionAudioGraph,
 } from "@/scene-editor/audio/buildCompositionAudioGraph";
 import { getAudioPlaybackSessionKey } from "@/scene-editor/playback/clipContinuityIndex";
-import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
+import {
+	buildSkiaFrameSnapshot,
+	buildSkiaRenderState,
+} from "@/scene-editor/preview/buildSkiaTree";
 import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type {
 	EditorRuntime,
@@ -206,6 +209,59 @@ export const exportTimelineAsVideo = async (options: {
 				},
 			);
 		};
+		const buildFrameRenderState = (
+			args: Parameters<typeof buildSkiaRenderState>[0],
+		) => {
+			const prepare = args.prepare;
+			const RuntimeProvider = EditorRuntimeProvider as RuntimeProviderComponent;
+			return buildSkiaRenderState(
+				{
+					...args,
+					elements: rootElements,
+					tracks: rootTracks,
+					prepare: {
+						isExporting: prepare?.isExporting ?? true,
+						fps: prepare?.fps ?? fps,
+						canvasSize: prepare?.canvasSize ?? timelineState.canvasSize,
+						getModelStore: prepare?.getModelStore,
+						prepareTransitionPictures: prepare?.prepareTransitionPictures,
+						forcePrepareFrames: prepare?.forcePrepareFrames,
+						awaitReady: prepare?.awaitReady,
+						maxCompositionDepth: prepare?.maxCompositionDepth,
+						compositionPath: rootSceneId ? [rootSceneId] : [],
+						frameChannel: "offscreen",
+					},
+				},
+				{
+					wrapRenderNode: (node) =>
+						createElement(RuntimeProvider, { runtime: options.runtime }, node),
+					resolveCompositionTimeline: (sceneId) => {
+						if (!runtimeManager.getTimelineRuntime) return null;
+						const childRuntime = runtimeManager.getTimelineRuntime(
+							toSceneTimelineRef(sceneId),
+						);
+						if (!childRuntime) return null;
+						const childState = childRuntime.timelineStore.getState();
+						return {
+							sceneId,
+							elements: childState.elements,
+							tracks: childState.tracks,
+							fps: childState.fps,
+							canvasSize: childState.canvasSize,
+							getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
+							wrapRenderNode: (node) =>
+								createElement(
+									RuntimeProvider,
+									{
+										runtime: createScopedRuntime(childRuntime),
+									},
+									node,
+								),
+						};
+					},
+				},
+			);
+		};
 		await exportTimelineAsVideoCore({
 			elements: audioMixElements,
 			tracks: audioMixTracks,
@@ -215,6 +271,7 @@ export const exportTimelineAsVideo = async (options: {
 			endFrame,
 			filename: options?.filename,
 			buildSkiaFrameSnapshot: buildFrameSnapshot,
+			buildSkiaRenderState: buildFrameRenderState,
 			getModelStore: (id) => modelRegistry.get(id),
 			audio: {
 				audioTrackStates: timelineState.audioTrackStates,

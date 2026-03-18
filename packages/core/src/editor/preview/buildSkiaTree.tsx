@@ -1,5 +1,13 @@
 import React from "react";
-import { Fill, Group, Picture, Skia, type SkPicture } from "react-skia-lite";
+import {
+	Fill,
+	Group,
+	Picture,
+	RenderTarget,
+	Skia,
+	getSkiaRenderBackend,
+	type SkPicture,
+} from "react-skia-lite";
 import type {
 	ComponentModelStore,
 	RenderFrameChannel,
@@ -294,6 +302,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 	);
 	const shouldAwaitReady = isExporting || (prepare?.awaitReady ?? false);
 	const frameChannel = resolveRenderFrameChannel(prepare?.frameChannel);
+	const shouldUseLiveComposition = getSkiaRenderBackend().kind === "webgpu";
 	const shouldPrepareTransitionPictures =
 		(prepare?.prepareTransitionPictures ?? false) || isExporting;
 	const transitionPictureSize =
@@ -416,66 +425,42 @@ const buildSkiaRenderStateWithScopeCore = async (
 			if (!deps.resolveCompositionTimeline) {
 				return { node: null, ready: Promise.resolve() };
 			}
-				try {
-					const compositionTimeline =
-						await deps.resolveCompositionTimeline(sceneId);
-					if (!compositionTimeline) {
-						return { node: null, ready: Promise.resolve() };
-					}
-					const compositionDeps: BuildSkiaDeps =
-						typeof compositionTimeline.wrapRenderNode === "function"
-							? {
-									...deps,
-									renderNodeToPicture: (node, size) =>
-										deps.renderNodeToPicture(
-											compositionTimeline.wrapRenderNode?.(node) ?? node,
-											size,
-										),
-								}
-							: deps;
-					const parentFps = resolveSafeFps(fps);
-					const childFps = resolveSafeFps(compositionTimeline.fps, parentFps);
-					const compositionStart = resolveFiniteNumber(
-						element.timeline.start,
-						0,
-					);
-					const compositionOffset = Math.max(
-						0,
-						Math.round(resolveFiniteNumber(element.timeline.offset, 0)),
-					);
-					const localFrames = Math.max(
-						0,
-						displayTime - compositionStart + compositionOffset,
-					);
-					const localSeconds = localFrames / parentFps;
-					const childDisplayTime = Math.max(
-						0,
-						Math.round(localSeconds * childFps),
-					);
-					const childSnapshot = await buildSkiaFrameSnapshotCore(
-					{
-						elements: compositionTimeline.elements,
-						displayTime: childDisplayTime,
-						tracks: compositionTimeline.tracks,
-						getTrackIndexForElement,
-						sortByTrackIndex,
-						prepare: {
-							isExporting,
-							fps: childFps,
-							canvasSize: compositionTimeline.canvasSize,
-							getModelStore: compositionTimeline.getModelStore,
-							prepareTransitionPictures: shouldPrepareTransitionPictures,
-							forcePrepareFrames,
-							awaitReady: shouldAwaitReady,
-							compositionPath: [...compositionPath, sceneId],
-							maxCompositionDepth,
-							frameChannel: "offscreen",
-						},
-						},
-						compositionDeps,
-					);
-				scope.add(() => childSnapshot.dispose?.());
-
+			try {
+				const compositionTimeline =
+					await deps.resolveCompositionTimeline(sceneId);
+				if (!compositionTimeline) {
+					return { node: null, ready: Promise.resolve() };
+				}
+				const compositionDeps: BuildSkiaDeps =
+					typeof compositionTimeline.wrapRenderNode === "function"
+						? {
+								...deps,
+								renderNodeToPicture: (node, size) =>
+									deps.renderNodeToPicture(
+										compositionTimeline.wrapRenderNode?.(node) ?? node,
+										size,
+									),
+							}
+						: deps;
+				const parentFps = resolveSafeFps(fps);
+				const childFps = resolveSafeFps(compositionTimeline.fps, parentFps);
+				const compositionStart = resolveFiniteNumber(
+					element.timeline.start,
+					0,
+				);
+				const compositionOffset = Math.max(
+					0,
+					Math.round(resolveFiniteNumber(element.timeline.offset, 0)),
+				);
+				const localFrames = Math.max(
+					0,
+					displayTime - compositionStart + compositionOffset,
+				);
+				const localSeconds = localFrames / parentFps;
+				const childDisplayTime = Math.max(
+					0,
+					Math.round(localSeconds * childFps),
+				);
 				const childCanvasWidth = Math.max(
 					1,
 					resolveFiniteNumber(compositionTimeline.canvasSize.width, 1),
@@ -503,20 +488,87 @@ const buildSkiaRenderStateWithScopeCore = async (
 					targetWidth / childCanvasWidth,
 					targetHeight / childCanvasHeight,
 				);
-				const compositionNode = (
-					<Group matrix={matrix} key={element.id}>
-						<Group
-							clip={{
-								x: 0,
-								y: 0,
-								width: childCanvasWidth,
-								height: childCanvasHeight,
-							}}
-						>
-							<Picture picture={childSnapshot.picture} />
+				const childPrepare = {
+					isExporting,
+					fps: childFps,
+					canvasSize: compositionTimeline.canvasSize,
+					getModelStore: compositionTimeline.getModelStore,
+					prepareTransitionPictures: shouldPrepareTransitionPictures,
+					forcePrepareFrames,
+					awaitReady: shouldAwaitReady,
+					compositionPath: [...compositionPath, sceneId],
+					maxCompositionDepth,
+					frameChannel: "offscreen" as const,
+				};
+				let compositionNode: React.ReactNode;
+				let compositionReady: Promise<void>;
+				if (shouldUseLiveComposition) {
+					const childRenderState = await buildSkiaRenderStateWithScopeCore(
+						{
+							elements: compositionTimeline.elements,
+							displayTime: childDisplayTime,
+							tracks: compositionTimeline.tracks,
+							getTrackIndexForElement,
+							sortByTrackIndex,
+							prepare: childPrepare,
+						},
+						compositionDeps,
+						scope,
+					);
+					const childNode = compositionTimeline.wrapRenderNode
+						? compositionTimeline.wrapRenderNode(childRenderState.children)
+						: childRenderState.children;
+					compositionNode = (
+						<Group matrix={matrix} key={element.id}>
+							<RenderTarget
+								width={childCanvasWidth}
+								height={childCanvasHeight}
+								clearColor="transparent"
+								debugLabel={`composition:${element.id}`}
+							>
+								<Group
+									clip={{
+										x: 0,
+										y: 0,
+										width: childCanvasWidth,
+										height: childCanvasHeight,
+									}}
+								>
+									{childNode}
+								</Group>
+							</RenderTarget>
 						</Group>
-					</Group>
-				);
+					);
+					compositionReady = childRenderState.ready;
+				} else {
+					const childSnapshot = await buildSkiaFrameSnapshotCore(
+						{
+							elements: compositionTimeline.elements,
+							displayTime: childDisplayTime,
+							tracks: compositionTimeline.tracks,
+							getTrackIndexForElement,
+							sortByTrackIndex,
+							prepare: childPrepare,
+						},
+						compositionDeps,
+					);
+					scope.add(() => childSnapshot.dispose?.());
+					compositionNode = (
+						<Group matrix={matrix} key={element.id}>
+							<Group
+								clip={{
+									x: 0,
+									y: 0,
+									width: childCanvasWidth,
+									height: childCanvasHeight,
+								}}
+							>
+								<Picture picture={childSnapshot.picture} />
+							</Group>
+						</Group>
+					);
+					compositionReady = childSnapshot.ready;
+				}
 				const node = wrapElementNode({
 					target: element,
 					node: compositionNode,
@@ -525,7 +577,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 				});
 				return {
 					node,
-					ready: childSnapshot.ready,
+					ready: compositionReady,
 				};
 			} catch (error) {
 				console.warn(

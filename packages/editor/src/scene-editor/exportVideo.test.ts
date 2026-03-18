@@ -1,4 +1,7 @@
-import type { BuildSkiaFrameSnapshot } from "core/editor/exportVideo";
+import type {
+	BuildSkiaFrameSnapshot,
+	BuildSkiaRenderState,
+} from "core/editor/exportVideo";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelRegistryClass } from "@/element/model/registry";
 import type { EditorRuntime } from "@/scene-editor/runtime/types";
@@ -26,14 +29,17 @@ let timelineState: {
 };
 let runtime: EditorRuntime;
 type FrameSnapshotArgs = Parameters<BuildSkiaFrameSnapshot>[0];
+type RenderStateArgs = Parameters<BuildSkiaRenderState>[0];
 
 const {
 	exportTimelineAsVideoCoreMock,
 	buildSkiaFrameSnapshotMock,
+	buildSkiaRenderStateMock,
 	buildCompositionAudioGraphMock,
 } = vi.hoisted(() => ({
 	exportTimelineAsVideoCoreMock: vi.fn(),
 	buildSkiaFrameSnapshotMock: vi.fn(),
+	buildSkiaRenderStateMock: vi.fn(),
 	buildCompositionAudioGraphMock: vi.fn(),
 }));
 
@@ -43,6 +49,7 @@ vi.mock("@/scene-editor/playback/clipContinuityIndex", () => ({
 
 vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
 	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
+	buildSkiaRenderState: buildSkiaRenderStateMock,
 }));
 
 vi.mock("@/scene-editor/audio/buildCompositionAudioGraph", () => ({
@@ -54,7 +61,10 @@ vi.mock("core/editor/exportVideo", () => ({
 }));
 
 import { buildCompositionAudioGraph } from "@/scene-editor/audio/buildCompositionAudioGraph";
-import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
+import {
+	buildSkiaFrameSnapshot,
+	buildSkiaRenderState,
+} from "@/scene-editor/preview/buildSkiaTree";
 import { exportTimelineAsVideo } from "./exportVideo";
 
 const createAbortError = (): Error => {
@@ -120,6 +130,7 @@ describe("editor.exportTimelineAsVideo", () => {
 		};
 		exportTimelineAsVideoCoreMock.mockReset();
 		buildSkiaFrameSnapshotMock.mockReset();
+		buildSkiaRenderStateMock.mockReset();
 		buildCompositionAudioGraphMock.mockReset();
 		buildSkiaFrameSnapshotMock.mockResolvedValue({
 			children: [],
@@ -130,6 +141,17 @@ describe("editor.exportTimelineAsVideo", () => {
 				hiddenElementIds: [],
 			},
 			picture: {},
+			ready: Promise.resolve(),
+			dispose: () => {},
+		});
+		buildSkiaRenderStateMock.mockResolvedValue({
+			children: [],
+			orderedElements: [],
+			visibleElements: [],
+			transitionFrameState: {
+				activeTransitions: [],
+				hiddenElementIds: [],
+			},
 			ready: Promise.resolve(),
 			dispose: () => {},
 		});
@@ -164,9 +186,7 @@ describe("editor.exportTimelineAsVideo", () => {
 			signal: controller.signal,
 		});
 		expect(typeof passed.buildSkiaFrameSnapshot).toBe("function");
-		expect(
-			(passed as { buildSkiaRenderState?: unknown }).buildSkiaRenderState,
-		).toBeUndefined();
+		expect(typeof passed.buildSkiaRenderState).toBe("function");
 		expect(onFrame).toHaveBeenCalledWith(15);
 		expect(timelineState.setExportTime).toHaveBeenCalledWith(10);
 		expect(timelineState.setExportTime).toHaveBeenCalledWith(15);
@@ -364,6 +384,10 @@ describe("editor.exportTimelineAsVideo", () => {
 			await options.buildSkiaFrameSnapshot({
 				...snapshotInput,
 			});
+			const renderStateInput: RenderStateArgs = {
+				...snapshotInput,
+			};
+			await options.buildSkiaRenderState?.(renderStateInput);
 		});
 
 		await exportTimelineAsVideo({ runtime });
@@ -371,7 +395,12 @@ describe("editor.exportTimelineAsVideo", () => {
 		const snapshotCall = vi
 			.mocked(buildSkiaFrameSnapshot)
 			.mock.calls.at(-1)?.[0];
+		const renderStateCall = vi
+			.mocked(buildSkiaRenderState)
+			.mock.calls.at(-1)?.[0];
 		expect(snapshotCall?.elements).toBe(rootElements);
 		expect(snapshotCall?.tracks).toBe(rootTracks);
+		expect(renderStateCall?.elements).toBe(rootElements);
+		expect(renderStateCall?.tracks).toBe(rootTracks);
 	});
 });

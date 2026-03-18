@@ -12,11 +12,13 @@ import type {
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { SceneNodeSkiaRenderer } from "./renderer";
 
-const { buildSkiaFrameSnapshotMock } = vi.hoisted(() => ({
+const { buildSkiaRenderStateMock, buildSkiaFrameSnapshotMock } = vi.hoisted(() => ({
+	buildSkiaRenderStateMock: vi.fn(),
 	buildSkiaFrameSnapshotMock: vi.fn(),
 }));
 
 vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
+	buildSkiaRenderState: buildSkiaRenderStateMock,
 	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
 }));
 
@@ -27,55 +29,18 @@ vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", () => ({
 }));
 
 vi.mock("react-skia-lite", async () => {
-	const ReactModule = await import("react");
-	let nextPictureId = 0;
-	const createSharedValue = <T,>(value: T) => {
-		const listeners = new Map<number, (nextValue: T) => void>();
-		let currentValue = value;
-		return {
-			get value() {
-				return currentValue;
-			},
-			set value(nextValue: T) {
-				currentValue = nextValue;
-				for (const listener of listeners.values()) {
-					listener(nextValue);
-				}
-			},
-			_isSharedValue: true as const,
-			addListener: (listenerId: number, listener: (nextValue: T) => void) => {
-				listeners.set(listenerId, listener);
-			},
-			removeListener: (listenerId: number) => {
-				listeners.delete(listenerId);
-			},
-			modify: (modifier?: (value: T) => T, _forceUpdate?: boolean) => {
-				const nextValue = modifier ? modifier(currentValue) : currentValue;
-				currentValue = nextValue;
-				for (const listener of listeners.values()) {
-					listener(nextValue);
-				}
-			},
-		};
-	};
-
 	return {
 		Group: ({ children }: { children?: React.ReactNode }) => children ?? null,
 		Picture: () => null,
+		RenderTarget: ({ children }: { children?: React.ReactNode }) =>
+			children ?? null,
 		Rect: () => null,
-		useSharedValue: <T,>(initialValue: T) => {
-			const ref = ReactModule.useRef(createSharedValue(initialValue));
-			return ref.current;
-		},
-		Skia: {
-			PictureRecorder: () => ({
-				beginRecording: () => ({}),
-				finishRecordingAsPicture: () => ({
-					id: `empty-picture-${nextPictureId++}`,
-					dispose: vi.fn(),
-				}),
-			}),
-		},
+		getSkiaRenderBackend: () => ({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		}),
 	};
 });
 
@@ -88,10 +53,11 @@ const flushMicrotasks = async () => {
 
 describe("SceneNodeSkiaRenderer", () => {
 	beforeEach(() => {
+		buildSkiaRenderStateMock.mockReset();
 		buildSkiaFrameSnapshotMock.mockReset();
 	});
 
-	it("用 shared value 提交 picture 时不会触发 React 重渲染，并会延后一帧释放旧 picture", async () => {
+	it("切换 scene render state 时会延后一帧释放旧资源", async () => {
 		const rafQueue: FrameRequestCallback[] = [];
 		vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
 			rafQueue.push(callback);
@@ -175,13 +141,27 @@ describe("SceneNodeSkiaRenderer", () => {
 		const disposeFirst = vi.fn();
 		const disposeSecond = vi.fn();
 
-		buildSkiaFrameSnapshotMock
+		buildSkiaRenderStateMock
 			.mockResolvedValueOnce({
-				picture: { id: "picture-1" },
+				children: React.createElement("mock-frame", { id: "frame-1" }),
+				orderedElements: [],
+				visibleElements: [],
+				transitionFrameState: {
+					activeTransitions: [],
+					hiddenElementIds: [],
+				},
+				ready: Promise.resolve(),
 				dispose: disposeFirst,
 			})
 			.mockResolvedValueOnce({
-				picture: { id: "picture-2" },
+				children: React.createElement("mock-frame", { id: "frame-2" }),
+				orderedElements: [],
+				visibleElements: [],
+				transitionFrameState: {
+					activeTransitions: [],
+					hiddenElementIds: [],
+				},
+				ready: Promise.resolve(),
 				dispose: disposeSecond,
 			});
 
@@ -202,11 +182,9 @@ describe("SceneNodeSkiaRenderer", () => {
 			</React.Profiler>,
 		);
 
-		expect(profileSpy).toHaveBeenCalledTimes(1);
-
 		await flushMicrotasks();
 
-		expect(profileSpy).toHaveBeenCalledTimes(1);
+		expect(profileSpy).toHaveBeenCalled();
 		expect(disposeFirst).not.toHaveBeenCalled();
 
 		act(() => {
@@ -215,7 +193,6 @@ describe("SceneNodeSkiaRenderer", () => {
 
 		await flushMicrotasks();
 
-		expect(profileSpy).toHaveBeenCalledTimes(1);
 		expect(disposeFirst).not.toHaveBeenCalled();
 		expect(disposeSecond).not.toHaveBeenCalled();
 

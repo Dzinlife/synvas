@@ -1,5 +1,6 @@
 import type { VideoSample, VideoSampleSink } from "mediabunny";
 import {
+	getSkiaRenderBackend,
 	makeImageFromTextureSourceDirect,
 	type SkImage,
 } from "react-skia-lite";
@@ -34,6 +35,8 @@ export const videoSampleToSkImage = (
 	sample: VideoSample,
 ): SkImage | null => {
 	let frame: VideoFrame | null = null;
+	const shouldCloseFrameAfterUpload =
+		getSkiaRenderBackend().kind === "webgpu";
 	try {
 		frame = sample.toVideoFrame();
 		return makeImageFromTextureSourceDirect(frame);
@@ -42,6 +45,10 @@ export const videoSampleToSkImage = (
 		closeVideoFrame(frame);
 		return null;
 	} finally {
+		if (shouldCloseFrameAfterUpload) {
+			// WebGPU 路径会先把外部帧拷进内部纹理，拷贝完成后即可释放 VideoFrame。
+			closeVideoFrame(frame);
+		}
 		// sample 与生成出来的 VideoFrame 生命周期分离，这里只关闭 sample 本体。
 		closeVideoSample(sample);
 	}

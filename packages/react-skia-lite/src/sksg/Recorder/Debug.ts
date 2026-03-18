@@ -1,4 +1,4 @@
-import { CommandType, isGroup } from "./Core";
+import { CommandType, isGroup, isRenderTarget } from "./Core";
 import type { Command } from "./Core";
 
 const CommandTypeNames: Record<CommandType, string> = {
@@ -20,6 +20,7 @@ const CommandTypeNames: Record<CommandType, string> = {
   [CommandType.RestoreBackdropFilter]: "RestoreBackdropFilter",
   [CommandType.SaveLayer]: "SaveLayer",
   [CommandType.RestorePaintDeclaration]: "RestorePaintDeclaration",
+  [CommandType.RenderTarget]: "RenderTarget",
   [CommandType.DrawBox]: "DrawBox",
   [CommandType.DrawImage]: "DrawImage",
   [CommandType.DrawCircle]: "DrawCircle",
@@ -72,7 +73,7 @@ export const debugTree = (commands: Command[], indent = 0): string => {
       result += `, "props": ${serializeProps(cmd.props)}`;
     }
 
-    if (isGroup(cmd)) {
+    if (isGroup(cmd) || isRenderTarget(cmd)) {
       result += `, "children": ${debugTree(cmd.children, indent + 2)}`;
     }
 
