@@ -1,7 +1,7 @@
-import type { CanvasSink, WrappedCanvas } from "mediabunny";
+import type { VideoSample, VideoSampleSink } from "mediabunny";
 
 export interface WarmFramesFromKeyframeToTargetOptions<Frame> {
-	videoSink: CanvasSink;
+	videoSampleSink: VideoSampleSink;
 	targetTime: number;
 	frameInterval: number;
 	alignTime: (time: number) => number;
@@ -10,7 +10,7 @@ export interface WarmFramesFromKeyframeToTargetOptions<Frame> {
 		timeKey: number;
 	}) => Promise<number | null>;
 	getCachedFrame: (alignedTime: number) => Frame | undefined;
-	decodeWrappedFrame: (frame: WrappedCanvas) => Promise<Frame | null>;
+	decodeVideoSample: (sample: VideoSample) => Promise<Frame | null>;
 	storeFrame: (alignedTime: number, frame: Frame) => void;
 	shouldAbort?: () => boolean;
 }
@@ -25,13 +25,13 @@ export interface WarmFramesFromKeyframeToTargetResult<Frame> {
 }
 
 export const warmFramesFromKeyframeToTarget = async <Frame>({
-	videoSink,
+	videoSampleSink,
 	targetTime,
 	frameInterval,
 	alignTime,
 	resolveKeyframeTime,
 	getCachedFrame,
-	decodeWrappedFrame,
+	decodeVideoSample,
 	storeFrame,
 	shouldAbort,
 }: WarmFramesFromKeyframeToTargetOptions<Frame>): Promise<
@@ -69,16 +69,17 @@ export const warmFramesFromKeyframeToTarget = async <Frame>({
 	let decodedCount = 0;
 	let bestFrame: Frame | null = null;
 	let bestFrameTime: number | null = null;
-	const iterator = videoSink.canvases(decodeStart, decodeEndExclusive);
+	const iterator = videoSampleSink.samples(decodeStart, decodeEndExclusive);
 	try {
 		while (true) {
 			if (shouldAbort?.()) break;
 			const result = await iterator.next();
 			if (result.done) break;
-			const wrapped = result.value;
-			const decoded = await decodeWrappedFrame(wrapped);
+			const sample = result.value;
+			const sampleTimestamp = sample.timestamp;
+			const decoded = await decodeVideoSample(sample);
 			if (!decoded) continue;
-			const alignedFrameTime = alignTime(wrapped.timestamp);
+			const alignedFrameTime = alignTime(sampleTimestamp);
 			storeFrame(alignedFrameTime, decoded);
 			decodedCount += 1;
 			if (

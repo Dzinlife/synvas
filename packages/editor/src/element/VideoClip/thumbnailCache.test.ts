@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import type { CanvasSink, WrappedCanvas } from "mediabunny";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getThumbnail } from "./thumbnailCache";
 import { resolveVideoKeyframeTime } from "./keyframeTimeCache";
@@ -9,25 +8,24 @@ vi.mock("./keyframeTimeCache", () => ({
 	resolveVideoKeyframeTime: vi.fn(async () => null),
 }));
 
-const createFrameGenerator = (
-	canvas: HTMLCanvasElement,
-): AsyncGenerator<WrappedCanvas, void, unknown> =>
-	(async function* () {
-		yield {
-			canvas,
-			timestamp: 0,
-		} as WrappedCanvas;
-	})();
+const createVideoSample = (width: number, height: number) => ({
+	displayWidth: width,
+	displayHeight: height,
+	draw: vi.fn(),
+	close: vi.fn(),
+});
 
-const createVideoSink = (
-	canvas: HTMLCanvasElement,
+const createVideoSampleSink = (
+	sample: ReturnType<typeof createVideoSample>,
 	spy: ReturnType<typeof vi.fn>,
-): CanvasSink => {
+) => {
 	return {
-		canvases: spy.mockImplementation((_time: number) =>
-			createFrameGenerator(canvas),
+		samples: spy.mockImplementation((_time: number) =>
+			(async function* () {
+				yield sample;
+			})(),
 		),
-	} as unknown as CanvasSink;
+	};
 };
 
 describe("thumbnailCache.getThumbnail", () => {
@@ -45,11 +43,9 @@ describe("thumbnailCache.getThumbnail", () => {
 	});
 
 	it("preferKeyframes=false 时按精确时间取帧", async () => {
-		const source = document.createElement("canvas");
-		source.width = 320;
-		source.height = 180;
-		const canvasesSpy = vi.fn();
-		const sink = createVideoSink(source, canvasesSpy);
+		const sample = createVideoSample(320, 180);
+		const samplesSpy = vi.fn();
+		const sink = createVideoSampleSink(sample, samplesSpy);
 		const mockedResolve = vi.mocked(resolveVideoKeyframeTime);
 
 		const result = await getThumbnail({
@@ -59,21 +55,21 @@ describe("thumbnailCache.getThumbnail", () => {
 			width: 120,
 			height: 67.5,
 			pixelRatio: 1,
-			videoSink: sink,
+			videoSampleSink: sink as any,
 			preferKeyframes: false,
 		});
 
 		expect(result).not.toBeNull();
 		expect(mockedResolve).not.toHaveBeenCalled();
-		expect(canvasesSpy).toHaveBeenCalledWith(1.234);
+		expect(samplesSpy).toHaveBeenCalledWith(1.234);
+		expect(sample.draw).toHaveBeenCalledTimes(1);
+		expect(sample.close).toHaveBeenCalledTimes(1);
 	});
 
 	it("preferKeyframes=true 时走关键帧时间映射", async () => {
-		const source = document.createElement("canvas");
-		source.width = 320;
-		source.height = 180;
-		const canvasesSpy = vi.fn();
-		const sink = createVideoSink(source, canvasesSpy);
+		const sample = createVideoSample(320, 180);
+		const samplesSpy = vi.fn();
+		const sink = createVideoSampleSink(sample, samplesSpy);
 		const mockedResolve = vi.mocked(resolveVideoKeyframeTime);
 		mockedResolve.mockResolvedValueOnce(2.5);
 
@@ -84,12 +80,14 @@ describe("thumbnailCache.getThumbnail", () => {
 			width: 120,
 			height: 67.5,
 			pixelRatio: 1,
-			videoSink: sink,
+			videoSampleSink: sink as any,
 			preferKeyframes: true,
 		});
 
 		expect(result).not.toBeNull();
 		expect(mockedResolve).toHaveBeenCalledTimes(1);
-		expect(canvasesSpy).toHaveBeenCalledWith(2.5);
+		expect(samplesSpy).toHaveBeenCalledWith(2.5);
+		expect(sample.draw).toHaveBeenCalledTimes(1);
+		expect(sample.close).toHaveBeenCalledTimes(1);
 	});
 });

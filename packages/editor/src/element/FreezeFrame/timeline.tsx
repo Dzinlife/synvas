@@ -48,7 +48,9 @@ export const FreezeFrameTimeline: React.FC<FreezeFrameTimelineProps> = ({
 	const scheduleIdRef = useRef<number | null>(null);
 	const lastUriRef = useRef<string | null>(null);
 	const assetHandleRef = useRef<AssetHandle<VideoAsset> | null>(null);
-	const [videoSink, setVideoSink] = useState<VideoAsset["videoSink"] | null>(null);
+	const [videoSampleSink, setVideoSampleSink] = useState<
+		VideoAsset["videoSampleSink"] | null
+	>(null);
 	const [input, setInput] = useState<VideoAsset["input"] | null>(null);
 	const [videoDuration, setVideoDuration] = useState(0);
 
@@ -57,7 +59,7 @@ export const FreezeFrameTimeline: React.FC<FreezeFrameTimelineProps> = ({
 		const previousHandle = assetHandleRef.current;
 		assetHandleRef.current = null;
 		previousHandle?.release();
-		setVideoSink(null);
+		setVideoSampleSink(null);
 		setInput(null);
 		setVideoDuration(0);
 		lastRenderKeyRef.current = "";
@@ -70,7 +72,7 @@ export const FreezeFrameTimeline: React.FC<FreezeFrameTimelineProps> = ({
 					return;
 				}
 				assetHandleRef.current = handle;
-				setVideoSink(handle.asset.videoSink);
+				setVideoSampleSink(handle.asset.videoSampleSink);
 				setInput(handle.asset.input);
 				setVideoDuration(handle.asset.duration ?? 0);
 			} catch (error) {
@@ -82,14 +84,14 @@ export const FreezeFrameTimeline: React.FC<FreezeFrameTimelineProps> = ({
 			const handle = assetHandleRef.current;
 			assetHandleRef.current = null;
 			handle?.release();
-			setVideoSink(null);
+			setVideoSampleSink(null);
 			setInput(null);
 			setVideoDuration(0);
 		};
 	}, [uri]);
 
 	const drawThumbnail = useCallback(async () => {
-		if (!canvasRef.current || !uri || !videoSink) return;
+		if (!canvasRef.current || !uri || !videoSampleSink) return;
 		const canvas = canvasRef.current;
 		const ctx = canvas.getContext("2d");
 		if (!ctx) return;
@@ -164,7 +166,7 @@ export const FreezeFrameTimeline: React.FC<FreezeFrameTimelineProps> = ({
 					: alignedTime;
 			const timeKey = Math.max(0, Math.round(clampedTime * 1000));
 
-			const videoSize = await getVideoSize(uri, videoSink);
+			const videoSize = await getVideoSize(uri, videoSampleSink);
 			const sourceAspectRatio =
 				videoSize && videoSize.height > 0
 					? videoSize.width / videoSize.height
@@ -204,7 +206,7 @@ export const FreezeFrameTimeline: React.FC<FreezeFrameTimelineProps> = ({
 				width: thumbnailWidth,
 				height: thumbnailHeight,
 				pixelRatio,
-				videoSink,
+				videoSampleSink,
 				input,
 				preferKeyframes: false,
 			});
@@ -246,7 +248,7 @@ export const FreezeFrameTimeline: React.FC<FreezeFrameTimelineProps> = ({
 		timelineScale,
 		uri,
 		videoDuration,
-		videoSink,
+		videoSampleSink,
 	]);
 
 	const scheduleDraw = useCallback(() => {

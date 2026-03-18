@@ -8,6 +8,14 @@ import {
 	setSkiaRenderBackend,
 } from "../src/skia/web/renderBackend";
 
+const mocks = vi.hoisted(() => ({
+	makeImageFromTextureSourceDirect: vi.fn(),
+}));
+
+vi.mock("../src/skia/web/makeTextureSourceImage", () => ({
+	makeImageFromTextureSourceDirect: mocks.makeImageFromTextureSourceDirect,
+}));
+
 class FakeHTMLCanvasElement {
 	width = 0;
 	height = 0;
@@ -94,6 +102,7 @@ const createCanvasKitStub = () => {
 describe("imageFactory", () => {
 	afterEach(() => {
 		__resetSkiaRenderBackendForTests();
+		mocks.makeImageFromTextureSourceDirect.mockReset();
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
 	});
@@ -108,6 +117,9 @@ describe("imageFactory", () => {
 		});
 		const canvasKit = createCanvasKitStub();
 		const factory = new JsiSkImageFactory(canvasKit as never);
+		mocks.makeImageFromTextureSourceDirect.mockReturnValue({
+			ref: canvasKit.MakeImage(),
+		});
 		const imageElement = document.createElement(
 			"img",
 		) as unknown as FakeHTMLImageElement;
@@ -119,9 +131,9 @@ describe("imageFactory", () => {
 		const image = factory.MakeImageFromNativeBuffer(imageElement);
 
 		expect(image).toBeTruthy();
-		expect(canvasKit.MakeLazyImageFromTextureSource).toHaveBeenCalledTimes(1);
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledTimes(1);
+		expect(canvasKit.MakeLazyImageFromTextureSource).not.toHaveBeenCalled();
 		expect(canvasKit.MakeImageFromCanvasImageSource).not.toHaveBeenCalled();
-		expect(canvasKit.MakeImage).not.toHaveBeenCalled();
 	});
 
 	it("WebGPU 下视频不会退回 WebGL 共享纹理路径", () => {
@@ -134,6 +146,9 @@ describe("imageFactory", () => {
 		});
 		const canvasKit = createCanvasKitStub();
 		const factory = new JsiSkImageFactory(canvasKit as never);
+		mocks.makeImageFromTextureSourceDirect.mockReturnValue({
+			ref: canvasKit.MakeImage(),
+		});
 		const videoElement = document.createElement(
 			"video",
 		) as unknown as FakeHTMLVideoElement;
@@ -145,7 +160,8 @@ describe("imageFactory", () => {
 		const image = video.nextImage();
 
 		expect(image).toBeTruthy();
-		expect(canvasKit.MakeLazyImageFromTextureSource).toHaveBeenCalledTimes(1);
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledTimes(1);
+		expect(canvasKit.MakeLazyImageFromTextureSource).not.toHaveBeenCalled();
 		video.dispose();
 	});
 
@@ -203,6 +219,9 @@ describe("imageFactory", () => {
 			...createCanvasKitStub(),
 		} as never;
 		const factory = new JsiSkImageFactory(canvasKit);
+		mocks.makeImageFromTextureSourceDirect.mockReturnValue({
+			ref: canvasKit.MakeImage(),
+		});
 		const imageElement = document.createElement(
 			"img",
 		) as unknown as FakeHTMLImageElement;
@@ -215,6 +234,7 @@ describe("imageFactory", () => {
 		const image = factory.MakeImageFromNativeBuffer(imageElement, surface);
 
 		expect(image).toBeTruthy();
-		expect(canvasKit.MakeLazyImageFromTextureSource).toHaveBeenCalledTimes(1);
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledTimes(1);
+		expect(canvasKit.MakeLazyImageFromTextureSource).not.toHaveBeenCalled();
 	});
 });

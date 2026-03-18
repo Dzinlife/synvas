@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import type { WrappedCanvas } from "mediabunny";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";
 import {
@@ -10,7 +9,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
 	acquireVideoAsset: vi.fn(),
-	makeImageFromNativeBuffer: vi.fn(),
+	makeImageFromTextureSourceDirect: vi.fn(),
 }));
 
 vi.mock("@/assets/videoAsset", () => ({
@@ -18,28 +17,32 @@ vi.mock("@/assets/videoAsset", () => ({
 }));
 
 vi.mock("react-skia-lite", () => ({
-	Skia: {
-		Image: {
-			MakeImageFromNativeBuffer: mocks.makeImageFromNativeBuffer,
-		},
-	},
+	makeImageFromTextureSourceDirect: mocks.makeImageFromTextureSourceDirect,
 }));
 
-const createWrappedCanvasGenerator = (
-	canvas: HTMLCanvasElement,
-): AsyncGenerator<WrappedCanvas, void, unknown> =>
+const createVideoSampleGenerator = (
+	frame: VideoFrame,
+): AsyncGenerator<any, void, unknown> =>
 	(async function* () {
 		yield {
-			canvas,
 			timestamp: 0,
-		} as WrappedCanvas;
+			toVideoFrame: vi.fn(() => frame),
+			close: vi.fn(),
+		};
 	})();
+
+const createMockVideoSample = (frame: VideoFrame) => ({
+	timestamp: 0,
+	toVideoFrame: vi.fn(() => frame),
+	close: vi.fn(),
+});
 
 const createMockVideoHandle = (options: {
 	cachedImage?: object | null;
-	decodedGenerator?: AsyncGenerator<WrappedCanvas, void, unknown>;
+	decodedGenerator?: AsyncGenerator<any, void, unknown>;
+	videoRotation?: 0 | 90 | 180 | 270;
 }) => {
-	const canavses = vi.fn(
+	const samples = vi.fn(
 		(_sourceTime: number) =>
 			options.decodedGenerator ??
 			(async function* () {
@@ -47,9 +50,10 @@ const createMockVideoHandle = (options: {
 			})(),
 	);
 	const asset = {
-		videoSink: {
-			canvases: canavses,
+		videoSampleSink: {
+			samples,
 		},
+		videoRotation: options.videoRotation ?? 0,
 		getCachedFrame: vi.fn(() => options.cachedImage ?? undefined),
 		storeFrame: vi.fn(),
 		pinFrame: vi.fn(),
@@ -89,7 +93,7 @@ describe("FreezeFrame model", () => {
 
 		expect(mocks.acquireVideoAsset).toHaveBeenCalledWith("clip.mp4");
 		expect(handle.asset.getCachedFrame).toHaveBeenCalledWith(1);
-		expect(handle.asset.videoSink.canvases).not.toHaveBeenCalled();
+		expect(handle.asset.videoSampleSink.samples).not.toHaveBeenCalled();
 		expect(handle.asset.storeFrame).not.toHaveBeenCalled();
 		expect(handle.asset.pinFrame).toHaveBeenCalledWith(cachedImage);
 		expect(store.getState().internal.image).toBe(cachedImage);
@@ -101,14 +105,12 @@ describe("FreezeFrame model", () => {
 
 	it("缓存未命中时解码并回填缓存", async () => {
 		const decodedImage = { id: "decoded-image" };
-		const canvas = document.createElement("canvas");
+		const frame = { id: "frame", close: vi.fn() } as unknown as VideoFrame;
 		const handle = createMockVideoHandle({
-			decodedGenerator: createWrappedCanvasGenerator(canvas),
+			decodedGenerator: createVideoSampleGenerator(frame),
 		});
 		mocks.acquireVideoAsset.mockResolvedValue(handle);
-		const createImageBitmapMock = vi.fn(async () => ({ id: "bitmap" }));
-		vi.stubGlobal("createImageBitmap", createImageBitmapMock);
-		mocks.makeImageFromNativeBuffer.mockReturnValue(decodedImage);
+		mocks.makeImageFromTextureSourceDirect.mockReturnValue(decodedImage);
 
 		const store = createFreezeFrameModel("freeze-2", {
 			uri: "clip.mp4",
@@ -118,9 +120,11 @@ describe("FreezeFrame model", () => {
 
 		const alignedTime = alignSourceTime(1.01, 30);
 		expect(handle.asset.getCachedFrame).toHaveBeenCalledWith(alignedTime);
-		expect(handle.asset.videoSink.canvases).toHaveBeenCalledWith(alignedTime);
-		expect(createImageBitmapMock).toHaveBeenCalledWith(canvas);
-		expect(mocks.makeImageFromNativeBuffer).toHaveBeenCalledTimes(1);
+		expect(handle.asset.videoSampleSink.samples).toHaveBeenCalledWith(
+			alignedTime,
+		);
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(frame);
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledTimes(1);
 		expect(handle.asset.storeFrame).toHaveBeenCalledWith(
 			alignedTime,
 			decodedImage,
@@ -158,5 +162,25 @@ describe("FreezeFrame model", () => {
 		store.getState().dispose();
 		expect(handleB.asset.unpinFrame).toHaveBeenCalledWith(imageB);
 		expect(handleB.release).toHaveBeenCalledTimes(1);
+	});
+
+	it("解码完成后会同步写入视频旋转元数据", async () => {
+		const decodedImage = { id: "decoded-image" };
+		const handle = createMockVideoHandle({
+			decodedGenerator: (async function* () {
+				yield createMockVideoSample({ close: vi.fn() } as unknown as VideoFrame);
+			})(),
+			videoRotation: 90,
+		});
+		mocks.acquireVideoAsset.mockResolvedValue(handle);
+		mocks.makeImageFromTextureSourceDirect.mockReturnValue(decodedImage);
+
+		const store = createFreezeFrameModel("freeze-rotation", {
+			uri: "clip.mp4",
+			sourceTime: 0,
+		}, runtime);
+		await store.getState().init();
+
+		expect(store.getState().internal.videoRotation).toBe(90);
 	});
 });

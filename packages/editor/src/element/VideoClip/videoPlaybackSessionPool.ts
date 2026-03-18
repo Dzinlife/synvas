@@ -1,4 +1,5 @@
-import type { CanvasSink, WrappedCanvas } from "mediabunny";
+import type { VideoSample, VideoSampleSink } from "mediabunny";
+import { closeVideoSample } from "@/lib/videoFrameUtils";
 
 type VideoPlaybackSession = {
 	key: string;
@@ -7,18 +8,18 @@ type VideoPlaybackSession = {
 	playbackIdleTimer: ReturnType<typeof setTimeout> | null;
 	lastTouch: number;
 	asyncId: number;
-	iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null;
-	nextFrame: WrappedCanvas | null;
+	iterator: AsyncGenerator<VideoSample, void, unknown> | null;
+	nextSample: VideoSample | null;
 	isActive: boolean;
 	isStepping: boolean;
 	lastTargetTime: number | null;
-	sink: CanvasSink | null;
+	sink: VideoSampleSink | null;
 	getIsExporting: (() => boolean) | null;
 };
 
 type StepVideoPlaybackSessionOptions = {
 	key: string;
-	sink: CanvasSink | null;
+	sink: VideoSampleSink | null;
 	targetTime: number;
 	backJumpThresholdSeconds: number;
 	isExporting?: () => boolean;
@@ -39,7 +40,7 @@ const createSession = (key: string): VideoPlaybackSession => ({
 	lastTouch: 0,
 	asyncId: 0,
 	iterator: null,
-	nextFrame: null,
+	nextSample: null,
 	isActive: false,
 	isStepping: false,
 	lastTargetTime: null,
@@ -66,7 +67,8 @@ const stopSessionInternal = (session: VideoPlaybackSession) => {
 	session.isActive = false;
 	session.isStepping = false;
 	session.lastTargetTime = null;
-	session.nextFrame = null;
+	closeVideoSample(session.nextSample);
+	session.nextSample = null;
 	if (session.playbackIdleTimer) {
 		clearTimeout(session.playbackIdleTimer);
 		session.playbackIdleTimer = null;
@@ -109,7 +111,7 @@ const touchSession = (session: VideoPlaybackSession) => {
 
 const startSessionPlayback = async (
 	session: VideoPlaybackSession,
-	sink: CanvasSink,
+	sink: VideoSampleSink,
 	startTime: number,
 ): Promise<void> => {
 	stopSessionInternal(session);
@@ -118,15 +120,19 @@ const startSessionPlayback = async (
 	session.asyncId += 1;
 	const currentAsyncId = session.asyncId;
 	try {
-		const iterator = sink.canvases(startTime);
+		const iterator = sink.samples(startTime);
 		if (!iterator || typeof iterator.next !== "function") {
 			session.isActive = false;
 			return;
 		}
 		session.iterator = iterator;
 		const firstResult = await iterator.next();
-		if (session.asyncId !== currentAsyncId) return;
-		session.nextFrame = firstResult.value ?? null;
+		const firstSample = firstResult.value ?? null;
+		if (session.asyncId !== currentAsyncId) {
+			closeVideoSample(firstSample);
+			return;
+		}
+		session.nextSample = firstSample;
 	} catch (error) {
 		console.warn("Start video playback session failed:", error);
 		session.isActive = false;
@@ -136,22 +142,30 @@ const startSessionPlayback = async (
 const drainSessionFrames = async (
 	session: VideoPlaybackSession,
 	targetTime: number,
-): Promise<WrappedCanvas | null> => {
+) => {
 	if (!session.isActive || !session.iterator) return null;
 	if (session.isStepping) return null;
 	session.isStepping = true;
 	const currentAsyncId = session.asyncId;
 	try {
-		let frameToShow: WrappedCanvas | null = null;
-		while (session.nextFrame && session.nextFrame.timestamp <= targetTime) {
-			frameToShow = session.nextFrame;
+		let sampleToShow: VideoSample | null = null;
+		while (session.nextSample && session.nextSample.timestamp <= targetTime) {
+			closeVideoSample(sampleToShow);
+			sampleToShow = session.nextSample;
 			const result = await session.iterator.next();
-			if (session.asyncId !== currentAsyncId) return null;
-			session.nextFrame = result.value ?? null;
-			if (!session.nextFrame) break;
+			const nextSample = result.value ?? null;
+			if (session.asyncId !== currentAsyncId) {
+				closeVideoSample(sampleToShow);
+				closeVideoSample(nextSample);
+				return null;
+			}
+			session.nextSample = nextSample;
+			if (!session.nextSample) break;
 		}
-		return frameToShow;
+		return sampleToShow;
 	} catch (error) {
+		closeVideoSample(session.nextSample);
+		session.nextSample = null;
 		console.warn("Drain video playback session frames failed:", error);
 		return null;
 	} finally {
@@ -192,7 +206,7 @@ export const stepVideoPlaybackSession = async ({
 	targetTime,
 	backJumpThresholdSeconds,
 	isExporting,
-}: StepVideoPlaybackSessionOptions): Promise<WrappedCanvas | null> => {
+}: StepVideoPlaybackSessionOptions) => {
 	if (!Number.isFinite(targetTime)) return null;
 	if (!sink) return null;
 	const session = getOrCreateSession(key);

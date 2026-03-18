@@ -1,4 +1,5 @@
-import { Group, ImageShader, Rect } from "react-skia-lite";
+import { Group, Image } from "react-skia-lite";
+import { resolveVideoImageTransform } from "@/lib/videoImageTransform";
 import { useTimelineStore } from "@/scene-editor/contexts/TimelineContext";
 import { createModelSelector } from "../model/registry";
 import type { FreezeFrameInternal, FreezeFrameProps } from "./model";
@@ -13,11 +14,11 @@ const useFreezeFrameSelector = createModelSelector<
 >();
 
 const FreezeFrameRenderer: React.FC<FreezeFrameRendererProps> = ({ id }) => {
-	const transform = useTimelineStore(
+	const elementTransform = useTimelineStore(
 		(state) => state.getElementById(id)?.transform,
 	);
-	const width = transform?.baseSize.width ?? 0;
-	const height = transform?.baseSize.height ?? 0;
+	const width = elementTransform?.baseSize.width ?? 0;
+	const height = elementTransform?.baseSize.height ?? 0;
 
 	const isLoading = useFreezeFrameSelector(
 		id,
@@ -28,6 +29,10 @@ const FreezeFrameRenderer: React.FC<FreezeFrameRendererProps> = ({ id }) => {
 		(state) => state.constraints.hasError ?? false,
 	);
 	const image = useFreezeFrameSelector(id, (state) => state.internal.image);
+	const videoRotation = useFreezeFrameSelector(
+		id,
+		(state) => state.internal.videoRotation,
+	);
 
 	if (isLoading) {
 		return null;
@@ -37,20 +42,28 @@ const FreezeFrameRenderer: React.FC<FreezeFrameRendererProps> = ({ id }) => {
 		return null;
 	}
 
+	if (!image || width <= 0 || height <= 0) {
+		return null;
+	}
+
+	const sourceWidth = Math.max(1, image.width());
+	const sourceHeight = Math.max(1, image.height());
+	const imageTransform = resolveVideoImageTransform({
+		src: { x: 0, y: 0, width: sourceWidth, height: sourceHeight },
+		dst: { x: 0, y: 0, width, height },
+		rotation: videoRotation,
+	});
+
 	return (
-		<Group>
-			<Rect x={0} y={0} width={width} height={height}>
-				{image && (
-					<ImageShader
-						image={image}
-						fit="contain"
-						x={0}
-						y={0}
-						width={width}
-						height={height}
-					/>
-				)}
-			</Rect>
+		<Group transform={imageTransform}>
+			<Image
+				image={image}
+				x={0}
+				y={0}
+				width={sourceWidth}
+				height={sourceHeight}
+				fit="fill"
+			/>
 		</Group>
 	);
 };

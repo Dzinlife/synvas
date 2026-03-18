@@ -1,9 +1,10 @@
-import type { CanvasSink, WrappedCanvas } from "mediabunny";
-import { type SkImage, Skia } from "react-skia-lite";
+import type { VideoSampleSink } from "mediabunny";
+import { type SkImage } from "react-skia-lite";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import type { AssetHandle } from "@/assets/AssetStore";
 import { acquireVideoAsset, type VideoAsset } from "@/assets/videoAsset";
+import { getVideoSampleAfterTime, videoSampleToSkImage } from "@/lib/videoFrameUtils";
 import type { EditorRuntime } from "@/scene-editor/runtime/types";
 import { framesToSeconds } from "@/utils/timecode";
 import type {
@@ -21,6 +22,7 @@ export interface FreezeFrameProps {
 
 export interface FreezeFrameInternal {
 	image: SkImage | null;
+	videoRotation: 0 | 90 | 180 | 270;
 	isReady: boolean;
 }
 
@@ -49,39 +51,13 @@ export const alignSourceTime = (sourceTime: number, fps: number): number => {
 	return Math.round(clamped / frameInterval) * frameInterval;
 };
 
-const canvasToSkImage = async (
-	canvas: HTMLCanvasElement | OffscreenCanvas,
-): Promise<SkImage | null> => {
-	try {
-		const imageBitmap = await createImageBitmap(canvas);
-		return Skia.Image.MakeImageFromNativeBuffer(imageBitmap);
-	} catch (error) {
-		console.warn("FreezeFrame canvas decode failed:", error);
-		return null;
-	}
-};
-
 export const decodeFrameAtTime = async (
-	videoSink: Pick<CanvasSink, "canvases">,
+	videoSampleSink: Pick<VideoSampleSink, "samples">,
 	sourceTime: number,
 ): Promise<SkImage | null> => {
-	let iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
-	try {
-		iterator = videoSink.canvases(sourceTime);
-		const first = (await iterator.next()).value ?? null;
-		if (!first) return null;
-		const canvas = first.canvas;
-		if (
-			!(
-				canvas instanceof HTMLCanvasElement || canvas instanceof OffscreenCanvas
-			)
-		) {
-			return null;
-		}
-		return await canvasToSkImage(canvas);
-	} finally {
-		await iterator?.return?.();
-	}
+	const sample = await getVideoSampleAfterTime(videoSampleSink, sourceTime);
+	if (!sample) return null;
+	return videoSampleToSkImage(sample);
 };
 
 export function createFreezeFrameModel(
@@ -124,6 +100,7 @@ export function createFreezeFrameModel(
 			},
 			internal: {
 				image: null,
+				videoRotation: 0,
 				isReady: false,
 			} satisfies FreezeFrameInternal,
 
@@ -192,14 +169,18 @@ export function createFreezeFrameModel(
 
 					assetHandle?.release();
 					assetHandle = localHandle;
+					const asset = localHandle.asset;
 
 					const fps = normalizeFps(timelineStore.getState().fps);
 					const sourceTime = resolveSourceTime(get().props, fps);
 					const alignedSourceTime = alignSourceTime(sourceTime, fps);
-					const cached = localHandle.asset.getCachedFrame(alignedSourceTime);
+					const cached = asset.getCachedFrame(alignedSourceTime);
 					const image =
 						cached ??
-						(await decodeFrameAtTime(localHandle.asset.videoSink, alignedSourceTime));
+						(await decodeFrameAtTime(
+							asset.videoSampleSink,
+							alignedSourceTime,
+						));
 
 					if (currentEpoch !== initEpoch) return;
 					if (!image) {
@@ -207,9 +188,9 @@ export function createFreezeFrameModel(
 					}
 
 					if (!cached) {
-						localHandle.asset.storeFrame(alignedSourceTime, image);
+						asset.storeFrame(alignedSourceTime, image);
 					}
-					updatePinnedFrame(image, localHandle.asset);
+					updatePinnedFrame(image, asset);
 
 					set((state) => ({
 						constraints: {
@@ -221,6 +202,7 @@ export function createFreezeFrameModel(
 						internal: {
 							...state.internal,
 							image,
+							videoRotation: asset.videoRotation,
 							isReady: true,
 						},
 					}));
@@ -242,6 +224,7 @@ export function createFreezeFrameModel(
 						internal: {
 							...state.internal,
 							image: null,
+							videoRotation: 0,
 							isReady: false,
 						},
 					}));
@@ -257,6 +240,7 @@ export function createFreezeFrameModel(
 					internal: {
 						...state.internal,
 						image: null,
+						videoRotation: 0,
 						isReady: false,
 					},
 				}));

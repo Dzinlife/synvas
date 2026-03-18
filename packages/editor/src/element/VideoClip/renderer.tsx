@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
-import { Group, ImageShader, Rect } from "react-skia-lite";
+import { Group, Image } from "react-skia-lite";
 import type { RenderFrameChannel } from "core/element/model/types";
+import { resolveVideoImageTransform } from "@/lib/videoImageTransform";
 import {
 	useFps,
 	usePlaybackControl,
@@ -43,11 +44,11 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 	const timeline = useTimelineStore(
 		(state) => state.getElementById(id)?.timeline,
 	);
-	const transform = useTimelineStore(
+	const elementTransform = useTimelineStore(
 		(state) => state.getElementById(id)?.transform,
 	);
-	const width = transform?.baseSize.width ?? 0;
-	const height = transform?.baseSize.height ?? 0;
+	const width = elementTransform?.baseSize.width ?? 0;
+	const height = elementTransform?.baseSize.height ?? 0;
 
 	// 订阅需要的状态
 	const isLoading = useVideoClipSelector(
@@ -64,6 +65,10 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 			frameChannel === "offscreen"
 				? state.internal.offscreenFrame
 				: state.internal.currentFrame,
+	);
+	const videoRotation = useVideoClipSelector(
+		id,
+		(state) => state.internal.videoRotation,
 	);
 	const playbackEpoch = useVideoClipSelector(
 		id,
@@ -213,27 +218,29 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 		return null;
 	}
 
+	if (!renderFrame || width <= 0 || height <= 0) {
+		return null;
+	}
+
+	const sourceWidth = Math.max(1, renderFrame.width());
+	const sourceHeight = Math.max(1, renderFrame.height());
+	const imageTransform = resolveVideoImageTransform({
+		src: { x: 0, y: 0, width: sourceWidth, height: sourceHeight },
+		dst: { x: 0, y: 0, width, height },
+		rotation: videoRotation,
+	});
+
 	// 正常渲染
 	return (
-		<Group>
-			<Rect
+		<Group transform={imageTransform}>
+			<Image
+				image={renderFrame}
 				x={0}
 				y={0}
-				width={width}
-				height={height}
-				color={renderFrame ? undefined : "transparent"}
-			>
-				{renderFrame && (
-					<ImageShader
-						image={renderFrame}
-						fit="contain"
-						x={0}
-						y={0}
-						width={width}
-						height={height}
-					/>
-				)}
-			</Rect>
+				width={sourceWidth}
+				height={sourceHeight}
+				fit="fill"
+			/>
 		</Group>
 	);
 };

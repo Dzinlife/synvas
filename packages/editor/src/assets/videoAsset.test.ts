@@ -17,11 +17,8 @@ const mocks = vi.hoisted(() => {
 		constructor(_options: unknown) {}
 	}
 
-	class MockCanvasSink {
-		constructor(
-			_publicTrack: unknown,
-			_publicOptions: unknown,
-		) {}
+	class MockVideoSampleSink {
+		constructor(_publicTrack: unknown) {}
 	}
 
 	class MockUrlSource {
@@ -35,7 +32,7 @@ const mocks = vi.hoisted(() => {
 	return {
 		videoTrack,
 		Input: MockInput,
-		CanvasSink: MockCanvasSink,
+		VideoSampleSink: MockVideoSampleSink,
 		UrlSource: MockUrlSource,
 		StreamSource: MockStreamSource,
 		resolveProjectOpfsFile: vi.fn(),
@@ -44,22 +41,23 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("mediabunny", () => ({
 	ALL_FORMATS: {},
-	CanvasSink: mocks.CanvasSink,
 	Input: mocks.Input,
 	StreamSource: mocks.StreamSource,
 	UrlSource: mocks.UrlSource,
+	VideoSampleSink: mocks.VideoSampleSink,
 }));
 
 vi.mock("@/lib/projectOpfsStorage", () => ({
 	resolveProjectOpfsFile: mocks.resolveProjectOpfsFile,
 }));
 
-const createMockImage = (width: number, height: number, id: string) => ({
+const createMockImage = (width: number, height: number, id: string) =>
+	({
 	id,
 	width: () => width,
 	height: () => height,
 	dispose: vi.fn(),
-});
+	}) as any;
 
 describe("videoAsset", () => {
 	beforeEach(() => {

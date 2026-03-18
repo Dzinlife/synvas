@@ -1,15 +1,15 @@
 import {
 	ALL_FORMATS,
-	CanvasSink,
 	Input,
 	StreamSource,
 	UrlSource,
+	VideoSampleSink,
 } from "mediabunny";
 import { type SkImage } from "react-skia-lite";
 import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
 import { type AssetHandle, assetStore } from "./AssetStore";
 
-const DEFAULT_MAX_CACHE_BYTES = 384 * 1024 * 1024;
+const DEFAULT_MAX_CACHE_BYTES = 500 * 1920 * 1080;
 const ESTIMATED_FRAME_BYTES_PER_PIXEL = 4;
 
 const estimateFrameCacheBytes = (image: SkImage) => {
@@ -22,9 +22,10 @@ const estimateFrameCacheBytes = (image: SkImage) => {
 export type VideoAsset = {
 	uri: string;
 	input: Input;
-	videoSink: CanvasSink;
+	videoSampleSink: VideoSampleSink;
 	duration: number;
-	createVideoSink: () => CanvasSink;
+	videoRotation: 0 | 90 | 180 | 270;
+	createVideoSampleSink: () => VideoSampleSink;
 	frameCache: Map<number, SkImage>;
 	cacheAccessOrder: number[];
 	maxCacheBytes: number;
@@ -156,14 +157,8 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 		throw new Error("No valid video track found");
 	}
 
-	const videoCanBeTransparent = await videoTrack.canBeTransparent();
-	const buildVideoSink = () =>
-		new CanvasSink(videoTrack, {
-			poolSize: 2,
-			fit: "contain",
-			alpha: videoCanBeTransparent,
-		});
-	const videoSink = buildVideoSink();
+	const buildVideoSampleSink = () => new VideoSampleSink(videoTrack);
+	const videoSampleSink = buildVideoSampleSink();
 
 	const frameCache = new Map<number, SkImage>();
 	const frameCacheBytes = new Map<number, number>();
@@ -224,9 +219,10 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 	return {
 		uri,
 		input,
-		videoSink,
+		videoSampleSink,
 		duration,
-		createVideoSink: buildVideoSink,
+		videoRotation: videoTrack.rotation,
+		createVideoSampleSink: buildVideoSampleSink,
 		frameCache,
 		cacheAccessOrder,
 		maxCacheBytes,

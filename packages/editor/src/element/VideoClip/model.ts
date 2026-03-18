@@ -5,11 +5,11 @@ import type {
 import type { TimelineElement } from "core/element/types";
 import type {
 	AudioBufferSink,
-	CanvasSink,
 	Input,
-	WrappedCanvas,
+	VideoSample,
+	VideoSampleSink,
 } from "mediabunny";
-import { type SkImage, Skia } from "react-skia-lite";
+import { type SkImage } from "react-skia-lite";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import type { AssetHandle } from "@/assets/AssetStore";
@@ -21,6 +21,10 @@ import {
 	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
 } from "@/audio/playback";
+import {
+	closeVideoSample,
+	videoSampleToSkImage,
+} from "@/lib/videoFrameUtils";
 import {
 	getAudioPlaybackSessionKey,
 	getVideoPlaybackSessionKey,
@@ -74,11 +78,12 @@ const resolveSeekReason = (
 
 // VideoClip 内部状态
 export interface VideoClipInternal {
-	videoSink: CanvasSink | null;
+	videoSampleSink: VideoSampleSink | null;
 	input: Input | null;
 	currentFrame: SkImage | null;
 	offscreenFrame: SkImage | null;
 	videoDuration: number; // 秒
+	videoRotation: 0 | 90 | 180 | 270;
 	isReady: boolean;
 	playbackEpoch: number;
 	audioSink: AudioBufferSink | null;
@@ -234,7 +239,7 @@ export function createVideoClipModel(
 	let unsubscribeElements: (() => void) | null = null;
 	let unsubscribeTime: (() => void) | null = null;
 	let activeDedicatedSink = false;
-	let dedicatedVideoSink: CanvasSink | null = null;
+	let dedicatedVideoSampleSink: VideoSampleSink | null = null;
 	let lastSinkSwitchFrame: number | null = null;
 	const reversePrewarmInflight = new Set<string>();
 	const reversePrewarmCompleted = new Set<string>();
@@ -387,27 +392,14 @@ export function createVideoClipModel(
 		}
 	};
 
-	// 将 canvas 转换为 SkImage
-	const canvasToSkImage = async (
-		canvas: HTMLCanvasElement | OffscreenCanvas,
-	): Promise<SkImage | null> => {
-		try {
-			const imageBitmap = await createImageBitmap(canvas);
-			return Skia.Image.MakeImageFromNativeBuffer(imageBitmap);
-		} catch (err) {
-			console.warn("Canvas to SkImage failed:", err);
-			return null;
-		}
-	};
-
 	const prewarmReverseRange = async (options: {
 		uri: string;
 		asset: VideoAsset;
-		videoSink: CanvasSink;
+		videoSampleSink: VideoSampleSink;
 		startTime: number;
 		endExclusive: number;
 	}): Promise<void> => {
-		const { uri, asset, videoSink, startTime, endExclusive } = options;
+		const { uri, asset, videoSampleSink, startTime, endExclusive } = options;
 		const rangeKey = buildReversePrewarmRangeKey(uri, startTime, endExclusive);
 		if (
 			reversePrewarmInflight.has(rangeKey) ||
@@ -417,27 +409,22 @@ export function createVideoClipModel(
 		}
 		reversePrewarmInflight.add(rangeKey);
 
-		let iterator: AsyncGenerator<WrappedCanvas, void, unknown> | null = null;
+		let iterator: AsyncGenerator<VideoSample, void, unknown> | null = null;
 		let hasError = false;
 		try {
-			iterator = videoSink.canvases(startTime, endExclusive);
+			iterator = videoSampleSink.samples(startTime, endExclusive);
 			while (true) {
 				const result = await iterator.next();
 				if (result.done) break;
 				// 资源已切换时停止旧任务，避免把旧素材帧写进新状态。
-				if (assetHandle?.asset !== asset) return;
-				const canvas = result.value.canvas;
-				if (
-					!(
-						canvas instanceof HTMLCanvasElement ||
-						canvas instanceof OffscreenCanvas
-					)
-				) {
-					continue;
+				if (assetHandle?.asset !== asset) {
+					closeVideoSample(result.value);
+					return;
 				}
-				const skiaImage = await canvasToSkImage(canvas);
+				const sampleTimestamp = result.value.timestamp;
+				const skiaImage = videoSampleToSkImage(result.value);
 				if (!skiaImage) continue;
-				asset.storeFrame(alignTime(result.value.timestamp), skiaImage);
+				asset.storeFrame(alignTime(sampleTimestamp), skiaImage);
 			}
 		} catch (err) {
 			hasError = true;
@@ -454,11 +441,11 @@ export function createVideoClipModel(
 	const scheduleReverseLookaheadPrewarm = (options: {
 		uri: string;
 		input: Input;
-		videoSink: CanvasSink;
+		videoSampleSink: VideoSampleSink;
 		asset: VideoAsset;
 		targetTime: number;
 	}) => {
-		const { uri, input, videoSink, asset, targetTime } = options;
+		const { uri, input, videoSampleSink, asset, targetTime } = options;
 		void (async () => {
 			const frameInterval = 1 / getTimelineFps();
 			const currentTimeKey = Math.max(0, Math.round(targetTime * 1000));
@@ -491,7 +478,7 @@ export function createVideoClipModel(
 				await prewarmReverseRange({
 					uri,
 					asset,
-					videoSink,
+					videoSampleSink,
 					startTime,
 					endExclusive,
 				});
@@ -608,21 +595,24 @@ export function createVideoClipModel(
 		return owner.id !== clipId;
 	};
 
-	const resolveVideoSink = (asset: VideoAsset, shouldDedicated: boolean) => {
-		if (!shouldDedicated) return asset.videoSink;
-		if (!dedicatedVideoSink) {
+	const resolveVideoSampleSink = (
+		asset: VideoAsset,
+		shouldDedicated: boolean,
+	) => {
+		if (!shouldDedicated) return asset.videoSampleSink;
+		if (!dedicatedVideoSampleSink) {
 			try {
-				dedicatedVideoSink = asset.createVideoSink();
+				dedicatedVideoSampleSink = asset.createVideoSampleSink();
 			} catch (err) {
 				// 创建独立 sink 失败时回退到共享 sink
-				console.warn("Create video sink failed:", err);
-				return asset.videoSink;
+				console.warn("Create video sample sink failed:", err);
+				return asset.videoSampleSink;
 			}
 		}
-		return dedicatedVideoSink;
+		return dedicatedVideoSampleSink;
 	};
 
-	const updateVideoSink = () => {
+	const updateVideoSampleSink = () => {
 		const handle = assetHandle;
 		if (!handle) return;
 		const timelineState = timelineStore.getState();
@@ -657,7 +647,7 @@ export function createVideoClipModel(
 		activeDedicatedSink = shouldDedicated;
 		lastSinkSwitchFrame = currentTime;
 
-		const nextSink = resolveVideoSink(handle.asset, shouldDedicated);
+		const nextSink = resolveVideoSampleSink(handle.asset, shouldDedicated);
 		for (const frameChannel of FRAME_CHANNELS) {
 			stopPlayback(frameChannel);
 		}
@@ -665,13 +655,13 @@ export function createVideoClipModel(
 			...state,
 			internal: {
 				...state.internal,
-				videoSink: nextSink,
+				videoSampleSink: nextSink,
 				playbackEpoch: (state.internal.playbackEpoch ?? 0) + 1,
 			},
 		}));
 		if (!shouldDedicated) {
 			// 释放独立 sink 引用，减少长期占用
-			dedicatedVideoSink = null;
+			dedicatedVideoSampleSink = null;
 		}
 	};
 
@@ -708,34 +698,27 @@ export function createVideoClipModel(
 	): Promise<void> => {
 		if (!Number.isFinite(targetTime)) return;
 		const { internal, props } = store.getState();
-		const videoSink = internal.videoSink;
-		if (!videoSink) return;
+		const videoSampleSink = internal.videoSampleSink;
+		if (!videoSampleSink) return;
 		// 倒放时 targetTime 会递减，阈值必须为 0 才能每次回退都重建迭代器并推进画面。
 		const backJumpThresholdSeconds = props.reversed
 			? 0
 			: PLAYBACK_BACK_JUMP_FRAMES / getTimelineFps();
 		const sessionKey = retainPlaybackSession(frameChannel);
-		const frameToShow = await stepVideoPlaybackSession({
+		const sampleToShow = await stepVideoPlaybackSession({
 			key: sessionKey,
-			sink: videoSink,
+			sink: videoSampleSink,
 			targetTime,
 			backJumpThresholdSeconds,
 			isExporting: () => timelineStore.getState().isExporting,
 		});
-		if (!frameToShow) {
+		if (!sampleToShow) {
 			return;
 		}
-		const canvas = frameToShow.canvas;
-		if (
-			!(
-				canvas instanceof HTMLCanvasElement || canvas instanceof OffscreenCanvas
-			)
-		) {
-			return;
-		}
-		const skiaImage = await canvasToSkImage(canvas);
+		const sampleTimestamp = sampleToShow.timestamp;
+		const skiaImage = videoSampleToSkImage(sampleToShow);
 		if (!skiaImage) return;
-		updateCurrentFrame(skiaImage, frameToShow.timestamp, frameChannel);
+		updateCurrentFrame(skiaImage, sampleTimestamp, frameChannel);
 	};
 
 	const getAudioPlaybackState = () => {
@@ -780,10 +763,10 @@ export function createVideoClipModel(
 		options: VideoSeekOptions = {},
 	): Promise<void> => {
 		const { internal, props } = store.getState();
-		const { videoSink, input } = internal;
+		const { videoSampleSink, input } = internal;
 		const frameChannel = resolveFrameChannel(options.frameChannel);
 
-		if (!videoSink) return;
+		if (!videoSampleSink) return;
 
 		// seek 前先停止流式播放，避免迭代器与临时 seek 竞争
 		stopPlayback(frameChannel);
@@ -813,7 +796,7 @@ export function createVideoClipModel(
 			scheduleReverseLookaheadPrewarm({
 				uri: reverseLookaheadContext.uri,
 				input: reverseLookaheadContext.input,
-				videoSink,
+				videoSampleSink,
 				asset: reverseLookaheadContext.asset,
 				targetTime: alignedTime,
 			});
@@ -892,28 +875,20 @@ export function createVideoClipModel(
 		asyncId++;
 		const currentAsyncId = asyncId;
 
-		const decodeWrappedFrame = async (
-			frame: WrappedCanvas,
-		): Promise<SkImage | null> => {
-			const canvas = frame.canvas;
-			if (
-				!(
-					canvas instanceof HTMLCanvasElement ||
-					canvas instanceof OffscreenCanvas
-				)
-			) {
-				return null;
-			}
-			return canvasToSkImage(canvas);
+		const decodeVideoSample = async (sample: VideoSample) => {
+			return videoSampleToSkImage(sample);
 		};
 
 		const fallbackSeekBySingleFrame = async (): Promise<void> => {
-			const iterator = videoSink.canvases(alignedTime);
+			const iterator = videoSampleSink.samples(alignedTime);
 			try {
 				const firstFrame = (await iterator.next()).value ?? null;
-				if (currentAsyncId !== asyncId) return;
+				if (currentAsyncId !== asyncId) {
+					closeVideoSample(firstFrame);
+					return;
+				}
 				if (!firstFrame) return;
-				const firstImage = await decodeWrappedFrame(firstFrame);
+				const firstImage = await decodeVideoSample(firstFrame);
 				if (firstImage && currentAsyncId === asyncId) {
 					updateCurrentFrame(firstImage, alignedTime, frameChannel);
 					lastSeekTimeByChannel[frameChannel] = alignedTime;
@@ -922,12 +897,16 @@ export function createVideoClipModel(
 				// 预取少量连续帧，减少拖动预览时的离散命中
 				for (let i = 0; i < SEEK_PREFETCH_FRAMES; i += 1) {
 					const result = await iterator.next();
-					if (currentAsyncId !== asyncId) return;
 					const nextFrame = result.value ?? null;
+					if (currentAsyncId !== asyncId) {
+						closeVideoSample(nextFrame);
+						return;
+					}
 					if (!nextFrame) break;
-					const nextImage = await decodeWrappedFrame(nextFrame);
+					const nextFrameTimestamp = nextFrame.timestamp;
+					const nextImage = await decodeVideoSample(nextFrame);
 					if (nextImage && currentAsyncId === asyncId) {
-						const nextAlignedTime = alignTime(nextFrame.timestamp);
+						const nextAlignedTime = alignTime(nextFrameTimestamp);
 						assetHandle?.asset.storeFrame(nextAlignedTime, nextImage);
 					}
 				}
@@ -940,7 +919,7 @@ export function createVideoClipModel(
 			let resolvedByWarmup = false;
 			if (shouldReverseLookahead && props.uri && input && assetHandle?.asset) {
 				const warmupResult = await warmFramesFromKeyframeToTarget<SkImage>({
-					videoSink,
+					videoSampleSink,
 					targetTime: alignedTime,
 					frameInterval: 1 / getTimelineFps(),
 					alignTime,
@@ -952,8 +931,8 @@ export function createVideoClipModel(
 							timeKey,
 						}),
 					getCachedFrame: (time) => assetHandle?.asset.getCachedFrame(time),
-					decodeWrappedFrame: async (frame) => {
-						const decoded = await decodeWrappedFrame(frame);
+					decodeVideoSample: async (sample) => {
+						const decoded = await decodeVideoSample(sample);
 						if (!decoded || currentAsyncId !== asyncId) return null;
 						return decoded;
 					},
@@ -1081,11 +1060,12 @@ export function createVideoClipModel(
 				canTrimEnd: true,
 			},
 			internal: {
-				videoSink: null,
+				videoSampleSink: null,
 				input: null,
 				currentFrame: null,
 				offscreenFrame: null,
 				videoDuration: 0,
+				videoRotation: 0,
 				isReady: false,
 				playbackEpoch: 0,
 				audioSink: null,
@@ -1240,7 +1220,7 @@ export function createVideoClipModel(
 						currentTime,
 					);
 					activeDedicatedSink = shouldDedicated;
-					const clipSink = resolveVideoSink(asset, shouldDedicated);
+					const clipSink = resolveVideoSampleSink(asset, shouldDedicated);
 
 					// 更新状态
 					set((state) => ({
@@ -1251,9 +1231,10 @@ export function createVideoClipModel(
 						},
 						internal: {
 							...state.internal,
-							videoSink: clipSink,
+							videoSampleSink: clipSink,
 							input: asset.input,
 							videoDuration: asset.duration,
+							videoRotation: asset.videoRotation,
 							frameCache: asset.frameCache,
 						},
 					}));
@@ -1288,13 +1269,13 @@ export function createVideoClipModel(
 						unsubscribeElements = timelineStore.subscribe(
 							(state) => state.elements,
 							() => {
-								updateVideoSink();
+								updateVideoSampleSink();
 							},
 						);
 					}
 					if (!unsubscribeTime) {
 						const onTimeChange = () => {
-							updateVideoSink();
+							updateVideoSampleSink();
 						};
 						const unsub1 = timelineStore.subscribe(
 							(state) => state.currentTime,
@@ -1406,8 +1387,9 @@ export function createVideoClipModel(
 				resetReversePrewarmState();
 
 				// 清理资源
-				internal.videoSink = null;
+				internal.videoSampleSink = null;
 				internal.input = null;
+				internal.videoRotation = 0;
 				internal.audioSink = null;
 				internal.audioDuration = 0;
 				internal.hasSourceAudioTrack = null;

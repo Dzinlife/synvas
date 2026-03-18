@@ -1,7 +1,10 @@
 import type { TimelineAsset, TimelineElement } from "core/element/types";
 import { buildSplitElements } from "core/editor/command/split";
-import type { CanvasSink } from "mediabunny";
-import { acquireVideoAsset } from "@/assets/videoAsset";
+import { acquireVideoAsset, type VideoAsset } from "@/assets/videoAsset";
+import {
+	closeVideoSample,
+	getVideoSampleAfterTime,
+} from "@/lib/videoFrameUtils";
 import { framesToSeconds } from "@/utils/timecode";
 import { isTransitionElement, reconcileTransitions } from "../utils/transitions";
 
@@ -135,27 +138,22 @@ export const resolveQuickSplitCandidate = (options: {
 	return target;
 };
 
-const readFrameCanvasAtTime = async (
-	videoSink: CanvasSink,
+const drawFrameSampleAtTime = async (
+	videoSampleSink: VideoAsset["videoSampleSink"],
 	time: number,
+	ctx: CanvasRenderingContext2D,
 	signal?: AbortSignal,
-): Promise<HTMLCanvasElement | OffscreenCanvas | null> => {
+): Promise<boolean> => {
 	throwIfAborted(signal);
-	const iterator = videoSink.canvases(time);
+	const sample = await getVideoSampleAfterTime(videoSampleSink, time);
 	try {
-		const frame = (await iterator.next()).value;
 		throwIfAborted(signal);
-		const canvas = frame?.canvas;
-		const hasOffscreenCanvas = typeof OffscreenCanvas !== "undefined";
-		if (
-			canvas instanceof HTMLCanvasElement ||
-			(hasOffscreenCanvas && canvas instanceof OffscreenCanvas)
-		) {
-			return canvas;
-		}
-		return null;
+		if (!sample) return false;
+		ctx.clearRect(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+		sample.draw(ctx, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+		return true;
 	} finally {
-		await iterator.return?.();
+		closeVideoSample(sample);
 	}
 };
 
@@ -227,11 +225,8 @@ const buildEdgeMap = (
 };
 
 const extractFrameFeatures = (
-	source: HTMLCanvasElement | OffscreenCanvas,
 	scratchCtx: CanvasRenderingContext2D,
 ): FrameFeatures => {
-	scratchCtx.clearRect(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-	scratchCtx.drawImage(source, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
 	const imageData = scratchCtx.getImageData(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
 	const { luma, hist, meanLuma } = buildLumaAndHistogram(imageData);
 	const edge = buildEdgeMap(luma, SAMPLE_WIDTH, SAMPLE_HEIGHT);
@@ -648,7 +643,7 @@ export const analyzeVideoChangeForElement = async (options: {
 	}
 	const handle = await acquireVideoAsset(source.uri);
 	try {
-		const videoSink = handle.asset.createVideoSink();
+		const videoSampleSink = handle.asset.createVideoSampleSink();
 		const sampledFrames: number[] = [];
 		const features: FrameFeatures[] = [];
 		for (let index = 0; index < requestedFrames.length; index += 1) {
@@ -667,9 +662,14 @@ export const analyzeVideoChangeForElement = async (options: {
 				Math.max(0, sourceTime),
 				Math.max(0, handle.asset.duration - 0.001),
 			);
-			const frameCanvas = await readFrameCanvasAtTime(videoSink, clampedTime, signal);
-			if (frameCanvas) {
-				const frameFeatures = extractFrameFeatures(frameCanvas, scratchCtx);
+			const hasFrame = await drawFrameSampleAtTime(
+				videoSampleSink,
+				clampedTime,
+				scratchCtx,
+				signal,
+			);
+			if (hasFrame) {
+				const frameFeatures = extractFrameFeatures(scratchCtx);
 				sampledFrames.push(timelineFrame);
 				features.push(frameFeatures);
 			}

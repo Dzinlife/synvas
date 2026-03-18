@@ -1,4 +1,4 @@
-import type { CanvasKit, Image } from "canvaskit-wasm";
+import type { CanvasKit, Image, TextureSource } from "canvaskit-wasm";
 import type {
 	ImageFactory,
 	ImageInfo,
@@ -12,6 +12,8 @@ import { getEnum, Host, throwNotImplementedOnRNWeb } from "./Host";
 import { JsiSkData } from "./JsiSkData";
 import { JsiSkImage } from "./JsiSkImage";
 import type { JsiSkSurface } from "./JsiSkSurface";
+import { makeImageFromTextureSourceDirect } from "./makeTextureSourceImage";
+import { getSkiaRenderBackend } from "./renderBackend";
 
 const isHTMLImageElement = (
 	value: CanvasImageSource | NativeBuffer,
@@ -27,6 +29,11 @@ const isImageBitmap = (
 	value: CanvasImageSource | NativeBuffer,
 ): value is ImageBitmap =>
 	typeof ImageBitmap !== "undefined" && value instanceof ImageBitmap;
+
+const isVideoFrame = (
+	value: CanvasImageSource | NativeBuffer,
+): value is VideoFrame =>
+	typeof VideoFrame !== "undefined" && value instanceof VideoFrame;
 
 export class JsiSkImageFactory extends Host implements ImageFactory {
 	constructor(CanvasKit: CanvasKit) {
@@ -46,12 +53,23 @@ export class JsiSkImageFactory extends Host implements ImageFactory {
 	}
 
 	private makeImageFromCanvasImageSource(source: CanvasImageSource) {
-		if (
+		const isTextureBackedSource =
 			isHTMLImageElement(source) ||
 			isHTMLVideoElement(source) ||
-			isImageBitmap(source)
-		) {
-			return this.CanvasKit.MakeLazyImageFromTextureSource(source);
+			isImageBitmap(source) ||
+			isVideoFrame(source);
+		if (getSkiaRenderBackend().kind === "webgpu" && isTextureBackedSource) {
+			const image = makeImageFromTextureSourceDirect(
+				source as TextureSource | VideoFrame,
+			) as JsiSkImage | null;
+			if (image) {
+				return image.ref;
+			}
+		}
+		if (getSkiaRenderBackend().kind === "webgl" && isTextureBackedSource) {
+			return this.CanvasKit.MakeLazyImageFromTextureSource(
+				source as TextureSource,
+			);
 		}
 		return this.CanvasKit.MakeImageFromCanvasImageSource(source);
 	}

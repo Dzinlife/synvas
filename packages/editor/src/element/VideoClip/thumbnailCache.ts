@@ -1,4 +1,8 @@
-import type { CanvasSink, Input } from "mediabunny";
+import type { Input, VideoSampleSink } from "mediabunny";
+import {
+	closeVideoSample,
+	getVideoSampleAfterTime,
+} from "@/lib/videoFrameUtils";
 import { resolveVideoKeyframeTime } from "./keyframeTimeCache";
 
 const THUMBNAIL_CACHE_LIMIT = 800;
@@ -29,37 +33,31 @@ const evictThumbnailsIfNeeded = () => {
 	}
 };
 
-const getFrameCanvas = async (
-	videoSink: CanvasSink,
-	time: number,
-): Promise<HTMLCanvasElement | OffscreenCanvas | null> => {
-	const iterator = videoSink.canvases(time);
-	try {
-		const frame = (await iterator.next()).value;
-		return frame?.canvas ?? null;
-	} finally {
-		await iterator.return();
-	}
-};
-
 export const getVideoSize = async (
 	uri: string,
-	videoSink?: CanvasSink | null,
+	videoSampleSink?: VideoSampleSink | null,
 ): Promise<{ width: number; height: number } | null> => {
 	const cached = videoSizeCache.get(uri);
 	if (cached) return cached;
-	if (!videoSink) return null;
+	if (!videoSampleSink) return null;
 	const inflight = videoSizeInflight.get(uri);
 	if (inflight) return inflight;
 
 	const promise = (async () => {
-		const frameCanvas = await getFrameCanvas(videoSink, 0);
-		if (!frameCanvas || frameCanvas.width <= 0 || frameCanvas.height <= 0) {
-			return null;
+		const sample = await getVideoSampleAfterTime(videoSampleSink, 0);
+		try {
+			if (!sample || sample.displayWidth <= 0 || sample.displayHeight <= 0) {
+				return null;
+			}
+			const size = {
+				width: sample.displayWidth,
+				height: sample.displayHeight,
+			};
+			videoSizeCache.set(uri, size);
+			return size;
+		} finally {
+			closeVideoSample(sample);
 		}
-		const size = { width: frameCanvas.width, height: frameCanvas.height };
-		videoSizeCache.set(uri, size);
-		return size;
 	})();
 
 	videoSizeInflight.set(uri, promise);
@@ -77,7 +75,7 @@ export const getThumbnail = async (options: {
 	width: number;
 	height: number;
 	pixelRatio: number;
-	videoSink?: CanvasSink | null;
+	videoSampleSink?: VideoSampleSink | null;
 	input?: Input | null;
 	preferKeyframes?: boolean;
 }): Promise<HTMLCanvasElement | null> => {
@@ -88,7 +86,7 @@ export const getThumbnail = async (options: {
 		width,
 		height,
 		pixelRatio,
-		videoSink,
+		videoSampleSink,
 		input,
 		preferKeyframes,
 	} = options;
@@ -116,7 +114,7 @@ export const getThumbnail = async (options: {
 		touchThumbnailKey(cacheKey);
 		return cached;
 	}
-	if (!videoSink) return null;
+	if (!videoSampleSink) return null;
 
 	const inflight = thumbnailInflight.get(cacheKey);
 	if (inflight) {
@@ -124,52 +122,56 @@ export const getThumbnail = async (options: {
 	}
 
 	const promise = (async () => {
-		const frameCanvas = await getFrameCanvas(videoSink, effectiveTime);
-		if (!frameCanvas || frameCanvas.width <= 0 || frameCanvas.height <= 0) {
-			return null;
+		const sample = await getVideoSampleAfterTime(videoSampleSink, effectiveTime);
+		try {
+			if (!sample || sample.displayWidth <= 0 || sample.displayHeight <= 0) {
+				return null;
+			}
+
+			const resultCanvas = document.createElement("canvas");
+			resultCanvas.width = targetWidth;
+			resultCanvas.height = targetHeight;
+			const ctx = resultCanvas.getContext("2d");
+			if (!ctx) return null;
+
+			const scale = targetHeight / sample.displayHeight;
+			const scaledWidth = sample.displayWidth * scale;
+			if (scaledWidth > targetWidth) {
+				const sourceWidth = targetWidth / scale;
+				const sourceX = (sample.displayWidth - sourceWidth) / 2;
+				sample.draw(
+					ctx,
+					sourceX,
+					0,
+					sourceWidth,
+					sample.displayHeight,
+					0,
+					0,
+					targetWidth,
+					targetHeight,
+				);
+			} else {
+				const offsetX = (targetWidth - scaledWidth) / 2;
+				sample.draw(
+					ctx,
+					0,
+					0,
+					sample.displayWidth,
+					sample.displayHeight,
+					offsetX,
+					0,
+					scaledWidth,
+					targetHeight,
+				);
+			}
+
+			thumbnailCache.set(cacheKey, resultCanvas);
+			touchThumbnailKey(cacheKey);
+			evictThumbnailsIfNeeded();
+			return resultCanvas;
+		} finally {
+			closeVideoSample(sample);
 		}
-
-		const resultCanvas = document.createElement("canvas");
-		resultCanvas.width = targetWidth;
-		resultCanvas.height = targetHeight;
-		const ctx = resultCanvas.getContext("2d");
-		if (!ctx) return null;
-
-		const scale = targetHeight / frameCanvas.height;
-		const scaledWidth = frameCanvas.width * scale;
-		if (scaledWidth > targetWidth) {
-			const sourceWidth = targetWidth / scale;
-			const sourceX = (frameCanvas.width - sourceWidth) / 2;
-			ctx.drawImage(
-				frameCanvas,
-				sourceX,
-				0,
-				sourceWidth,
-				frameCanvas.height,
-				0,
-				0,
-				targetWidth,
-				targetHeight,
-			);
-		} else {
-			const offsetX = (targetWidth - scaledWidth) / 2;
-			ctx.drawImage(
-				frameCanvas,
-				0,
-				0,
-				frameCanvas.width,
-				frameCanvas.height,
-				offsetX,
-				0,
-				scaledWidth,
-				targetHeight,
-			);
-		}
-
-		thumbnailCache.set(cacheKey, resultCanvas);
-		touchThumbnailKey(cacheKey);
-		evictThumbnailsIfNeeded();
-		return resultCanvas;
 	})();
 
 	thumbnailInflight.set(cacheKey, promise);
