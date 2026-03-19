@@ -109,6 +109,8 @@ const TransitionRenderer: React.FC<{
 	id: string;
 	fromNode?: React.ReactNode;
 	toNode?: React.ReactNode;
+	fromImage?: unknown;
+	toImage?: unknown;
 	progress?: number;
 }> = ({ id, fromNode, toNode }) => {
 	return (
@@ -134,7 +136,16 @@ const deps: BuildSkiaDeps = {
 			return { Renderer: FilterRenderer };
 		}
 		if (componentId === "transition/test") {
-			return { Renderer: TransitionRenderer };
+			return {
+				Renderer: TransitionRenderer,
+				transitionInputMode: "texture",
+			};
+		}
+		if (componentId === "transition/node") {
+			return {
+				Renderer: TransitionRenderer,
+				transitionInputMode: "node",
+			};
 		}
 		return undefined;
 	},
@@ -514,6 +525,166 @@ describe("buildSkiaTree transform wrapper", () => {
 		);
 		expect(compositionPictureNodes.length).toBeGreaterThan(0);
 		renderState.dispose?.();
+	});
+
+	it("WebGPU texture transition 会优先复用 image snapshot，不再回退到 picture 录制", async () => {
+		getSkiaRenderBackendMock.mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+		const clipA = createElement({
+			id: "clip-a",
+			type: "Image",
+			component: "image",
+		});
+		const clipB = createElement({
+			id: "clip-b",
+			type: "Image",
+			component: "image",
+			timeline: {
+				start: 30,
+				end: 60,
+				startTimecode: "00:00:01:00",
+				endTimecode: "00:00:02:00",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+		});
+		const transition = createElement({
+			id: "transition-live-texture",
+			type: "Transition",
+			component: "transition/test",
+			timeline: {
+				start: 15,
+				end: 45,
+				startTimecode: "00:00:00:15",
+				endTimecode: "00:00:01:15",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+			transition: {
+				duration: 30,
+				boundry: 30,
+				fromId: "clip-a",
+				toId: "clip-b",
+			},
+		});
+		const renderNodeToImage = vi
+			.fn()
+			.mockResolvedValueOnce({ id: "from-image", dispose: vi.fn() } as any)
+			.mockResolvedValueOnce({ id: "to-image", dispose: vi.fn() } as any);
+		const renderNodeToPicture = vi.fn();
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToImage,
+			renderNodeToPicture,
+		};
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [clipA, clipB, transition],
+				displayTime: 20,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					prepareTransitionPictures: true,
+				},
+			},
+			localDeps,
+		);
+
+		const renderedChildren = renderState.children.slice(1).filter(Boolean);
+		const transitionNode = renderedChildren.find(
+			(node) => isElement(node) && node.type === TransitionRenderer,
+		);
+
+		expect(renderNodeToImage).toHaveBeenCalledTimes(2);
+		expect(renderNodeToPicture).not.toHaveBeenCalled();
+		expect(transitionNode).toBeTruthy();
+		if (!isElement(transitionNode)) return;
+		expect(transitionNode.props.fromImage).toBeTruthy();
+		expect(transitionNode.props.toImage).toBeTruthy();
+		expect(transitionNode.props.fromPicture).toBeNull();
+		expect(transitionNode.props.toPicture).toBeNull();
+
+		renderState.dispose?.();
+	});
+
+	it("node transition 即使开启转场预生成也不会额外生成纹理", async () => {
+		const clipA = createElement({
+			id: "clip-a",
+			type: "Image",
+			component: "image",
+		});
+		const clipB = createElement({
+			id: "clip-b",
+			type: "Image",
+			component: "image",
+			timeline: {
+				start: 30,
+				end: 60,
+				startTimecode: "00:00:01:00",
+				endTimecode: "00:00:02:00",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+		});
+		const transition = createElement({
+			id: "transition-live-node",
+			type: "Transition",
+			component: "transition/node",
+			timeline: {
+				start: 15,
+				end: 45,
+				startTimecode: "00:00:00:15",
+				endTimecode: "00:00:01:15",
+				trackIndex: 0,
+				trackId: "main",
+				role: "clip",
+			},
+			transition: {
+				duration: 30,
+				boundry: 30,
+				fromId: "clip-a",
+				toId: "clip-b",
+			},
+		});
+		const renderNodeToImage = vi.fn();
+		const renderNodeToPicture = vi.fn();
+		const localDeps: BuildSkiaDeps = {
+			...deps,
+			renderNodeToImage,
+			renderNodeToPicture,
+		};
+
+		await buildSkiaRenderStateCore(
+			{
+				elements: [clipA, clipB, transition],
+				displayTime: 20,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+					prepareTransitionPictures: true,
+				},
+			},
+			localDeps,
+		);
+
+		expect(renderNodeToImage).not.toHaveBeenCalled();
+		expect(renderNodeToPicture).not.toHaveBeenCalled();
 	});
 
 	it("Composition 子场景的 Transition progress 跟随子场景 displayTime", async () => {

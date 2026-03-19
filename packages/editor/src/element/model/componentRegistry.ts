@@ -26,6 +26,7 @@ export interface ElementToCanvasClipboardNodeContext<
 }
 
 export type ElementResizeBehavior = "default" | "text-width-reflow";
+export type TransitionInputMode = "node" | "texture";
 
 /**
  * 组件定义接口
@@ -49,6 +50,7 @@ export interface ElementComponentDefinition<Props = any, Internal = any> {
 	prepareRenderFrame?: (
 		context: RendererPrepareFrameContext,
 	) => Promise<void> | void;
+	transitionInputMode?: TransitionInputMode;
 	toCanvasClipboardNode?: (
 		context: ElementToCanvasClipboardNodeContext<Props>,
 	) => CanvasNodeCreateInput | null;

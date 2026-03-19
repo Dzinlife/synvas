@@ -6,6 +6,7 @@ import { HostObject, runAttachedDisposeCleanups } from "./Host";
 import { JsiSkCanvas } from "./JsiSkCanvas";
 import { JsiSkImage } from "./JsiSkImage";
 import { JsiSkRect } from "./JsiSkRect";
+import { toCanvasKitWebGPU } from "./renderBackend";
 
 export class JsiSkSurface
   extends HostObject<Surface, "Surface">
@@ -67,6 +68,37 @@ export class JsiSkSurface
 
   getCanvas(): SkCanvas {
     return new JsiSkCanvas(this.CanvasKit, this.ref.getCanvas());
+  }
+
+  asImage(bounds?: SkRect): SkImage | null {
+    this.setSurfaceCurrentContextIfNeeded(this.ref);
+    const subset = bounds
+      ? Array.from(JsiSkRect.fromValue(this.CanvasKit, bounds))
+      : undefined;
+    const image = bounds
+      ? toCanvasKitWebGPU(this.CanvasKit).SkSurfaces?.AsImageCopy?.(
+          this.ref,
+          subset,
+          false
+        ) ?? this.ref.makeImageSnapshot(subset)
+      : toCanvasKitWebGPU(this.CanvasKit).SkSurfaces?.AsImage?.(this.ref) ??
+        this.ref.makeImageSnapshot();
+    return image ? new JsiSkImage(this.CanvasKit, image) : null;
+  }
+
+  asImageCopy(bounds?: SkRect, mipmapped = false): SkImage | null {
+    this.setSurfaceCurrentContextIfNeeded(this.ref);
+    const subset = bounds
+      ? Array.from(JsiSkRect.fromValue(this.CanvasKit, bounds))
+      : undefined;
+    const image =
+      toCanvasKitWebGPU(this.CanvasKit).SkSurfaces?.AsImageCopy?.(
+        this.ref,
+        subset,
+        mipmapped
+      ) ??
+      this.ref.makeImageSnapshot(subset);
+    return image ? new JsiSkImage(this.CanvasKit, image) : null;
   }
 
   makeImageSnapshot(bounds?: SkRect, outputImage?: JsiSkImage): SkImage {

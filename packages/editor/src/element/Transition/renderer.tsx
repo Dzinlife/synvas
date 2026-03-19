@@ -2,14 +2,12 @@ import type { TimelineElement } from "core/element/types";
 import type React from "react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo } from "react";
-import type { SkPicture } from "react-skia-lite";
+import type { SkImage, SkPicture } from "react-skia-lite";
 import {
-	FilterMode,
 	Group,
 	processUniforms,
 	Rect,
 	Skia,
-	TileMode,
 } from "react-skia-lite";
 import {
 	useRenderTime,
@@ -17,11 +15,17 @@ import {
 } from "@/scene-editor/contexts/TimelineContext";
 import { getTransitionBoundary } from "@/scene-editor/utils/transitions";
 import type { TransitionProps } from "./model";
+import {
+	makeTransitionTextureShader,
+	type TransitionTextureSource,
+} from "./textureShader";
 
 interface TransitionRendererProps extends TransitionProps {
 	id: string;
 	fromNode?: ReactNode;
 	toNode?: ReactNode;
+	fromImage?: SkImage | null;
+	toImage?: SkImage | null;
 	fromPicture?: SkPicture | null;
 	toPicture?: SkPicture | null;
 	progress?: number;
@@ -62,6 +66,8 @@ const resolveTransitionDuration = (element: TimelineElement | null): number => {
 const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 	fromNode,
 	toNode,
+	fromImage,
+	toImage,
 	fromPicture,
 	toPicture,
 	progress,
@@ -102,33 +108,23 @@ const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 	const width = canvasSize.width;
 	const height = canvasSize.height;
 
-	const preRollPicture = fromPicture ?? null;
-	const afterRollPicture = toPicture ?? null;
+	const preRollTexture: TransitionTextureSource | null =
+		fromImage ?? fromPicture ?? null;
+	const afterRollTexture: TransitionTextureSource | null =
+		toImage ?? toPicture ?? null;
 
 	const blendShader = useMemo(() => {
 		if (
 			!shaderSource ||
-			!preRollPicture ||
-			!afterRollPicture ||
+			!preRollTexture ||
+			!afterRollTexture ||
 			width <= 0 ||
 			height <= 0
 		)
 			return null;
 		const bounds = { x: 0, y: 0, width, height };
-		const fromShader = preRollPicture.makeShader(
-			TileMode.Clamp,
-			TileMode.Clamp,
-			FilterMode.Linear,
-			undefined,
-			bounds,
-		);
-		const toShader = afterRollPicture.makeShader(
-			TileMode.Clamp,
-			TileMode.Clamp,
-			FilterMode.Linear,
-			undefined,
-			bounds,
-		);
+		const fromShader = makeTransitionTextureShader(preRollTexture, bounds);
+		const toShader = makeTransitionTextureShader(afterRollTexture, bounds);
 		const uniforms = processUniforms(shaderSource, { progress: safeProgress });
 		const shader = shaderSource.makeShaderWithChildren(uniforms, [
 			fromShader,
@@ -136,8 +132,8 @@ const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 		]);
 		return { shader, children: [fromShader, toShader] };
 	}, [
-		afterRollPicture,
-		preRollPicture,
+		afterRollTexture,
+		preRollTexture,
 		safeProgress,
 		shaderSource,
 		width,
@@ -170,7 +166,7 @@ const TransitionRenderer: React.FC<TransitionRendererProps> = ({
 		return <Group>{safeProgress < boundaryProgress ? fromNode : toNode}</Group>;
 	};
 
-	if (paintBundle && preRollPicture && afterRollPicture) {
+	if (paintBundle && preRollTexture && afterRollTexture) {
 		return (
 			<Group>
 				<Rect

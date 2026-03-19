@@ -7,11 +7,15 @@ import {
 import type { RendererPrepareFrameContext } from "core/element/model/types";
 import type { ReactNode } from "react";
 import { componentRegistry } from "@/element/model/componentRegistry";
-import { renderNodeToPicture } from "@/element/Transition/picture";
+import {
+	renderNodeToImage,
+	renderNodeToPicture,
+} from "@/element/Transition/picture";
 import { isTransitionElement } from "@/scene-editor/utils/transitions";
 
 type BuildSkiaOverrides = {
 	renderNodeToPicture?: BuildSkiaDeps["renderNodeToPicture"];
+	renderNodeToImage?: BuildSkiaDeps["renderNodeToImage"];
 	wrapRenderNode?: (node: ReactNode) => ReactNode;
 	resolveCompositionTimeline?: BuildSkiaDeps["resolveCompositionTimeline"];
 };
@@ -26,6 +30,13 @@ const createBuildSkiaDeps = (
 			? overrides.wrapRenderNode(node)
 			: node;
 		const render = overrides?.renderNodeToPicture ?? renderNodeToPicture;
+		return render(wrappedNode, size);
+	},
+	renderNodeToImage: (node, size) => {
+		const wrappedNode = overrides?.wrapRenderNode
+			? overrides.wrapRenderNode(node)
+			: node;
+		const render = overrides?.renderNodeToImage ?? renderNodeToImage;
 		return render(wrappedNode, size);
 	},
 	isTransitionElement,

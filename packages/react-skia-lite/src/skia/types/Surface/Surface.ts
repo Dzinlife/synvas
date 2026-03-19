@@ -26,6 +26,16 @@ export interface SkSurface extends SkJSIInstance<"Surface"> {
   makeImageSnapshot(bounds?: SkRect, outputImage?: SkImage): SkImage;
 
   /**
+   * Returns an image aliasing the current surface contents when the backend supports it.
+   */
+  asImage(bounds?: SkRect): SkImage | null;
+
+  /**
+   * Returns an explicit copy of the current surface contents when the backend supports it.
+   */
+  asImageCopy(bounds?: SkRect, mipmapped?: boolean): SkImage | null;
+
+  /**
    * Make sure any queued draws are sent to the screen or the GPU.
    */
   flush(): void;

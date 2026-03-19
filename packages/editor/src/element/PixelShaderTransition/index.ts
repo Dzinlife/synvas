@@ -13,6 +13,7 @@ export const PixelShaderTransitionDefinition: ElementComponentDefinition<Transit
 		component: "transition/pixel-shader",
 		createModel: createTransitionModel,
 		Renderer: PixelShaderTransitionRenderer,
+		transitionInputMode: "node",
 		Timeline: TransitionTimeline,
 		meta: {
 			name: "Pixel Shader",

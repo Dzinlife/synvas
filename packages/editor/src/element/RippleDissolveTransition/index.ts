@@ -13,6 +13,7 @@ export const RippleDissolveTransitionDefinition: ElementComponentDefinition<Tran
 		component: "transition/ripple-dissolve",
 		createModel: createTransitionModel,
 		Renderer: RippleDissolveTransitionRenderer,
+		transitionInputMode: "texture",
 		Timeline: TransitionTimeline,
 		meta: {
 			name: "Ripple Dissolve",

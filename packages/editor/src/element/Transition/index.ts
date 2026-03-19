@@ -5,7 +5,7 @@ import TransitionRenderer from "./renderer";
 import { TransitionTimeline } from "./timeline";
 
 export { createTransitionModel, type TransitionProps } from "./model";
-export { renderNodeToPicture } from "./picture";
+export { renderNodeToImage, renderNodeToPicture } from "./picture";
 export { TransitionTimeline } from "./timeline";
 
 export const TransitionDefinition: ElementComponentDefinition<TransitionProps> = {
@@ -13,6 +13,7 @@ export const TransitionDefinition: ElementComponentDefinition<TransitionProps> =
 	component: "transition/crossfade",
 	createModel: createTransitionModel,
 	Renderer: TransitionRenderer,
+	transitionInputMode: "texture",
 	Timeline: TransitionTimeline,
 	meta: {
 		name: "Crossfade",

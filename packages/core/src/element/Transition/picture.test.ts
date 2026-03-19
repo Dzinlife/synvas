@@ -10,6 +10,7 @@ const {
 	drawOnCanvasMock,
 	unmountMock,
 	makeSurfaceMock,
+	makeOffscreenSurfaceMock,
 	makeColorMock,
 	getSkiaRenderBackendMock,
 	sceneGraph,
@@ -24,6 +25,7 @@ const {
 	drawOnCanvasMock: vi.fn(),
 	unmountMock: vi.fn(),
 	makeSurfaceMock: vi.fn(),
+	makeOffscreenSurfaceMock: vi.fn(),
 	makeColorMock: vi.fn((value: string) => value),
 	getSkiaRenderBackendMock: vi.fn(() => ({
 		bundle: "webgpu",
@@ -49,6 +51,7 @@ vi.mock("react-skia-lite", async () => {
 			}),
 			Surface: {
 				Make: makeSurfaceMock,
+				MakeOffscreen: makeOffscreenSurfaceMock,
 			},
 			Color: makeColorMock,
 		},
@@ -62,7 +65,7 @@ vi.mock("react-skia-lite", async () => {
 	};
 });
 
-import { renderNodeToPicture } from "./picture";
+import { renderNodeToImage, renderNodeToPicture } from "./picture";
 
 describe("renderNodeToPicture", () => {
 	beforeEach(() => {
@@ -74,6 +77,7 @@ describe("renderNodeToPicture", () => {
 			device: {} as GPUDevice,
 			deviceContext: {} as never,
 		});
+		makeOffscreenSurfaceMock.mockReset();
 	});
 
 	it("普通树会直接录制 picture，不创建隔离 surface", () => {
@@ -106,6 +110,7 @@ describe("renderNodeToPicture", () => {
 		const surface = {
 			getCanvas: vi.fn(() => surfaceCanvas),
 			flush: vi.fn(),
+			asImage: vi.fn(() => image),
 			makeImageSnapshot: vi.fn(() => image),
 			dispose: vi.fn(),
 		};
@@ -120,6 +125,7 @@ describe("renderNodeToPicture", () => {
 		expect(makeColorMock).toHaveBeenCalledWith("transparent");
 		expect(surfaceCanvas.clear).toHaveBeenCalledWith("transparent");
 		expect(drawOnCanvasMock).toHaveBeenCalledWith(surfaceCanvas);
+		expect(surface.asImage).toHaveBeenCalledTimes(1);
 		expect(recordingCanvas.drawImage).toHaveBeenCalledWith(image, 0, 0);
 		expect(image.dispose).toHaveBeenCalledTimes(1);
 		expect(surface.dispose).toHaveBeenCalledTimes(1);
@@ -133,11 +139,52 @@ describe("renderNodeToPicture", () => {
 		getSkiaRenderBackendMock.mockReturnValue({
 			bundle: "webgl",
 			kind: "webgl",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
 		});
 
 		renderNodeToPicture(child, { width: 320, height: 180 });
 
 		expect(makeSurfaceMock).not.toHaveBeenCalled();
 		expect(drawOnCanvasMock).toHaveBeenCalledWith(recordingCanvas);
+	});
+
+	it("WebGPU 下会直接把节点重放到 offscreen surface 并输出 image", () => {
+		const child = React.createElement("child", { id: "content" });
+		const cleanup = vi.fn();
+		const surfaceCanvas = {
+			clear: vi.fn(),
+		};
+		const imageDispose = vi.fn();
+		const image = {
+			dispose: imageDispose,
+		};
+		const surface = {
+			getCanvas: vi.fn(() => surfaceCanvas),
+			flush: vi.fn(),
+			asImage: vi.fn(() => image),
+			makeImageSnapshot: vi.fn(() => image),
+			dispose: vi.fn(),
+		};
+		makeOffscreenSurfaceMock.mockReturnValueOnce(surface);
+		drawOnCanvasMock.mockReturnValueOnce([cleanup]);
+
+		const rendered = renderNodeToImage(child, { width: 320, height: 180 });
+
+		expect(makeOffscreenSurfaceMock).toHaveBeenCalledWith(320, 180);
+		expect(renderMock).toHaveBeenCalledWith(child);
+		expect(makeColorMock).toHaveBeenCalledWith("transparent");
+		expect(surfaceCanvas.clear).toHaveBeenCalledWith("transparent");
+		expect(drawOnCanvasMock).toHaveBeenCalledWith(surfaceCanvas, {
+			retainResources: true,
+		});
+		expect(surface.asImage).toHaveBeenCalledTimes(1);
+		expect(rendered).toBe(image);
+
+		rendered?.dispose?.();
+
+		expect(imageDispose).toHaveBeenCalledTimes(1);
+		expect(cleanup).toHaveBeenCalledTimes(1);
+		expect(surface.dispose).toHaveBeenCalledTimes(1);
 	});
 });

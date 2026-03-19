@@ -6,6 +6,7 @@ import {
 	RenderTarget,
 	Skia,
 	getSkiaRenderBackend,
+	type SkImage,
 	type SkPicture,
 } from "react-skia-lite";
 import type {
@@ -46,6 +47,7 @@ type ResolvedComponent = {
 	prepareRenderFrame?: (
 		context: RendererPrepareFrameContext,
 	) => Promise<void> | void;
+	transitionInputMode?: "node" | "texture";
 };
 
 type ResolvedCompositionTimeline = {
@@ -68,6 +70,10 @@ export type BuildSkiaDeps = {
 		node: React.ReactNode,
 		size: { width: number; height: number },
 	) => SkPicture | null | Promise<SkPicture | null>;
+	renderNodeToImage?: (
+		node: React.ReactNode,
+		size: { width: number; height: number },
+	) => SkImage | null | Promise<SkImage | null>;
 	isTransitionElement?: (element: TimelineElement) => boolean;
 	resolveCompositionTimeline?: (
 		sceneId: string,
@@ -302,7 +308,8 @@ const buildSkiaRenderStateWithScopeCore = async (
 	);
 	const shouldAwaitReady = isExporting || (prepare?.awaitReady ?? false);
 	const frameChannel = resolveRenderFrameChannel(prepare?.frameChannel);
-	const shouldUseLiveComposition = getSkiaRenderBackend().kind === "webgpu";
+	const renderBackend = getSkiaRenderBackend();
+	const shouldUseLiveComposition = renderBackend.kind === "webgpu";
 	const shouldPrepareTransitionPictures =
 		(prepare?.prepareTransitionPictures ?? false) || isExporting;
 	const transitionPictureSize =
@@ -312,8 +319,8 @@ const buildSkiaRenderStateWithScopeCore = async (
 		canvasSize.height > 0
 			? canvasSize
 			: null;
-	// 只有能生成 picture 时才需要强制准备帧
-	const canRenderTransitionPictures = Boolean(transitionPictureSize);
+	// 只有能生成转场纹理时才需要强制准备帧
+	const canRenderTransitionTextures = Boolean(transitionPictureSize);
 	const isTransitionElement =
 		deps.isTransitionElement ?? defaultIsTransitionElement;
 	const transitionFrameState = resolveTransitionFrameStateCore({
@@ -594,6 +601,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 		if (!transitionDef) {
 			return { node: null, ready: Promise.resolve() };
 		}
+		const transitionInputMode = transitionDef.transitionInputMode ?? "texture";
 		const { fromId, toId } = element.transition ?? {};
 		if (!fromId || !toId) {
 			return { node: null, ready: Promise.resolve() };
@@ -613,7 +621,10 @@ const buildSkiaRenderStateWithScopeCore = async (
 			if (target.type === COMPOSITION_ELEMENT_TYPE) {
 				return buildElementPlan(target);
 			}
-			return buildPlainElementPlan(target, canRenderTransitionPictures);
+			return buildPlainElementPlan(
+				target,
+				transitionInputMode === "texture" && canRenderTransitionTextures,
+			);
 		};
 		const [fromPlan, toPlan] = await Promise.all([
 			buildTransitionInputPlan(fromElement),
@@ -622,20 +633,37 @@ const buildSkiaRenderStateWithScopeCore = async (
 		const elementReady = Promise.all([fromPlan.ready, toPlan.ready]);
 		let fromPicture: SkPicture | null = null;
 		let toPicture: SkPicture | null = null;
-		if (transitionPictureSize) {
+		let fromImage: SkImage | null = null;
+		let toImage: SkImage | null = null;
+		if (transitionInputMode === "texture" && transitionPictureSize) {
 			await elementReady;
-			const [fromRendered, toRendered] = await Promise.all([
-				fromPlan.node
-					? deps.renderNodeToPicture(fromPlan.node, transitionPictureSize)
-					: Promise.resolve(null),
-				toPlan.node
-					? deps.renderNodeToPicture(toPlan.node, transitionPictureSize)
-					: Promise.resolve(null),
-			]);
-			fromPicture = fromRendered;
-			toPicture = toRendered;
-			scope.addDisposable(fromRendered);
-			scope.addDisposable(toRendered);
+			if (renderBackend.kind === "webgpu" && deps.renderNodeToImage) {
+				const [fromRendered, toRendered] = await Promise.all([
+					fromPlan.node
+						? deps.renderNodeToImage(fromPlan.node, transitionPictureSize)
+						: Promise.resolve(null),
+					toPlan.node
+						? deps.renderNodeToImage(toPlan.node, transitionPictureSize)
+						: Promise.resolve(null),
+				]);
+				fromImage = fromRendered;
+				toImage = toRendered;
+				scope.addDisposable(fromRendered);
+				scope.addDisposable(toRendered);
+			} else {
+				const [fromRendered, toRendered] = await Promise.all([
+					fromPlan.node
+						? deps.renderNodeToPicture(fromPlan.node, transitionPictureSize)
+						: Promise.resolve(null),
+					toPlan.node
+						? deps.renderNodeToPicture(toPlan.node, transitionPictureSize)
+						: Promise.resolve(null),
+				]);
+				fromPicture = fromRendered;
+				toPicture = toRendered;
+				scope.addDisposable(fromRendered);
+				scope.addDisposable(toRendered);
+			}
 		}
 		const TransitionRenderer = transitionDef.Renderer;
 		const activeTransition = activeTransitionById.get(element.id);
@@ -646,6 +674,8 @@ const buildSkiaRenderStateWithScopeCore = async (
 				{...element.props}
 				fromNode={fromPlan.node}
 				toNode={toPlan.node}
+				fromImage={fromImage}
+				toImage={toImage}
 				fromPicture={fromPicture}
 				toPicture={toPicture}
 				progress={activeTransition?.progress}
