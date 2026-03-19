@@ -1,48 +1,5 @@
-diff --git a/modules/canvaskit/BUILD.gn b/modules/canvaskit/BUILD.gn
-index 9090ce305c..bf00a7fdb9 100644
---- a/modules/canvaskit/BUILD.gn
-+++ b/modules/canvaskit/BUILD.gn
-@@ -95,6 +95,9 @@ action("create_notomono_cpp") {
- 
- skia_wasm_lib("canvaskit") {
-   deps = [ "../..:skia" ]
-+  if (skia_canvaskit_enable_pathops) {
-+    deps += [ "../..:pathops" ]
-+  }
-   if (skia_canvaskit_enable_paragraph) {
-     deps += [
-       "../../modules/skparagraph:skparagraph",
-@@ -117,6 +120,9 @@ skia_wasm_lib("canvaskit") {
-   if (skia_canvaskit_enable_embedded_font) {
-     deps += [ ":create_notomono_cpp" ]
-   }
-+  if (skia_canvaskit_enable_webgpu) {
-+    public_configs = [ "../../third_party/dawn:dawn_api_config" ]
-+  }
- 
-   sources = [
-     "WasmCommon.h",
-@@ -194,7 +200,6 @@ skia_wasm_lib("canvaskit") {
-       "--pre-js",
-       rebase_path("webgpu.js"),
-       "-sUSE_WEBGL2=0",
--      "-sUSE_WEBGPU=1",
-       "-sASYNCIFY",
- 
-       # Modules from html5_webgpu for JS<->WASM interop
-@@ -391,6 +396,10 @@ skia_wasm_lib("canvaskit") {
-         "SK_GL",
-         "CK_ENABLE_WEBGL",
-       ]
-+    } else if (skia_canvaskit_enable_webgpu) {
-+      defines += [
-+        "CK_ENABLE_WEBGPU",
-+      ]
-     }
-   }
- 
 diff --git a/modules/canvaskit/canvaskit_bindings.cpp b/modules/canvaskit/canvaskit_bindings.cpp
-index 59c6249124..398c8cd074 100644
+index 59c6249..bbcba1e 100644
 --- a/modules/canvaskit/canvaskit_bindings.cpp
 +++ b/modules/canvaskit/canvaskit_bindings.cpp
 @@ -32,7 +32,9 @@
@@ -70,8 +27,8 @@ index 59c6249124..398c8cd074 100644
 +#include "include/gpu/graphite/dawn/DawnBackendContext.h"
 +#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
 +#include "src/gpu/graphite/ContextOptionsPriv.h"
-+#include <unordered_map>
 +#include <emscripten/emscripten.h>
++#include <unordered_map>
  #include <webgpu/webgpu.h>
  #include <webgpu/webgpu_cpp.h>
 +
@@ -89,7 +46,61 @@ index 59c6249124..398c8cd074 100644
  #endif  // CK_ENABLE_WEBGPU
  
  #ifndef CK_NO_FONTS
-@@ -367,15 +392,106 @@ sk_sp<SkSurface> MakeRenderTarget(sk_sp<GrDirectContext> dContext, SimpleImageIn
+@@ -257,6 +282,26 @@ struct SimpleImageInfo {
+     sk_sp<SkColorSpace> colorSpace;
+ };
+ 
++#ifdef CK_ENABLE_WEBGPU
++struct SimpleColorInfo {
++    SkColorType colorType;
++    SkAlphaType alphaType;
++    sk_sp<SkColorSpace> colorSpace;
++};
++
++struct SimpleIRect {
++    int left;
++    int top;
++    int right;
++    int bottom;
++};
++
++struct SimpleISize {
++    int width;
++    int height;
++};
++#endif  // CK_ENABLE_WEBGPU
++
+ SkImageInfo toSkImageInfo(const SimpleImageInfo& sii) {
+     return SkImageInfo::Make(sii.width,
+                              sii.height,
+@@ -265,6 +310,26 @@ SkImageInfo toSkImageInfo(const SimpleImageInfo& sii) {
+                              sii.colorSpace ? sii.colorSpace : SkColorSpace::MakeSRGB());
+ }
+ 
++#ifdef CK_ENABLE_WEBGPU
++SkColorInfo toSkColorInfo(const SimpleColorInfo& sci) {
++    return SkColorInfo(sci.colorType,
++                       sci.alphaType,
++                       sci.colorSpace ? sci.colorSpace : SkColorSpace::MakeSRGB());
++}
++
++SkIRect toSkIRect(const SimpleIRect& rect) {
++    return SkIRect::MakeLTRB(rect.left, rect.top, rect.right, rect.bottom);
++}
++
++SkISize toSkISize(const SimpleISize& size) {
++    return SkISize::Make(size.width, size.height);
++}
++
++skgpu::Mipmapped toMipmapped(bool mipmapped) {
++    return mipmapped ? skgpu::Mipmapped::kYes : skgpu::Mipmapped::kNo;
++}
++#endif  // CK_ENABLE_WEBGPU
++
+ #ifdef CK_ENABLE_WEBGL
+ 
+ // Set the pixel format based on the colortype.
+@@ -367,71 +432,521 @@ sk_sp<SkSurface> MakeRenderTarget(sk_sp<GrDirectContext> dContext, SimpleImageIn
  
  #ifdef CK_ENABLE_WEBGPU
  
@@ -127,6 +138,67 @@ index 59c6249124..398c8cd074 100644
 +    std::unordered_map<uint64_t, sk_sp<SkImage>> fCache;
 +};
 +
++struct WebGPUReleaseContext {
++    JSObject fReleaseCallback;
++};
++
++void InvokeWebGPUReleaseProc(SkSurfaces::ReleaseContext releaseContext) {
++    auto* context = reinterpret_cast<WebGPUReleaseContext*>(releaseContext);
++    if (!context) {
++        return;
++    }
++    context->fReleaseCallback.call<void>("callRelease");
++    delete context;
++}
++
++struct AsyncReadContext {
++    JSObject fCallback;
++    std::vector<size_t> fPlaneHeights;
++    int fWidth = 0;
++    int fHeight = 0;
++};
++
++JSObject MakeAsyncReadResultValue(const SkImage::AsyncReadResult& result,
++                                  const AsyncReadContext& context) {
++    JSObject jsResult = emscripten::val::object();
++    JSObject planes = emscripten::val::array();
++    JSObject rowBytes = emscripten::val::array();
++    for (int planeIndex = 0; planeIndex < result.count(); ++planeIndex) {
++        const size_t planeHeight = planeIndex < static_cast<int>(context.fPlaneHeights.size())
++                                           ? context.fPlaneHeights[planeIndex]
++                                           : 0;
++        const size_t planeRowBytes = result.rowBytes(planeIndex);
++        const size_t planeSize = planeHeight * planeRowBytes;
++        planes.set(
++                planeIndex,
++                emscripten::val(typed_memory_view(
++                                        planeSize,
++                                        reinterpret_cast<const uint8_t*>(result.data(planeIndex))))
++                        .call<Uint8Array>("slice"));
++        rowBytes.set(planeIndex, static_cast<unsigned int>(planeRowBytes));
++    }
++    jsResult.set("planes", planes);
++    jsResult.set("rowBytes", rowBytes);
++    jsResult.set("count", result.count());
++    jsResult.set("width", context.fWidth);
++    jsResult.set("height", context.fHeight);
++    return jsResult;
++}
++
++void ResolveAsyncReadCallback(SkImage::ReadPixelsContext readContext,
++                              std::unique_ptr<const SkImage::AsyncReadResult> result) {
++    std::unique_ptr<AsyncReadContext> context(reinterpret_cast<AsyncReadContext*>(readContext));
++    if (!context) {
++        return;
++    }
++
++    if (!result) {
++        context->fCallback.call<void>("resolve", emscripten::val::null());
++        return;
++    }
++    context->fCallback.call<void>("resolve", MakeAsyncReadResultValue(*result, *context));
++}
++
 +class WebGPUDeviceContext {
 +public:
 +    WebGPUDeviceContext(std::unique_ptr<skgpu::graphite::Context> context,
@@ -134,23 +206,101 @@ index 59c6249124..398c8cd074 100644
 +            : fContext(std::move(context))
 +            , fRecorder(std::move(recorder)) {}
 +
-+    bool submit() {
++    bool submit(bool syncToCpu = false) {
 +        if (!fContext || !fRecorder) {
 +            return false;
 +        }
 +
 +        std::unique_ptr<skgpu::graphite::Recording> recording = fRecorder->snap();
-+        if (!recording) {
++        if (recording) {
++            skgpu::graphite::InsertRecordingInfo info;
++            info.fRecording = recording.get();
++            if (fContext->insertRecording(info) != skgpu::graphite::InsertStatus::kSuccess) {
++                return false;
++            }
++        }
++
++        return fContext->submit(syncToCpu ? skgpu::graphite::SyncToCpu::kYes
++                                          : skgpu::graphite::SyncToCpu::kNo);
++    }
++
++    void checkAsyncWorkCompletion() {
++        if (!fContext) {
++            return;
++        }
++        fContext->checkAsyncWorkCompletion();
++    }
++
++    bool readSurfacePixelsAsync(sk_sp<SkSurface> surface,
++                                SimpleImageInfo dstImageInfo,
++                                SimpleIRect srcRect,
++                                SkImage::RescaleGamma rescaleGamma,
++                                SkImage::RescaleMode rescaleMode,
++                                JSObject callbackObj) {
++        if (!fContext || !surface) {
 +            return false;
 +        }
 +
-+        skgpu::graphite::InsertRecordingInfo info;
-+        info.fRecording = recording.get();
-+        if (fContext->insertRecording(info) != skgpu::graphite::InsertStatus::kSuccess) {
++        auto* context = new AsyncReadContext{
++                callbackObj,
++                {static_cast<size_t>(std::max(dstImageInfo.height, 0))},
++                dstImageInfo.width,
++                dstImageInfo.height,
++        };
++        fContext->asyncRescaleAndReadPixels(surface.get(),
++                                            toSkImageInfo(dstImageInfo),
++                                            toSkIRect(srcRect),
++                                            rescaleGamma,
++                                            rescaleMode,
++                                            ResolveAsyncReadCallback,
++                                            context);
++        if (!this->submit(true)) {
++            ResolveAsyncReadCallback(context, nullptr);
++            return false;
++        }
++        return true;
++    }
++
++    bool readSurfacePixelsYUV420Async(sk_sp<SkSurface> surface,
++                                      SkYUVColorSpace yuvColorSpace,
++                                      sk_sp<SkColorSpace> dstColorSpace,
++                                      SimpleIRect srcRect,
++                                      SimpleISize dstSize,
++                                      SkImage::RescaleGamma rescaleGamma,
++                                      SkImage::RescaleMode rescaleMode,
++                                      JSObject callbackObj) {
++        if (!fContext || !surface) {
 +            return false;
 +        }
 +
-+        return fContext->submit();
++        const int dstWidth = std::max(dstSize.width, 0);
++        const int dstHeight = std::max(dstSize.height, 0);
++        auto* context = new AsyncReadContext{
++                callbackObj,
++                {
++                        static_cast<size_t>(dstHeight),
++                        static_cast<size_t>(std::max(0, dstHeight / 2)),
++                        static_cast<size_t>(std::max(0, dstHeight / 2)),
++                },
++                dstWidth,
++                dstHeight,
++        };
++        fContext->asyncRescaleAndReadPixelsYUV420(surface.get(),
++                                                  yuvColorSpace,
++                                                  dstColorSpace
++                                                          ? dstColorSpace
++                                                          : SkColorSpace::MakeSRGB(),
++                                                  toSkIRect(srcRect),
++                                                  toSkISize(dstSize),
++                                                  rescaleGamma,
++                                                  rescaleMode,
++                                                  ResolveAsyncReadCallback,
++                                                  context);
++        if (!this->submit(true)) {
++            ResolveAsyncReadCallback(context, nullptr);
++            return false;
++        }
++        return true;
 +    }
 +
 +    skgpu::graphite::Recorder* recorder() const { return fRecorder.get(); }
@@ -193,59 +343,112 @@ index 59c6249124..398c8cd074 100644
  }
  
 -sk_sp<SkSurface> MakeGPUTextureSurface(sk_sp<GrDirectContext> dContext,
-+sk_sp<SkSurface> MakeGPUTextureSurface(WebGPUDeviceContext& dContext,
-                                        uint32_t textureHandle,
-                                        uint32_t textureFormat,
-+                                       uint32_t textureUsage,
-                                        int width,
-                                        int height,
-                                        sk_sp<SkColorSpace> colorSpace) {
-@@ -383,55 +499,205 @@ sk_sp<SkSurface> MakeGPUTextureSurface(sk_sp<GrDirectContext> dContext,
+-                                       uint32_t textureHandle,
+-                                       uint32_t textureFormat,
+-                                       int width,
+-                                       int height,
+-                                       sk_sp<SkColorSpace> colorSpace) {
++SkColorType ResolveWebGPUTextureColorType(wgpu::TextureFormat textureFormat) {
++    switch (textureFormat) {
++        case wgpu::TextureFormat::BGRA8Unorm:
++        case wgpu::TextureFormat::BGRA8UnormSrgb:
++            return SkColorType::kBGRA_8888_SkColorType;
++        case wgpu::TextureFormat::RGBA8Unorm:
++        case wgpu::TextureFormat::RGBA8UnormSrgb:
++        default:
++            return SkColorType::kRGBA_8888_SkColorType;
++    }
++}
++
++skgpu::graphite::BackendTexture MakeWebGPUBackendTexture(uint32_t textureHandle,
++                                                         uint32_t textureFormat,
++                                                         uint32_t textureUsage,
++                                                         int width,
++                                                         int height) {
++    WGPUTexture rawTexture = canvaskit_import_webgpu_texture(textureHandle);
++    canvaskit_release_webgpu_js_handle(textureHandle);
++    if (!rawTexture) {
++        return {};
++    }
++
++    return skgpu::graphite::BackendTextures::MakeDawn(
++            {width, height},
++            skgpu::graphite::DawnTextureInfo(skgpu::graphite::SampleCount::k1,
++                                             skgpu::Mipmapped::kNo,
++                                             static_cast<wgpu::TextureFormat>(textureFormat),
++                                             static_cast<wgpu::TextureUsage>(textureUsage),
++                                             wgpu::TextureAspect::All),
++            rawTexture);
++}
++
++sk_sp<SkSurface> SkSurfacesRenderTarget(WebGPUDeviceContext& dContext,
++                                        SimpleImageInfo imageInfo,
++                                        bool mipmapped,
++                                        std::string label) {
++    return SkSurfaces::RenderTarget(
++            dContext.recorder(), toSkImageInfo(imageInfo), toMipmapped(mipmapped), nullptr, label);
++}
++
++sk_sp<SkSurface> SkSurfacesWrapBackendTexture(WebGPUDeviceContext& dContext,
++                                              uint32_t textureHandle,
++                                              uint32_t textureFormat,
++                                              uint32_t textureUsage,
++                                              int width,
++                                              int height,
++                                              sk_sp<SkColorSpace> colorSpace,
++                                              JSObject releaseCallbackObj,
++                                              std::string label) {
+     if (!colorSpace) {
          colorSpace = SkColorSpace::MakeSRGB();
      }
  
 -    wgpu::TextureFormat format = static_cast<wgpu::TextureFormat>(textureFormat);
 -    wgpu::Texture texture(emscripten_webgpu_import_texture(textureHandle));
 -    emscripten_webgpu_release_js_handle(textureHandle);
--
++    auto backendTexture =
++            MakeWebGPUBackendTexture(textureHandle, textureFormat, textureUsage, width, height);
++    if (!backendTexture.isValid()) {
++        return nullptr;
++    }
+ 
 -    // GrDawnRenderTargetInfo currently only supports a 1-mip TextureView.
 -    constexpr uint32_t mipLevelCount = 1;
 -    constexpr uint32_t sampleCount = 1;
-+    WGPUTexture rawTexture = canvaskit_import_webgpu_texture(textureHandle);
-+    canvaskit_release_webgpu_js_handle(textureHandle);
-+    if (!rawTexture) {
-+        return nullptr;
++    SkSurfaces::TextureReleaseProc releaseProc = nullptr;
++    SkSurfaces::ReleaseContext releaseContext = nullptr;
++    if (!releaseCallbackObj.isNull() && !releaseCallbackObj.isUndefined()) {
++        auto* callbackContext = new WebGPUReleaseContext{releaseCallbackObj};
++        releaseProc = InvokeWebGPUReleaseProc;
++        releaseContext = reinterpret_cast<SkSurfaces::ReleaseContext>(callbackContext);
 +    }
++    return SkSurfaces::WrapBackendTexture(
++            dContext.recorder(), backendTexture, colorSpace, nullptr, releaseProc, releaseContext,
++            label);
++}
  
 -    GrDawnTextureInfo info;
 -    info.fTexture = texture;
 -    info.fFormat = format;
 -    info.fLevelCount = mipLevelCount;
-+    auto target = skgpu::graphite::BackendTextures::MakeDawn(
-+            {width, height},
-+            skgpu::graphite::DawnTextureInfo(
-+                    skgpu::graphite::SampleCount::k1,
-+                    skgpu::Mipmapped::kNo,
-+                    static_cast<wgpu::TextureFormat>(textureFormat),
-+                    static_cast<wgpu::TextureUsage>(textureUsage),
-+                    wgpu::TextureAspect::All),
-+            rawTexture);
-+    if (!target.isValid()) {
++sk_sp<SkImage> SkSurfacesAsImage(sk_sp<SkSurface> surface) {
++    if (!surface) {
 +        return nullptr;
 +    }
++    sk_sp<const SkSurface> constSurface = sk_ref_sp(surface.get());
++    return SkSurfaces::AsImage(std::move(constSurface));
++}
  
 -    GrBackendTexture target(width, height, info);
-     return SkSurfaces::WrapBackendTexture(
+-    return SkSurfaces::WrapBackendTexture(
 -            dContext.get(),
-+            dContext.recorder(),
-             target,
+-            target,
 -            kTopLeft_GrSurfaceOrigin,
 -            sampleCount,
 -            colorSpace->isSRGB() ? kRGBA_8888_SkColorType : kRGBA_F16_SkColorType,
-             colorSpace,
-             nullptr);
- }
- 
+-            colorSpace,
+-            nullptr);
+-}
+-
 -bool ReplaceBackendTexture(
 -        SkSurface& surface, uint32_t textureHandle, uint32_t textureFormat, int width, int height) {
 -    wgpu::TextureFormat format = static_cast<wgpu::TextureFormat>(textureFormat);
@@ -271,57 +474,63 @@ index 59c6249124..398c8cd074 100644
 -    GrBackendTexture target(width, height, info);
 -    return surface.replaceBackendTexture(
 -            target, kTopLeft_GrSurfaceOrigin, SkSurface::kDiscard_ContentChangeMode);
-+SkColorType ResolveWebGPUTextureColorType(wgpu::TextureFormat textureFormat) {
-+    switch (textureFormat) {
-+        case wgpu::TextureFormat::BGRA8Unorm:
-+        case wgpu::TextureFormat::BGRA8UnormSrgb:
-+            return SkColorType::kBGRA_8888_SkColorType;
-+        case wgpu::TextureFormat::RGBA8Unorm:
-+        case wgpu::TextureFormat::RGBA8UnormSrgb:
-+        default:
-+            return SkColorType::kRGBA_8888_SkColorType;
++sk_sp<SkImage> SkSurfacesAsImageCopy(sk_sp<SkSurface> surface,
++                                     bool hasSubset,
++                                     SimpleIRect subset,
++                                     bool mipmapped) {
++    if (!surface) {
++        return nullptr;
 +    }
++    sk_sp<const SkSurface> constSurface = sk_ref_sp(surface.get());
++    SkIRect copiedSubset;
++    const SkIRect* subsetPtr = nullptr;
++    if (hasSubset) {
++        copiedSubset = toSkIRect(subset);
++        subsetPtr = &copiedSubset;
++    }
++    return SkSurfaces::AsImageCopy(std::move(constSurface), subsetPtr, toMipmapped(mipmapped));
 +}
 +
-+sk_sp<SkImage> MakeGPUTextureImage(WebGPUDeviceContext& dContext,
++sk_sp<SkImage> SkImagesWrapTexture(WebGPUDeviceContext& dContext,
 +                                   uint32_t textureHandle,
 +                                   uint32_t textureFormat,
 +                                   uint32_t textureUsage,
 +                                   int width,
 +                                   int height,
++                                   SkColorType colorType,
++                                   SkAlphaType alphaType,
 +                                   sk_sp<SkColorSpace> colorSpace,
-+                                   bool srcIsPremul) {
++                                   skgpu::Origin origin,
++                                   SkImages::GenerateMipmapsFromBase generateMipmapsFromBase,
++                                   JSObject releaseCallbackObj,
++                                   std::string label) {
 +    if (!colorSpace) {
 +        colorSpace = SkColorSpace::MakeSRGB();
 +    }
 +
-+    WGPUTexture rawTexture = canvaskit_import_webgpu_texture(textureHandle);
-+    canvaskit_release_webgpu_js_handle(textureHandle);
-+    if (!rawTexture) {
++    auto backendTexture =
++            MakeWebGPUBackendTexture(textureHandle, textureFormat, textureUsage, width, height);
++    if (!backendTexture.isValid()) {
 +        return nullptr;
 +    }
 +
-+    const auto dawnTextureFormat = static_cast<wgpu::TextureFormat>(textureFormat);
-+    auto target = skgpu::graphite::BackendTextures::MakeDawn(
-+            {width, height},
-+            skgpu::graphite::DawnTextureInfo(
-+                    skgpu::graphite::SampleCount::k1,
-+                    skgpu::Mipmapped::kNo,
-+                    dawnTextureFormat,
-+                    static_cast<wgpu::TextureUsage>(textureUsage),
-+                    wgpu::TextureAspect::All),
-+            rawTexture);
-+    if (!target.isValid()) {
-+        return nullptr;
++    SkImages::TextureReleaseProc releaseProc = nullptr;
++    SkImages::ReleaseContext releaseContext = nullptr;
++    if (!releaseCallbackObj.isNull() && !releaseCallbackObj.isUndefined()) {
++        auto* callbackContext = new WebGPUReleaseContext{releaseCallbackObj};
++        releaseProc = InvokeWebGPUReleaseProc;
++        releaseContext = reinterpret_cast<SkImages::ReleaseContext>(callbackContext);
 +    }
-+
-+    return SkImages::WrapTexture(
-+            dContext.recorder(),
-+            target,
-+            ResolveWebGPUTextureColorType(dawnTextureFormat),
-+            srcIsPremul ? SkAlphaType::kPremul_SkAlphaType
-+                        : SkAlphaType::kUnpremul_SkAlphaType,
-+            colorSpace);
++    return SkImages::WrapTexture(dContext.recorder(),
++                                 backendTexture,
++                                 colorType,
++                                 alphaType,
++                                 colorSpace,
++                                 origin,
++                                 generateMipmapsFromBase,
++                                 releaseProc,
++                                 releaseContext,
++                                 label);
 +}
 +
 +struct WebGPUTexturePromiseImageContext {
@@ -349,32 +558,20 @@ index 59c6249124..398c8cd074 100644
 +        return {{}, nullptr};
 +    }
 +
-+    WGPUTexture rawTexture = canvaskit_import_webgpu_texture(textureHandle);
-+    if (!rawTexture) {
++    auto backendTexture = MakeWebGPUBackendTexture(textureHandle,
++                                                   context->fTextureFormat,
++                                                   context->fTextureUsage,
++                                                   context->fWidth,
++                                                   context->fHeight);
++    if (!backendTexture.isValid()) {
 +        context->fCallback.call<void>("releaseTexture", textureHandle);
 +        return {{}, nullptr};
 +    }
 +
-+    auto target = skgpu::graphite::BackendTextures::MakeDawn(
-+            {context->fWidth, context->fHeight},
-+            skgpu::graphite::DawnTextureInfo(
-+                    skgpu::graphite::SampleCount::k1,
-+                    skgpu::Mipmapped::kNo,
-+                    static_cast<wgpu::TextureFormat>(context->fTextureFormat),
-+                    static_cast<wgpu::TextureUsage>(context->fTextureUsage),
-+                    wgpu::TextureAspect::All),
-+            rawTexture);
-+    if (!target.isValid()) {
-+        context->fCallback.call<void>("releaseTexture", textureHandle);
-+        return {{}, nullptr};
-+    }
-+
-+    auto* releaseContext = new WebGPUTexturePromiseReleaseContext{
-+            context->fCallback,
-+            textureHandle,
-+    };
-+    return {target, reinterpret_cast<SkImages::GraphitePromiseTextureReleaseContext>(
-+                            releaseContext)};
++    auto* releaseContext =
++            new WebGPUTexturePromiseReleaseContext{context->fCallback, textureHandle};
++    return {backendTexture,
++            reinterpret_cast<SkImages::GraphitePromiseTextureReleaseContext>(releaseContext)};
 +}
 +
 +void ReleaseWebGPUTexturePromiseImage(SkImages::GraphitePromiseImageContext imageContext) {
@@ -396,26 +593,23 @@ index 59c6249124..398c8cd074 100644
 +    delete context;
 +}
 +
-+sk_sp<SkImage> MakeGPUTexturePromiseImage(WebGPUDeviceContext& dContext,
++sk_sp<SkImage> SkImagesPromiseTextureFrom(WebGPUDeviceContext& dContext,
 +                                          uint32_t textureFormat,
 +                                          uint32_t textureUsage,
 +                                          int width,
 +                                          int height,
-+                                          sk_sp<SkColorSpace> colorSpace,
-+                                          bool srcIsPremul,
-+                                          JSObject callbackObj) {
-+    if (!colorSpace) {
-+        colorSpace = SkColorSpace::MakeSRGB();
-+    }
-+
++                                          SimpleColorInfo colorInfo,
++                                          skgpu::Origin origin,
++                                          bool isVolatile,
++                                          JSObject callbackObj,
++                                          std::string label) {
 +    const auto dawnTextureFormat = static_cast<wgpu::TextureFormat>(textureFormat);
 +    const auto textureInfo = skgpu::graphite::TextureInfos::MakeDawn(
-+            skgpu::graphite::DawnTextureInfo(
-+                    skgpu::graphite::SampleCount::k1,
-+                    skgpu::Mipmapped::kNo,
-+                    dawnTextureFormat,
-+                    static_cast<wgpu::TextureUsage>(textureUsage),
-+                    wgpu::TextureAspect::All));
++            skgpu::graphite::DawnTextureInfo(skgpu::graphite::SampleCount::k1,
++                                             skgpu::Mipmapped::kNo,
++                                             dawnTextureFormat,
++                                             static_cast<wgpu::TextureUsage>(textureUsage),
++                                             wgpu::TextureAspect::All));
 +
 +    auto* imageContext = new WebGPUTexturePromiseImageContext{
 +            callbackObj,
@@ -429,25 +623,61 @@ index 59c6249124..398c8cd074 100644
 +            dContext.recorder(),
 +            {width, height},
 +            textureInfo,
-+            SkColorInfo(ResolveWebGPUTextureColorType(dawnTextureFormat),
-+                        srcIsPremul ? SkAlphaType::kPremul_SkAlphaType
-+                                    : SkAlphaType::kUnpremul_SkAlphaType,
-+                        colorSpace),
-+            skgpu::graphite::Volatile::kNo,
++            toSkColorInfo(colorInfo),
++            origin,
++            isVolatile ? skgpu::graphite::Volatile::kYes : skgpu::graphite::Volatile::kNo,
 +            FulfillWebGPUTexturePromise,
 +            ReleaseWebGPUTexturePromiseImage,
 +            ReleaseWebGPUTexturePromiseTexture,
-+            reinterpret_cast<SkImages::GraphitePromiseImageContext>(imageContext));
++            reinterpret_cast<SkImages::GraphitePromiseImageContext>(imageContext),
++            label);
 +    if (!image) {
 +        ReleaseWebGPUTexturePromiseImage(
 +                reinterpret_cast<SkImages::GraphitePromiseImageContext>(imageContext));
 +        return nullptr;
 +    }
 +    return image;
++}
++
++JSObject SkImagesMakeWithFilter(WebGPUDeviceContext& dContext,
++                                sk_sp<SkImage> src,
++                                const SkImageFilter* filter,
++                                SimpleIRect subset,
++                                SimpleIRect clipBounds) {
++    if (!src || !filter) {
++        return emscripten::val::null();
++    }
++
++    SkIRect outSubset;
++    SkIPoint offset;
++    auto image = SkImages::MakeWithFilter(dContext.recorder(),
++                                          std::move(src),
++                                          filter,
++                                          toSkIRect(subset),
++                                          toSkIRect(clipBounds),
++                                          &outSubset,
++                                          &offset);
++    if (!image) {
++        return emscripten::val::null();
++    }
++
++    JSObject result = emscripten::val::object();
++    JSObject subsetValue = emscripten::val::object();
++    subsetValue.set("left", outSubset.left());
++    subsetValue.set("top", outSubset.top());
++    subsetValue.set("right", outSubset.right());
++    subsetValue.set("bottom", outSubset.bottom());
++    JSObject offsetValue = emscripten::val::object();
++    offsetValue.set("x", offset.x());
++    offsetValue.set("y", offset.y());
++    result.set("image", image);
++    result.set("outSubset", subsetValue);
++    result.set("offset", offsetValue);
++    return result;
  }
  
  #endif  // CK_ENABLE_WEBGPU
-@@ -724,6 +990,119 @@ SkPath MakePathFromVerbsPointsWeights(WASMPointerU8 verbsPtr,
+@@ -724,6 +1239,119 @@ SkPath MakePathFromVerbsPointsWeights(WASMPointerU8 verbsPtr,
                         SkPathFillType::kDefault);
  }
  
@@ -567,7 +797,7 @@ index 59c6249124..398c8cd074 100644
  void PathAddVerbsPointsWeights(SkPathBuilder& self,
                                 WASMPointerU8 verbsPtr,
                                 int numVerbs,
-@@ -1118,10 +1497,10 @@ private:
+@@ -1118,10 +1746,10 @@ private:
  EMSCRIPTEN_BINDINGS(Skia) {
  #ifdef ENABLE_GPU
      constant("gpu", true);
@@ -579,20 +809,29 @@ index 59c6249124..398c8cd074 100644
      constant("webgl", true);
      function("_MakeOnScreenGLSurface",
               select_overload<sk_sp<SkSurface>(
-@@ -1141,7 +1520,12 @@ EMSCRIPTEN_BINDINGS(Skia) {
+@@ -1141,7 +1769,20 @@ EMSCRIPTEN_BINDINGS(Skia) {
  
  #ifdef CK_ENABLE_WEBGPU
      constant("webgpu", true);
+-    function("_MakeGPUTextureSurface", &MakeGPUTextureSurface);
 +    class_<WebGPUDeviceContext>("WebGPUDeviceContext")
-+            .function("_submit", &WebGPUDeviceContext::submit);
++            .function("_submit", &WebGPUDeviceContext::submit)
++            .function("_checkAsyncWorkCompletion", &WebGPUDeviceContext::checkAsyncWorkCompletion)
++            .function("_readSurfacePixelsAsync", &WebGPUDeviceContext::readSurfacePixelsAsync)
++            .function("_readSurfacePixelsYUV420Async",
++                      &WebGPUDeviceContext::readSurfacePixelsYUV420Async);
 +    function("_MakeWebGPUDeviceContext", &MakeWebGPUDeviceContext, allow_raw_pointers());
-     function("_MakeGPUTextureSurface", &MakeGPUTextureSurface);
-+    function("_MakeGPUTextureImage", &MakeGPUTextureImage);
-+    function("_MakeGPUTexturePromiseImage", &MakeGPUTexturePromiseImage);
++    function("_SkSurfaces_RenderTarget", &SkSurfacesRenderTarget);
++    function("_SkSurfaces_WrapBackendTexture", &SkSurfacesWrapBackendTexture);
++    function("_SkSurfaces_AsImage", &SkSurfacesAsImage);
++    function("_SkSurfaces_AsImageCopy", &SkSurfacesAsImageCopy);
++    function("_SkImages_WrapTexture", &SkImagesWrapTexture);
++    function("_SkImages_PromiseTextureFrom", &SkImagesPromiseTextureFrom);
++    function("_SkImages_MakeWithFilter", &SkImagesMakeWithFilter, allow_raw_pointers());
  #endif  // CK_ENABLE_WEBGPU
  
      function("getDecodeCacheLimitBytes", &SkResourceCache::GetTotalByteLimit);
-@@ -2323,6 +2707,12 @@ EMSCRIPTEN_BINDINGS(Skia) {
+@@ -2323,6 +2964,12 @@ EMSCRIPTEN_BINDINGS(Skia) {
              .class_function("MakeFromPathInterpolation", &MakePathFromInterpolation)
              .class_function("_MakeFromCmds", &MakePathFromCmds)
              .class_function("_MakeFromVerbsPointsWeights", &MakePathFromVerbsPointsWeights)
@@ -605,7 +844,7 @@ index 59c6249124..398c8cd074 100644
              .function("countPoints", &SkPath::countPoints)
              .function("contains", optional_override(
                                [](const SkPath& self, float x, float y) -> bool {
-@@ -2893,16 +3283,6 @@ EMSCRIPTEN_BINDINGS(Skia) {
+@@ -2893,16 +3540,6 @@ EMSCRIPTEN_BINDINGS(Skia) {
                                    releaseCtx);
                        }))
  #endif  // CK_ENABLE_WEBGL
@@ -622,76 +861,61 @@ index 59c6249124..398c8cd074 100644
              .function("_makeImageSnapshot",
                        optional_override([](SkSurface& self, WASMPointerU32 iPtr) -> sk_sp<SkImage> {
                            SkIRect* bounds = reinterpret_cast<SkIRect*>(iPtr);
-diff --git a/modules/canvaskit/compile.sh b/modules/canvaskit/compile.sh
-index c56d1d08ce..d12e547807 100755
---- a/modules/canvaskit/compile.sh
-+++ b/modules/canvaskit/compile.sh
-@@ -48,9 +48,9 @@ if [[ $@ == *cpu* ]]; then
-   ENABLE_GANESH="false"
- elif [[ $@ == *webgpu* ]]; then
-   echo "Using WebGPU instead of WebGL"
-+  ENABLE_GANESH="true"
-   ENABLE_WEBGPU="true"
-   ENABLE_GRAPHITE="true"
--  ENABLE_GANESH="false"
- else
-   ENABLE_WEBGL="true"
- fi
-diff --git a/third_party/dawn/BUILD.gn b/third_party/dawn/BUILD.gn
-index 128fac0650..55b15ef797 100644
---- a/third_party/dawn/BUILD.gn
-+++ b/third_party/dawn/BUILD.gn
-@@ -132,18 +132,41 @@ group("tint") {
- }
+@@ -3141,6 +3778,33 @@ EMSCRIPTEN_BINDINGS(Skia) {
+             .value("RGB_F16F16F16x", SkColorType::kRGB_F16F16F16x_SkColorType)
+             .value("RGBA_F32", SkColorType::kRGBA_F32_SkColorType);
  
- config("dawn_api_config") {
-+  ldflags = []
-   if (!is_canvaskit) {
-     include_dirs = [
-       "../externals/dawn",
-       "../externals/dawn/include",
-       "$target_gen_dir/include",
-     ]
-+  } else if (is_wasm) {
-+    include_dirs = [
-+      "$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/include",
-+      "../externals/dawn",
-+      "../externals/dawn/include",
-+    ]
-+    ldflags += [
-+      "--js-library=" + rebase_path(
-+              "$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/library_webgpu_enum_tables.js",
-+              root_build_dir),
-+      "--js-library=" + rebase_path(
-+              "$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/library_webgpu_generated_struct_info.js",
-+              root_build_dir),
-+      "--js-library=" + rebase_path(
-+              "$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/library_webgpu_generated_sig_info.js",
-+              root_build_dir),
-+      "--js-library=" + rebase_path(
-+              "../externals/dawn/third_party/emdawnwebgpu/pkg/webgpu/src/library_webgpu.js",
-+              root_build_dir),
-+      "--closure-args=--externs=" + rebase_path(
-+              "../externals/dawn/third_party/emdawnwebgpu/pkg/webgpu/src/webgpu-externs.js",
-+              root_build_dir),
-+    ]
-   } else {
--    # Emscripten includes its own WebGPU headers.
-     include_dirs = []
-   }
-   if (is_win) {
--    ldflags = [ "/WHOLEARCHIVE:dawn_combined.lib" ]
-+    ldflags += [ "/WHOLEARCHIVE:dawn_combined.lib" ]
-     libs = [
-       "onecore.lib",
-       "user32.lib",
-@@ -155,6 +178,9 @@ config("dawn_api_config") {
-     libs = []
-   }
-   libs += [ "$root_out_dir/$_dawn_lib_name" ]
-+  if (is_canvaskit && is_wasm) {
-+    libs += [ "$root_out_dir/cmake_dawn/src/emdawnwebgpu/libemdawnwebgpu_c.a" ]
-+  }
++#ifdef CK_ENABLE_WEBGPU
++    enum_<skgpu::Origin>("Origin")
++            .value("TopLeft", skgpu::Origin::kTopLeft)
++            .value("BottomLeft", skgpu::Origin::kBottomLeft);
++
++    enum_<SkImage::RescaleGamma>("RescaleGamma")
++            .value("Src", SkImage::RescaleGamma::kSrc)
++            .value("Linear", SkImage::RescaleGamma::kLinear);
++
++    enum_<SkImage::RescaleMode>("RescaleMode")
++            .value("Nearest", SkImage::RescaleMode::kNearest)
++            .value("Linear", SkImage::RescaleMode::kLinear)
++            .value("RepeatedLinear", SkImage::RescaleMode::kRepeatedLinear)
++            .value("RepeatedCubic", SkImage::RescaleMode::kRepeatedCubic);
++
++    enum_<SkYUVColorSpace>("YUVColorSpace")
++            .value("JPEG", kJPEG_SkYUVColorSpace)
++            .value("Rec601", kRec601_SkYUVColorSpace)
++            .value("Rec709", kRec709_SkYUVColorSpace)
++            .value("BT2020", kBT2020_SkYUVColorSpace)
++            .value("Identity", kIdentity_SkYUVColorSpace);
++
++    enum_<SkImages::GenerateMipmapsFromBase>("GenerateMipmapsFromBase")
++            .value("No", SkImages::GenerateMipmapsFromBase::kNo)
++            .value("Yes", SkImages::GenerateMipmapsFromBase::kYes);
++#endif
++
+     enum_<SkPathFillType>("FillType")
+             .value("Winding", SkPathFillType::kWinding)
+             .value("EvenOdd", SkPathFillType::kEvenOdd);
+@@ -3231,6 +3895,23 @@ EMSCRIPTEN_BINDINGS(Skia) {
+             .field("alphaType", &SimpleImageInfo::alphaType)
+             .field("colorSpace", &SimpleImageInfo::colorSpace);
  
-   # https://dawn.googlesource.com/dawn/+/647c352f57aa8a4c2666258455158a36c0c385af/src/dawn/native/BUILD.gn#645
-   if (is_mac || is_ios) {
++#ifdef CK_ENABLE_WEBGPU
++    value_object<SimpleColorInfo>("ColorInfo")
++            .field("colorType", &SimpleColorInfo::colorType)
++            .field("alphaType", &SimpleColorInfo::alphaType)
++            .field("colorSpace", &SimpleColorInfo::colorSpace);
++
++    value_object<SimpleIRect>("SimpleIRect")
++            .field("left", &SimpleIRect::left)
++            .field("top", &SimpleIRect::top)
++            .field("right", &SimpleIRect::right)
++            .field("bottom", &SimpleIRect::bottom);
++
++    value_object<SimpleISize>("SimpleISize")
++            .field("width", &SimpleISize::width)
++            .field("height", &SimpleISize::height);
++#endif
++
+     value_object<StrokeOpts>("StrokeOpts")
+             .field("width", &StrokeOpts::width)
+             .field("miter_limit", &StrokeOpts::miter_limit)

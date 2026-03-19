@@ -281,23 +281,12 @@ export interface CanvasKit {
     MakeGPUDeviceContext(device: GPUDevice): WebGPUDeviceContext | null;
 
     /**
-     * Creates a Surface that draws to the given GPU texture.
-     * @param ctx
-     * @param texture - A texture that was created on the GPU device associated with `ctx`.
-     * @param width - Width of the visible region in pixels.
-     * @param height - Height of the visible region in pixels.
-     * @param colorSpace
-     */
-    MakeGPUTextureSurface(ctx: WebGPUDeviceContext, texture: GPUTexture, textureFormat: GPUTextureFormat,
-                          width: number, height: number, colorSpace: ColorSpace): Surface | null;
-
-    /**
      * Creates and configures a WebGPU context for the given canvas.
      * @param ctx
      * @param canvas
      * @param opts
      */
-    MakeGPUCanvasContext(ctx: WebGPUDeviceContext, canvas: HTMLCanvasElement | OffscreenCanvas,
+    MakeGPUCanvasContext(ctx: WebGPUDeviceContext, canvas: HTMLCanvasElement,
                          opts?: WebGPUCanvasOptions): WebGPUCanvasContext | null;
 
     /**
@@ -316,6 +305,16 @@ export interface CanvasKit {
                          width?: number, height?: number): Surface | null;
 
     /**
+     * Graphite surface factories for the WebGPU bundle.
+     */
+    readonly SkSurfaces: SkSurfacesFactory;
+
+    /**
+     * Graphite image factories for the WebGPU bundle.
+     */
+    readonly SkImages: SkImagesFactory;
+
+    /**
      * Returns a (non-visible) Surface on the GPU. It has the given dimensions and uses 8888
      * color depth and premultiplied alpha. See Surface.h for more details.
      * @param ctx
@@ -331,22 +330,6 @@ export interface CanvasKit {
      * @param info
      */
     MakeRenderTarget(ctx: GrDirectContext, info: ImageInfo): Surface | null;
-
-    /**
-     * Returns a texture-backed image based on the content in src. It assumes the image is
-     * RGBA_8888, unpremul and SRGB. This image can be re-used across multiple surfaces.
-     *
-     * Not available for software-backed surfaces.
-     * @param src - CanvasKit will take ownership of the TextureSource and clean it up when
-     *              the image is destroyed.
-     * @param info - If provided, will be used to determine the width/height/format of the
-     *               source image. If not, sensible defaults will be used.
-     * @param srcIsPremul - set to true if the src data has premultiplied alpha. Otherwise, it will
-     *         be assumed to be Unpremultiplied. Note: if this is true and info specifies
-     *         Unpremul, Skia will not convert the src pixels first.
-     */
-    MakeLazyImageFromTextureSource(src: TextureSource, info?: ImageInfo | PartialImageInfo,
-                                   srcIsPremul?: boolean): Image;
 
     /**
      * Deletes the associated WebGLContext. Function not available on the CPU version.
@@ -692,14 +675,88 @@ export interface GrDirectContext extends EmbindObject<"GrDirectContext"> {
     setResourceCacheLimitBytes(bytes: number): void;
 }
 
+export interface AsyncReadResult {
+    planes: Uint8Array[];
+    rowBytes: number[];
+    count: number;
+    width: number;
+    height: number;
+}
+
+export interface ISize {
+    width: number;
+    height: number;
+}
+
+export interface ColorInfo {
+    colorType: ColorType;
+    alphaType: AlphaType;
+    colorSpace?: ColorSpace | null;
+}
+
+export interface TextureInfo {
+    textureFormat: GPUTextureFormat;
+    usage: number;
+}
+
+export interface PromiseTextureFromResult {
+    texture: GPUTexture;
+    releaseContext?: unknown;
+}
+
+export interface PromiseTextureFromOptions {
+    dimensions: ISize;
+    textureInfo: TextureInfo;
+    colorInfo: ColorInfo;
+    origin?: Origin;
+    isVolatile?: boolean;
+    fulfill: (imageContext: unknown) => PromiseTextureFromResult | GPUTexture | null;
+    imageRelease?: (imageContext: unknown) => void;
+    textureRelease?: (releaseContext: unknown) => void;
+    imageContext?: unknown;
+    label?: string;
+}
+
+export interface MakeWithFilterResult {
+    image: Image;
+    outSubset: IRect;
+    offset: Int32Array;
+}
+
+export interface SkSurfacesFactory {
+    RenderTarget(ctx: WebGPUDeviceContext, imageInfo: ImageInfo, mipmapped?: boolean,
+                 surfaceProps?: unknown, label?: string): Surface | null;
+    WrapBackendTexture(ctx: WebGPUDeviceContext, texture: GPUTexture, colorSpace?: ColorSpace | null,
+                       surfaceProps?: unknown, releaseProc?: ((releaseContext: unknown) => void) | null,
+                       releaseContext?: unknown, label?: string): Surface | null;
+    AsImage(surface: Surface): Image | null;
+    AsImageCopy(surface: Surface, subset?: InputIRect, mipmapped?: boolean): Image | null;
+}
+
+export interface SkImagesFactory {
+    WrapTexture(ctx: WebGPUDeviceContext, texture: GPUTexture, colorType: ColorType,
+                alphaType: AlphaType, colorSpace?: ColorSpace | null, origin?: Origin,
+                generateMipmapsFromBase?: GenerateMipmapsFromBase,
+                releaseProc?: ((releaseContext: unknown) => void) | null,
+                releaseContext?: unknown, label?: string): Image | null;
+    PromiseTextureFrom(ctx: WebGPUDeviceContext, options: PromiseTextureFromOptions): Image | null;
+    MakeWithFilter(ctx: WebGPUDeviceContext, src: Image, filter: ImageFilter, subset: InputIRect,
+                   clipBounds: InputIRect): MakeWithFilterResult | null;
+}
+
 /**
  * Represents the Graphite recorder/context pair backed by a WebGPU device instance.
  */
 export interface WebGPUDeviceContext extends EmbindObject<"WebGPUDeviceContext"> {
-    /**
-     * Flushes recorded work into the Graphite context and submits it to WebGPU.
-     */
-    submit(): boolean;
+    submit(syncToCpu?: boolean): boolean;
+    checkAsyncWorkCompletion(): void;
+    ReadSurfacePixelsAsync(surface: Surface, dstImageInfo: ImageInfo, srcRect?: InputIRect,
+                           rescaleGamma?: RescaleGamma,
+                           rescaleMode?: RescaleMode): Promise<AsyncReadResult | null>;
+    ReadSurfacePixelsYUV420Async(surface: Surface, yuvColorSpace: YUVColorSpace,
+                                 dstColorSpace: ColorSpace | null, srcRect: InputIRect,
+                                 dstSize: ISize, rescaleGamma?: RescaleGamma,
+                                 rescaleMode?: RescaleMode): Promise<AsyncReadResult | null>;
 }
 
 /**
@@ -4621,15 +4678,20 @@ export type FillType = EmbindEnumEntity;
 export type FilterMode = EmbindEnumEntity;
 export type FontEdging = EmbindEnumEntity;
 export type FontHinting = EmbindEnumEntity;
+export type GenerateMipmapsFromBase = EmbindEnumEntity;
 export type MipmapMode = EmbindEnumEntity;
+export type Origin = EmbindEnumEntity;
 export type PaintStyle = EmbindEnumEntity;
 export type Path1DEffectStyle = EmbindEnumEntity;
 export type PathOp = EmbindEnumEntity;
 export type PointMode = EmbindEnumEntity;
+export type RescaleGamma = EmbindEnumEntity;
+export type RescaleMode = EmbindEnumEntity;
 export type StrokeCap = EmbindEnumEntity;
 export type StrokeJoin = EmbindEnumEntity;
 export type TileMode = EmbindEnumEntity;
 export type VertexMode = EmbindEnumEntity;
+export type YUVColorSpace = EmbindEnumEntity;
 export type InputState = EmbindEnumEntity;
 export type ModifierKey = EmbindEnumEntity;
 

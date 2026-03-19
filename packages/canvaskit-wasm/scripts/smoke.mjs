@@ -66,19 +66,41 @@ const assertWebGPUBundle = (canvasKit) => {
 		"MakeGPUDeviceContext",
 		"MakeGPUCanvasContext",
 		"MakeGPUCanvasSurface",
-		"MakeGPUTextureSurface",
+	]) {
+		if (typeof canvasKit[method] !== "function") {
+			throw new Error(`CanvasKit.${method} is not available.`);
+		}
+	}
+	for (const method of ["RenderTarget", "WrapBackendTexture"]) {
+		if (typeof canvasKit.SkSurfaces?.[method] !== "function") {
+			throw new Error(`CanvasKit.SkSurfaces.${method} is not available.`);
+		}
+	}
+	for (const method of ["WrapTexture", "PromiseTextureFrom", "MakeWithFilter"]) {
+		if (typeof canvasKit.SkImages?.[method] !== "function") {
+			throw new Error(`CanvasKit.SkImages.${method} is not available.`);
+		}
+	}
+	for (const method of [
+		"_MakeWebGPUDeviceContext",
+		"_SkSurfaces_RenderTarget",
+		"_SkSurfaces_WrapBackendTexture",
+		"_SkImages_WrapTexture",
+		"_SkImages_PromiseTextureFrom",
 	]) {
 		if (typeof canvasKit[method] !== "function") {
 			throw new Error(`CanvasKit.${method} is not available.`);
 		}
 	}
 	for (const method of [
-		"_MakeWebGPUDeviceContext",
+		"MakeGPUTextureSurface",
 		"_MakeGPUTextureSurface",
+		"_MakeGPUTextureImage",
 		"_MakeGPUTexturePromiseImage",
+		"MakeLazyImageFromTextureSource",
 	]) {
-		if (typeof canvasKit[method] !== "function") {
-			throw new Error(`CanvasKit.${method} is not available.`);
+		if (typeof canvasKit[method] !== "undefined") {
+			throw new Error(`CanvasKit.${method} should not be exposed in the WebGPU bundle.`);
 		}
 	}
 };
@@ -94,6 +116,12 @@ const assertWebGPUHelperInterop = (entryPath) => {
 	if (source.includes("this.WebGPU.TextureFormat.indexOf(textureFormat)")) {
 		throw new Error("Expected WebGPU helper to use module-scoped WebGPU enum table.");
 	}
+	if (!source.includes("CanvasKit.SkSurfaces={")) {
+		throw new Error("Expected WebGPU helper to expose CanvasKit.SkSurfaces.");
+	}
+	if (!source.includes("CanvasKit.SkImages={")) {
+		throw new Error("Expected WebGPU helper to expose CanvasKit.SkImages.");
+	}
 	if (!source.includes("JsValStore.add(texture)")) {
 		throw new Error("Expected WebGPU helper to reference JsValStore.add(texture).");
 	}
@@ -101,6 +129,9 @@ const assertWebGPUHelperInterop = (entryPath) => {
 		throw new Error(
 			"Expected WebGPU helper to reference WebGPU.TextureFormat.indexOf(textureFormat).",
 		);
+	}
+	if (!source.includes("context.ReadSurfacePixelsAsync=function(")) {
+		throw new Error("Expected WebGPU helper to install Graphite async readback wrappers.");
 	}
 };
 

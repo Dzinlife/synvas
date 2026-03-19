@@ -35,6 +35,10 @@ const isVideoFrame = (
 ): value is VideoFrame =>
 	typeof VideoFrame !== "undefined" && value instanceof VideoFrame;
 
+type CanvasKitWithLazyTextureSourceImage = CanvasKit & {
+	MakeLazyImageFromTextureSource?: (src: TextureSource) => Image;
+};
+
 export class JsiSkImageFactory extends Host implements ImageFactory {
 	constructor(CanvasKit: CanvasKit) {
 		super(CanvasKit);
@@ -61,14 +65,18 @@ export class JsiSkImageFactory extends Host implements ImageFactory {
 		if (getSkiaRenderBackend().kind === "webgpu" && isTextureBackedSource) {
 			const image = makeImageFromTextureSourceDirect(
 				source as TextureSource | VideoFrame,
-			) as JsiSkImage | null;
+			);
 			if (image) {
 				return image.ref;
 			}
 		}
 		if (getSkiaRenderBackend().kind === "webgl" && isTextureBackedSource) {
-			return this.CanvasKit.MakeLazyImageFromTextureSource(
-				source as TextureSource,
+			const canvasKit =
+				this.CanvasKit as CanvasKitWithLazyTextureSourceImage;
+			return (
+				canvasKit.MakeLazyImageFromTextureSource?.(
+					source as TextureSource,
+				) ?? this.CanvasKit.MakeImageFromCanvasImageSource(source)
 			);
 		}
 		return this.CanvasKit.MakeImageFromCanvasImageSource(source);

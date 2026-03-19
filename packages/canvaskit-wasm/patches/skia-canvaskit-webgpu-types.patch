@@ -1,8 +1,28 @@
 diff --git a/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts b/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
-index 99bcc75317..7364950ec5 100644
+index 99bcc75..4d4f681 100644
 --- a/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
 +++ b/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
-@@ -1056,15 +1056,16 @@ function verticesTests(CK: CanvasKit) {
+@@ -265,19 +265,6 @@ function imageTests(CK: CanvasKit, imgElement?: HTMLImageElement) {
+       colorType: CK.ColorType.RGBA_8888,
+       colorSpace: CK.ColorSpace.SRGB
+     }, Uint8Array.of(255, 0, 0, 250), 4);
+-    const img4 = CK.MakeLazyImageFromTextureSource(imgElement); // $ExpectType Image
+-    const img5 = CK.MakeLazyImageFromTextureSource(imgElement, {
+-      width: 1,
+-      height: 1,
+-      alphaType: CK.AlphaType.Premul,
+-      colorType: CK.ColorType.RGBA_8888,
+-    });
+-    const img6 = CK.MakeLazyImageFromTextureSource(imgElement, {
+-      width: 1,
+-      height: 1,
+-      alphaType: CK.AlphaType.Premul,
+-      colorType: CK.ColorType.RGBA_8888,
+-    }, true);
+     if (!img) return;
+     const dOne = img.encodeToBytes(); // $ExpectType Uint8Array | null
+     const dTwo = img.encodeToBytes(CK.ImageFormat.JPEG, 97);
+@@ -1056,16 +1043,50 @@ function verticesTests(CK: CanvasKit) {
      const id = vertices.uniqueID(); // $ExpectType number
  }
  
@@ -13,50 +33,274 @@ index 99bcc75317..7364950ec5 100644
      }
  
 -    const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType GrDirectContext
+-
+-    // Texture surface.
+-    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, 800, 600, // $ExpectType Surface | null
+-                                              CK.ColorSpace.SRGB);
 +    const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType WebGPUDeviceContext
 +    const submitResult = gpuContext.submit(); // $ExpectType boolean
- 
-     // Texture surface.
--    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, 800, 600, // $ExpectType Surface | null
-+    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, "bgra8unorm", 800, 600, // $ExpectType Surface | null
-                                               CK.ColorSpace.SRGB);
++    gpuContext.checkAsyncWorkCompletion();
++
++    const surface1 = CK.SkSurfaces.WrapBackendTexture(gpuContext, texture, CK.ColorSpace.SRGB); // $ExpectType Surface | null
++    const surfaceImage = surface1 && CK.SkSurfaces.AsImage(surface1); // $ExpectType Image | null
++    const copiedSurfaceImage = surface1 && CK.SkSurfaces.AsImageCopy(surface1); // $ExpectType Image | null
++    const wrappedTextureImage = CK.SkImages.WrapTexture(
++        gpuContext,
++        texture,
++        CK.ColorType.RGBA_8888,
++        CK.AlphaType.Unpremul,
++        CK.ColorSpace.SRGB,
++        CK.Origin.TopLeft,
++        CK.GenerateMipmapsFromBase.No,
++    ); // $ExpectType Image | null
++    const promisedTextureImage = CK.SkImages.PromiseTextureFrom(gpuContext, {
++        dimensions: { width: texture.width, height: texture.height },
++        textureInfo: {
++            textureFormat: "bgra8unorm",
++            usage: texture.usage,
++        },
++        colorInfo: {
++            colorType: CK.ColorType.BGRA_8888,
++            alphaType: CK.AlphaType.Unpremul,
++            colorSpace: CK.ColorSpace.SRGB,
++        },
++        fulfill: () => ({ texture, releaseContext: null }),
++    }); // $ExpectType Image | null
++    const readResult = gpuContext.ReadSurfacePixelsAsync(
++        surface1!,
++        {
++            width: texture.width,
++            height: texture.height,
++            colorType: CK.ColorType.RGBA_8888,
++            alphaType: CK.AlphaType.Unpremul,
++            colorSpace: CK.ColorSpace.SRGB,
++        },
++    ); // $ExpectType Promise<AsyncReadResult | null>
  
      // Canvas surfaces.
+     const canvasContext = CK.MakeGPUCanvasContext(gpuContext, canvas, { // $ExpectType WebGPUCanvasContext
 diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
-index 892a27ebe3..b06dd3bb7e 100644
+index 892a27e..eec6a4c 100644
 --- a/modules/canvaskit/npm_build/types/index.d.ts
 +++ b/modules/canvaskit/npm_build/types/index.d.ts
-@@ -288,8 +288,8 @@ export interface CanvasKit {
-      * @param height - Height of the visible region in pixels.
-      * @param colorSpace
+@@ -280,17 +280,6 @@ export interface CanvasKit {
       */
+     MakeGPUDeviceContext(device: GPUDevice): WebGPUDeviceContext | null;
+ 
+-    /**
+-     * Creates a Surface that draws to the given GPU texture.
+-     * @param ctx
+-     * @param texture - A texture that was created on the GPU device associated with `ctx`.
+-     * @param width - Width of the visible region in pixels.
+-     * @param height - Height of the visible region in pixels.
+-     * @param colorSpace
+-     */
 -    MakeGPUTextureSurface(ctx: WebGPUDeviceContext, texture: GPUTexture, width: number, height: number,
 -                          colorSpace: ColorSpace): Surface | null;
-+    MakeGPUTextureSurface(ctx: WebGPUDeviceContext, texture: GPUTexture, textureFormat: GPUTextureFormat,
-+                          width: number, height: number, colorSpace: ColorSpace): Surface | null;
- 
+-
      /**
       * Creates and configures a WebGPU context for the given canvas.
-@@ -297,7 +297,7 @@ export interface CanvasKit {
-      * @param canvas
-      * @param opts
-      */
--    MakeGPUCanvasContext(ctx: WebGPUDeviceContext, canvas: HTMLCanvasElement,
-+    MakeGPUCanvasContext(ctx: WebGPUDeviceContext, canvas: HTMLCanvasElement | OffscreenCanvas,
-                          opts?: WebGPUCanvasOptions): WebGPUCanvasContext | null;
+      * @param ctx
+@@ -315,6 +304,16 @@ export interface CanvasKit {
+     MakeGPUCanvasSurface(canvasContext: WebGPUCanvasContext, colorSpace: ColorSpace,
+                          width?: number, height?: number): Surface | null;
  
++    /**
++     * Graphite surface factories for the WebGPU bundle.
++     */
++    readonly SkSurfaces: SkSurfacesFactory;
++
++    /**
++     * Graphite image factories for the WebGPU bundle.
++     */
++    readonly SkImages: SkImagesFactory;
++
      /**
-@@ -693,9 +693,14 @@ export interface GrDirectContext extends EmbindObject<"GrDirectContext"> {
+      * Returns a (non-visible) Surface on the GPU. It has the given dimensions and uses 8888
+      * color depth and premultiplied alpha. See Surface.h for more details.
+@@ -332,22 +331,6 @@ export interface CanvasKit {
+      */
+     MakeRenderTarget(ctx: GrDirectContext, info: ImageInfo): Surface | null;
+ 
+-    /**
+-     * Returns a texture-backed image based on the content in src. It assumes the image is
+-     * RGBA_8888, unpremul and SRGB. This image can be re-used across multiple surfaces.
+-     *
+-     * Not available for software-backed surfaces.
+-     * @param src - CanvasKit will take ownership of the TextureSource and clean it up when
+-     *              the image is destroyed.
+-     * @param info - If provided, will be used to determine the width/height/format of the
+-     *               source image. If not, sensible defaults will be used.
+-     * @param srcIsPremul - set to true if the src data has premultiplied alpha. Otherwise, it will
+-     *         be assumed to be Unpremultiplied. Note: if this is true and info specifies
+-     *         Unpremul, Skia will not convert the src pixels first.
+-     */
+-    MakeLazyImageFromTextureSource(src: TextureSource, info?: ImageInfo | PartialImageInfo,
+-                                   srcIsPremul?: boolean): Image;
+-
+     /**
+      * Deletes the associated WebGLContext. Function not available on the CPU version.
+      * @param ctx
+@@ -692,10 +675,89 @@ export interface GrDirectContext extends EmbindObject<"GrDirectContext"> {
+     setResourceCacheLimitBytes(bytes: number): void;
  }
  
++export interface AsyncReadResult {
++    planes: Uint8Array[];
++    rowBytes: number[];
++    count: number;
++    width: number;
++    height: number;
++}
++
++export interface ISize {
++    width: number;
++    height: number;
++}
++
++export interface ColorInfo {
++    colorType: ColorType;
++    alphaType: AlphaType;
++    colorSpace?: ColorSpace | null;
++}
++
++export interface TextureInfo {
++    textureFormat: GPUTextureFormat;
++    usage: number;
++}
++
++export interface PromiseTextureFromResult {
++    texture: GPUTexture;
++    releaseContext?: unknown;
++}
++
++export interface PromiseTextureFromOptions {
++    dimensions: ISize;
++    textureInfo: TextureInfo;
++    colorInfo: ColorInfo;
++    origin?: Origin;
++    isVolatile?: boolean;
++    fulfill: (imageContext: unknown) => PromiseTextureFromResult | GPUTexture | null;
++    imageRelease?: (imageContext: unknown) => void;
++    textureRelease?: (releaseContext: unknown) => void;
++    imageContext?: unknown;
++    label?: string;
++}
++
++export interface MakeWithFilterResult {
++    image: Image;
++    outSubset: IRect;
++    offset: Int32Array;
++}
++
++export interface SkSurfacesFactory {
++    RenderTarget(ctx: WebGPUDeviceContext, imageInfo: ImageInfo, mipmapped?: boolean,
++                 surfaceProps?: unknown, label?: string): Surface | null;
++    WrapBackendTexture(ctx: WebGPUDeviceContext, texture: GPUTexture, colorSpace?: ColorSpace | null,
++                       surfaceProps?: unknown, releaseProc?: ((releaseContext: unknown) => void) | null,
++                       releaseContext?: unknown, label?: string): Surface | null;
++    AsImage(surface: Surface): Image | null;
++    AsImageCopy(surface: Surface, subset?: InputIRect, mipmapped?: boolean): Image | null;
++}
++
++export interface SkImagesFactory {
++    WrapTexture(ctx: WebGPUDeviceContext, texture: GPUTexture, colorType: ColorType,
++                alphaType: AlphaType, colorSpace?: ColorSpace | null, origin?: Origin,
++                generateMipmapsFromBase?: GenerateMipmapsFromBase,
++                releaseProc?: ((releaseContext: unknown) => void) | null,
++                releaseContext?: unknown, label?: string): Image | null;
++    PromiseTextureFrom(ctx: WebGPUDeviceContext, options: PromiseTextureFromOptions): Image | null;
++    MakeWithFilter(ctx: WebGPUDeviceContext, src: Image, filter: ImageFilter, subset: InputIRect,
++                   clipBounds: InputIRect): MakeWithFilterResult | null;
++}
++
  /**
 - * Represents the context backed by a WebGPU device instance.
 + * Represents the Graphite recorder/context pair backed by a WebGPU device instance.
   */
 -export type WebGPUDeviceContext = GrDirectContext;
 +export interface WebGPUDeviceContext extends EmbindObject<"WebGPUDeviceContext"> {
-+    /**
-+     * Flushes recorded work into the Graphite context and submits it to WebGPU.
-+     */
-+    submit(): boolean;
++    submit(syncToCpu?: boolean): boolean;
++    checkAsyncWorkCompletion(): void;
++    ReadSurfacePixelsAsync(surface: Surface, dstImageInfo: ImageInfo, srcRect?: InputIRect,
++                           rescaleGamma?: RescaleGamma,
++                           rescaleMode?: RescaleMode): Promise<AsyncReadResult | null>;
++    ReadSurfacePixelsYUV420Async(surface: Surface, yuvColorSpace: YUVColorSpace,
++                                 dstColorSpace: ColorSpace | null, srcRect: InputIRect,
++                                 dstSize: ISize, rescaleGamma?: RescaleGamma,
++                                 rescaleMode?: RescaleMode): Promise<AsyncReadResult | null>;
 +}
+ 
+ /**
+  * Represents the canvas context and swapchain backed by a WebGPU device.
+@@ -3909,6 +3971,16 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromCmds(cmds: InputCommands): Path | null;
+ 
++    /**
++     * Creates a new path by drawing each glyph at the corresponding x/y position.
++     * Positions are provided as a flattened point array `[x0, y0, x1, y1, ...]`.
++     * @param glyphs
++     * @param positions
++     * @param font
++     */
++    MakeFromGlyphs(glyphs: InputGlyphIDArray, positions: InputFlattenedPointArray,
++                   font: Font): Path | null;
++
+     /**
+      * Creates a new path by combining the given paths according to op. If this fails, null will
+      * be returned instead.
+@@ -3940,6 +4012,15 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromPathInterpolation(start: Path, end: Path, weight: number): Path | null;
+ 
++    /**
++     * Creates a new path by drawing each glyph with the corresponding rsxform.
++     * @param glyphs
++     * @param rsxforms
++     * @param font
++     */
++    MakeFromRSXformGlyphs(glyphs: InputGlyphIDArray, rsxforms: InputFlattenedRSXFormArray,
++                          font: Font): Path | null;
++
+     /**
+      * Creates a new path from the provided SVG string. If this fails, null will be
+      * returned instead.
+@@ -3947,6 +4028,16 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromSVGString(str: string): Path | null;
+ 
++    /**
++     * Creates a new path from text laid out with the provided font, with the
++     * first glyph positioned at x/y.
++     * @param str
++     * @param x
++     * @param y
++     * @param font
++     */
++    MakeFromText(str: string, x: number, y: number, font: Font): Path | null;
++
+     /**
+      * Creates a new path using the provided verbs and associated points and weights. The process
+      * reads the first verb from verbs and then the appropriate number of points from the
+@@ -4587,15 +4678,20 @@ export type FillType = EmbindEnumEntity;
+ export type FilterMode = EmbindEnumEntity;
+ export type FontEdging = EmbindEnumEntity;
+ export type FontHinting = EmbindEnumEntity;
++export type GenerateMipmapsFromBase = EmbindEnumEntity;
+ export type MipmapMode = EmbindEnumEntity;
++export type Origin = EmbindEnumEntity;
+ export type PaintStyle = EmbindEnumEntity;
+ export type Path1DEffectStyle = EmbindEnumEntity;
+ export type PathOp = EmbindEnumEntity;
+ export type PointMode = EmbindEnumEntity;
++export type RescaleGamma = EmbindEnumEntity;
++export type RescaleMode = EmbindEnumEntity;
+ export type StrokeCap = EmbindEnumEntity;
+ export type StrokeJoin = EmbindEnumEntity;
+ export type TileMode = EmbindEnumEntity;
+ export type VertexMode = EmbindEnumEntity;
++export type YUVColorSpace = EmbindEnumEntity;
+ export type InputState = EmbindEnumEntity;
+ export type ModifierKey = EmbindEnumEntity;
+ 

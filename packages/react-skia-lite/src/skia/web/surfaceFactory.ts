@@ -20,24 +20,11 @@ type CachedWebGPUCanvasContext = {
 	canvasContext: WebGPUCanvasContext;
 };
 
-const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
 const WEBGPU_CANVAS_ALPHA_MODE = "premultiplied" as const;
 const webgpuCanvasContextCache = new WeakMap<
 	CanvasElement,
 	CachedWebGPUCanvasContext
 >();
-
-const getWebGPUTextureUsage = () => {
-	if (typeof GPUTextureUsage === "undefined") {
-		return WEBGPU_TEXTURE_USAGE_FALLBACK;
-	}
-	return (
-		GPUTextureUsage.RENDER_ATTACHMENT |
-		GPUTextureUsage.TEXTURE_BINDING |
-		GPUTextureUsage.COPY_SRC |
-		GPUTextureUsage.COPY_DST
-	);
-};
 
 const releaseWebGLCanvasContext = (canvas: CanvasElement) => {
 	const context = canvas.getContext("webgl2") as WebGL2RenderingContext | null;
@@ -157,30 +144,23 @@ export const createSkiaOffscreenSurface = (
 	const targetWidth = Math.max(1, Math.ceil(width));
 	const targetHeight = Math.max(1, Math.ceil(height));
 	if (backend.kind === "webgpu") {
-		const textureFormat = getPreferredWebGPUTextureFormat();
-		const texture = backend.device.createTexture({
-			size: {
+		const surface = toCanvasKitWebGPU(CanvasKit).SkSurfaces?.RenderTarget?.(
+			backend.deviceContext,
+			{
 				width: targetWidth,
 				height: targetHeight,
+				colorType: CanvasKit.ColorType.RGBA_8888,
+				alphaType: CanvasKit.AlphaType.Premul,
+				colorSpace: CanvasKit.ColorSpace.SRGB,
 			},
-			format: textureFormat,
-			usage: getWebGPUTextureUsage(),
-		});
-		const surface = toCanvasKitWebGPU(CanvasKit).MakeGPUTextureSurface?.(
-			backend.deviceContext,
-			texture,
-			textureFormat,
-			targetWidth,
-			targetHeight,
+			false,
 			undefined,
+			"",
 		);
 		if (!surface) {
-			texture.destroy();
 			return null;
 		}
-		return new JsiSkSurface(CanvasKit, surface, () => {
-			texture.destroy();
-		});
+		return new JsiSkSurface(CanvasKit, surface);
 	}
 	if (
 		backend.kind === "webgl" &&

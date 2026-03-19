@@ -1,8 +1,8 @@
 diff --git a/modules/canvaskit/webgpu.js b/modules/canvaskit/webgpu.js
-index 0e937d41b4..879c56db23 100644
+index 0e937d4..c47e5ba 100644
 --- a/modules/canvaskit/webgpu.js
 +++ b/modules/canvaskit/webgpu.js
-@@ -4,6 +4,10 @@
+@@ -4,28 +4,267 @@
  (function(CanvasKit){
      CanvasKit._extraInitializations = CanvasKit._extraInitializations || [];
      CanvasKit._extraInitializations.push(function() {
@@ -10,12 +10,111 @@ index 0e937d41b4..879c56db23 100644
 +
 +      var originalSurfaceFlush = CanvasKit.Surface.prototype.flush;
 +
++      function getRequestAnimationFrame() {
++        if (typeof requestAnimationFrame === 'function') {
++          return requestAnimationFrame;
++        }
++        return function(callback) {
++          return setTimeout(function() { callback(performance.now()); }, 0);
++        };
++      }
++
++      function getTextureFormatIndex(textureFormat) {
++        return WebGPU.TextureFormat.indexOf(textureFormat);
++      }
++
++      function toSimpleIRect(rect, fallbackWidth, fallbackHeight) {
++        if (!rect) {
++          return {
++            left: 0,
++            top: 0,
++            right: fallbackWidth || 0,
++            bottom: fallbackHeight || 0,
++          };
++        }
++        if (typeof rect.length === 'number' && rect.length >= 4) {
++          return {
++            left: rect[0],
++            top: rect[1],
++            right: rect[2],
++            bottom: rect[3],
++          };
++        }
++        return {
++          left: rect.left,
++          top: rect.top,
++          right: rect.right,
++          bottom: rect.bottom,
++        };
++      }
++
++      function toSimpleISize(size, fallbackWidth, fallbackHeight) {
++        if (!size) {
++          return {
++            width: fallbackWidth || 0,
++            height: fallbackHeight || 0,
++          };
++        }
++        if (typeof size.length === 'number' && size.length >= 2) {
++          return {
++            width: size[0],
++            height: size[1],
++          };
++        }
++        return {
++          width: size.width,
++          height: size.height,
++        };
++      }
++
++      function makeReleaseCallback(releaseProc, releaseContext) {
++        if (typeof releaseProc !== 'function') {
++          return null;
++        }
++        return {
++          callRelease: function() {
++            releaseProc(releaseContext);
++          },
++        };
++      }
++
++      function wrapPromiseTextureCallbacks(opts) {
++        var releaseContexts = new Map();
++        return {
++          makeTexture: function() {
++            var fulfilled = opts.fulfill ? opts.fulfill(opts.imageContext) : null;
++            if (!fulfilled) {
++              return 0;
++            }
++            var texture = fulfilled.texture || fulfilled;
++            var releaseContext = fulfilled.texture ? fulfilled.releaseContext : fulfilled;
++            var handle = JsValStore.add(texture);
++            releaseContexts.set(handle, releaseContext);
++            return handle;
++          },
++          releaseTexture: function(textureHandle) {
++            var releaseContext = releaseContexts.get(textureHandle);
++            releaseContexts.delete(textureHandle);
++            JsValStore.remove(textureHandle);
++            if (typeof opts.textureRelease === 'function') {
++              opts.textureRelease(releaseContext);
++            }
++          },
++          freeSrc: function() {
++            if (typeof opts.imageRelease === 'function') {
++              opts.imageRelease(opts.imageContext);
++            }
++          },
++        };
++      }
++
        CanvasKit.MakeGPUDeviceContext = function(device) {
          if (!device) {
            return null;
-@@ -12,8 +16,14 @@
-         // This allows native code to access this device by calling
-         // `emscripten_webgpu_get_device().`
+         }
+ 
+-        // This allows native code to access this device by calling
+-        // `emscripten_webgpu_get_device().`
          CanvasKit.preinitializedWebGPUDevice = device;
 -        var context = this._MakeGrContext();
 +        var context = this._MakeWebGPUDeviceContext();
@@ -23,49 +122,236 @@ index 0e937d41b4..879c56db23 100644
 +          return null;
 +        }
          context._device = device;
-+        context.submit = function() {
-+          return this._submit();
+-
++        context.submit = function(syncToCpu) {
++          return this._submit(!!syncToCpu);
 +        };
- 
++        context.checkAsyncWorkCompletion = function() {
++          this._checkAsyncWorkCompletion();
++        };
++        context.ReadSurfacePixelsAsync = function(surface, dstImageInfo, srcRect, rescaleGamma, rescaleMode) {
++          var resolvedRect = toSimpleIRect(
++              srcRect,
++              dstImageInfo && dstImageInfo.width,
++              dstImageInfo && dstImageInfo.height);
++          return new Promise(function(resolve) {
++            var ok = context._readSurfacePixelsAsync(
++                surface,
++                dstImageInfo,
++                resolvedRect,
++                rescaleGamma || CanvasKit.RescaleGamma.Linear,
++                rescaleMode || CanvasKit.RescaleMode.Linear,
++                { resolve: resolve });
++            if (!ok) {
++              resolve(null);
++            }
++          });
++        };
++        context.ReadSurfacePixelsYUV420Async = function(surface, yuvColorSpace, dstColorSpace, srcRect, dstSize, rescaleGamma, rescaleMode) {
++          var resolvedSize = toSimpleISize(
++              dstSize,
++              surface ? surface.width() : 0,
++              surface ? surface.height() : 0);
++          var resolvedRect = toSimpleIRect(
++              srcRect,
++              resolvedSize.width,
++              resolvedSize.height);
++          return new Promise(function(resolve) {
++            var ok = context._readSurfacePixelsYUV420Async(
++                surface,
++                yuvColorSpace,
++                dstColorSpace || CanvasKit.ColorSpace.SRGB,
++                resolvedRect,
++                resolvedSize,
++                rescaleGamma || CanvasKit.RescaleGamma.Linear,
++                rescaleMode || CanvasKit.RescaleMode.Linear,
++                { resolve: resolve });
++            if (!ok) {
++              resolve(null);
++            }
++          });
++        };
          return context;
        };
-@@ -64,6 +74,9 @@
-                                                  context.getCurrentTexture(),
-                                                  canvasCtx._textureFormat,
-                                                  width, height, colorSpace);
-+        if (!surface) {
-+          return null;
-+        }
-         surface._canvasContext = canvasCtx;
-         return surface;
-       };
-@@ -81,25 +94,29 @@
-           // (see
-           // https://github.com/emscripten-core/emscripten/blob/0e63f74f36b06849ef1c777b130783a43316ade0/src/library_html5_webgpu.js
-           // for reference)
--          return this._MakeGPUTextureSurface(
-+          var surface = this._MakeGPUTextureSurface(
-               devCtx,
-               JsValStore.add(texture),
-               WebGPU.TextureFormat.indexOf(textureFormat),
+ 
++      CanvasKit.SkSurfaces = {
++        RenderTarget: function(devCtx, imageInfo, mipmapped, surfaceProps, label) {
++          return CanvasKit._SkSurfaces_RenderTarget(
++              devCtx,
++              imageInfo,
++              !!mipmapped,
++              label || '');
++        },
++        WrapBackendTexture: function(devCtx, texture, colorSpace, surfaceProps, releaseProc, releaseContext, label) {
++          var surface = CanvasKit._SkSurfaces_WrapBackendTexture(
++              devCtx,
++              JsValStore.add(texture),
++              getTextureFormatIndex(texture.format),
 +              texture.usage,
-               width, height,
-               colorSpace);
++              texture.width,
++              texture.height,
++              colorSpace || null,
++              makeReleaseCallback(releaseProc, releaseContext),
++              label || '');
 +          if (!surface) {
 +            return null;
 +          }
 +          surface._deviceContext = devCtx;
 +          return surface;
++        },
++        AsImage: function(surface) {
++          return CanvasKit._SkSurfaces_AsImage(surface);
++        },
++        AsImageCopy: function(surface, subset, mipmapped) {
++          return CanvasKit._SkSurfaces_AsImageCopy(
++              surface,
++              !!subset,
++              toSimpleIRect(subset, surface.width(), surface.height()),
++              !!mipmapped);
++        },
++      };
++
++      CanvasKit.SkImages = {
++        WrapTexture: function(devCtx, texture, colorType, alphaType, colorSpace, origin, generateMipmapsFromBase, releaseProc, releaseContext, label) {
++          return CanvasKit._SkImages_WrapTexture(
++              devCtx,
++              JsValStore.add(texture),
++              getTextureFormatIndex(texture.format),
++              texture.usage,
++              texture.width,
++              texture.height,
++              colorType,
++              alphaType,
++              colorSpace || null,
++              origin || CanvasKit.Origin.TopLeft,
++              generateMipmapsFromBase || CanvasKit.GenerateMipmapsFromBase.No,
++              makeReleaseCallback(releaseProc, releaseContext),
++              label || '');
++        },
++        PromiseTextureFrom: function(devCtx, opts) {
++          if (!opts || !opts.dimensions || !opts.textureInfo || !opts.colorInfo) {
++            return null;
++          }
++          return CanvasKit._SkImages_PromiseTextureFrom(
++              devCtx,
++              getTextureFormatIndex(opts.textureInfo.textureFormat || opts.textureInfo.format),
++              opts.textureInfo.usage,
++              opts.dimensions.width,
++              opts.dimensions.height,
++              opts.colorInfo,
++              opts.origin || CanvasKit.Origin.TopLeft,
++              !!opts.isVolatile,
++              wrapPromiseTextureCallbacks(opts),
++              opts.label || '');
++        },
++        MakeWithFilter: function(devCtx, src, filter, subset, clipBounds) {
++          var result = CanvasKit._SkImages_MakeWithFilter(
++              devCtx,
++              src,
++              filter,
++              toSimpleIRect(subset, src.width(), src.height()),
++              toSimpleIRect(clipBounds, src.width(), src.height()));
++          if (!result) {
++            return null;
++          }
++          result.outSubset = CanvasKit.LTRBiRect(
++              result.outSubset.left,
++              result.outSubset.top,
++              result.outSubset.right,
++              result.outSubset.bottom);
++          result.offset = Int32Array.of(result.offset.x, result.offset.y);
++          return result;
++        },
++      };
++
+       CanvasKit.MakeGPUCanvasContext = function(devCtx, canvas, opts) {
+         var canvasCtx = canvas.getContext('webgpu');
+-        if (!canvasCtx) {
++        if (!canvasCtx || !devCtx || !devCtx._device) {
+           return null;
+         }
+ 
+-        let format = (opts && opts.format) ? opts.format : navigator.gpu.getPreferredCanvasFormat();
+-        // GPUCanvasConfiguration
++        var format = (opts && opts.format) ? opts.format : navigator.gpu.getPreferredCanvasFormat();
+         canvasCtx.configure({
+             device: devCtx._device,
+             format: format,
+@@ -37,9 +276,9 @@
+           '_deviceContext': devCtx,
+           '_textureFormat': format,
+         };
+-        context['requestAnimationFrame'] =  function(callback) {
+-          requestAnimationFrame(function() {
+-            const surface = CanvasKit.MakeGPUCanvasSurface(context);
++        context.requestAnimationFrame = function(callback) {
++          getRequestAnimationFrame()(function() {
++            var surface = CanvasKit.MakeGPUCanvasSurface(context);
+             if (!surface) {
+               console.error('Failed to initialize Surface for current canvas swapchain texture');
+               return;
+@@ -53,53 +292,35 @@
        };
  
-       CanvasKit.Surface.prototype.assignCurrentSwapChainTexture = function() {
+       CanvasKit.MakeGPUCanvasSurface = function(canvasCtx, colorSpace, width, height) {
+-        let context = canvasCtx._inner;
+-        if (!width) {
+-          width = context.canvas.width;
+-        }
+-        if (!height) {
+-          height = context.canvas.height;
++        var context = canvasCtx._inner;
++        var texture = context.getCurrentTexture();
++        var surface = CanvasKit._SkSurfaces_WrapBackendTexture(
++            canvasCtx._deviceContext,
++            JsValStore.add(texture),
++            getTextureFormatIndex(canvasCtx._textureFormat),
++            texture.usage,
++            width || context.canvas.width,
++            height || context.canvas.height,
++            colorSpace || null,
++            null,
++            '');
++        if (!surface) {
++          return null;
+         }
+-        let surface = this.MakeGPUTextureSurface(canvasCtx._deviceContext,
+-                                                 context.getCurrentTexture(),
+-                                                 canvasCtx._textureFormat,
+-                                                 width, height, colorSpace);
++        surface._deviceContext = canvasCtx._deviceContext;
+         surface._canvasContext = canvasCtx;
+         return surface;
+       };
+ 
+-      CanvasKit.MakeGPUTextureSurface = function (devCtx, texture, textureFormat, width, height, colorSpace) {
+-          colorSpace = colorSpace || null;
+-
+-          // JsValStore and WebGPU are objects in Emscripten's library_html5_webgpu.js utility
+-          // library. JsValStore allows a WebGPU object to be imported by native code by calling the
+-          // various `emscripten_webgpu_import_*` functions.
+-          //
+-          // The CanvasKit WASM module is responsible for removing entries from the value store by
+-          // calling `emscripten_webgpu_release_js_handle` after importing the object.
+-          //
+-          // (see
+-          // https://github.com/emscripten-core/emscripten/blob/0e63f74f36b06849ef1c777b130783a43316ade0/src/library_html5_webgpu.js
+-          // for reference)
+-          return this._MakeGPUTextureSurface(
+-              devCtx,
+-              this.JsValStore.add(texture),
+-              this.WebGPU.TextureFormat.indexOf(textureFormat),
+-              width, height,
+-              colorSpace);
++      CanvasKit.Surface.prototype.assignCurrentSwapChainTexture = function() {
++        return false;
+       };
+ 
+-      CanvasKit.Surface.prototype.assignCurrentSwapChainTexture = function() {
 -        // This feature is only supported for a Surface that was created via MakeGPUCanvasSurface.
 -        if (!this._canvasContext) {
 -          console.log('Surface is not bound to a canvas context');
 -          return false;
-+        return false;
-+      };
-+
 +      CanvasKit.Surface.prototype.flush = function(dirtyRect) {
 +        originalSurfaceFlush.call(this, dirtyRect);
 +        if (this._deviceContext) {
@@ -79,14 +365,16 @@ index 0e937d41b4..879c56db23 100644
        };
  
        CanvasKit.Surface.prototype.requestAnimationFrame = function(callback, dirtyRect) {
-@@ -108,10 +125,15 @@
+@@ -107,11 +328,16 @@
+           return this._requestAnimationFrameInternal(callback, dirtyRect);
          }
  
-         return requestAnimationFrame(function() {
+-        return requestAnimationFrame(function() {
 -          // Replace the render target of the Surface with the current swapchain surface if this is
 -          // bound to a canvas context.
 -          if (this._canvasContext && !this.assignCurrentSwapChainTexture()) {
 -            console.log('failed to replace GPU backend texture');
++        return getRequestAnimationFrame()(function() {
 +          if (this._canvasContext) {
 +            var surface = CanvasKit.MakeGPUCanvasSurface(this._canvasContext);
 +            if (!surface) {
@@ -99,14 +387,16 @@ index 0e937d41b4..879c56db23 100644
              return;
            }
            callback(this.getCanvas());
-@@ -126,10 +148,15 @@
+@@ -125,11 +351,16 @@
+           return;
          }
  
-         requestAnimationFrame(function() {
+-        requestAnimationFrame(function() {
 -          // Replace the render target of the Surface with the current swapchain surface if this is
 -          // bound to a canvas context.
 -          if (this._canvasContext && !this.assignCurrentSwapChainTexture()) {
 -            console.log('failed to replace GPU backend texture');
++        getRequestAnimationFrame()(function() {
 +          if (this._canvasContext) {
 +            var surface = CanvasKit.MakeGPUCanvasSurface(this._canvasContext);
 +            if (!surface) {

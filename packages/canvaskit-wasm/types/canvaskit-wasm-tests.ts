@@ -265,19 +265,6 @@ function imageTests(CK: CanvasKit, imgElement?: HTMLImageElement) {
       colorType: CK.ColorType.RGBA_8888,
       colorSpace: CK.ColorSpace.SRGB
     }, Uint8Array.of(255, 0, 0, 250), 4);
-    const img4 = CK.MakeLazyImageFromTextureSource(imgElement); // $ExpectType Image
-    const img5 = CK.MakeLazyImageFromTextureSource(imgElement, {
-      width: 1,
-      height: 1,
-      alphaType: CK.AlphaType.Premul,
-      colorType: CK.ColorType.RGBA_8888,
-    });
-    const img6 = CK.MakeLazyImageFromTextureSource(imgElement, {
-      width: 1,
-      height: 1,
-      alphaType: CK.AlphaType.Premul,
-      colorType: CK.ColorType.RGBA_8888,
-    }, true);
     if (!img) return;
     const dOne = img.encodeToBytes(); // $ExpectType Uint8Array | null
     const dTwo = img.encodeToBytes(CK.ImageFormat.JPEG, 97);
@@ -1063,10 +1050,43 @@ function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElemen
 
     const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType WebGPUDeviceContext
     const submitResult = gpuContext.submit(); // $ExpectType boolean
+    gpuContext.checkAsyncWorkCompletion();
 
-    // Texture surface.
-    const surface1 = CK.MakeGPUTextureSurface(gpuContext, texture, "bgra8unorm", 800, 600, // $ExpectType Surface | null
-                                              CK.ColorSpace.SRGB);
+    const surface1 = CK.SkSurfaces.WrapBackendTexture(gpuContext, texture, CK.ColorSpace.SRGB); // $ExpectType Surface | null
+    const surfaceImage = surface1 && CK.SkSurfaces.AsImage(surface1); // $ExpectType Image | null
+    const copiedSurfaceImage = surface1 && CK.SkSurfaces.AsImageCopy(surface1); // $ExpectType Image | null
+    const wrappedTextureImage = CK.SkImages.WrapTexture(
+        gpuContext,
+        texture,
+        CK.ColorType.RGBA_8888,
+        CK.AlphaType.Unpremul,
+        CK.ColorSpace.SRGB,
+        CK.Origin.TopLeft,
+        CK.GenerateMipmapsFromBase.No,
+    ); // $ExpectType Image | null
+    const promisedTextureImage = CK.SkImages.PromiseTextureFrom(gpuContext, {
+        dimensions: { width: texture.width, height: texture.height },
+        textureInfo: {
+            textureFormat: "bgra8unorm",
+            usage: texture.usage,
+        },
+        colorInfo: {
+            colorType: CK.ColorType.BGRA_8888,
+            alphaType: CK.AlphaType.Unpremul,
+            colorSpace: CK.ColorSpace.SRGB,
+        },
+        fulfill: () => ({ texture, releaseContext: null }),
+    }); // $ExpectType Image | null
+    const readResult = gpuContext.ReadSurfacePixelsAsync(
+        surface1!,
+        {
+            width: texture.width,
+            height: texture.height,
+            colorType: CK.ColorType.RGBA_8888,
+            alphaType: CK.AlphaType.Unpremul,
+            colorSpace: CK.ColorSpace.SRGB,
+        },
+    ); // $ExpectType Promise<AsyncReadResult | null>
 
     // Canvas surfaces.
     const canvasContext = CK.MakeGPUCanvasContext(gpuContext, canvas, { // $ExpectType WebGPUCanvasContext

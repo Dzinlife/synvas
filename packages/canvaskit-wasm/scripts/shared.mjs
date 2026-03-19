@@ -258,15 +258,15 @@ export const applySkiaPatch = () => {
 			readFileSync(
 				path.join(skiaDir, "modules", "canvaskit", "npm_build", "types", "index.d.ts"),
 				"utf8",
-			).includes("texture: GPUTexture, textureFormat: GPUTextureFormat,") &&
+			).includes("readonly SkSurfaces: SkSurfacesFactory;") &&
 			readFileSync(
 				path.join(skiaDir, "modules", "canvaskit", "npm_build", "types", "index.d.ts"),
 				"utf8",
-			).includes("canvas: HTMLCanvasElement | OffscreenCanvas,") &&
+			).includes("readonly SkImages: SkImagesFactory;") &&
 			readFileSync(
 				path.join(skiaDir, "modules", "canvaskit", "npm_build", "types", "index.d.ts"),
 				"utf8",
-			).includes('export interface WebGPUDeviceContext extends EmbindObject<"WebGPUDeviceContext">') &&
+			).includes("ReadSurfacePixelsYUV420Async") &&
 			readFileSync(
 				path.join(
 					skiaDir,
@@ -277,7 +277,7 @@ export const applySkiaPatch = () => {
 					"canvaskit-wasm-tests.ts",
 				),
 				"utf8",
-			).includes('texture, "bgra8unorm", 800, 600,') &&
+			).includes("CK.SkSurfaces.WrapBackendTexture(gpuContext, texture,") &&
 			readFileSync(
 				path.join(
 					skiaDir,
@@ -288,7 +288,7 @@ export const applySkiaPatch = () => {
 					"canvaskit-wasm-tests.ts",
 				),
 				"utf8",
-			).includes("const submitResult = gpuContext.submit();")
+			).includes("ReadSurfacePixelsAsync(")
 		);
 	});
 	applyGitPatch("CanvasKit WebGPU build", canvasKitWebGPUBuildPatchFile, () => {
@@ -312,7 +312,11 @@ export const applySkiaPatch = () => {
 			readFileSync(
 				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
 				"utf8",
-			).includes('"_MakeWebGPUDeviceContext"') &&
+			).includes('"_SkSurfaces_RenderTarget"') &&
+			readFileSync(
+				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
+				"utf8",
+			).includes('"_SkImages_PromiseTextureFrom"') &&
 			readFileSync(
 				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
 				"utf8",
@@ -330,9 +334,9 @@ export const applySkiaPatch = () => {
 		return readFileSync(
 			path.join(skiaDir, "modules", "canvaskit", "webgpu.js"),
 			"utf8",
-		).includes("var context = this._MakeWebGPUDeviceContext();") &&
+		).includes("CanvasKit.SkSurfaces = {") &&
 			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
-				"texture.usage,",
+				"CanvasKit.SkImages = {",
 			) &&
 			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
 				"JsValStore.add(texture)",
@@ -347,7 +351,7 @@ export const applySkiaPatch = () => {
 				"this.WebGPU.TextureFormat.indexOf(textureFormat)",
 			) &&
 			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
-				"CanvasKit.Surface.prototype.assignCurrentSwapChainTexture = function() {\n        return false;",
+				"context.ReadSurfacePixelsAsync = function(",
 			);
 	});
 	applyGitPatch("Skia Dawn build jobs", dawnPatchFile, () => {

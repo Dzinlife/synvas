@@ -27,6 +27,28 @@ const createInteropBundleLoader = (
 	}));
 };
 
+const createWebGPUCanvasKitStub = (
+	overrides: Record<string, unknown> = {},
+) => {
+	return {
+		MakeGPUDeviceContext: vi.fn(() => ({ id: "gpu-context" })),
+		MakeGPUCanvasContext: vi.fn(),
+		MakeGPUCanvasSurface: vi.fn(),
+		SkSurfaces: {
+			RenderTarget: vi.fn(),
+			WrapBackendTexture: vi.fn(),
+			AsImage: vi.fn(),
+			AsImageCopy: vi.fn(),
+		},
+		SkImages: {
+			WrapTexture: vi.fn(),
+			PromiseTextureFrom: vi.fn(),
+			MakeWithFilter: vi.fn(),
+		},
+		...overrides,
+	};
+};
+
 const loadSkiaModules = async () => {
 	const loadModule = await import("../src/LoadSkiaWeb");
 	const renderBackendModule = await import("../src/skia/web/renderBackend");
@@ -54,12 +76,7 @@ describe("LoadSkiaWeb", () => {
 		const device = {
 			createTexture: vi.fn(),
 		};
-		const webgpuCanvasKit = {
-			MakeGPUDeviceContext: vi.fn(() => ({ id: "gpu-context" })),
-			MakeGPUCanvasContext: vi.fn(),
-			MakeGPUCanvasSurface: vi.fn(),
-			MakeGPUTextureSurface: vi.fn(),
-		};
+		const webgpuCanvasKit = createWebGPUCanvasKitStub();
 		const webglCanvasKit = {
 			MakeWebGLCanvasSurface: vi.fn(),
 		};
@@ -94,12 +111,7 @@ describe("LoadSkiaWeb", () => {
 	});
 
 	it("会兼容 Vite 返回的 CanvasKit interop 模块形状", async () => {
-		const webgpuCanvasKit = {
-			MakeGPUDeviceContext: vi.fn(() => ({ id: "gpu-context" })),
-			MakeGPUCanvasContext: vi.fn(),
-			MakeGPUCanvasSurface: vi.fn(),
-			MakeGPUTextureSurface: vi.fn(),
-		};
+		const webgpuCanvasKit = createWebGPUCanvasKitStub();
 		vi.stubGlobal("navigator", {
 			gpu: {
 				requestAdapter: vi.fn(async () => ({
@@ -126,12 +138,9 @@ describe("LoadSkiaWeb", () => {
 	});
 
 	it("auto 模式在 WebGPU 初始化失败时回退到 WebGL bundle", async () => {
-		const webgpuCanvasKit = {
+		const webgpuCanvasKit = createWebGPUCanvasKitStub({
 			MakeGPUDeviceContext: vi.fn(() => null),
-			MakeGPUCanvasContext: vi.fn(),
-			MakeGPUCanvasSurface: vi.fn(),
-			MakeGPUTextureSurface: vi.fn(),
-		};
+		});
 		const webglCanvasKit = {
 			MakeWebGLCanvasSurface: vi.fn(),
 		};
@@ -167,16 +176,13 @@ describe("LoadSkiaWeb", () => {
 
 	it("真实 WebGPU bundle 缺少私有导出挂载时仍保留官方 helper", async () => {
 		const makeGPUDeviceContext = vi.fn(() => ({ id: "gpu-context" }));
-		const webgpuCanvasKit = {
+		const webgpuCanvasKit = createWebGPUCanvasKitStub({
 			webgpu: true,
 			Surface: {
 				prototype: {},
 			},
 			MakeGPUDeviceContext: makeGPUDeviceContext,
-			MakeGPUCanvasContext: vi.fn(),
-			MakeGPUCanvasSurface: vi.fn(),
-			MakeGPUTextureSurface: vi.fn(),
-		};
+		});
 		const webglCanvasKit = {
 			MakeWebGLCanvasSurface: vi.fn(),
 		};
@@ -224,16 +230,14 @@ describe("LoadSkiaWeb", () => {
 		const originalMakeGPUCanvasContext = vi.fn(() => ({
 			id: "canvas-context",
 		}));
-		const webgpuCanvasKit = {
+		const webgpuCanvasKit = createWebGPUCanvasKitStub({
 			webgpu: true,
 			Surface: {
 				prototype: {},
 			},
 			MakeGPUDeviceContext: makeGPUDeviceContext,
 			MakeGPUCanvasContext: originalMakeGPUCanvasContext,
-			MakeGPUCanvasSurface: vi.fn(),
-			MakeGPUTextureSurface: vi.fn(),
-		};
+		});
 		vi.stubGlobal("navigator", {
 			gpu: {
 				requestAdapter: vi.fn(async () => ({
@@ -261,6 +265,52 @@ describe("LoadSkiaWeb", () => {
 			format: "rgba8unorm",
 			alphaMode: "premultiplied",
 		});
+	});
+
+	it("真实 WebGPU bundle 会保留 flush 的 surface this 绑定", async () => {
+		const prototypeFlushFallback = vi.fn();
+		const instanceFlush = vi.fn();
+		const submit = vi.fn();
+		const webgpuCanvasKit = createWebGPUCanvasKitStub({
+			webgpu: true,
+			Surface: {
+				prototype: {
+					_flush: prototypeFlushFallback,
+					flush(this: { _flush?: (dirtyRect?: number[]) => void }, dirtyRect?: number[]) {
+						this._flush?.(dirtyRect);
+					},
+				},
+			},
+		});
+		vi.stubGlobal("navigator", {
+			gpu: {
+				requestAdapter: vi.fn(async () => ({
+					requestDevice: vi.fn(async () => ({ createTexture: vi.fn() })),
+				})),
+			},
+		});
+		const {
+			LoadSkiaWeb,
+			__setSkiaBundleLoadersForTests,
+		} = await loadSkiaModules();
+		__setSkiaBundleLoadersForTests({
+			webgpu: createBundleLoader(webgpuCanvasKit),
+		});
+
+		const canvasKit = await LoadSkiaWeb({ backendPreference: "webgpu" });
+		const surface = Object.create(canvasKit.Surface.prototype) as {
+			_flush?: (dirtyRect?: number[]) => void;
+			_deviceContext?: { submit?: () => void };
+		};
+		surface._flush = instanceFlush;
+		surface._deviceContext = { submit };
+
+		canvasKit.Surface.prototype.flush.call(surface, [1, 2, 3, 4]);
+
+		expect(instanceFlush).toHaveBeenCalledTimes(1);
+		expect(instanceFlush).toHaveBeenCalledWith([1, 2, 3, 4]);
+		expect(prototypeFlushFallback).not.toHaveBeenCalled();
+		expect(submit).toHaveBeenCalledTimes(1);
 	});
 
 	it("缺少官方 helper 且缺少底层导出时会回退到 WebGL bundle", async () => {

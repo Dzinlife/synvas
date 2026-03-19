@@ -15,5 +15,6 @@ export { JsiSkImage } from "./skia/web/JsiSkImage";
 export { JsiSkSurface } from "./skia/web/JsiSkSurface";
 export { makeImageFromTextureSourceDirect } from "./skia/web/makeTextureSourceImage";
 export * from "./skia/web/surfaceFactory";
+export * from "./skia/web/webgpuReadback";
 export * from "./sksg";
 export * from "./WithSkiaWeb";

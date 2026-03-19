@@ -1,6 +1,4 @@
-import type { Image, Surface, TextureSource } from "canvaskit-wasm";
-
-import type { SkImage } from "../types";
+import type { Image, TextureSource } from "canvaskit-wasm";
 
 import { CanvasKit } from "../Skia";
 import { JsiSkImage } from "./JsiSkImage";
@@ -9,6 +7,14 @@ import {
 	getSkiaRenderBackend,
 	toCanvasKitWebGPU,
 } from "./renderBackend";
+
+type CanvasKitWithLazyTextureSourceImage = typeof CanvasKit & {
+	MakeLazyImageFromTextureSource?: (src: TextureSource) => Image | null;
+};
+
+type WebGPUExternalImageCopy = Parameters<
+	GPUQueue["copyExternalImageToTexture"]
+>[0];
 
 const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
 
@@ -22,6 +28,24 @@ const getWebGPUTextureUsage = () => {
 		GPUTextureUsage.COPY_SRC |
 		GPUTextureUsage.COPY_DST
 	);
+};
+
+const destroyWebGPUTextureWhenQueueIdle = (
+	device: GPUDevice,
+	texture: GPUTexture,
+) => {
+	const onSubmittedWorkDone = device.queue?.onSubmittedWorkDone;
+	if (typeof onSubmittedWorkDone !== "function") {
+		texture.destroy();
+		return;
+	}
+	// 等待已提交命令完成后再销毁外部纹理，避免 validation error。
+	void onSubmittedWorkDone
+		.call(device.queue)
+		.catch(() => undefined)
+		.finally(() => {
+			texture.destroy();
+		});
 };
 
 const getTextureSourceWidth = (source: TextureSource | VideoFrame) => {
@@ -44,56 +68,23 @@ const getTextureSourceHeight = (source: TextureSource | VideoFrame) => {
 	);
 };
 
-const toExternalTextureSource = (source: TextureSource | VideoFrame) => {
-	return source as unknown as HTMLCanvasElement | OffscreenCanvas | ImageBitmap;
-};
-
-const disposeSurface = (surface: Surface | null | undefined) => {
-	try {
-		surface?.dispose?.();
-	} catch {}
-	try {
-		surface?.delete?.();
-	} catch {}
-};
-
-const attachImageCleanup = (image: Image, cleanup: () => void) => {
-	const mutableImage = image as Image & {
-		delete?: () => void;
-		__aiNLETextureSourceCleanupAttached?: boolean;
-	};
-	if (mutableImage.__aiNLETextureSourceCleanupAttached) {
-		return image;
-	}
-	const originalDelete =
-		typeof mutableImage.delete === "function"
-			? mutableImage.delete.bind(mutableImage)
-			: undefined;
-	let released = false;
-	const release = () => {
-		if (released) {
-			return;
-		}
-		released = true;
-		cleanup();
-	};
-	mutableImage.delete = () => {
-		release();
-		originalDelete?.();
-	};
-	mutableImage.__aiNLETextureSourceCleanupAttached = true;
-	return image;
-};
+const toExternalTextureSource = (source: TextureSource | VideoFrame) =>
+	({
+		source: source as never,
+	}) as WebGPUExternalImageCopy;
 
 export const makeImageFromTextureSourceDirect = (
 	source: TextureSource | VideoFrame,
-): SkImage | null => {
+): JsiSkImage | null => {
 	const backend = getSkiaRenderBackend();
 	if (backend.kind === "webgl") {
 		try {
-			const image = CanvasKit.MakeLazyImageFromTextureSource(
-				source as TextureSource,
-			);
+			const canvasKit =
+				CanvasKit as CanvasKitWithLazyTextureSourceImage;
+			const image =
+				canvasKit.MakeLazyImageFromTextureSource?.(
+					source as TextureSource,
+				) ?? CanvasKit.MakeImageFromCanvasImageSource(source as CanvasImageSource);
 			return new JsiSkImage(CanvasKit, image);
 		} catch (error) {
 			console.warn("Failed to create WebGL texture-source image", error);
@@ -114,38 +105,34 @@ export const makeImageFromTextureSourceDirect = (
 		format: textureFormat,
 		usage: getWebGPUTextureUsage(),
 	});
-	let surface: Surface | null = null;
 	try {
 		backend.device.queue.copyExternalImageToTexture(
-			{
-				source: toExternalTextureSource(source),
-			},
+			toExternalTextureSource(source),
 			{ texture },
 			{
 				width,
 				height,
 			},
 		);
-		surface = toCanvasKitWebGPU(CanvasKit).MakeGPUTextureSurface?.(
+		const image = toCanvasKitWebGPU(CanvasKit).SkImages?.WrapTexture?.(
 			backend.deviceContext,
 			texture,
-			textureFormat,
-			width,
-			height,
+			CanvasKit.ColorType.RGBA_8888,
+			CanvasKit.AlphaType.Unpremul,
+			CanvasKit.ColorSpace.SRGB,
 			undefined,
-		) as Surface | null;
-		if (!surface) {
-			texture.destroy();
+			undefined,
+			() => {
+				texture.destroy();
+			},
+		);
+		if (!image) {
+			destroyWebGPUTextureWhenQueueIdle(backend.device, texture);
 			return null;
 		}
-		const image = attachImageCleanup(surface.makeImageSnapshot(), () => {
-			disposeSurface(surface);
-			texture.destroy();
-		});
 		return new JsiSkImage(CanvasKit, image);
 	} catch (error) {
-		disposeSurface(surface);
-		texture.destroy();
+		destroyWebGPUTextureWhenQueueIdle(backend.device, texture);
 		console.warn("Failed to create texture-source image", error);
 		return null;
 	}

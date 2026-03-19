@@ -15,7 +15,11 @@ import type {
   ImageInfo,
 } from "../types";
 
-import { getEnum, HostObject } from "./Host";
+import {
+  getEnum,
+  HostObject,
+  setCurrentCanvasKitContextIfNeeded,
+} from "./Host";
 import { JsiSkMatrix } from "./JsiSkMatrix";
 import { JsiSkShader } from "./JsiSkShader";
 
@@ -58,6 +62,7 @@ export class JsiSkImage extends HostObject<Image, "Image"> implements SkImage {
   }
 
   private createRasterImage() {
+    setCurrentCanvasKitContextIfNeeded(this.CanvasKit, this.ref);
     const partialInfo = this.ref.getImageInfo();
     const info = {
       width: partialInfo.width,
@@ -161,6 +166,7 @@ export class JsiSkImage extends HostObject<Image, "Image"> implements SkImage {
   // TODO: this is leaking on Web
   // Add signature with allocated buffer
   readPixels(srcX?: number, srcY?: number, imageInfo?: ImageInfo) {
+    setCurrentCanvasKitContextIfNeeded(this.CanvasKit, this.ref);
     const info = this.getImageInfo();
     const pxInfo: CKImageInfo = {
       colorSpace: this.CanvasKit.ColorSpace.SRGB,
@@ -182,10 +188,5 @@ export class JsiSkImage extends HostObject<Image, "Image"> implements SkImage {
 
   makeNonTextureImage(): SkImage {
     return new JsiSkImage(this.CanvasKit, this.createRasterImage());
-  }
-
-  getNativeTextureUnstable(): unknown {
-    console.warn("getBackendTexture is not implemented on Web");
-    return null;
   }
 }

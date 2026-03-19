@@ -7,11 +7,17 @@ import {
 	Output,
 	QUALITY_HIGH,
 	StreamTarget,
+	VideoSample,
+	VideoSampleSource,
 } from "mediabunny";
 import {
+	AlphaType,
+	ColorType,
 	createSkiaCanvasSurface,
+	createSkiaWebGPUReadbackSurface,
 	getSkiaRenderBackend,
 	JsiSkSurface,
+	type SkiaWebGPUReadbackSurface,
 	Skia,
 	SkiaSGRoot,
 } from "react-skia-lite";
@@ -135,7 +141,6 @@ const sortByTrackIndex = (items: TimelineElement[]) => {
 };
 
 const OPFS_CLEANUP_DELAY_MS = 10 * 60_000;
-
 const createAbortError = (): Error => {
 	if (typeof DOMException !== "undefined") {
 		return new DOMException("已取消", "AbortError");
@@ -189,6 +194,68 @@ const createSurfaceForExport = (
 	} catch {
 		surface?.dispose();
 		return null;
+	}
+};
+
+const getExportCanvas2DContext = (
+	canvas: HTMLCanvasElement | OffscreenCanvas,
+) => {
+	const context = canvas.getContext("2d");
+	if (!context) {
+		throw new Error("导出失败：无法获取 2D 编码画布上下文");
+	}
+	return context as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+};
+
+type WebGPUExportSurface = {
+	surface: JsiSkSurface;
+	readbackSurface: SkiaWebGPUReadbackSurface;
+};
+
+const copySkiaSurfaceToCanvas = async (
+	surface: JsiSkSurface,
+	canvas: HTMLCanvasElement | OffscreenCanvas,
+) => {
+	try {
+		const pixels = surface.getCanvas().readPixels(0, 0, {
+			width: surface.width(),
+			height: surface.height(),
+			colorType: ColorType.RGBA_8888,
+			alphaType: AlphaType.Unpremul,
+		});
+		if (!pixels) {
+			throw new Error("导出失败：无法通过 canvas 读取当前帧像素");
+		}
+		const context = getExportCanvas2DContext(canvas);
+		const rgbaPixels = new Uint8ClampedArray(pixels);
+		context.putImageData(
+			new ImageData(rgbaPixels, surface.width(), surface.height()),
+			0,
+			0,
+		);
+	} catch {
+		const snapshot = surface.makeImageSnapshot();
+		let rasterImage = snapshot;
+		try {
+			rasterImage = snapshot.makeNonTextureImage();
+			const imageInfo = rasterImage.getImageInfo();
+			const pixels = rasterImage.readPixels();
+			if (!pixels) {
+				throw new Error("导出失败：无法读取当前帧像素");
+			}
+			const context = getExportCanvas2DContext(canvas);
+			const rgbaPixels = new Uint8ClampedArray(pixels);
+			context.putImageData(
+				new ImageData(rgbaPixels, imageInfo.width, imageInfo.height),
+				0,
+				0,
+			);
+		} finally {
+			rasterImage.dispose();
+			if (rasterImage !== snapshot) {
+				snapshot.dispose();
+			}
+		}
 	}
 };
 
@@ -579,12 +646,12 @@ export const exportTimelineAsVideoCore = async (
 	const transitionCurveById = collectTransitionCurveById(options.elements);
 
 	let surface: JsiSkSurface | null = null;
-	let renderCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
 	let outputTarget: ExportOutputTarget | null = null;
 	let output: Output<Mp4OutputFormat, BufferTarget | StreamTarget> | null =
 		null;
 	let shouldCleanupOutputTargetImmediately = true;
 	let liveRoot: SkiaSGRoot | null = null;
+	let webgpuExportSurface: WebGPUExportSurface | null = null;
 
 	try {
 		throwIfAborted(options.signal);
@@ -596,20 +663,35 @@ export const exportTimelineAsVideoCore = async (
 			target: outputTarget.target,
 		});
 
-		const exportCanvas =
-			typeof OffscreenCanvas !== "undefined"
-				? new OffscreenCanvas(width, height)
-				: (() => {
-						const canvas = document.createElement("canvas");
-						canvas.width = width;
-						canvas.height = height;
+		const renderBackend = getSkiaRenderBackend();
+		let exportCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
+		const getExportCanvas = () => {
+			if (exportCanvas) {
+				return exportCanvas;
+			}
+			exportCanvas =
+				typeof OffscreenCanvas !== "undefined"
+					? new OffscreenCanvas(width, height)
+					: (() => {
+							const canvas = document.createElement("canvas");
+							canvas.width = width;
+							canvas.height = height;
 						return canvas;
-					})();
-
-		const videoSource = new CanvasSource(exportCanvas, {
-			codec: "avc",
-			bitrate: QUALITY_HIGH,
-		});
+						})();
+			return exportCanvas;
+		};
+		let canvasVideoSource: CanvasSource | null = null;
+		let webgpuSampleSource: VideoSampleSource | null = null;
+		const videoSource =
+			renderBackend.kind === "webgpu"
+				? (webgpuSampleSource = new VideoSampleSource({
+						codec: "avc",
+						bitrate: QUALITY_HIGH,
+					}))
+				: (canvasVideoSource = new CanvasSource(getExportCanvas(), {
+						codec: "avc",
+						bitrate: QUALITY_HIGH,
+					}));
 		output.addVideoTrack(videoSource, { frameRate: fps });
 
 		let audioSource: AudioSampleSource | null = null;
@@ -625,15 +707,35 @@ export const exportTimelineAsVideoCore = async (
 		await output.start();
 		throwIfAborted(options.signal);
 
-		const renderBackend = getSkiaRenderBackend();
-		const usesFrameBoundCanvasSurface = renderBackend.kind === "webgpu";
 		const useLiveRenderState =
 			renderBackend.kind === "webgpu" &&
 			typeof options.buildSkiaRenderState === "function";
 		let skiaCanvas: ReturnType<JsiSkSurface["getCanvas"]> | null = null;
+		// WebGPU 导出走离屏 surface，可跨帧复用，避免 swapchain 黑屏和纹理过早销毁。
 		const createActiveSurface = () => {
+			if (renderBackend.kind === "webgpu") {
+				const readbackSurface = createSkiaWebGPUReadbackSurface(
+					width,
+					height,
+					{
+						backend: renderBackend,
+						label: "export-readback",
+					},
+				);
+				if (!readbackSurface) {
+					throw new Error("导出失败：无法创建 webgpu 离屏 Surface");
+				}
+				webgpuExportSurface = {
+					surface: readbackSurface.surface,
+					readbackSurface,
+				};
+				return {
+					surface: readbackSurface.surface,
+					skiaCanvas: readbackSurface.surface.getCanvas(),
+				};
+			}
 			const surfaceResult = createSurfaceForExport(
-				exportCanvas,
+				getExportCanvas(),
 				width,
 				height,
 			);
@@ -643,18 +745,18 @@ export const exportTimelineAsVideoCore = async (
 				);
 			}
 			const nextSurface = surfaceResult.surface;
-			const nextRenderCanvas = surfaceResult.canvas;
 			const nextSkiaCanvas = nextSurface.getCanvas();
-			if (!nextRenderCanvas) {
-				throw new Error("导出失败：无法获取导出画布");
-			}
 			return {
 				surface: nextSurface,
-				renderCanvas: nextRenderCanvas,
 				skiaCanvas: nextSkiaCanvas,
 			};
 		};
-		({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
+		({ surface, skiaCanvas } = createActiveSurface());
+		if (renderBackend.kind === "webgpu") {
+			if (!webgpuSampleSource || !webgpuExportSurface) {
+				throw new Error("导出失败：缺少 WebGPU 视频源");
+			}
+		}
 		if (useLiveRenderState) {
 			liveRoot = new SkiaSGRoot(Skia);
 		}
@@ -686,6 +788,69 @@ export const exportTimelineAsVideoCore = async (
 			}
 			return options.buildSkiaRenderState(buildFrameArgs(targetFrame));
 		};
+		const addVideoFrame = async (frame: number) => {
+			const timestamp = frame / fps;
+			const duration = 1 / fps;
+
+			if (renderBackend.kind === "webgpu") {
+				if (!surface) {
+					throw new Error("导出失败：无法创建当前帧 Surface");
+				}
+				if (webgpuExportSurface) {
+					try {
+						const readback = await webgpuExportSurface.readbackSurface.readbackPixels();
+						const sample = new VideoSample(readback.pixels, {
+							format: readback.format,
+							codedWidth: readback.width,
+							codedHeight: readback.height,
+							timestamp,
+							duration,
+							layout: [
+								{
+									offset: 0,
+									stride: readback.bytesPerRow,
+								},
+							],
+						});
+						try {
+							if (!webgpuSampleSource) {
+								throw new Error("导出失败：缺少 WebGPU 视频源");
+							}
+							await webgpuSampleSource.add(sample);
+						} finally {
+							sample.close();
+						}
+						return;
+					} catch (error) {
+						console.warn(
+							"WebGPU video sample export failed, falling back to canvas sample",
+							error,
+						);
+						await webgpuExportSurface.readbackSurface.flushPendingReadbacks();
+					}
+				}
+				const fallbackCanvas = getExportCanvas();
+				await copySkiaSurfaceToCanvas(surface, fallbackCanvas);
+				const sample = new VideoSample(fallbackCanvas, {
+					timestamp,
+					duration,
+				});
+				try {
+					if (!webgpuSampleSource) {
+						throw new Error("导出失败：缺少 WebGPU 视频源");
+					}
+					await webgpuSampleSource.add(sample);
+				} finally {
+					sample.close();
+				}
+				return;
+			}
+
+			if (!canvasVideoSource) {
+				throw new Error("导出失败：缺少 Canvas 视频源");
+			}
+			await canvasVideoSource.add(timestamp, duration);
+		};
 
 		for (let frame = startFrame; frame < endFrame; frame += 1) {
 			throwIfAborted(options.signal);
@@ -714,17 +879,13 @@ export const exportTimelineAsVideoCore = async (
 			if (useLiveRenderState) {
 				const renderState = await buildFrameRenderState(frame);
 				const retainedResources: Array<() => void> = [];
-				try {
-					await renderState.ready;
-					throwIfAborted(options.signal);
+					try {
+						await renderState.ready;
+						throwIfAborted(options.signal);
 
-					if (usesFrameBoundCanvasSurface) {
-						surface?.dispose();
-						({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
-					}
-					if (!surface || !skiaCanvas || !liveRoot) {
-						throw new Error("导出失败：无法创建当前帧 Surface");
-					}
+						if (!surface || !skiaCanvas || !liveRoot) {
+							throw new Error("导出失败：无法创建当前帧 Surface");
+						}
 
 					liveRoot.render(renderState.children);
 					retainedResources.push(
@@ -735,7 +896,7 @@ export const exportTimelineAsVideoCore = async (
 					surface.flush();
 					throwIfAborted(options.signal);
 
-					await videoSource.add(frame / fps, 1 / fps);
+					await addVideoFrame(frame);
 					throwIfAborted(options.signal);
 				} finally {
 					for (const cleanup of retainedResources) {
@@ -754,29 +915,26 @@ export const exportTimelineAsVideoCore = async (
 				throwIfAborted(options.signal);
 
 				const picture = frameSnapshot.picture;
-				if (!picture) {
-					throw new Error(
-						`导出失败：无法构建第 ${frame} 帧 picture（已中止导出）`,
-					);
-				}
-				if (usesFrameBoundCanvasSurface) {
-					surface?.dispose();
-					({ surface, renderCanvas, skiaCanvas } = createActiveSurface());
-				}
-				if (!surface || !skiaCanvas) {
-					throw new Error("导出失败：无法创建当前帧 Surface");
-				}
+					if (!picture) {
+						throw new Error(
+							`导出失败：无法构建第 ${frame} 帧 picture（已中止导出）`,
+						);
+					}
+					if (!surface || !skiaCanvas) {
+						throw new Error("导出失败：无法创建当前帧 Surface");
+					}
 				skiaCanvas.drawPicture(picture);
 				surface.flush();
 				throwIfAborted(options.signal);
 
-				await videoSource.add(frame / fps, 1 / fps);
+				await addVideoFrame(frame);
 				throwIfAborted(options.signal);
 			} finally {
 				frameSnapshot.dispose?.();
 			}
 		}
 
+		await webgpuExportSurface?.readbackSurface.flushPendingReadbacks();
 		console.log("video canvas rendered");
 
 		if (audioSource && audioTargets.length > 0) {
@@ -820,11 +978,17 @@ export const exportTimelineAsVideoCore = async (
 		try {
 			liveRoot?.unmount();
 		} catch {}
+		try {
+			webgpuExportSurface?.readbackSurface.dispose();
+			if (webgpuExportSurface) {
+				surface = null;
+			}
+		} catch {}
 		if (shouldCleanupOutputTargetImmediately) {
 			await outputTarget?.cleanup();
 		}
 		try {
-			if (surface && renderCanvas) {
+			if (surface) {
 				surface.dispose();
 			}
 		} catch {}

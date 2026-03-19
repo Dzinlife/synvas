@@ -260,7 +260,14 @@ export const exportTimelineAsVideo = async (options: {
 						};
 					},
 				},
-			);
+			).then((renderState) => ({
+				...renderState,
+				children: createElement(
+					RuntimeProvider,
+					{ runtime: options.runtime },
+					renderState.children,
+				),
+			}));
 		};
 		await exportTimelineAsVideoCore({
 			elements: audioMixElements,

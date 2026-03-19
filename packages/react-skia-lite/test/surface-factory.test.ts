@@ -11,28 +11,16 @@ describe("surfaceFactory", () => {
 		vi.unstubAllGlobals();
 	});
 
-	it("WebGPU offscreen surface 会创建 GPU 纹理并在释放时销毁", () => {
+	it("WebGPU offscreen surface 改走 Graphite RenderTarget", () => {
 		const deleteMock = vi.fn();
 		const flushMock = vi.fn();
 		const snapshotDeleteMock = vi.fn();
-		const textureA = { destroy: vi.fn() };
-		const textureB = { destroy: vi.fn() };
-		const createTextureMock = vi
-			.fn()
-			.mockReturnValueOnce(textureA)
-			.mockReturnValueOnce(textureB);
-		const makeGPUTextureSurfaceMock = vi.fn(
-			(
-				_deviceContext: unknown,
-				_texture: GPUTexture,
-				_textureFormat: GPUTextureFormat,
-				width: number,
-				height: number,
-			) => ({
+		const renderTargetMock = vi.fn(
+			(_deviceContext: unknown, imageInfo: { width: number; height: number }) => ({
 				delete: deleteMock,
 				flush: flushMock,
-				width: () => width,
-				height: () => height,
+				width: () => imageInfo.width,
+				height: () => imageInfo.height,
 				getCanvas: () => ({
 					clear: vi.fn(),
 					save: vi.fn(),
@@ -46,21 +34,19 @@ describe("surfaceFactory", () => {
 			}),
 		);
 		const canvasKit = {
-			MakeGPUTextureSurface: makeGPUTextureSurfaceMock,
+			ColorType: { RGBA_8888: "rgba8888" },
+			AlphaType: { Premul: "premul" },
+			ColorSpace: { SRGB: "srgb" },
+			SkSurfaces: {
+				RenderTarget: renderTargetMock,
+			},
 		} as never;
 		const backend = {
 			bundle: "webgpu",
 			kind: "webgpu",
-			device: {
-				createTexture: createTextureMock,
-			},
+			device: {} as GPUDevice,
 			deviceContext: { id: "ctx" },
 		} as const;
-		vi.stubGlobal("navigator", {
-			gpu: {
-				getPreferredCanvasFormat: vi.fn(() => "rgba8unorm"),
-			},
-		});
 
 		const firstSurface = createSkiaOffscreenSurface(canvasKit, 64, 32, backend);
 		const secondSurface = createSkiaOffscreenSurface(
@@ -75,49 +61,80 @@ describe("surfaceFactory", () => {
 		firstSurface?.dispose();
 		secondSurface?.dispose();
 
-		expect(createTextureMock).toHaveBeenNthCalledWith(
-			1,
-			expect.objectContaining({
-				size: {
-					width: 64,
-					height: 32,
-				},
-				format: "rgba8unorm",
-			}),
-		);
-		expect(createTextureMock).toHaveBeenNthCalledWith(
-			2,
-			expect.objectContaining({
-				size: {
-					width: 128,
-					height: 72,
-				},
-				format: "rgba8unorm",
-			}),
-		);
-		expect(makeGPUTextureSurfaceMock).toHaveBeenNthCalledWith(
+		expect(renderTargetMock).toHaveBeenNthCalledWith(
 			1,
 			backend.deviceContext,
-			textureA,
-			"rgba8unorm",
-			64,
-			32,
+			expect.objectContaining({
+				width: 64,
+				height: 32,
+				colorType: "rgba8888",
+				alphaType: "premul",
+				colorSpace: "srgb",
+			}),
+			false,
 			undefined,
+			"",
 		);
-		expect(makeGPUTextureSurfaceMock).toHaveBeenNthCalledWith(
+		expect(renderTargetMock).toHaveBeenNthCalledWith(
 			2,
 			backend.deviceContext,
-			textureB,
-			"rgba8unorm",
-			128,
-			72,
+			expect.objectContaining({
+				width: 128,
+				height: 72,
+				colorType: "rgba8888",
+				alphaType: "premul",
+				colorSpace: "srgb",
+			}),
+			false,
 			undefined,
+			"",
 		);
 		expect(flushMock).toHaveBeenCalledTimes(1);
 		expect(deleteMock).toHaveBeenCalledTimes(2);
-		expect(textureA.destroy).toHaveBeenCalledTimes(1);
-		expect(textureB.destroy).toHaveBeenCalledTimes(1);
 		expect(snapshotDeleteMock).not.toHaveBeenCalled();
+	});
+
+	it("WebGPU offscreen surface 不再自行创建外部 GPUTexture", () => {
+		const deleteMock = vi.fn();
+		const renderTargetMock = vi.fn(
+			(_deviceContext: unknown, imageInfo: { width: number; height: number }) => ({
+				delete: deleteMock,
+				flush: vi.fn(),
+				width: () => imageInfo.width,
+				height: () => imageInfo.height,
+				getCanvas: () => ({
+					clear: vi.fn(),
+					save: vi.fn(),
+					restore: vi.fn(),
+					scale: vi.fn(),
+					drawPicture: vi.fn(),
+				}),
+				makeImageSnapshot: vi.fn(),
+			}),
+		);
+		const canvasKit = {
+			ColorType: { RGBA_8888: "rgba8888" },
+			AlphaType: { Premul: "premul" },
+			ColorSpace: { SRGB: "srgb" },
+			SkSurfaces: {
+				RenderTarget: renderTargetMock,
+			},
+		} as never;
+		const backend = {
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {
+				createTexture: vi.fn(),
+			} as unknown as GPUDevice,
+			deviceContext: { id: "ctx" },
+		} as const;
+
+		const surface = createSkiaOffscreenSurface(canvasKit, 64, 32, backend);
+		surface?.dispose();
+
+		expect(deleteMock).toHaveBeenCalledTimes(1);
+		expect(backend.device.createTexture).not.toHaveBeenCalled();
+		expect(renderTargetMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("WebGPU canvas surface 会复用已配置的 canvas context", () => {

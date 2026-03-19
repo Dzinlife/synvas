@@ -27,7 +27,11 @@ export class JsiSkSurface
     canvasKitWithContext.setCurrentContext?.(contextHandle);
   }
 
-  constructor(CanvasKit: CanvasKit, ref: Surface, cleanup?: () => void) {
+  constructor(
+    CanvasKit: CanvasKit,
+    ref: Surface,
+    cleanup?: () => void,
+  ) {
     super(CanvasKit, ref, "Surface");
     this.cleanup = cleanup;
   }
@@ -75,10 +79,5 @@ export class JsiSkSurface
       outputImage.ref = image;
     }
     return new JsiSkImage(this.CanvasKit, image);
-  }
-
-  getNativeTextureUnstable(): unknown {
-    console.warn("getBackendTexture is not implemented on Web");
-    return null;
   }
 }

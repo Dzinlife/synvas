@@ -25,6 +25,19 @@ export abstract class Host {
 	}
 }
 
+export const setCurrentCanvasKitContextIfNeeded = (
+	CanvasKit: CanvasKit,
+	currentRef: unknown,
+) => {
+	if (!currentRef || typeof currentRef !== "object") return;
+	const contextHandle = (currentRef as { _context?: unknown })._context;
+	if (contextHandle === undefined || contextHandle === null) return;
+	const canvasKitWithContext = CanvasKit as CanvasKit & {
+		setCurrentContext?: (context: unknown) => boolean;
+	};
+	canvasKitWithContext.setCurrentContext?.(contextHandle);
+};
+
 export abstract class BaseHostObject<T, N extends string>
 	extends Host
 	implements SkJSIInstance<N>
@@ -43,13 +56,7 @@ export abstract class BaseHostObject<T, N extends string>
 	}
 
 	private setCurrentContextIfNeeded(currentRef: unknown) {
-		if (!currentRef || typeof currentRef !== "object") return;
-		const contextHandle = (currentRef as { _context?: unknown })._context;
-		if (contextHandle === undefined || contextHandle === null) return;
-		const canvasKitWithContext = this.CanvasKit as CanvasKit & {
-			setCurrentContext?: (context: unknown) => boolean;
-		};
-		canvasKitWithContext.setCurrentContext?.(contextHandle);
+		setCurrentCanvasKitContextIfNeeded(this.CanvasKit, currentRef);
 	}
 
 	[Symbol.dispose](): void {

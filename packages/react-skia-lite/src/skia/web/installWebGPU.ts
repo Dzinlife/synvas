@@ -1,8 +1,12 @@
 import type {
+	AsyncReadResult,
 	Canvas,
 	CanvasKit,
+	ColorInfo,
 	Image,
 	ImageInfo,
+	InputIRect,
+	MakeWithFilterResult,
 	PartialImageInfo,
 	Surface,
 	TextureSource,
@@ -10,6 +14,43 @@ import type {
 	WebGPUCanvasOptions,
 	WebGPUDeviceContext,
 } from "canvaskit-wasm";
+
+type SimpleIRect = {
+	left: number;
+	top: number;
+	right: number;
+	bottom: number;
+};
+
+type SimpleISize = {
+	width: number;
+	height: number;
+};
+
+type WebGPUExternalImageCopy = Parameters<
+	GPUQueue["copyExternalImageToTexture"]
+>[0];
+
+type IRectLike = {
+	left?: number;
+	top?: number;
+	right?: number;
+	bottom?: number;
+	fLeft?: number;
+	fTop?: number;
+	fRight?: number;
+	fBottom?: number;
+};
+
+type ReleaseCallback = {
+	callRelease: () => void;
+};
+
+type PromiseTextureCallback = {
+	makeTexture: () => number;
+	releaseTexture: (textureHandle: number) => void;
+	freeSrc: () => void;
+};
 
 type InternalSurfacePrototype = Omit<
 	InternalWebGPUSurface,
@@ -33,27 +74,10 @@ type InternalWebGPUCanvasContext = WebGPUCanvasContext & {
 	_textureFormat: GPUTextureFormat;
 };
 
-type InternalWebGPUDeviceContext = WebGPUDeviceContext & {
-	_device?: GPUDevice;
-	_submit?: () => boolean;
-};
-
-type WebGPUExternalTextureSource =
-	| HTMLImageElement
-	| HTMLVideoElement
-	| ImageBitmap
-	| VideoFrame;
-
 type InternalWebGPUSurface = Surface & {
 	_canvasContext?: InternalWebGPUCanvasContext;
 	_deviceContext?: InternalWebGPUDeviceContext;
 	reportBackendTypeIsGPU?: () => boolean;
-	_requestAnimationFrameInternal?: (
-		callback: (_: Canvas) => void,
-		dirtyRect?: number[],
-	) => number;
-	_drawOnceInternal?: (callback: (_: Canvas) => void, dirtyRect?: number[]) => void;
-	assignCurrentSwapChainTexture?: () => boolean;
 	makeImageFromTextureSource?: (
 		source: TextureSource | VideoFrame,
 		info?: ImageInfo | PartialImageInfo,
@@ -65,14 +89,109 @@ type InternalWebGPUSurface = Surface & {
 		srcIsPremul?: boolean,
 		info?: ImageInfo | PartialImageInfo,
 	) => Image;
+	_requestAnimationFrameInternal?: (
+		callback: (_: Canvas) => void,
+		dirtyRect?: number[],
+	) => number;
+	_drawOnceInternal?: (callback: (_: Canvas) => void, dirtyRect?: number[]) => void;
 	requestAnimationFrame: (
 		callback: (_: Canvas) => void,
 		dirtyRect?: number[],
 	) => number;
 	drawOnce: (callback: (_: Canvas) => void, dirtyRect?: number[]) => void;
 	flush: (dirtyRect?: number[]) => void;
+	assignCurrentSwapChainTexture?: () => boolean;
 	delete?: () => void;
 	dispose?: () => void;
+};
+
+type InternalWebGPUDeviceContext = WebGPUDeviceContext & {
+	_device?: GPUDevice;
+	_submit?: (syncToCpu?: boolean) => boolean;
+	_checkAsyncWorkCompletion?: () => void;
+	_readSurfacePixelsAsync?: (
+		surface: Surface,
+		dstImageInfo: ImageInfo,
+		srcRect: SimpleIRect,
+		rescaleGamma: unknown,
+		rescaleMode: unknown,
+		callback: { resolve: (result: AsyncReadResult | null) => void },
+	) => boolean;
+	_readSurfacePixelsYUV420Async?: (
+		surface: Surface,
+		yuvColorSpace: unknown,
+		dstColorSpace: unknown,
+		srcRect: SimpleIRect,
+		dstSize: SimpleISize,
+		rescaleGamma: unknown,
+		rescaleMode: unknown,
+		callback: { resolve: (result: AsyncReadResult | null) => void },
+	) => boolean;
+};
+
+type InternalSkSurfacesFactory = {
+	RenderTarget?: (
+		context: InternalWebGPUDeviceContext,
+		imageInfo: ImageInfo,
+		mipmapped?: boolean,
+		surfaceProps?: unknown,
+		label?: string,
+	) => Surface | null;
+	WrapBackendTexture?: (
+		context: InternalWebGPUDeviceContext,
+		texture: GPUTexture,
+		colorSpace?: unknown,
+		surfaceProps?: unknown,
+		releaseProc?: ((releaseContext: unknown) => void) | null,
+		releaseContext?: unknown,
+		label?: string,
+	) => Surface | null;
+	AsImage?: (surface: Surface) => Image | null;
+	AsImageCopy?: (
+		surface: Surface,
+		subset?: InputIRect,
+		mipmapped?: boolean,
+	) => Image | null;
+};
+
+type InternalSkImagesFactory = {
+	WrapTexture?: (
+		context: InternalWebGPUDeviceContext,
+		texture: GPUTexture,
+		colorType: unknown,
+		alphaType: unknown,
+		colorSpace?: unknown,
+		origin?: unknown,
+		generateMipmapsFromBase?: unknown,
+		releaseProc?: ((releaseContext: unknown) => void) | null,
+		releaseContext?: unknown,
+		label?: string,
+	) => Image | null;
+	PromiseTextureFrom?: (
+		context: InternalWebGPUDeviceContext,
+		options: {
+			dimensions: SimpleISize;
+			textureInfo: {
+				textureFormat: GPUTextureFormat;
+				usage: number;
+			};
+			colorInfo: ColorInfo;
+			origin?: unknown;
+			isVolatile?: boolean;
+			fulfill: (imageContext: unknown) => { texture: GPUTexture; releaseContext?: unknown } | GPUTexture | null;
+			imageRelease?: (imageContext: unknown) => void;
+			textureRelease?: (releaseContext: unknown) => void;
+			imageContext?: unknown;
+			label?: string;
+		},
+	) => Image | null;
+	MakeWithFilter?: (
+		context: InternalWebGPUDeviceContext,
+		src: Image,
+		filter: unknown,
+		subset: InputIRect,
+		clipBounds: InputIRect,
+	) => MakeWithFilterResult | null;
 };
 
 type InternalCanvasKitWebGPU = Omit<
@@ -80,22 +199,20 @@ type InternalCanvasKitWebGPU = Omit<
 	| "MakeGPUCanvasContext"
 	| "MakeGPUCanvasSurface"
 	| "MakeGPUDeviceContext"
-	| "MakeGPUTextureSurface"
+	| "SkSurfaces"
+	| "SkImages"
 	| "Surface"
 > & {
 	webgpu?: boolean;
 	preinitializedWebGPUDevice?: GPUDevice;
 	_MakeWebGPUDeviceContext?: () => InternalWebGPUDeviceContext | null;
-	_MakeGPUTextureSurface?: (
+	_SkSurfaces_RenderTarget?: (
 		context: InternalWebGPUDeviceContext,
-		textureHandle: number,
-		textureFormatIndex: number,
-		textureUsage: number,
-		width: number,
-		height: number,
-		colorSpace: unknown,
+		imageInfo: ImageInfo,
+		mipmapped: boolean,
+		label: string,
 	) => Surface | null;
-	_MakeGPUTextureImage?: (
+	_SkSurfaces_WrapBackendTexture?: (
 		context: InternalWebGPUDeviceContext,
 		textureHandle: number,
 		textureFormatIndex: number,
@@ -103,22 +220,54 @@ type InternalCanvasKitWebGPU = Omit<
 		width: number,
 		height: number,
 		colorSpace: unknown,
-		srcIsPremul: boolean,
+		releaseCallback: ReleaseCallback | null,
+		label: string,
+	) => Surface | null;
+	_SkSurfaces_AsImage?: (surface: Surface) => Image | null;
+	_SkSurfaces_AsImageCopy?: (
+		surface: Surface,
+		hasSubset: boolean,
+		subset: SimpleIRect,
+		mipmapped: boolean,
 	) => Image | null;
-	_MakeGPUTexturePromiseImage?: (
+	_SkImages_WrapTexture?: (
+		context: InternalWebGPUDeviceContext,
+		textureHandle: number,
+		textureFormatIndex: number,
+		textureUsage: number,
+		width: number,
+		height: number,
+		colorType: unknown,
+		alphaType: unknown,
+		colorSpace: unknown,
+		origin: unknown,
+		generateMipmapsFromBase: unknown,
+		releaseCallback: ReleaseCallback | null,
+		label: string,
+	) => Image | null;
+	_SkImages_PromiseTextureFrom?: (
 		context: InternalWebGPUDeviceContext,
 		textureFormatIndex: number,
 		textureUsage: number,
 		width: number,
 		height: number,
-		colorSpace: unknown,
-		srcIsPremul: boolean,
-		callback: {
-			makeTexture: () => number;
-			releaseTexture: (textureHandle: number) => void;
-			freeSrc: () => void;
-		},
+		colorInfo: ColorInfo,
+		origin: unknown,
+		isVolatile: boolean,
+		callback: PromiseTextureCallback,
+		label: string,
 	) => Image | null;
+	_SkImages_MakeWithFilter?: (
+		context: InternalWebGPUDeviceContext,
+		src: Image,
+		filter: unknown,
+		subset: SimpleIRect,
+		clipBounds: SimpleIRect,
+	) => {
+		image: Image;
+		outSubset: SimpleIRect;
+		offset: { x: number; y: number };
+	} | null;
 	_defaultWebGPUDeviceContext?: InternalWebGPUDeviceContext;
 	JsValStore?: {
 		add: (value: unknown) => number;
@@ -127,6 +276,18 @@ type InternalCanvasKitWebGPU = Omit<
 	};
 	WebGPU?: {
 		TextureFormat?: GPUTextureFormat[];
+	};
+	Origin?: {
+		TopLeft: unknown;
+	};
+	GenerateMipmapsFromBase?: {
+		No: unknown;
+	};
+	RescaleGamma?: {
+		Linear: unknown;
+	};
+	RescaleMode?: {
+		Linear: unknown;
 	};
 	MakeGPUDeviceContext?: (device: GPUDevice) => InternalWebGPUDeviceContext | null;
 	MakeGPUCanvasContext?: (
@@ -140,19 +301,8 @@ type InternalCanvasKitWebGPU = Omit<
 		width?: number,
 		height?: number,
 	) => Surface | null;
-	MakeGPUTextureSurface?: (
-		context: InternalWebGPUDeviceContext,
-		texture: GPUTexture,
-		textureFormat: GPUTextureFormat,
-		width: number,
-		height: number,
-		colorSpace?: unknown,
-	) => Surface | null;
-	MakeLazyImageFromTextureSource?: (
-		source: TextureSource | VideoFrame,
-		info?: ImageInfo | PartialImageInfo,
-		srcIsPremul?: boolean,
-	) => Image;
+	SkSurfaces?: InternalSkSurfacesFactory;
+	SkImages?: InternalSkImagesFactory;
 	Surface?: {
 		prototype?: InternalWebGPUSurface & {
 			__aiNLEWebGPUPatched?: boolean;
@@ -172,9 +322,9 @@ type GlobalThisWithJsValStore = typeof globalThis & {
 	JsValStore?: GlobalJsValStore;
 };
 
+const DEFAULT_WEBGPU_CANVAS_ALPHA_MODE = "premultiplied" as const;
 const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
 const WEBGPU_TEXTURE_SOURCE_FORMAT = "rgba8unorm";
-const DEFAULT_WEBGPU_CANVAS_ALPHA_MODE = "premultiplied" as const;
 
 const getRequestAnimationFrame = () => {
 	if (typeof globalThis.requestAnimationFrame === "function") {
@@ -218,6 +368,10 @@ const ensureGlobalJsValStore = (): GlobalJsValStore => {
 	return store;
 };
 
+const getJsValStore = (canvasKit: InternalCanvasKitWebGPU) => {
+	return canvasKit.JsValStore ?? ensureGlobalJsValStore();
+};
+
 const getWebGPUTextureUsage = () => {
 	if (typeof GPUTextureUsage === "undefined") {
 		return WEBGPU_TEXTURE_USAGE_FALLBACK;
@@ -230,8 +384,22 @@ const getWebGPUTextureUsage = () => {
 	);
 };
 
-const getJsValStore = (canvasKit: InternalCanvasKitWebGPU) => {
-	return canvasKit.JsValStore ?? ensureGlobalJsValStore();
+const destroyWebGPUTextureWhenQueueIdle = (
+	device: GPUDevice,
+	texture: GPUTexture,
+) => {
+	const onSubmittedWorkDone = device.queue?.onSubmittedWorkDone;
+	if (typeof onSubmittedWorkDone !== "function") {
+		texture.destroy();
+		return;
+	}
+	// 等待已提交命令完成后再销毁外部纹理，避免 validation error。
+	void onSubmittedWorkDone
+		.call(device.queue)
+		.catch(() => undefined)
+		.finally(() => {
+			texture.destroy();
+		});
 };
 
 const looksLikeActualCanvasKitBundle = (canvasKit: InternalCanvasKitWebGPU) => {
@@ -246,7 +414,11 @@ const looksLikeActualCanvasKitBundle = (canvasKit: InternalCanvasKitWebGPU) => {
 const hasLowLevelWebGPUExports = (canvasKit: InternalCanvasKitWebGPU) => {
 	return (
 		typeof canvasKit._MakeWebGPUDeviceContext === "function" &&
-		typeof canvasKit._MakeGPUTextureSurface === "function" &&
+		typeof canvasKit._SkSurfaces_RenderTarget === "function" &&
+		typeof canvasKit._SkSurfaces_WrapBackendTexture === "function" &&
+		typeof canvasKit._SkImages_WrapTexture === "function" &&
+		typeof canvasKit._SkImages_PromiseTextureFrom === "function" &&
+		typeof canvasKit._SkImages_MakeWithFilter === "function" &&
 		typeof canvasKit.JsValStore?.add === "function" &&
 		Array.isArray(canvasKit.WebGPU?.TextureFormat)
 	);
@@ -257,46 +429,192 @@ const hasPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 		typeof canvasKit.MakeGPUDeviceContext === "function" &&
 		typeof canvasKit.MakeGPUCanvasContext === "function" &&
 		typeof canvasKit.MakeGPUCanvasSurface === "function" &&
-		typeof canvasKit.MakeGPUTextureSurface === "function"
+		typeof canvasKit.SkSurfaces?.RenderTarget === "function" &&
+		typeof canvasKit.SkSurfaces?.WrapBackendTexture === "function" &&
+		typeof canvasKit.SkSurfaces?.AsImage === "function" &&
+		typeof canvasKit.SkSurfaces?.AsImageCopy === "function" &&
+		typeof canvasKit.SkImages?.WrapTexture === "function" &&
+		typeof canvasKit.SkImages?.PromiseTextureFrom === "function" &&
+		typeof canvasKit.SkImages?.MakeWithFilter === "function"
 	);
 };
 
-const disableBrokenWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
-	const mutableCanvasKit = canvasKit as MutableCanvasKitWebGPU;
-	delete mutableCanvasKit.MakeGPUDeviceContext;
-	delete mutableCanvasKit.MakeGPUCanvasContext;
-	delete mutableCanvasKit.MakeGPUCanvasSurface;
-	delete mutableCanvasKit.MakeGPUTextureSurface;
-	canvasKit.webgpu = false;
+const normalizeWebGPUCanvasOptions = (opts?: WebGPUCanvasOptions) => {
+	return {
+		...opts,
+		alphaMode: opts?.alphaMode ?? DEFAULT_WEBGPU_CANVAS_ALPHA_MODE,
+	};
+};
+
+const getPreferredCanvasFormat = () => {
+	if (typeof navigator?.gpu?.getPreferredCanvasFormat === "function") {
+		return navigator.gpu.getPreferredCanvasFormat();
+	}
+	return "bgra8unorm" as GPUTextureFormat;
 };
 
 const getTextureFormatIndex = (
 	canvasKit: InternalCanvasKitWebGPU,
 	textureFormat: GPUTextureFormat,
 ) => {
-	const formats = canvasKit.WebGPU?.TextureFormat;
-	if (!formats) {
-		return -1;
-	}
-	return formats.indexOf(textureFormat);
+	return canvasKit.WebGPU?.TextureFormat?.indexOf(textureFormat) ?? -1;
 };
 
-const getPreferredCanvasFormat = (): GPUTextureFormat => {
-	const gpuNavigator = globalThis.navigator as Navigator & {
-		gpu?: {
-			getPreferredCanvasFormat?: () => GPUTextureFormat;
+const toSimpleIRect = (
+	rect: InputIRect | undefined,
+	fallbackWidth = 0,
+	fallbackHeight = 0,
+): SimpleIRect => {
+	if (!rect) {
+		return {
+			left: 0,
+			top: 0,
+			right: fallbackWidth,
+			bottom: fallbackHeight,
 		};
+	}
+	const rectArrayLike = rect as ArrayLike<number>;
+	if (
+		typeof rectArrayLike.length === "number" &&
+		rectArrayLike.length >= 4
+	) {
+		return {
+			left: rectArrayLike[0] ?? 0,
+			top: rectArrayLike[1] ?? 0,
+			right: rectArrayLike[2] ?? fallbackWidth,
+			bottom: rectArrayLike[3] ?? fallbackHeight,
+		};
+	}
+	const rectObject = rect as IRectLike;
+	return {
+		left: rectObject.left ?? rectObject.fLeft ?? 0,
+		top: rectObject.top ?? rectObject.fTop ?? 0,
+		right: rectObject.right ?? rectObject.fRight ?? fallbackWidth,
+		bottom: rectObject.bottom ?? rectObject.fBottom ?? fallbackHeight,
 	};
-	return gpuNavigator.gpu?.getPreferredCanvasFormat?.() ?? "bgra8unorm";
 };
 
-const normalizeWebGPUCanvasOptions = (
-	opts?: WebGPUCanvasOptions,
-): WebGPUCanvasOptions => {
+const resolveImageInfoColorSpace = (
+	canvasKit: InternalCanvasKitWebGPU,
+	info?: ImageInfo | PartialImageInfo,
+) => {
+	if (info && "colorSpace" in info) {
+		return info.colorSpace;
+	}
+	return canvasKit.ColorSpace.SRGB;
+};
+
+const makeReleaseCallback = (
+	releaseProc?: ((releaseContext: unknown) => void) | null,
+	releaseContext?: unknown,
+): ReleaseCallback | null => {
+	if (typeof releaseProc !== "function") {
+		return null;
+	}
 	return {
-		...(opts ?? {}),
-		alphaMode: opts?.alphaMode ?? DEFAULT_WEBGPU_CANVAS_ALPHA_MODE,
+		callRelease() {
+			releaseProc(releaseContext);
+		},
 	};
+};
+
+const getTextureSourceWidth = (
+	source: TextureSource | VideoFrame,
+	info?: ImageInfo | PartialImageInfo,
+) => {
+	return (
+		info?.width ??
+		(source as { naturalWidth?: number }).naturalWidth ??
+		(source as { videoWidth?: number }).videoWidth ??
+		(source as { displayWidth?: number }).displayWidth ??
+		(source as { width?: number }).width ??
+		0
+	);
+};
+
+const getTextureSourceHeight = (
+	source: TextureSource | VideoFrame,
+	info?: ImageInfo | PartialImageInfo,
+) => {
+	return (
+		info?.height ??
+		(source as { naturalHeight?: number }).naturalHeight ??
+		(source as { videoHeight?: number }).videoHeight ??
+		(source as { displayHeight?: number }).displayHeight ??
+		(source as { height?: number }).height ??
+		0
+	);
+};
+
+const makePromiseTextureSourceImage = (
+	canvasKit: InternalCanvasKitWebGPU,
+	deviceContext: InternalWebGPUDeviceContext,
+	source: TextureSource | VideoFrame,
+	info?: ImageInfo | PartialImageInfo,
+	srcIsPremul?: boolean,
+) => {
+	const device = deviceContext._device;
+	if (!device) {
+		return null;
+	}
+	const width = Math.max(1, Math.ceil(getTextureSourceWidth(source, info)));
+	const height = Math.max(1, Math.ceil(getTextureSourceHeight(source, info)));
+	return canvasKit.SkImages?.PromiseTextureFrom?.(deviceContext, {
+		dimensions: {
+			width,
+			height,
+		},
+		textureInfo: {
+			textureFormat: WEBGPU_TEXTURE_SOURCE_FORMAT,
+			usage: getWebGPUTextureUsage(),
+		},
+		colorInfo: {
+			colorType: canvasKit.ColorType.RGBA_8888,
+			alphaType: srcIsPremul
+				? canvasKit.AlphaType.Premul
+				: canvasKit.AlphaType.Unpremul,
+			colorSpace: resolveImageInfoColorSpace(canvasKit, info),
+		},
+		fulfill: () => {
+			const texture = device.createTexture({
+				size: {
+					width,
+					height,
+				},
+				format: WEBGPU_TEXTURE_SOURCE_FORMAT,
+				usage: getWebGPUTextureUsage(),
+			});
+			device.queue.copyExternalImageToTexture(
+				{
+					source: source as never,
+				} as WebGPUExternalImageCopy,
+				{ texture },
+				{
+					width,
+					height,
+				},
+			);
+			return {
+				texture,
+				releaseContext: texture,
+			};
+		},
+		imageRelease: () => {
+			if (
+				typeof VideoFrame !== "undefined" &&
+				source instanceof VideoFrame
+			) {
+				source.close();
+			}
+		},
+		textureRelease: (releaseContext) => {
+			const texture = releaseContext as GPUTexture | undefined;
+			if (!texture) {
+				return;
+			}
+			destroyWebGPUTextureWhenQueueIdle(device, texture);
+		},
+	});
 };
 
 const disposeSurface = (surface: InternalWebGPUSurface) => {
@@ -314,52 +632,55 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 	if (!surfacePrototype || surfacePrototype.__aiNLEWebGPUPatched) {
 		return;
 	}
+	if (typeof surfacePrototype.flush !== "function") {
+		surfacePrototype.__aiNLEWebGPUPatched = true;
+		return;
+	}
 
-	const originalFlush = surfacePrototype.flush.bind(surfacePrototype) as (
+	const originalFlush = surfacePrototype.flush as (
+		this: InternalWebGPUSurface,
 		dirtyRect?: number[],
 	) => void;
 	surfacePrototype.__aiNLEWebGPUPatched = true;
 	surfacePrototype.assignCurrentSwapChainTexture = () => false;
 	surfacePrototype.makeImageFromTextureSource = function (
-		_source: TextureSource | VideoFrame,
+		this: InternalWebGPUSurface,
+		source: TextureSource | VideoFrame,
 		info?: ImageInfo | PartialImageInfo,
 		srcIsPremul?: boolean,
 	) {
-		return canvasKit.MakeLazyImageFromTextureSource?.(_source, info, srcIsPremul);
+		if (!this._deviceContext) {
+			return canvasKit.MakeImageFromCanvasImageSource(source as CanvasImageSource);
+		}
+		return (
+			makePromiseTextureSourceImage(
+				canvasKit,
+				this._deviceContext,
+				source,
+				info,
+				srcIsPremul,
+			) ?? canvasKit.MakeImageFromCanvasImageSource(source as CanvasImageSource)
+		);
 	};
 	surfacePrototype.updateTextureFromSource = function (
+		this: InternalWebGPUSurface,
 		image: Image,
 		source: TextureSource | VideoFrame,
 		srcIsPremul?: boolean,
 		info?: ImageInfo | PartialImageInfo,
 	) {
-		const nextImage = canvasKit.MakeLazyImageFromTextureSource?.(
+		const nextImage = this.makeImageFromTextureSource?.(
 			source,
 			info,
 			srcIsPremul,
 		);
-		if (!nextImage) {
-			return image;
-		}
-		return nextImage;
-	};
-	const requestAnimationFrameInternal = (
-		surface: InternalWebGPUSurface,
-		callback: (_: Canvas) => void,
-		dirtyRect?: number[],
-	) => {
-		if (surface._requestAnimationFrameInternal) {
-			return surface._requestAnimationFrameInternal(callback, dirtyRect);
-		}
-		return getRequestAnimationFrame()(() => {
-			callback(surface.getCanvas());
-			surface.flush(dirtyRect);
-		});
+		return nextImage ?? image;
 	};
 	surfacePrototype.flush = function (
 		this: InternalWebGPUSurface,
 		dirtyRect?: number[],
 	) {
+		// 必须把真实 surface 实例透传给原始 flush，不能把 prototype 当成 embind Surface。
 		originalFlush.call(this, dirtyRect);
 		this._deviceContext?.submit?.();
 	};
@@ -369,7 +690,7 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 		dirtyRect?: number[],
 	) {
 		if (!this.reportBackendTypeIsGPU?.()) {
-			return requestAnimationFrameInternal(this, callback, dirtyRect);
+			return this._requestAnimationFrameInternal?.(callback, dirtyRect) ?? 0;
 		}
 		return getRequestAnimationFrame()(() => {
 			if (this._canvasContext) {
@@ -399,15 +720,15 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 		getRequestAnimationFrame()(() => {
 			if (this._canvasContext) {
 				const surface = canvasKit.MakeGPUCanvasSurface?.(this._canvasContext);
-					if (!surface) {
-						console.error("Failed to initialize Surface for current canvas swapchain texture");
-						return;
-					}
-					callback(surface.getCanvas());
-					(surface as InternalWebGPUSurface).flush(dirtyRect);
-					disposeSurface(surface as InternalWebGPUSurface);
+				if (!surface) {
+					console.error("Failed to initialize Surface for current canvas swapchain texture");
 					return;
 				}
+				callback(surface.getCanvas());
+				(surface as InternalWebGPUSurface).flush(dirtyRect);
+				disposeSurface(surface as InternalWebGPUSurface);
+				return;
+			}
 			callback(this.getCanvas());
 			this.flush(dirtyRect);
 			disposeSurface(this);
@@ -416,9 +737,13 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 };
 
 const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
-	const makeGPUDeviceContext: NonNullable<
-		InternalCanvasKitWebGPU["MakeGPUDeviceContext"]
-	> = (device) => {
+	const jsValStore = getJsValStore(canvasKit);
+	const resolveOrigin = () => canvasKit.Origin?.TopLeft;
+	const resolveGenerateMipmaps = () => canvasKit.GenerateMipmapsFromBase?.No;
+	const resolveRescaleGamma = () => canvasKit.RescaleGamma?.Linear;
+	const resolveRescaleMode = () => canvasKit.RescaleMode?.Linear;
+
+	canvasKit.MakeGPUDeviceContext = (device) => {
 		if (!device) {
 			return null;
 		}
@@ -428,70 +753,249 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 			return null;
 		}
 		context._device = device;
-		context.submit = () => context._submit?.() ?? false;
+		context.submit = (syncToCpu?: boolean) => context._submit?.(syncToCpu) ?? false;
+		context.checkAsyncWorkCompletion = () => {
+			context._checkAsyncWorkCompletion?.();
+		};
+		context.ReadSurfacePixelsAsync = (
+			surface,
+			dstImageInfo,
+			srcRect,
+			rescaleGamma,
+			rescaleMode,
+		) => {
+			const resolvedRect = toSimpleIRect(
+				srcRect,
+				dstImageInfo.width,
+				dstImageInfo.height,
+			);
+			return new Promise((resolve) => {
+				const ok = context._readSurfacePixelsAsync?.(
+					surface,
+					dstImageInfo,
+					resolvedRect,
+					rescaleGamma ?? resolveRescaleGamma(),
+					rescaleMode ?? resolveRescaleMode(),
+					{ resolve },
+				);
+				if (!ok) {
+					resolve(null);
+				}
+			});
+		};
+		context.ReadSurfacePixelsYUV420Async = (
+			surface,
+			yuvColorSpace,
+			dstColorSpace,
+			srcRect,
+			dstSize,
+			rescaleGamma,
+			rescaleMode,
+		) => {
+			const resolvedSize = dstSize ?? {
+				width: surface.width(),
+				height: surface.height(),
+			};
+			const resolvedRect = toSimpleIRect(
+				srcRect,
+				resolvedSize.width,
+				resolvedSize.height,
+			);
+			return new Promise((resolve) => {
+				const ok = context._readSurfacePixelsYUV420Async?.(
+					surface,
+					yuvColorSpace,
+					dstColorSpace ?? canvasKit.ColorSpace.SRGB,
+					resolvedRect,
+					resolvedSize,
+					rescaleGamma ?? resolveRescaleGamma(),
+					rescaleMode ?? resolveRescaleMode(),
+					{ resolve },
+				);
+				if (!ok) {
+					resolve(null);
+				}
+			});
+		};
 		canvasKit._defaultWebGPUDeviceContext = context;
 		return context;
 	};
-	canvasKit.MakeGPUDeviceContext = makeGPUDeviceContext;
 
-	const makeGPUTextureSurface: NonNullable<
-		InternalCanvasKitWebGPU["MakeGPUTextureSurface"]
-	> = (
-		deviceContext,
-		texture,
-		textureFormat,
-		width,
-		height,
-		colorSpace,
-	) => {
-		const textureHandle = canvasKit.JsValStore?.add(texture);
-		const textureFormatIndex = getTextureFormatIndex(canvasKit, textureFormat);
-		if (
-			typeof textureHandle !== "number" ||
-			textureFormatIndex < 0 ||
-			typeof canvasKit._MakeGPUTextureSurface !== "function"
-		) {
-			return null;
-		}
-		const surface = canvasKit._MakeGPUTextureSurface(
-			deviceContext,
-			textureHandle,
-			textureFormatIndex,
-			texture.usage,
-			width,
-			height,
-			colorSpace ?? null,
-		) as InternalWebGPUSurface | null;
-		if (!surface) {
-			return null;
-		}
-		surface._deviceContext = deviceContext;
-		return surface;
+	canvasKit.SkSurfaces = {
+		RenderTarget: (context, imageInfo, mipmapped, _surfaceProps, label) =>
+			canvasKit._SkSurfaces_RenderTarget?.(
+				context,
+				imageInfo,
+				Boolean(mipmapped),
+				label ?? "",
+			) ?? null,
+		WrapBackendTexture: (
+			context,
+			texture,
+			colorSpace,
+			_surfaceProps,
+			releaseProc,
+			releaseContext,
+			label,
+		) => {
+			const textureFormatIndex = getTextureFormatIndex(canvasKit, texture.format);
+			if (textureFormatIndex < 0) {
+				return null;
+			}
+			const surface = canvasKit._SkSurfaces_WrapBackendTexture?.(
+				context,
+				jsValStore.add(texture),
+				textureFormatIndex,
+				texture.usage,
+				texture.width,
+				texture.height,
+				colorSpace ?? null,
+				makeReleaseCallback(releaseProc, releaseContext),
+				label ?? "",
+			) as InternalWebGPUSurface | null;
+			if (!surface) {
+				return null;
+			}
+			surface._deviceContext = context;
+			return surface;
+		},
+		AsImage: (surface) => canvasKit._SkSurfaces_AsImage?.(surface) ?? null,
+		AsImageCopy: (surface, subset, mipmapped) =>
+			canvasKit._SkSurfaces_AsImageCopy?.(
+				surface,
+				Boolean(subset),
+				toSimpleIRect(subset, surface.width(), surface.height()),
+				Boolean(mipmapped),
+			) ?? null,
 	};
-	canvasKit.MakeGPUTextureSurface = makeGPUTextureSurface;
 
-	const makeGPUCanvasContext: NonNullable<
-		InternalCanvasKitWebGPU["MakeGPUCanvasContext"]
-	> = (deviceContext, canvas, opts) => {
+	canvasKit.SkImages = {
+		WrapTexture: (
+			context,
+			texture,
+			colorType,
+			alphaType,
+			colorSpace,
+			origin,
+			generateMipmapsFromBase,
+			releaseProc,
+			releaseContext,
+			label,
+		) => {
+			const textureFormatIndex = getTextureFormatIndex(canvasKit, texture.format);
+			if (textureFormatIndex < 0) {
+				return null;
+			}
+			return (
+				canvasKit._SkImages_WrapTexture?.(
+					context,
+					jsValStore.add(texture),
+					textureFormatIndex,
+					texture.usage,
+					texture.width,
+					texture.height,
+					colorType,
+					alphaType,
+					colorSpace ?? null,
+					origin ?? resolveOrigin(),
+					generateMipmapsFromBase ?? resolveGenerateMipmaps(),
+					makeReleaseCallback(releaseProc, releaseContext),
+					label ?? "",
+				) ?? null
+			);
+		},
+		PromiseTextureFrom: (context, options) => {
+			const releaseContexts = new Map<number, unknown>();
+			const textureFormatIndex = getTextureFormatIndex(
+				canvasKit,
+				options.textureInfo.textureFormat,
+			);
+			if (textureFormatIndex < 0) {
+				return null;
+			}
+			const callbacks: PromiseTextureCallback = {
+				makeTexture() {
+					const fulfilled = options.fulfill(options.imageContext);
+					if (!fulfilled) {
+						return 0;
+					}
+					const texture = "texture" in fulfilled ? fulfilled.texture : fulfilled;
+					const releaseContext =
+						"texture" in fulfilled
+							? fulfilled.releaseContext
+							: fulfilled;
+					const handle = jsValStore.add(texture);
+					releaseContexts.set(handle, releaseContext);
+					return handle;
+				},
+				releaseTexture(textureHandle) {
+					const releaseContext = releaseContexts.get(textureHandle);
+					releaseContexts.delete(textureHandle);
+					jsValStore.remove(textureHandle);
+					options.textureRelease?.(releaseContext);
+				},
+				freeSrc() {
+					options.imageRelease?.(options.imageContext);
+				},
+			};
+			return (
+				canvasKit._SkImages_PromiseTextureFrom?.(
+					context,
+					textureFormatIndex,
+					options.textureInfo.usage,
+					options.dimensions.width,
+					options.dimensions.height,
+					options.colorInfo,
+					options.origin ?? resolveOrigin(),
+					Boolean(options.isVolatile),
+					callbacks,
+					options.label ?? "",
+				) ?? null
+			);
+		},
+		MakeWithFilter: (context, src, filter, subset, clipBounds) => {
+			const result = canvasKit._SkImages_MakeWithFilter?.(
+				context,
+				src,
+				filter,
+				toSimpleIRect(subset, src.width(), src.height()),
+				toSimpleIRect(clipBounds, src.width(), src.height()),
+			);
+			if (!result) {
+				return null;
+			}
+			return {
+				image: result.image,
+				outSubset: canvasKit.LTRBiRect(
+					result.outSubset.left,
+					result.outSubset.top,
+					result.outSubset.right,
+					result.outSubset.bottom,
+				),
+				offset: Int32Array.of(result.offset.x, result.offset.y),
+			};
+		},
+	};
+
+	canvasKit.MakeGPUCanvasContext = (context, canvas, opts) => {
 		const canvasContext = canvas.getContext("webgpu");
-		if (!canvasContext || !deviceContext._device) {
+		if (!canvasContext || !context._device) {
 			return null;
 		}
 		const resolvedOptions = normalizeWebGPUCanvasOptions(opts);
 		const textureFormat = resolvedOptions.format ?? getPreferredCanvasFormat();
 		canvasContext.configure({
-			device: deviceContext._device,
+			device: context._device,
 			format: textureFormat,
 			alphaMode: resolvedOptions.alphaMode,
 		});
 		const webgpuCanvasContext = {
 			_inner: canvasContext,
-			_deviceContext: deviceContext,
+			_deviceContext: context,
 			_textureFormat: textureFormat,
 			requestAnimationFrame(callback: (_: Canvas) => void) {
 				getRequestAnimationFrame()(() => {
-					const surface =
-						canvasKit.MakeGPUCanvasSurface?.(webgpuCanvasContext);
+					const surface = canvasKit.MakeGPUCanvasSurface?.(webgpuCanvasContext);
 					if (!surface) {
 						console.error("Failed to initialize Surface for current canvas swapchain texture");
 						return;
@@ -504,27 +1008,34 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 		} satisfies InternalWebGPUCanvasContext;
 		return webgpuCanvasContext;
 	};
-	canvasKit.MakeGPUCanvasContext = makeGPUCanvasContext;
 
-	const makeGPUCanvasSurface: NonNullable<
-		InternalCanvasKitWebGPU["MakeGPUCanvasSurface"]
-	> = (canvasContext, colorSpace, width, height) => {
+	canvasKit.MakeGPUCanvasSurface = (canvasContext, colorSpace, width, height) => {
 		const currentTexture = canvasContext._inner.getCurrentTexture();
-		const surface = canvasKit.MakeGPUTextureSurface?.(
-			canvasContext._deviceContext,
-			currentTexture,
+		const textureFormatIndex = getTextureFormatIndex(
+			canvasKit,
 			canvasContext._textureFormat,
+		);
+		if (textureFormatIndex < 0) {
+			return null;
+		}
+		const surface = canvasKit._SkSurfaces_WrapBackendTexture?.(
+			canvasContext._deviceContext,
+			jsValStore.add(currentTexture),
+			textureFormatIndex,
+			currentTexture.usage,
 			width ?? canvasContext._inner.canvas.width,
 			height ?? canvasContext._inner.canvas.height,
-			colorSpace,
+			colorSpace ?? null,
+			null,
+			"",
 		) as InternalWebGPUSurface | null;
 		if (!surface) {
 			return null;
 		}
+		surface._deviceContext = canvasContext._deviceContext;
 		surface._canvasContext = canvasContext;
 		return surface;
 	};
-	canvasKit.MakeGPUCanvasSurface = makeGPUCanvasSurface;
 };
 
 export const installCanvasKitWebGPU = (canvasKit: CanvasKit) => {
@@ -532,52 +1043,42 @@ export const installCanvasKitWebGPU = (canvasKit: CanvasKit) => {
 	if (!looksLikeActualCanvasKitBundle(internalCanvasKit)) {
 		return;
 	}
-	const mutableCanvasKit = internalCanvasKit as MutableCanvasKitWebGPU;
+
 	if (!internalCanvasKit.JsValStore) {
-		// 旧的 CanvasKit WebGPU helper 直接依赖自由变量 JsValStore。
-		// 在 Vite 预构建后的模块环境里，这个内部对象不会自动挂到实例上，
-		// 需要显式补一个全局句柄仓库，供 helper 和 wasm import 共用。
-		mutableCanvasKit.JsValStore = ensureGlobalJsValStore();
+		(internalCanvasKit as MutableCanvasKitWebGPU).JsValStore =
+			ensureGlobalJsValStore();
 	}
-	if (hasPublicWebGPUHelpers(internalCanvasKit)) {
-		const originalMakeGPUDeviceContext =
-			internalCanvasKit.MakeGPUDeviceContext?.bind(internalCanvasKit);
-		const originalMakeGPUCanvasContext =
-			internalCanvasKit.MakeGPUCanvasContext?.bind(internalCanvasKit);
-		if (originalMakeGPUDeviceContext) {
-			internalCanvasKit.MakeGPUDeviceContext = (device) => {
-				const context = originalMakeGPUDeviceContext(device);
-				if (context) {
-					internalCanvasKit._defaultWebGPUDeviceContext = context;
-				}
-				return context;
-			};
+
+	patchSurfacePrototype(internalCanvasKit);
+
+	if (!hasPublicWebGPUHelpers(internalCanvasKit)) {
+		if (!hasLowLevelWebGPUExports(internalCanvasKit)) {
+			return;
 		}
-		if (originalMakeGPUCanvasContext) {
-			internalCanvasKit.MakeGPUCanvasContext = (context, canvas, opts) => {
-				return originalMakeGPUCanvasContext(
-					context,
-					canvas,
-					normalizeWebGPUCanvasOptions(opts),
-				);
-			};
-		}
-			// 官方 bundle 已经提供可用 helper 时，直接保留原始实现。
-			// emdawnwebgpu 的内部对象不一定会挂到 CanvasKit 实例上，
-			// 此时不能再按私有导出缺失来误判并删除 public helper。
-			internalCanvasKit.webgpu = true;
-		return;
-	}
-	if (!hasLowLevelWebGPUExports(internalCanvasKit)) {
-		disableBrokenWebGPUHelpers(internalCanvasKit);
+		installPublicWebGPUHelpers(internalCanvasKit);
 		return;
 	}
 
-	internalCanvasKit.webgpu = true;
-	installPublicWebGPUHelpers(internalCanvasKit);
-	patchSurfacePrototype(internalCanvasKit);
-	if (!hasPublicWebGPUHelpers(internalCanvasKit)) {
-		disableBrokenWebGPUHelpers(internalCanvasKit);
-		return;
+	const originalMakeGPUDeviceContext =
+		internalCanvasKit.MakeGPUDeviceContext?.bind(internalCanvasKit);
+	const originalMakeGPUCanvasContext =
+		internalCanvasKit.MakeGPUCanvasContext?.bind(internalCanvasKit);
+	if (originalMakeGPUDeviceContext) {
+		internalCanvasKit.MakeGPUDeviceContext = (device) => {
+			const context = originalMakeGPUDeviceContext(device);
+			if (context) {
+				internalCanvasKit._defaultWebGPUDeviceContext = context;
+			}
+			return context;
+		};
+	}
+	if (originalMakeGPUCanvasContext) {
+		internalCanvasKit.MakeGPUCanvasContext = (context, canvas, opts) => {
+			return originalMakeGPUCanvasContext(
+				context,
+				canvas,
+				normalizeWebGPUCanvasOptions(opts),
+			);
+		};
 	}
 };

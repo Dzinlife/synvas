@@ -1,5 +1,7 @@
 import type {
 	CanvasKit,
+	SkImagesFactory,
+	SkSurfacesFactory,
 	Surface,
 	WebGPUCanvasContext,
 	WebGPUCanvasOptions,
@@ -46,14 +48,8 @@ export type CanvasKitWebGPU = CanvasKit & {
 		width?: number,
 		height?: number,
 	) => Surface | null;
-	MakeGPUTextureSurface?: (
-		context: WebGPUDeviceContext,
-		texture: GPUTexture,
-		textureFormat: GPUTextureFormat,
-		width: number,
-		height: number,
-		colorSpace?: unknown,
-	) => Surface | null;
+	SkSurfaces?: SkSurfacesFactory;
+	SkImages?: SkImagesFactory;
 };
 
 let renderBackend: SkiaRenderBackend = { bundle: "webgl", kind: "software" };
@@ -68,7 +64,13 @@ const hasWebGPUSurfaceFactory = (CanvasKit: CanvasKit) => {
 		typeof canvasKit.MakeGPUDeviceContext === "function" &&
 		typeof canvasKit.MakeGPUCanvasContext === "function" &&
 		typeof canvasKit.MakeGPUCanvasSurface === "function" &&
-		typeof canvasKit.MakeGPUTextureSurface === "function"
+		typeof canvasKit.SkSurfaces?.RenderTarget === "function" &&
+		typeof canvasKit.SkSurfaces?.WrapBackendTexture === "function" &&
+		typeof canvasKit.SkSurfaces?.AsImage === "function" &&
+		typeof canvasKit.SkSurfaces?.AsImageCopy === "function" &&
+		typeof canvasKit.SkImages?.WrapTexture === "function" &&
+		typeof canvasKit.SkImages?.PromiseTextureFrom === "function" &&
+		typeof canvasKit.SkImages?.MakeWithFilter === "function"
 	);
 };
 

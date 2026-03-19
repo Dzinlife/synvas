@@ -3,6 +3,7 @@ import type {
   CanvasKit,
   CubicResampler as CKCubicResampler,
   FilterOptions as CKFilterOptions,
+  Font,
 } from "canvaskit-wasm";
 
 import {
@@ -34,7 +35,11 @@ import {
   isCubicSampling,
 } from "../types";
 
-import { getEnum, HostObject } from "./Host";
+import {
+  getEnum,
+  HostObject,
+  setCurrentCanvasKitContextIfNeeded,
+} from "./Host";
 import { JsiSkPaint } from "./JsiSkPaint";
 import { JsiSkRect } from "./JsiSkRect";
 import { JsiSkRRect } from "./JsiSkRRect";
@@ -301,7 +306,7 @@ export class JsiSkCanvas
     font: SkFont,
     paint: SkPaint
   ) {
-    const fontRef = JsiSkFont.fromValue(font);
+    const fontRef = JsiSkFont.fromValue(font) as Font | null;
     if (!fontRef) {
       return;
     }
@@ -452,6 +457,7 @@ export class JsiSkCanvas
   }
 
   readPixels(srcX: number, srcY: number, imageInfo: ImageInfo) {
+    setCurrentCanvasKitContextIfNeeded(this.CanvasKit, this.ref);
     const pxInfo = {
       width: imageInfo.width,
       height: imageInfo.height,
