@@ -58,6 +58,14 @@ export const drawImage = (ctx: DrawingContext, props: ImageProps) => {
   "worklet";
   const { image, sampling } = props;
   if (image) {
+    // Web 端对象被 dispose 后 ref 会被置为 null，此时应跳过绘制避免崩溃
+    const maybeHostImage = image as unknown as { ref?: unknown };
+    if (
+      "ref" in maybeHostImage &&
+      (maybeHostImage.ref === null || maybeHostImage.ref === undefined)
+    ) {
+      return;
+    }
     const fit = props.fit ?? "contain";
     const rect = processRect(ctx.Skia, props);
     const { src, dst } = fitRects(
