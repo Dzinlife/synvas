@@ -8,6 +8,7 @@ import type { TimelineElement as TimelineElementType } from "core/element/types"
 import React, {
 	useCallback,
 	useEffect,
+	useEffectEvent,
 	useMemo,
 	useRef,
 	useState,
@@ -15,7 +16,10 @@ import React, {
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { useModelExists } from "@/element/model/registry";
 import { cn } from "@/lib/utils";
-import { useModelRegistry } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import {
+	useModelRegistry,
+	useTimelineStoreApi,
+} from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { framesToTimecode } from "@/utils/timecode";
 import {
 	useAttachments,
@@ -26,7 +30,6 @@ import {
 	useMultiSelect,
 	useRippleEditing,
 	useSnap,
-	useTimelineStore,
 	useTrackAssignments,
 } from "../contexts/TimelineContext";
 import { getElementHeightForTrack } from "../timeline/index";
@@ -279,7 +282,10 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 	const { selectedIds, select, toggleSelect, setSelection } = useMultiSelect();
 	const { snapEnabled, setActiveSnapPoint } = useSnap();
 	const { elements, setElements } = useElements();
-	const currentTime = useTimelineStore((state) => state.currentTime);
+	const timelineStore = useTimelineStoreApi();
+	const getCurrentTime = useEffectEvent(() => {
+		return timelineStore.getState().currentTime;
+	});
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
@@ -368,7 +374,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 		trackAssignments,
 		maxDuration,
 		elements,
-		currentTime,
+		getCurrentTime,
 		snapEnabled,
 		autoAttach,
 		rippleEditingEnabled,

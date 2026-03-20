@@ -58,7 +58,7 @@ interface UseTimelineElementDndOptions {
 	trackAssignments: Map<string, number>;
 	maxDuration?: number;
 	elements: TimelineElement[];
-	currentTime: number;
+	getCurrentTime: () => number;
 	snapEnabled: boolean;
 	autoAttach: boolean;
 	rippleEditingEnabled: boolean;
@@ -333,7 +333,7 @@ export const useTimelineElementDnd = ({
 	trackAssignments,
 	maxDuration,
 	elements,
-	currentTime,
+	getCurrentTime,
 	snapEnabled,
 	autoAttach,
 	rippleEditingEnabled,
@@ -794,7 +794,7 @@ export const useTimelineElementDnd = ({
 				if (snapEnabled) {
 					const snapPoints = collectSnapPoints(
 						elements,
-						currentTime,
+						getCurrentTime(),
 						element.id,
 					);
 					const snapped = applySnap(previewStart, snapPoints, ratio);
@@ -890,7 +890,11 @@ export const useTimelineElementDnd = ({
 
 			let snapPoint = null;
 			if (snapEnabled) {
-				const snapPoints = collectSnapPoints(elements, currentTime, element.id);
+				const snapPoints = collectSnapPoints(
+					elements,
+					getCurrentTime(),
+					element.id,
+				);
 				const snapped = applySnap(newStart, snapPoints, ratio);
 				if (
 					snapped.snapPoint &&
@@ -1034,7 +1038,7 @@ export const useTimelineElementDnd = ({
 				if (snapEnabled) {
 					const snapPoints = collectSnapPoints(
 						elements,
-						currentTime,
+						getCurrentTime(),
 						element.id,
 					);
 					const snapped = applySnap(newEnd, snapPoints, ratio);
@@ -1080,7 +1084,11 @@ export const useTimelineElementDnd = ({
 
 			let snapPoint = null;
 			if (snapEnabled) {
-				const snapPoints = collectSnapPoints(elements, currentTime, element.id);
+				const snapPoints = collectSnapPoints(
+					elements,
+					getCurrentTime(),
+					element.id,
+				);
 				const snapped = applySnap(newEnd, snapPoints, ratio);
 				if (
 					snapped.snapPoint &&
@@ -1330,7 +1338,7 @@ export const useTimelineElementDnd = ({
 												: selectedId;
 										const snapPoints = collectSnapPoints(
 											baseElements,
-											currentTime,
+											getCurrentTime(),
 											snapExcludeId,
 										);
 										const snapped = applySnapForDrag(
@@ -2195,7 +2203,7 @@ export const useTimelineElementDnd = ({
 				const snapExcludeId = activeCopyId ?? element.id;
 				const snapPoints = collectSnapPoints(
 					elements,
-					currentTime,
+					getCurrentTime(),
 					snapExcludeId,
 				);
 				const snapped = applySnapForDrag(newStart, newEnd, snapPoints, ratio);

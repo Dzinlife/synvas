@@ -35,7 +35,6 @@ import TimelineTrackSidebarItem from "./components/TimelineTrackSidebarItem";
 import {
 	useAttachments,
 	useAutoScroll,
-	useCurrentTime,
 	useDragging,
 	useElements,
 	useFps,
@@ -212,7 +211,7 @@ const TimelineEditor = () => {
 	const setPreviewTime = useTimelineStore((state) => state.setPreviewTime);
 	const { previewAxisEnabled } = usePreviewAxis();
 	const { isPlaying, pause } = usePlaybackControl();
-	const { currentTime, setCurrentTime: seekTo } = useCurrentTime();
+	const seekTo = useTimelineStore((state) => state.seekTo);
 	const { fps } = useFps();
 	const { assets } = useProjectAssets();
 	const currentProject = useProjectStore((state) => state.currentProject);
@@ -1224,49 +1223,63 @@ const TimelineEditor = () => {
 			Date.now() + PLAYHEAD_FOLLOW_MANUAL_DEBOUNCE_MS;
 	}, [isPlaying, scrollLeft]);
 
-	// 播放时播放头不在可视范围内才跳转，让播放头回到内容区左侧
+	// 播放时通过 store 订阅播放头自动跟随，避免每帧触发 TimelineEditor 重渲染
 	useEffect(() => {
 		if (!isPlaying) return;
-		if (Date.now() < manualScrollSuppressUntilRef.current) return;
+		const runAutoFollow = (playheadTime: number) => {
+			if (Date.now() < manualScrollSuppressUntilRef.current) return;
 
-		const safeRatio = Number.isFinite(ratio) ? ratio : 0;
-		const visibleWidth = Number.isFinite(rulerWidth)
-			? Math.max(0, rulerWidth)
-			: 0;
-		if (safeRatio <= 0 || visibleWidth <= 0) return;
+			const safeRatio = Number.isFinite(ratio) ? ratio : 0;
+			const visibleWidth = Number.isFinite(rulerWidth)
+				? Math.max(0, rulerWidth)
+				: 0;
+			if (safeRatio <= 0 || visibleWidth <= 0) return;
 
-		const playheadX =
-			timelinePaddingLeft + currentTime * safeRatio - scrollLeft;
-		const isPlayheadOutOfView = playheadX < 0 || playheadX > visibleWidth;
-		if (!Number.isFinite(playheadX) || !isPlayheadOutOfView) {
-			return;
-		}
+			const currentScrollLeft = timelineStore.getState().scrollLeft;
+			const playheadX =
+				timelinePaddingLeft + playheadTime * safeRatio - currentScrollLeft;
+			const isPlayheadOutOfView = playheadX < 0 || playheadX > visibleWidth;
+			if (!Number.isFinite(playheadX) || !isPlayheadOutOfView) {
+				return;
+			}
 
-		const maxScrollLeft = Number.isFinite(timelineMaxScrollLeft)
-			? Math.max(0, timelineMaxScrollLeft)
-			: 0;
-		const targetScrollLeft = Math.min(
-			Math.max(0, currentTime * safeRatio + timelinePaddingLeft),
-			maxScrollLeft,
+			const maxScrollLeft = Number.isFinite(timelineMaxScrollLeft)
+				? Math.max(0, timelineMaxScrollLeft)
+				: 0;
+			const targetScrollLeft = Math.min(
+				Math.max(0, playheadTime * safeRatio + timelinePaddingLeft),
+				maxScrollLeft,
+			);
+			if (
+				Math.abs(targetScrollLeft - currentScrollLeft) <=
+				AUTO_FOLLOW_SCROLL_MATCH_EPSILON
+			) {
+				return;
+			}
+
+			pendingAutoFollowScrollLeftRef.current = targetScrollLeft;
+			setScrollLeft(targetScrollLeft);
+		};
+
+		const unsubscribe = timelineStore.subscribe(
+			(state) => state.currentTime,
+			(nextCurrentTime) => {
+				runAutoFollow(nextCurrentTime);
+			},
+			{ fireImmediately: true },
 		);
-		if (
-			Math.abs(targetScrollLeft - scrollLeft) <=
-			AUTO_FOLLOW_SCROLL_MATCH_EPSILON
-		) {
-			return;
-		}
 
-		pendingAutoFollowScrollLeftRef.current = targetScrollLeft;
-		setScrollLeft(targetScrollLeft);
+		return () => {
+			unsubscribe();
+		};
 	}, [
-		currentTime,
 		isPlaying,
 		ratio,
 		rulerWidth,
-		scrollLeft,
 		setScrollLeft,
 		timelineMaxScrollLeft,
 		timelinePaddingLeft,
+		timelineStore,
 	]);
 
 	// 使用原生事件监听器来正确处理滚动，防止触发窗口滚动
@@ -1535,7 +1548,6 @@ const TimelineEditor = () => {
 		handleMouseMove,
 		handleClick,
 		leftColumnWidth,
-		currentTime,
 		fps,
 		scrollLeft,
 		ratio,

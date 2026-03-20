@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useDeferredValue, useEffect, useRef } from "react";
 import {
 	useDragging,
 	usePlaybackControl,
@@ -25,7 +25,9 @@ const CurrentTimeIndicatorCanvas: React.FC<CurrentTimeIndicatorCanvasProps> = ({
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	// 直接从 store 获取固定时间，不受 previewTime 影响
 	const currentTime = useTimelineStore((state) => state.currentTime);
+	const deferredCurrentTime = useDeferredValue(currentTime);
 	const { previewTime } = usePreviewTime();
+	const deferredPreviewTime = useDeferredValue(previewTime);
 	const { previewAxisEnabled } = usePreviewAxis();
 	const { isPlaying } = usePlaybackControl();
 	const { isDragging } = useDragging();
@@ -48,7 +50,7 @@ const CurrentTimeIndicatorCanvas: React.FC<CurrentTimeIndicatorCanvasProps> = ({
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 
 		// 绘制红色竖线 - 固定时间（currentTime）
-		const currentX = leftOffset + currentTime * ratio - scrollLeft;
+		const currentX = leftOffset + deferredCurrentTime * ratio - scrollLeft;
 		const arrowTopY = 2;
 		const arrowHalfWidth = 4;
 		const arrowNeckHalfWidth = 4;
@@ -128,11 +130,11 @@ const CurrentTimeIndicatorCanvas: React.FC<CurrentTimeIndicatorCanvasProps> = ({
 		// 绘制蓝色竖线 - 预览时间（previewTime，如果存在且非播放/拖拽状态）
 		if (
 			previewAxisEnabled &&
-			previewTime !== null &&
+			deferredPreviewTime !== null &&
 			!isPlaying &&
 			!isDragging
 		) {
-			const previewX = leftOffset + previewTime * ratio - scrollLeft;
+			const previewX = leftOffset + deferredPreviewTime * ratio - scrollLeft;
 			ctx.strokeStyle = "#3b82f6"; // blue-500
 			ctx.lineWidth = 1;
 			ctx.setLineDash([4, 4]); // 虚线
@@ -146,8 +148,8 @@ const CurrentTimeIndicatorCanvas: React.FC<CurrentTimeIndicatorCanvasProps> = ({
 		leftOffset,
 		ratio,
 		scrollLeft,
-		currentTime,
-		previewTime,
+		deferredCurrentTime,
+		deferredPreviewTime,
 		previewAxisEnabled,
 		isPlaying,
 		isDragging,
