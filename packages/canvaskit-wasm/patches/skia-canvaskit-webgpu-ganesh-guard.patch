@@ -1,0 +1,12 @@
+diff --git a/modules/canvaskit/canvaskit_bindings.cpp b/modules/canvaskit/canvaskit_bindings.cpp
+--- a/modules/canvaskit/canvaskit_bindings.cpp
++++ b/modules/canvaskit/canvaskit_bindings.cpp
+@@ -75,7 +75,7 @@
+ #include <emscripten/bind.h>
+ #include <emscripten/html5.h>
+ #include "modules/canvaskit/WasmCommon.h"
+ 
+-#if defined(CK_ENABLE_WEBGL) || defined(CK_ENABLE_WEBGPU)
++#ifdef CK_ENABLE_WEBGL
+ #define ENABLE_GPU
+ #endif

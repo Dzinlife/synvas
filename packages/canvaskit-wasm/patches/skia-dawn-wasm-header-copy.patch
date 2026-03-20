@@ -1,12 +1,66 @@
 diff --git a/third_party/dawn/build_dawn.py b/third_party/dawn/build_dawn.py
 --- a/third_party/dawn/build_dawn.py
 +++ b/third_party/dawn/build_dawn.py
-@@ -193,6 +193,8 @@
+@@ -192,22 +192,52 @@
+   # The install target is broken, so we manually copy the headers.
    # The headers are located in the build directory in a gen/include folder.
    # The Skia build expects to find headers in subdirectories of the include path.
-   generated_headers_src = os.path.join(build_dir, "gen", "include")
+-  generated_headers_src = os.path.join(build_dir, "gen", "include")
++  generated_headers_sources = [os.path.join(build_dir, "gen", "include")]
 +  if target_os == "wasm":
-+    generated_headers_src = os.path.join(build_dir, "gen", "src", "emdawnwebgpu", "include")
++    generated_headers_sources.append(
++        os.path.join(build_dir, "gen", "src", "emdawnwebgpu", "include"))
    generated_headers_dest = os.path.join(gen_dir, "include")
  
    if os.path.exists(generated_headers_dest):
+     shutil.rmtree(generated_headers_dest)
+ 
+-  # Copy the contents of the 'dawn' and 'webgpu' directories into the destination.
+-  shutil.copytree(
+-      os.path.join(generated_headers_src, "dawn"),
+-      os.path.join(generated_headers_dest, "dawn"),
+-      dirs_exist_ok=True)
+-  shutil.copytree(
+-      os.path.join(generated_headers_src, "webgpu"),
+-      os.path.join(generated_headers_dest, "webgpu"),
+-      dirs_exist_ok=True)
++  # Copy headers from generated sources. On wasm we merge both generic headers
++  # and emdawnwebgpu-specific headers.
++  for generated_headers_src in generated_headers_sources:
++    dawn_headers_src = os.path.join(generated_headers_src, "dawn")
++    if os.path.exists(dawn_headers_src):
++      shutil.copytree(
++          dawn_headers_src,
++          os.path.join(generated_headers_dest, "dawn"),
++          dirs_exist_ok=True)
++    webgpu_headers_src = os.path.join(generated_headers_src, "webgpu")
++    if os.path.exists(webgpu_headers_src):
++      shutil.copytree(
++          webgpu_headers_src,
++          os.path.join(generated_headers_dest, "webgpu"),
++          dirs_exist_ok=True)
+ 
++  if target_os == "wasm":
++    emsdk_include_dir = os.path.join(
++        script_dir,
++        "..",
++        "externals",
++        "emsdk",
++        "upstream",
++        "emscripten",
++        "cache",
++        "sysroot",
++        "include")
++    os.makedirs(emsdk_include_dir, exist_ok=True)
++    shutil.copytree(
++        os.path.join(generated_headers_dest, "dawn"),
++        os.path.join(emsdk_include_dir, "dawn"),
++        dirs_exist_ok=True)
++    shutil.copytree(
++        os.path.join(generated_headers_dest, "webgpu"),
++        os.path.join(emsdk_include_dir, "webgpu"),
++        dirs_exist_ok=True)
++
+   dependencies, object_files = discover_dependencies(build_dir, build_targets)
+   write_depfile(output_path, depfile_path, dependencies)
+ 

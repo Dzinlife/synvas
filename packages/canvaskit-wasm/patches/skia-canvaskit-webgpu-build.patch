@@ -2,16 +2,6 @@ diff --git a/modules/canvaskit/canvaskit_bindings.cpp b/modules/canvaskit/canvas
 index 59c6249..bbcba1e 100644
 --- a/modules/canvaskit/canvaskit_bindings.cpp
 +++ b/modules/canvaskit/canvaskit_bindings.cpp
-@@ -32,7 +32,9 @@
- #include "include/core/SkPicture.h"
- #include "include/core/SkPictureRecorder.h"
- #include "include/core/SkPoint3.h"
-+#include "include/core/SkPathBuilder.h"
- #include "include/core/SkRRect.h"
-+#include "include/core/SkRSXform.h"
- #include "include/core/SkSamplingOptions.h"
- #include "include/core/SkScalar.h"
- #include "include/core/SkSerialProcs.h"
 @@ -103,9 +105,32 @@
  #endif  // CK_ENABLE_WEBGL
  
@@ -254,7 +244,7 @@ index 59c6249..bbcba1e 100644
 +                                            rescaleMode,
 +                                            ResolveAsyncReadCallback,
 +                                            context);
-+        if (!this->submit(true)) {
++        if (!this->submit(false)) {
 +            ResolveAsyncReadCallback(context, nullptr);
 +            return false;
 +        }
@@ -296,7 +286,7 @@ index 59c6249..bbcba1e 100644
 +                                                  rescaleMode,
 +                                                  ResolveAsyncReadCallback,
 +                                                  context);
-+        if (!this->submit(true)) {
++        if (!this->submit(false)) {
 +            ResolveAsyncReadCallback(context, nullptr);
 +            return false;
 +        }
@@ -677,126 +667,6 @@ index 59c6249..bbcba1e 100644
  }
  
  #endif  // CK_ENABLE_WEBGPU
-@@ -724,6 +1239,119 @@ SkPath MakePathFromVerbsPointsWeights(WASMPointerU8 verbsPtr,
-                        SkPathFillType::kDefault);
- }
- 
-+#ifndef CK_NO_FONTS
-+struct GlyphPathBuilderContext {
-+    const SkPoint* positions = nullptr;
-+    const SkRSXform* rsxforms = nullptr;
-+    size_t index = 0;
-+    SkPathBuilder builder;
-+    bool useRSXform = false;
-+};
-+
-+SkMatrix RSXformToMatrix(const SkRSXform& rsxform) {
-+    SkMatrix matrix;
-+    matrix.setAll(rsxform.fSCos,
-+                  -rsxform.fSSin,
-+                  rsxform.fTx,
-+                  rsxform.fSSin,
-+                  rsxform.fSCos,
-+                  rsxform.fTy,
-+                  0,
-+                  0,
-+                  1);
-+    return matrix;
-+}
-+
-+void AppendGlyphPath(const SkPath* glyphPath, const SkMatrix& mx, void* rawCtx) {
-+    auto* ctx = reinterpret_cast<GlyphPathBuilderContext*>(rawCtx);
-+    const size_t glyphIndex = ctx->index++;
-+    if (!glyphPath) {
-+        return;
-+    }
-+
-+    SkPath transformed = glyphPath->makeTransform(mx);
-+    if (ctx->useRSXform) {
-+        transformed = transformed.makeTransform(RSXformToMatrix(ctx->rsxforms[glyphIndex]));
-+    } else {
-+        const SkPoint& position = ctx->positions[glyphIndex];
-+        transformed = transformed.makeOffset(position.fX, position.fY);
-+    }
-+    ctx->builder.addPath(transformed);
-+}
-+
-+SkPathOrNull MakePathFromGlyphs(const SkFont& font,
-+                                WASMPointerU16 gPtr,
-+                                size_t byteLen,
-+                                WASMPointerF32 pPtr,
-+                                size_t numPos) {
-+    const size_t numGlyphs = byteLen >> 1;
-+    if (numGlyphs == 0) {
-+        return emscripten::val(SkPath());
-+    }
-+    if ((numPos >> 1) < numGlyphs) {
-+        return emscripten::val::null();
-+    }
-+
-+    const auto* glyphs = reinterpret_cast<const SkGlyphID*>(gPtr);
-+    const auto* positions = reinterpret_cast<const SkPoint*>(pPtr);
-+    GlyphPathBuilderContext ctx;
-+    ctx.positions = positions;
-+    font.getPaths({glyphs, numGlyphs}, AppendGlyphPath, &ctx);
-+    return emscripten::val(ctx.builder.detach());
-+}
-+
-+SkPathOrNull MakePathFromRSXformGlyphs(const SkFont& font,
-+                                       WASMPointerU16 gPtr,
-+                                       size_t byteLen,
-+                                       WASMPointerF32 xPtr,
-+                                       size_t numXforms) {
-+    const size_t numGlyphs = byteLen >> 1;
-+    if (numGlyphs == 0) {
-+        return emscripten::val(SkPath());
-+    }
-+    if ((numXforms >> 2) < numGlyphs) {
-+        return emscripten::val::null();
-+    }
-+
-+    const auto* glyphs = reinterpret_cast<const SkGlyphID*>(gPtr);
-+    const auto* rsxforms = reinterpret_cast<const SkRSXform*>(xPtr);
-+    GlyphPathBuilderContext ctx;
-+    ctx.rsxforms = rsxforms;
-+    ctx.useRSXform = true;
-+    font.getPaths({glyphs, numGlyphs}, AppendGlyphPath, &ctx);
-+    return emscripten::val(ctx.builder.detach());
-+}
-+
-+SkPathOrNull MakePathFromText(WASMPointerU8 sptr,
-+                              size_t len,
-+                              float x,
-+                              float y,
-+                              const SkFont& font) {
-+    const char* str = reinterpret_cast<const char*>(sptr);
-+    const size_t glyphCount = font.countText(str, len, SkTextEncoding::kUTF8);
-+    if (glyphCount == 0) {
-+        return emscripten::val(SkPath());
-+    }
-+
-+    std::vector<SkGlyphID> glyphs(glyphCount);
-+    font.textToGlyphs(str,
-+                      len,
-+                      SkTextEncoding::kUTF8,
-+                      {glyphs.data(), glyphs.size()});
-+
-+    std::vector<SkPoint> positions(glyphCount);
-+    font.getPos({glyphs.data(), glyphs.size()},
-+                {positions.data(), positions.size()},
-+                {x, y});
-+
-+    return MakePathFromGlyphs(font,
-+                              reinterpret_cast<WASMPointerU16>(glyphs.data()),
-+                              glyphs.size() * sizeof(SkGlyphID),
-+                              reinterpret_cast<WASMPointerF32>(positions.data()),
-+                              positions.size() * 2);
-+}
-+#endif
-+
- void PathAddVerbsPointsWeights(SkPathBuilder& self,
-                                WASMPointerU8 verbsPtr,
-                                int numVerbs,
 @@ -1118,10 +1746,10 @@ private:
  EMSCRIPTEN_BINDINGS(Skia) {
  #ifdef ENABLE_GPU
@@ -831,19 +701,6 @@ index 59c6249..bbcba1e 100644
  #endif  // CK_ENABLE_WEBGPU
  
      function("getDecodeCacheLimitBytes", &SkResourceCache::GetTotalByteLimit);
-@@ -2323,6 +2964,12 @@ EMSCRIPTEN_BINDINGS(Skia) {
-             .class_function("MakeFromPathInterpolation", &MakePathFromInterpolation)
-             .class_function("_MakeFromCmds", &MakePathFromCmds)
-             .class_function("_MakeFromVerbsPointsWeights", &MakePathFromVerbsPointsWeights)
-+#ifndef CK_NO_FONTS
-+            .class_function("_MakeFromGlyphs", &MakePathFromGlyphs, allow_raw_pointers())
-+            .class_function(
-+                    "_MakeFromRSXformGlyphs", &MakePathFromRSXformGlyphs, allow_raw_pointers())
-+            .class_function("_MakeFromText", &MakePathFromText, allow_raw_pointers())
-+#endif
-             .function("countPoints", &SkPath::countPoints)
-             .function("contains", optional_override(
-                               [](const SkPath& self, float x, float y) -> bool {
 @@ -2893,16 +3540,6 @@ EMSCRIPTEN_BINDINGS(Skia) {
                                    releaseCtx);
                        }))

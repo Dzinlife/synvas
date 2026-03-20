@@ -233,56 +233,6 @@ index 892a27e..eec6a4c 100644
  
  /**
   * Represents the canvas context and swapchain backed by a WebGPU device.
-@@ -3909,6 +3971,16 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
-      */
-     MakeFromCmds(cmds: InputCommands): Path | null;
- 
-+    /**
-+     * Creates a new path by drawing each glyph at the corresponding x/y position.
-+     * Positions are provided as a flattened point array `[x0, y0, x1, y1, ...]`.
-+     * @param glyphs
-+     * @param positions
-+     * @param font
-+     */
-+    MakeFromGlyphs(glyphs: InputGlyphIDArray, positions: InputFlattenedPointArray,
-+                   font: Font): Path | null;
-+
-     /**
-      * Creates a new path by combining the given paths according to op. If this fails, null will
-      * be returned instead.
-@@ -3940,6 +4012,15 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
-      */
-     MakeFromPathInterpolation(start: Path, end: Path, weight: number): Path | null;
- 
-+    /**
-+     * Creates a new path by drawing each glyph with the corresponding rsxform.
-+     * @param glyphs
-+     * @param rsxforms
-+     * @param font
-+     */
-+    MakeFromRSXformGlyphs(glyphs: InputGlyphIDArray, rsxforms: InputFlattenedRSXFormArray,
-+                          font: Font): Path | null;
-+
-     /**
-      * Creates a new path from the provided SVG string. If this fails, null will be
-      * returned instead.
-@@ -3947,6 +4028,16 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
-      */
-     MakeFromSVGString(str: string): Path | null;
- 
-+    /**
-+     * Creates a new path from text laid out with the provided font, with the
-+     * first glyph positioned at x/y.
-+     * @param str
-+     * @param x
-+     * @param y
-+     * @param font
-+     */
-+    MakeFromText(str: string, x: number, y: number, font: Font): Path | null;
-+
-     /**
-      * Creates a new path using the provided verbs and associated points and weights. The process
-      * reads the first verb from verbs and then the appropriate number of points from the
 @@ -4587,15 +4678,20 @@ export type FillType = EmbindEnumEntity;
  export type FilterMode = EmbindEnumEntity;
  export type FontEdging = EmbindEnumEntity;

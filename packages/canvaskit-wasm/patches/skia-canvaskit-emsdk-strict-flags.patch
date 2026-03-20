@@ -1,0 +1,28 @@
+diff --git a/modules/canvaskit/BUILD.gn b/modules/canvaskit/BUILD.gn
+--- a/modules/canvaskit/BUILD.gn
++++ b/modules/canvaskit/BUILD.gn
+@@ -197,7 +197,7 @@ skia_wasm_lib("canvaskit") {
+       "--pre-js",
+       rebase_path("webgpu.js"),
+       "-sUSE_WEBGL2=0",
+-      "-sUSE_WEBGPU=1",
++      "--use-port=emdawnwebgpu",
+       "-sASYNCIFY",
+ 
+       # Modules from html5_webgpu for JS<->WASM interop
+@@ -339,7 +339,6 @@ skia_wasm_lib("canvaskit") {
+     rebase_path("postamble.js"),
+     "-sALLOW_MEMORY_GROWTH",
+     "-sDISABLE_EXCEPTION_CATCHING",
+-    "-sNODEJS_CATCH_EXIT=0",
+     "-sDYNAMIC_EXECUTION=0",
+     "-sEXPORT_NAME=CanvasKitInit",
+     "-sEXPORTED_FUNCTIONS=[_malloc,_free]",
+@@ -349,7 +348,6 @@ skia_wasm_lib("canvaskit") {
+     "-sNO_EXIT_RUNTIME=1",
+     "-sINITIAL_MEMORY=128MB",
+     "-sWASM",
+-    "-sSTRICT=1",
+     "-sEXPORTED_RUNTIME_METHODS=HEAP32,HEAPU8,HEAPU16,HEAPU32,HEAPF32",
+ 
+     # INCOMING_MODULE_JS_API is set to empty by default.

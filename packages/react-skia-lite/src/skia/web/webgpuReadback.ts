@@ -1,4 +1,9 @@
-import type { CanvasKit as CanvasKitType } from "canvaskit-wasm";
+import type {
+	AsyncReadResult,
+	CanvasKit as CanvasKitType,
+	Surface as CanvasKitSurface,
+	WebGPUDeviceContext,
+} from "canvaskit-wasm";
 
 import { JsiSkSurface } from "./JsiSkSurface";
 import type { SkiaRenderBackend } from "./renderBackend";
@@ -8,17 +13,32 @@ import {
 } from "./renderBackend";
 
 const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
-const WEBGPU_BUFFER_USAGE_FALLBACK = 0x0001 | 0x0008;
-const WEBGPU_MAP_MODE_READ_FALLBACK = 0x0001;
-const WEBGPU_READBACK_ALIGNMENT = 256;
-const WEBGPU_BYTES_PER_PIXEL = 4;
-const DEFAULT_WEBGPU_READBACK_RING_SIZE = 2;
+const WEBGPU_ASYNC_READ_TIMEOUT_MS = 5_000;
 
 type WebGPUBackend = Extract<SkiaRenderBackend, { kind: "webgpu" }>;
-
-type WebGPUReadbackSlot = {
-	buffer: GPUBuffer;
-	pending: Promise<SkiaWebGPUReadbackResult> | null;
+type CanvasKitWithRescale = CanvasKitType & {
+	RescaleGamma?: {
+		Linear?: unknown;
+	};
+	RescaleMode?: {
+		Linear?: unknown;
+	};
+};
+type WebGPUDeviceContextWithAsyncRead = WebGPUDeviceContext & {
+	ReadSurfacePixelsAsync?: (
+		surface: CanvasKitSurface,
+		dstImageInfo: {
+			width: number;
+			height: number;
+			colorType: unknown;
+			alphaType: unknown;
+			colorSpace?: unknown;
+		},
+		srcRect?: [number, number, number, number],
+		rescaleGamma?: unknown,
+		rescaleMode?: unknown,
+	) => Promise<AsyncReadResult | null>;
+	checkAsyncWorkCompletion?: () => void;
 };
 
 export type SkiaWebGPUReadbackFormat = "BGRA" | "RGBA";
@@ -42,7 +62,6 @@ export type CreateSkiaWebGPUReadbackSurfaceOptions = {
 	CanvasKit?: CanvasKitType;
 	backend?: WebGPUBackend;
 	label?: string;
-	ringSize?: number;
 	textureFormat?: GPUTextureFormat;
 };
 
@@ -58,29 +77,21 @@ const getWebGPUTextureUsage = () => {
 	);
 };
 
-const getWebGPUBufferUsage = () => {
-	if (typeof GPUBufferUsage === "undefined") {
-		return WEBGPU_BUFFER_USAGE_FALLBACK;
-	}
-	return GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST;
-};
-
-const getWebGPUMapModeRead = () => {
-	if (typeof GPUMapMode === "undefined") {
-		return WEBGPU_MAP_MODE_READ_FALLBACK;
-	}
-	return GPUMapMode.READ;
-};
-
-const alignTo = (value: number, alignment: number) => {
-	return Math.ceil(value / alignment) * alignment;
-};
-
 const resolveReadbackFormat = (
 	textureFormat: GPUTextureFormat,
 ): SkiaWebGPUReadbackFormat => {
 	return `${textureFormat}`.startsWith("bgra") ? "BGRA" : "RGBA";
 };
+
+const waitForAsyncReadTick = () =>
+	new Promise<void>((resolve) => {
+		const requestAnimationFrameRef = globalThis.requestAnimationFrame;
+		if (typeof requestAnimationFrameRef === "function") {
+			requestAnimationFrameRef(() => resolve());
+			return;
+		}
+		globalThis.setTimeout(resolve, 0);
+	});
 
 const destroyWebGPUTextureWhenQueueIdle = (
 	device: GPUDevice,
@@ -100,107 +111,145 @@ const destroyWebGPUTextureWhenQueueIdle = (
 		});
 };
 
+const resolveCanvasKitReadbackConfig = (
+	canvasKit: CanvasKitType,
+	readbackFormat: SkiaWebGPUReadbackFormat,
+) => {
+	const colorType = canvasKit.ColorType as
+		| {
+				BGRA_8888?: unknown;
+				RGBA_8888?: unknown;
+		  }
+		| undefined;
+	if (readbackFormat === "BGRA" && colorType?.BGRA_8888 !== undefined) {
+		return {
+			colorType: colorType.BGRA_8888,
+			format: "BGRA" as const,
+		};
+	}
+	return {
+		colorType: colorType?.RGBA_8888 ?? canvasKit.ColorType.RGBA_8888,
+		format: "RGBA" as const,
+	};
+};
+
 class WebGPUReadbackSession {
-	private readonly bytesPerRow: number;
-	private readonly readbackSize: number;
 	private readonly format: SkiaWebGPUReadbackFormat;
-	private readonly slots: WebGPUReadbackSlot[] = [];
-	private nextSlotIndex = 0;
+	private readonly readbackInfo: {
+		width: number;
+		height: number;
+		colorType: unknown;
+		alphaType: unknown;
+		colorSpace?: unknown;
+	};
+	private readonly readbackRect: [number, number, number, number];
+	private readonly readbackRescaleGamma: unknown;
+	private readonly readbackRescaleMode: unknown;
+	private readonly pendingReads = new Set<Promise<SkiaWebGPUReadbackResult>>();
 	private disposed = false;
 
 	constructor(
-		private readonly device: GPUDevice,
-		private readonly texture: GPUTexture,
+		private readonly canvasKit: CanvasKitType,
+		private readonly deviceContext: WebGPUDeviceContextWithAsyncRead,
+		private readonly surfaceRef: CanvasKitSurface,
 		private readonly width: number,
 		private readonly height: number,
-		private readonly ringSize: number,
 		textureFormat: GPUTextureFormat,
 	) {
-		this.bytesPerRow = alignTo(
-			width * WEBGPU_BYTES_PER_PIXEL,
-			WEBGPU_READBACK_ALIGNMENT,
+		const readbackConfig = resolveCanvasKitReadbackConfig(
+			canvasKit,
+			resolveReadbackFormat(textureFormat),
 		);
-		this.readbackSize = this.bytesPerRow * height;
-		this.format = resolveReadbackFormat(textureFormat);
+		this.format = readbackConfig.format;
+		this.readbackInfo = {
+			width,
+			height,
+			colorType: readbackConfig.colorType,
+			alphaType: canvasKit.AlphaType.Premul,
+			colorSpace: canvasKit.ColorSpace?.SRGB,
+		};
+		this.readbackRect = [0, 0, width, height];
+		const canvasKitWithRescale = canvasKit as CanvasKitWithRescale;
+		this.readbackRescaleGamma = canvasKitWithRescale.RescaleGamma?.Linear;
+		this.readbackRescaleMode = canvasKitWithRescale.RescaleMode?.Linear;
 	}
 
-	private createSlot(): WebGPUReadbackSlot {
+	private async waitForCanvasKitAsyncReadResult(
+		pendingRead: Promise<AsyncReadResult | null>,
+	): Promise<AsyncReadResult | null> {
+		let settled = false;
+		let readResult: AsyncReadResult | null = null;
+		let readError: unknown = null;
+		void pendingRead.then(
+			(result) => {
+				settled = true;
+				readResult = result;
+			},
+			(error) => {
+				settled = true;
+				readError = error;
+			},
+		);
+
+		const startAt = Date.now();
+		while (!settled) {
+			this.deviceContext.checkAsyncWorkCompletion?.();
+			if (Date.now() - startAt > WEBGPU_ASYNC_READ_TIMEOUT_MS) {
+				throw new Error("CanvasKit 异步读回超时");
+			}
+			await waitForAsyncReadTick();
+		}
+
+		if (readError) {
+			throw readError;
+		}
+		return readResult;
+	}
+
+	private async readWithCanvasKitAsyncApi(): Promise<SkiaWebGPUReadbackResult> {
+		const readAsync = this.deviceContext.ReadSurfacePixelsAsync;
+		if (typeof readAsync !== "function") {
+			throw new Error("CanvasKit 异步读回 API 不可用");
+		}
+		const result = await this.waitForCanvasKitAsyncReadResult(
+			readAsync(
+				this.surfaceRef,
+				this.readbackInfo,
+				this.readbackRect,
+				this.readbackRescaleGamma,
+				this.readbackRescaleMode,
+			),
+		);
+		if (!result || result.count < 1 || result.planes.length < 1) {
+			throw new Error("CanvasKit 异步读回结果为空");
+		}
+		const plane0 = result.planes[0];
+		if (!plane0) {
+			throw new Error("CanvasKit 异步读回缺失主平面");
+		}
+		const bytesPerRow = result.rowBytes[0] ?? this.width * 4;
 		return {
-			buffer: this.device.createBuffer({
-				size: this.readbackSize,
-				usage: getWebGPUBufferUsage(),
-			}),
-			pending: null,
+			pixels: new Uint8Array(plane0),
+			width: result.width || this.width,
+			height: result.height || this.height,
+			bytesPerRow,
+			format: this.format,
 		};
 	}
 
-	private getNextSlot(): WebGPUReadbackSlot {
-		if (this.slots.length < this.ringSize) {
-			const slot = this.createSlot();
-			this.slots.push(slot);
-			return slot;
-		}
-		const slot = this.slots[this.nextSlotIndex];
-		this.nextSlotIndex = (this.nextSlotIndex + 1) % this.slots.length;
-		return slot;
-	}
-
-	private async copyTextureToPixels(
-		buffer: GPUBuffer,
-	): Promise<SkiaWebGPUReadbackResult> {
-		const encoder = this.device.createCommandEncoder();
-		encoder.copyTextureToBuffer(
-			{
-				texture: this.texture,
-			},
-			{
-				buffer,
-				bytesPerRow: this.bytesPerRow,
-				rowsPerImage: this.height,
-			},
-			{
-				width: this.width,
-				height: this.height,
-				depthOrArrayLayers: 1,
-			},
-		);
-		this.device.queue.submit([encoder.finish()]);
-		await buffer.mapAsync(getWebGPUMapModeRead(), 0, this.readbackSize);
-		try {
-			const mappedRange = buffer.getMappedRange(0, this.readbackSize);
-			return {
-				pixels: new Uint8Array(mappedRange.slice(0)),
-				width: this.width,
-				height: this.height,
-				bytesPerRow: this.bytesPerRow,
-				format: this.format,
-			};
-		} finally {
-			buffer.unmap();
-		}
-	}
-
-	async readbackPixels(): Promise<SkiaWebGPUReadbackResult> {
+	readbackPixels(): Promise<SkiaWebGPUReadbackResult> {
 		if (this.disposed) {
 			throw new Error("WebGPU readback surface 已释放");
 		}
-		const slot = this.getNextSlot();
-		await slot.pending;
-		const pending = this.copyTextureToPixels(slot.buffer).finally(() => {
-			slot.pending = null;
+		const pending = this.readWithCanvasKitAsyncApi().finally(() => {
+			this.pendingReads.delete(pending);
 		});
-		slot.pending = pending;
+		this.pendingReads.add(pending);
 		return pending;
 	}
 
 	async flushPendingReadbacks() {
-		await Promise.all(
-			this.slots
-				.map((slot) => slot.pending)
-				.filter((pending): pending is Promise<SkiaWebGPUReadbackResult> =>
-					Boolean(pending),
-				),
-		);
+		await Promise.all(Array.from(this.pendingReads));
 	}
 
 	dispose() {
@@ -208,12 +257,7 @@ class WebGPUReadbackSession {
 			return;
 		}
 		this.disposed = true;
-		for (const slot of this.slots) {
-			try {
-				slot.buffer.destroy?.();
-			} catch {}
-			slot.pending = null;
-		}
+		this.pendingReads.clear();
 	}
 }
 
@@ -273,11 +317,11 @@ export const createSkiaWebGPUReadbackSurface = (
 			throw new Error("无法创建 WebGPU readback Surface");
 		}
 		const session = new WebGPUReadbackSession(
-			backend.device,
-			texture,
+			canvasKit,
+			backend.deviceContext as WebGPUDeviceContextWithAsyncRead,
+			surfaceRef,
 			targetWidth,
 			targetHeight,
-			Math.max(1, options.ringSize ?? DEFAULT_WEBGPU_READBACK_RING_SIZE),
 			textureFormat,
 		);
 		const surface = new JsiSkSurface(canvasKit, surfaceRef, () => {

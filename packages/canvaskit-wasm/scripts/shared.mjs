@@ -58,6 +58,11 @@ export const dawnWasmHeadersPatchFile = path.join(
 	"patches",
 	"skia-dawn-wasm-header-copy.patch",
 );
+export const dawnGraphiteWasmCompatPatchFile = path.join(
+	packageDir,
+	"patches",
+	"skia-dawn-graphite-wasm-compat.patch",
+);
 export const canvasKitWebGPUTypesPatchFile = path.join(
 	packageDir,
 	"patches",
@@ -68,21 +73,33 @@ export const canvasKitWebGPUBuildPatchFile = path.join(
 	"patches",
 	"skia-canvaskit-webgpu-build.patch",
 );
+export const canvasKitWebGPUGaneshGuardPatchFile = path.join(
+	packageDir,
+	"patches",
+	"skia-canvaskit-webgpu-ganesh-guard.patch",
+);
 export const canvasKitWebGPUFlagPatchFile = path.join(
 	packageDir,
 	"patches",
 	"skia-canvaskit-webgpu-flag.patch",
 );
-export const dawnGraphiteWasmCompatPatchFile = path.join(
+export const canvasKitEmsdkStrictFlagsPatchFile = path.join(
 	packageDir,
 	"patches",
-	"skia-dawn-graphite-wasm-compat.patch",
+	"skia-canvaskit-emsdk-strict-flags.patch",
+);
+export const canvasKitWebGPUDefinePatchFile = path.join(
+	packageDir,
+	"patches",
+	"skia-canvaskit-webgpu-define.patch",
 );
 export const dockerfileDir = path.join(packageDir, "docker", "canvaskit-emsdk");
 export const dockerBaseImage =
-	process.env.AI_NLE_CANVASKIT_DOCKER_BASE_IMAGE ?? "emscripten/emsdk:4.0.7";
+	process.env.AI_NLE_CANVASKIT_DOCKER_BASE_IMAGE ?? "emscripten/emsdk:5.0.3";
 export const dockerImage =
-	process.env.AI_NLE_CANVASKIT_DOCKER_IMAGE ?? "ai-nle-canvaskit-emsdk:4.0.7";
+	process.env.AI_NLE_CANVASKIT_DOCKER_IMAGE ?? "ai-nle-canvaskit-emsdk:5.0.3";
+export const dockerPlatform =
+	process.env.AI_NLE_CANVASKIT_DOCKER_PLATFORM ?? "linux/amd64";
 export const dawnBuildNinjaJobs =
 	process.env.AI_NLE_CANVASKIT_DAWN_BUILD_NINJA_JOBS ?? "1";
 
@@ -293,18 +310,6 @@ export const applySkiaPatch = () => {
 	});
 	applyGitPatch("CanvasKit WebGPU build", canvasKitWebGPUBuildPatchFile, () => {
 		return (
-			readFileSync(path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"), "utf8").includes(
-				'"CK_ENABLE_WEBGPU"',
-			) &&
-			readFileSync(path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"), "utf8").includes(
-				'public_configs = [ "../../third_party/dawn:dawn_api_config" ]',
-			) &&
-			!readFileSync(path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"), "utf8").includes(
-				'"-sUSE_WEBGPU=1"',
-			) &&
-			readFileSync(path.join(skiaDir, "modules", "canvaskit", "compile.sh"), "utf8").includes(
-				'ENABLE_GANESH="true"\n  ENABLE_WEBGPU="true"\n  ENABLE_GRAPHITE="true"',
-			) &&
 			readFileSync(
 				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
 				"utf8",
@@ -321,13 +326,31 @@ export const applySkiaPatch = () => {
 				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
 				"utf8",
 			).includes("canvaskit_import_webgpu_texture") &&
-			readFileSync(
-				path.join(skiaDir, "third_party", "dawn", "BUILD.gn"),
-				"utf8",
-			).includes('libs += [ "$root_out_dir/cmake_dawn/src/emdawnwebgpu/libemdawnwebgpu_c.a" ]') &&
-			readFileSync(path.join(skiaDir, "third_party", "dawn", "BUILD.gn"), "utf8").includes(
-				'$root_out_dir/cmake_dawn/gen/src/emdawnwebgpu/include',
-			)
+				readFileSync(
+					path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
+					"utf8",
+				).includes("canvaskit_import_webgpu_texture")
+			);
+	});
+	applyGitPatch("CanvasKit WebGPU Ganesh guard", canvasKitWebGPUGaneshGuardPatchFile, () => {
+		return readFileSync(
+			path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
+			"utf8",
+		).includes("#ifdef CK_ENABLE_WEBGL\n#define ENABLE_GPU");
+	});
+	applyGitPatch("CanvasKit emsdk strict flags", canvasKitEmsdkStrictFlagsPatchFile, () => {
+		const buildGn = readFileSync(path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"), "utf8");
+		return (
+			buildGn.includes('"--use-port=emdawnwebgpu"') &&
+			!buildGn.includes('"-sUSE_WEBGPU=1"') &&
+			!buildGn.includes('"-sNODEJS_CATCH_EXIT=0"') &&
+			!buildGn.includes('"-sSTRICT=1"')
+		);
+	});
+	applyGitPatch("CanvasKit WebGPU define", canvasKitWebGPUDefinePatchFile, () => {
+		const buildGn = readFileSync(path.join(skiaDir, "modules", "canvaskit", "BUILD.gn"), "utf8");
+		return /if \(skia_canvaskit_enable_webgpu\) {\s*defines \+= \[ "CK_ENABLE_WEBGPU" \]\s*}\s*if \(skia_canvaskit_enable_pathops\)/.test(
+			buildGn,
 		);
 	});
 	applyGitPatch("CanvasKit WebGPU flag", canvasKitWebGPUFlagPatchFile, () => {
@@ -359,15 +382,8 @@ export const applySkiaPatch = () => {
 			.includes('os.environ.get("DAWN_BUILD_NINJA_JOBS")');
 	});
 	applyGitPatch("Skia Dawn WebGPU compat", dawnWebGPUPatchFile, () => {
-		return (
-			readFileSync(path.join(skiaDir, "third_party", "dawn", "build_dawn.py"), "utf8").includes(
-				"Emscripten.cmake",
-			) &&
-			readFileSync(
-				path.join(skiaDir, "third_party", "externals", "dawn", "include", "tint", "tint.h"),
-				"utf8",
-			).includes('#include "src/tint/api/common/bindings.h"')
-		);
+		return readFileSync(path.join(skiaDir, "third_party", "dawn", "build_dawn.py"), "utf8")
+			.includes("Emscripten.cmake");
 	});
 	applyGitPatch("Skia Dawn emdawnwebgpu dir", dawnThirdPartyPatchFile, () => {
 		return readFileSync(path.join(skiaDir, "third_party", "dawn", "cmake_utils.py"), "utf8")
@@ -383,26 +399,14 @@ export const applySkiaPatch = () => {
 	});
 	applyGitPatch("Skia Dawn Graphite wasm compat", dawnGraphiteWasmCompatPatchFile, () => {
 		return (
-			readFileSync(
-				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnBuffer.cpp"),
-				"utf8",
-			).includes("bool is_map_succeeded(wgpu::MapAsyncStatus status)") &&
-			readFileSync(
-				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnCaps.cpp"),
-				"utf8",
-			).includes("wgpu::Limits limits = {};") &&
-			readFileSync(
-				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnCommandBuffer.cpp"),
-				"utf8",
-			).includes("wgpu::PassTimestampWrites wgpuTimestampWrites;") &&
+			!readFileSync(path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnBuffer.cpp"), "utf8")
+				.includes("WGPUBufferMapAsyncStatus") &&
+			readFileSync(path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnCaps.cpp"), "utf8")
+				.includes("auto limitsStatus = backendContext.fDevice.GetLimits(&limits);") &&
 			readFileSync(
 				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnErrorChecker.cpp"),
 				"utf8",
-			).includes("wgpu::CallbackMode::AllowSpontaneous") &&
-			readFileSync(
-				path.join(skiaDir, "src", "gpu", "graphite", "dawn", "DawnGraphiteUtils.cpp"),
-				"utf8",
-			).includes("wgpu::ShaderSourceWGSL wgslDesc;")
+			).includes("wgpu::CallbackMode::AllowSpontaneous")
 		);
 	});
 };
@@ -424,6 +428,8 @@ export const ensureDocker = () => {
 	}
 	run("docker", [
 		"build",
+		"--platform",
+		dockerPlatform,
 		"--tag",
 		dockerImage,
 		"--build-arg",
@@ -562,6 +568,8 @@ const runCanvasKitDockerSteps = (steps) => {
 	}
 	run("docker", [
 		"run",
+		"--platform",
+		dockerPlatform,
 		"--rm",
 		"--volume",
 		`${skiaDir}:/SRC`,
@@ -571,8 +579,13 @@ const runCanvasKitDockerSteps = (steps) => {
 		"bash",
 		"-lc",
 		[
+			"if [ -L /SRC/third_party/externals/emsdk ]; then rm /SRC/third_party/externals/emsdk; fi",
+			"export GIT_SYNC_DEPS_SKIP_EMSDK=1",
 			"python3 /SRC/tools/git-sync-deps",
+			"rm -rf /SRC/third_party/externals/emsdk",
+			"ln -s /emsdk /SRC/third_party/externals/emsdk",
 			"cd /SRC/modules/canvaskit",
+			"source /emsdk/emsdk_env.sh",
 			'export PATH="/SRC/third_party/ninja:$PATH"',
 			`export DAWN_BUILD_NINJA_JOBS=${JSON.stringify(dawnBuildNinjaJobs)}`,
 			...steps,

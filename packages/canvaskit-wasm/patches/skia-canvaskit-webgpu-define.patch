@@ -1,0 +1,16 @@
+diff --git a/modules/canvaskit/BUILD.gn b/modules/canvaskit/BUILD.gn
+--- a/modules/canvaskit/BUILD.gn
++++ b/modules/canvaskit/BUILD.gn
+@@ -396,6 +396,9 @@ skia_wasm_lib("canvaskit") {
+     if (skia_canvaskit_enable_webgl) {
+       defines += [
+         "SK_GL",
+         "CK_ENABLE_WEBGL",
+       ]
+     }
+   }
++  if (skia_canvaskit_enable_webgpu) {
++    defines += [ "CK_ENABLE_WEBGPU" ]
++  }
+ 
+   if (skia_canvaskit_enable_pathops) {

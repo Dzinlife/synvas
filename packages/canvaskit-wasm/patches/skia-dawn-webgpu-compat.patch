@@ -39,14 +39,3 @@ diff --git a/third_party/dawn/build_dawn.py b/third_party/dawn/build_dawn.py
    else:
      configure_cmd.append(f"-DCMAKE_C_COMPILER={args.cc.replace(os.sep, '/')}")
      configure_cmd.append(f"-DCMAKE_CXX_COMPILER={args.cxx.replace(os.sep, '/')}")
-diff --git a/third_party/externals/dawn/include/tint/tint.h b/third_party/externals/dawn/include/tint/tint.h
---- a/third_party/externals/dawn/include/tint/tint.h
-+++ b/third_party/externals/dawn/include/tint/tint.h
-@@ -34,6 +34,7 @@
- // TODO(tint:88): When implementing support for an install target, all of these
- //                headers will need to be moved to include/tint/.
- 
-+#include "src/tint/api/common/bindings.h"                    // IWYU pragma: export
- #include "src/tint/api/common/binding_point.h"                // IWYU pragma: export
- #include "src/tint/api/common/resource_type.h"                // IWYU pragma: export
- #include "src/tint/api/common/subgroup_matrix.h"              // IWYU pragma: export

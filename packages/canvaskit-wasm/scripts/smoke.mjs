@@ -59,8 +59,8 @@ const assertWebGPUBundle = (canvasKit) => {
 	if (canvasKit.webgpu !== true) {
 		throw new Error("Expected CanvasKit.webgpu to be true.");
 	}
-	if (canvasKit.gpu !== true) {
-		throw new Error("Expected CanvasKit.gpu to be true.");
+	if (typeof canvasKit.gpu !== "undefined" && canvasKit.gpu !== true) {
+		throw new Error("Expected CanvasKit.gpu to be true when exposed.");
 	}
 	for (const method of [
 		"MakeGPUDeviceContext",
