@@ -149,13 +149,18 @@ export const runTimelineAudioMixFrame = (
 		);
 	}
 
+	const dispatchedSessionKeys = new Set<string>();
 	for (const target of args.targets.values()) {
+		if (dispatchedSessionKeys.has(target.sessionKey)) continue;
+		dispatchedSessionKeys.add(target.sessionKey);
 		const picked = pickedBySession.get(target.sessionKey);
-		const isPickedTarget = picked?.target.id === target.id;
-		const instruction = isPickedTarget ? (picked?.instruction ?? null) : null;
-		invokeApplyAudioMix(target, instruction);
-		if (isPickedTarget && instruction) {
-			activeIds.add(target.id);
+		if (!picked) {
+			invokeApplyAudioMix(target, null);
+			continue;
+		}
+		invokeApplyAudioMix(picked.target, picked.instruction ?? null);
+		if (picked.instruction) {
+			activeIds.add(picked.target.id);
 		}
 	}
 

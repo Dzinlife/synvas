@@ -38,6 +38,7 @@ export type AudioPlaybackMixInstruction = {
 	sourceTime?: number;
 	sourceRange?: AudioPlaybackRange;
 	reversed?: boolean;
+	runtimeKey?: string;
 };
 
 export type AudioPlaybackStepInput = number | AudioPlaybackMixInstruction;

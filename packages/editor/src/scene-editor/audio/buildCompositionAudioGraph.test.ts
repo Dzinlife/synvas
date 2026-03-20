@@ -39,18 +39,20 @@ const createAudioClip = ({
 	end,
 	offset = 0,
 	clip,
+	assetId = `${id}-asset`,
 }: {
 	id: string;
 	start: number;
 	end: number;
 	offset?: number;
 	clip?: TimelineElement["clip"];
+	assetId?: string;
 }): TimelineElement => ({
 	id,
 	type: "AudioClip",
 	component: "audio-clip",
 	name: id,
-	assetId: `${id}-asset`,
+	assetId,
 	timeline: createTimeline(start, end, offset),
 	props: {},
 	clip,
@@ -549,6 +551,151 @@ describe("buildCompositionAudioGraph", () => {
 			return element.component === "__composition_audio_proxy__";
 		}).length;
 		expect(proxyCount).toBeGreaterThan(0);
+	});
+
+	it("同一子 scene 多实例重叠时应保留独立 session 并分别驱动", () => {
+		const runtimeManager = createEditorRuntime({
+			id: "runtime-root",
+		}) as unknown as StudioRuntimeManager;
+		const rootRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-root"),
+		);
+		const childRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-child"),
+		);
+
+		rootRuntime.timelineStore.getState().setTracks([createTrack()]);
+		rootRuntime.timelineStore.getState().setElements([
+			createComposition({
+				id: "comp-a",
+				sceneId: "scene-child",
+				start: 0,
+				end: 90,
+			}),
+			createComposition({
+				id: "comp-b",
+				sceneId: "scene-child",
+				start: 30,
+				end: 120,
+			}),
+		]);
+
+		childRuntime.timelineStore.getState().setTracks([createTrack()]);
+		childRuntime.timelineStore.getState().setElements([
+			createAudioClip({
+				id: "child-audio",
+				start: 0,
+				end: 120,
+			}),
+		]);
+		const { applyAudioMix } = registerAudioModel(childRuntime, "child-audio");
+
+		const graph = buildCompositionAudioGraph({
+			rootRuntime,
+			runtimeManager,
+		});
+
+		expect(graph.previewTargets.size).toBe(2);
+		expect(new Set(Array.from(graph.sessionKeyMap.values())).size).toBe(2);
+
+		const targets = Array.from(graph.previewTargets.entries())
+			.sort((a, b) => a[0].localeCompare(b[0]))
+			.map((entry) => entry[1]);
+		targets[0]?.applyAudioMix({
+			timelineTimeSeconds: 0.5,
+			gain: 1,
+		});
+		targets[1]?.applyAudioMix({
+			timelineTimeSeconds: 1.5,
+			gain: 1,
+		});
+
+		expect(applyAudioMix).toHaveBeenCalledTimes(2);
+		const firstCall = applyAudioMix.mock.calls[0]?.[0] as
+			| { runtimeKey?: string }
+			| undefined;
+		const secondCall = applyAudioMix.mock.calls[1]?.[0] as
+			| { runtimeKey?: string }
+			| undefined;
+		expect(firstCall?.runtimeKey).toBeTruthy();
+		expect(secondCall?.runtimeKey).toBeTruthy();
+		expect(firstCall?.runtimeKey).not.toBe(secondCall?.runtimeKey);
+	});
+
+	it("同一 composition 实例内连续 session 应复用同一 runtimeKey", () => {
+		const runtimeManager = createEditorRuntime({
+			id: "runtime-root",
+		}) as unknown as StudioRuntimeManager;
+		const rootRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-root"),
+		);
+		const childRuntime = runtimeManager.ensureTimelineRuntime(
+			toSceneTimelineRef("scene-child"),
+		);
+
+		rootRuntime.timelineStore.getState().setTracks([createTrack()]);
+		rootRuntime.timelineStore.getState().setElements([
+			createComposition({
+				id: "comp-a",
+				sceneId: "scene-child",
+				start: 0,
+				end: 120,
+			}),
+		]);
+
+		childRuntime.timelineStore.getState().setTracks([createTrack()]);
+		childRuntime.timelineStore.getState().setElements([
+			createAudioClip({
+				id: "child-audio-1",
+				start: 0,
+				end: 60,
+				offset: 0,
+				assetId: "shared-asset",
+			}),
+			createAudioClip({
+				id: "child-audio-2",
+				start: 60,
+				end: 120,
+				offset: 60,
+				assetId: "shared-asset",
+			}),
+		]);
+		const firstModel = registerAudioModel(childRuntime, "child-audio-1");
+		const secondModel = registerAudioModel(childRuntime, "child-audio-2");
+
+		const graph = buildCompositionAudioGraph({
+			rootRuntime,
+			runtimeManager,
+		});
+
+		expect(graph.previewTargets.size).toBe(2);
+		expect(new Set(Array.from(graph.sessionKeyMap.values())).size).toBe(1);
+
+		const targets = Array.from(graph.previewTargets.entries())
+			.sort((a, b) => a[0].localeCompare(b[0]))
+			.map((entry) => entry[1]);
+		targets[0]?.applyAudioMix({
+			timelineTimeSeconds: 0.5,
+			gain: 1,
+		});
+		targets[1]?.applyAudioMix({
+			timelineTimeSeconds: 2.5,
+			gain: 1,
+		});
+
+		const runtimeKey1 = (
+			firstModel.applyAudioMix.mock.calls[0]?.[0] as
+				| { runtimeKey?: string }
+				| undefined
+		)?.runtimeKey;
+		const runtimeKey2 = (
+			secondModel.applyAudioMix.mock.calls[0]?.[0] as
+				| { runtimeKey?: string }
+				| undefined
+		)?.runtimeKey;
+		expect(runtimeKey1).toBeTruthy();
+		expect(runtimeKey2).toBeTruthy();
+		expect(runtimeKey1).toBe(runtimeKey2);
 	});
 
 	it("循环 Composition 引用会被跳过并告警", () => {

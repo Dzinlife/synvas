@@ -36,7 +36,7 @@ const createAudioClip = (
 });
 
 describe("runTimelineAudioMixFrame", () => {
-	it("同 session 候选切换时会清空未选中的目标", () => {
+	it("同 session 候选切换时只驱动被选中的目标", () => {
 		const applyA = vi.fn();
 		const applyB = vi.fn();
 		const elements = [
@@ -89,10 +89,16 @@ describe("runTimelineAudioMixFrame", () => {
 			targets,
 		});
 
-		const applyBCalls = applyB.mock.calls;
-		const lastApplyBCall = applyBCalls.at(-1);
-		expect(lastApplyBCall).toBeDefined();
-		expect(lastApplyBCall?.[0]).toBeNull();
+		expect(applyA).toHaveBeenCalledTimes(1);
+		expect(applyB).toHaveBeenCalledTimes(1);
+		expect(applyA.mock.calls[0]?.[0]).toMatchObject({
+			sourceTime: expect.any(Number),
+			gain: expect.any(Number),
+		});
+		expect(applyB.mock.calls[0]?.[0]).toMatchObject({
+			sourceTime: expect.any(Number),
+			gain: expect.any(Number),
+		});
 	});
 
 	it("停止播放时会对同 session 的所有目标下发停止指令", () => {
@@ -140,5 +146,68 @@ describe("runTimelineAudioMixFrame", () => {
 
 		expect(applyA).toHaveBeenCalledWith(null);
 		expect(applyB).toHaveBeenCalledWith(null);
+	});
+
+	it("composition 虚拟节点共享物理目标时不会被 null 指令打断", () => {
+		const sharedApply = vi.fn();
+		const elements = [
+			createAudioClip("virtual-a", 0, 30),
+			createAudioClip("virtual-b", 30, 60),
+		];
+		const targets = new Map([
+			[
+				"virtual-a",
+				{
+					id: "virtual-a",
+					timeline: createTimeline(0, 30),
+					audioDuration: 60,
+					enabled: true,
+					sessionKey: "session:composition-shared",
+					applyAudioMix: sharedApply,
+				},
+			],
+			[
+				"virtual-b",
+				{
+					id: "virtual-b",
+					timeline: createTimeline(30, 60),
+					audioDuration: 60,
+					enabled: true,
+					sessionKey: "session:composition-shared",
+					applyAudioMix: sharedApply,
+				},
+			],
+		]);
+
+		runTimelineAudioMixFrame({
+			isPlaying: true,
+			isExporting: false,
+			displayTime: 10,
+			fps: 30,
+			elements,
+			tracks: [createTrack()],
+			audioTrackStates: {},
+			targets,
+		});
+		runTimelineAudioMixFrame({
+			isPlaying: true,
+			isExporting: false,
+			displayTime: 40,
+			fps: 30,
+			elements,
+			tracks: [createTrack()],
+			audioTrackStates: {},
+			targets,
+		});
+
+		expect(sharedApply).toHaveBeenCalledTimes(2);
+		expect(sharedApply.mock.calls[0]?.[0]).toMatchObject({
+			sourceTime: expect.any(Number),
+			gain: expect.any(Number),
+		});
+		expect(sharedApply.mock.calls[1]?.[0]).toMatchObject({
+			sourceTime: expect.any(Number),
+			gain: expect.any(Number),
+		});
 	});
 });

@@ -289,13 +289,31 @@ const ensureRuntimeGainNode = (
 	return runtime.clipGain;
 };
 
+const resolveRuntimeKeyOverride = (value: unknown): string | null => {
+	if (typeof value !== "string") return null;
+	const key = value.trim();
+	return key.length > 0 ? key : null;
+};
+
 const resolveRuntimeKeyValue = (
 	deps: AudioPlaybackDeps,
 	fallback: string,
+	overrideKey?: string | null,
 ): string => {
+	const resolvedOverride = resolveRuntimeKeyOverride(overrideKey);
+	if (resolvedOverride) return resolvedOverride;
 	const key = deps.getRuntimeKey?.();
 	if (!key || typeof key !== "string") return fallback;
 	return key;
+};
+
+const resolveRuntimeKeyFromInput = (
+	input: AudioPlaybackStepInput,
+): string | null => {
+	if (typeof input === "number") return null;
+	return resolveRuntimeKeyOverride(
+		(input as { runtimeKey?: unknown } | undefined)?.runtimeKey,
+	);
 };
 
 const resolvePlaybackInput = (
@@ -370,7 +388,7 @@ export const createAudioPlaybackController = (
 ): AudioPlaybackController => {
 	runtimeControllerIdSeed += 1;
 	const fallbackRuntimeKey = `controller:${runtimeControllerIdSeed}`;
-	let activeRuntimeKey = resolveRuntimeKeyValue(deps, fallbackRuntimeKey);
+	let activeRuntimeKey = resolveRuntimeKeyValue(deps, fallbackRuntimeKey, null);
 	retainRuntime(activeRuntimeKey);
 
 	const isPlaybackEnabled = () => deps.isPlaybackEnabled?.() ?? true;
@@ -386,8 +404,14 @@ export const createAudioPlaybackController = (
 		});
 	};
 
-	const syncRuntime = (): AudioPlaybackRuntime => {
-		const resolvedKey = resolveRuntimeKeyValue(deps, fallbackRuntimeKey);
+	const syncRuntime = (
+		runtimeKeyOverride?: string | null,
+	): AudioPlaybackRuntime => {
+		const resolvedKey = resolveRuntimeKeyValue(
+			deps,
+			fallbackRuntimeKey,
+			runtimeKeyOverride,
+		);
 		if (resolvedKey !== activeRuntimeKey) {
 			retainRuntime(resolvedKey);
 			releaseRuntime(activeRuntimeKey);
@@ -922,7 +946,8 @@ export const createAudioPlaybackController = (
 	};
 
 	const stepPlayback = async (input: AudioPlaybackStepInput): Promise<void> => {
-		const runtime = syncRuntime();
+		const runtimeKeyOverride = resolveRuntimeKeyFromInput(input);
+		const runtime = syncRuntime(runtimeKeyOverride);
 		const seekEpoch = normalizeSeekEpoch(deps.getSeekEpoch?.());
 		const restartPlayback = async (
 			playbackInput: ResolvedPlaybackInput,

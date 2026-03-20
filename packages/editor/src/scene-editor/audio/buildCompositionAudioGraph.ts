@@ -6,6 +6,7 @@ import {
 import { isTimelineTrackAudible } from "core/editor/utils/trackAudibility";
 import type { TimelineElement, TimelineMeta } from "core/element/types";
 import type { AudioBufferSink } from "mediabunny";
+import type { AudioPlaybackMixInstruction } from "@/audio/types";
 import { getAudioPlaybackSessionKey } from "@/scene-editor/playback/clipContinuityIndex";
 import type {
 	StudioRuntimeManager,
@@ -33,8 +34,6 @@ const MIX_DEFAULT_TRACKS: TimelineTrack[] = [
 	},
 ];
 
-const warnedPhysicalMultiInstanceKeys = new Set<string>();
-
 type PhysicalClipRef = {
 	sceneId: string;
 	elementId: string;
@@ -45,7 +44,7 @@ type AudioModelInternal = {
 	audioDuration?: number;
 	audioSink?: AudioBufferSink | null;
 	applyAudioMix?: (
-		instruction: AudioMixInstruction | null,
+		instruction: AudioPlaybackMixInstruction | null,
 	) => void | Promise<void>;
 };
 
@@ -773,22 +772,6 @@ const buildFlattenedAudioGraph = (params: {
 	};
 };
 
-const buildPhysicalSessionCollapseMap = (
-	clipNodes: VirtualClipNode[],
-): Map<string, string[]> => {
-	const map = new Map<string, string[]>();
-	for (const clipNode of clipNodes) {
-		const key = `${clipNode.physical.runtimeId}:${clipNode.physical.elementId}`;
-		const list = map.get(key);
-		if (list) {
-			list.push(clipNode.virtualId);
-			continue;
-		}
-		map.set(key, [clipNode.virtualId]);
-	}
-	return map;
-};
-
 export const buildCompositionAudioGraph = (options: {
 	rootRuntime: TimelineRuntime;
 	runtimeManager: StudioRuntimeManager;
@@ -821,18 +804,6 @@ export const buildCompositionAudioGraph = (options: {
 		context,
 	});
 
-	const physicalCollapseMap = buildPhysicalSessionCollapseMap(
-		flattened.clipNodes,
-	);
-	for (const [physicalKey, virtualIds] of physicalCollapseMap.entries()) {
-		if (virtualIds.length <= 1) continue;
-		if (warnedPhysicalMultiInstanceKeys.has(physicalKey)) continue;
-		warnedPhysicalMultiInstanceKeys.add(physicalKey);
-		console.warn(
-			`[TimelineAudioMix] Multiple Composition instances share physical clip ${physicalKey}, fallback to single-session arbitration.`,
-		);
-	}
-
 	const enabledMap = new Map<string, boolean>();
 	const exportAudioSourceMap = new Map<string, ExportElementAudioSource>();
 	const sessionKeyMap = new Map<string, string>();
@@ -853,12 +824,11 @@ export const buildCompositionAudioGraph = (options: {
 	}
 
 	for (const clipNode of flattened.clipNodes) {
-		const physicalKey = `${clipNode.physical.runtimeId}:${clipNode.physical.elementId}`;
-		const collapsedIds = physicalCollapseMap.get(physicalKey) ?? [];
-		const sessionKey =
-			collapsedIds.length > 1
-				? `physical:${physicalKey}`
-				: getAudioPlaybackSessionKey(flattened.mixElements, clipNode.virtualId);
+		const sessionKey = getAudioPlaybackSessionKey(
+			flattened.mixElements,
+			clipNode.virtualId,
+		);
+		const runtimeKey = `composition:${clipNode.physical.runtimeId}:${sessionKey}`;
 		sessionKeyMap.set(clipNode.virtualId, sessionKey);
 		if (!clipNode.previewTarget) continue;
 		previewTargets.set(clipNode.virtualId, {
@@ -867,7 +837,20 @@ export const buildCompositionAudioGraph = (options: {
 			audioDuration: clipNode.previewTarget.audioDuration,
 			enabled: clipNode.previewTarget.enabled,
 			sessionKey,
-			applyAudioMix: clipNode.previewTarget.applyAudioMix,
+			applyAudioMix: (instruction) => {
+				const instructionWithRuntime: AudioPlaybackMixInstruction = instruction
+					? {
+							...instruction,
+							runtimeKey,
+						}
+					: {
+							timelineTimeSeconds: 0,
+							gain: 0,
+							activeWindow: { start: 0, end: 0 },
+							runtimeKey,
+						};
+				return clipNode.previewTarget.applyAudioMix(instructionWithRuntime);
+			},
 		});
 	}
 
