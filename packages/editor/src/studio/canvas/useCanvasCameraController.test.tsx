@@ -2,7 +2,7 @@
 
 import { act, render } from "@testing-library/react";
 import { useEffect } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CameraState } from "./canvasWorkspaceUtils";
 import {
 	type UseCanvasCameraControllerResult,
@@ -36,7 +36,84 @@ const CameraControllerProbe = ({
 };
 
 describe("useCanvasCameraController", () => {
-	it("commits smooth camera transitions once and keeps animation state until timing completion", () => {
+	let rafClock = 0;
+	let rafSeed = 1;
+	let nativeRequestAnimationFrame: typeof window.requestAnimationFrame;
+	let nativeCancelAnimationFrame: typeof window.cancelAnimationFrame;
+	const rafTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		rafClock = 0;
+		rafSeed = 1;
+		nativeRequestAnimationFrame = window.requestAnimationFrame;
+		nativeCancelAnimationFrame = window.cancelAnimationFrame;
+		window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+			const rafId = rafSeed;
+			rafSeed += 1;
+			const timer = window.setTimeout(() => {
+				rafClock += 16;
+				rafTimers.delete(rafId);
+				callback(rafClock);
+			}, 16);
+			rafTimers.set(rafId, timer);
+			return rafId;
+		}) as typeof window.requestAnimationFrame;
+		window.cancelAnimationFrame = ((id: number) => {
+			const timer = rafTimers.get(id);
+			if (timer === undefined) return;
+			window.clearTimeout(timer);
+			rafTimers.delete(id);
+		}) as typeof window.cancelAnimationFrame;
+	});
+
+	afterEach(() => {
+		for (const timer of rafTimers.values()) {
+			window.clearTimeout(timer);
+		}
+		rafTimers.clear();
+		window.requestAnimationFrame = nativeRequestAnimationFrame;
+		window.cancelAnimationFrame = nativeCancelAnimationFrame;
+		vi.useRealTimers();
+	});
+
+	it("instant camera 更新会立刻写入 sharedValue 与 store", () => {
+		const onChange = vi.fn();
+		const onAnimationStateChange = vi.fn();
+		let controller: UseCanvasCameraControllerResult | null = null;
+
+		render(
+			<CameraControllerProbe
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				onChange={onChange}
+				onAnimationStateChange={onAnimationStateChange}
+				onReady={(api) => {
+					controller = api;
+				}}
+			/>,
+		);
+
+		act(() => {
+			controller?.applyCamera(
+				{ x: 120, y: -48, zoom: 1.5 },
+				{ transition: "instant" },
+			);
+		});
+
+		expect(controller).not.toBeNull();
+		if (!controller) return;
+		expect(controller.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
+		expect(controller.cameraSharedValue.value).toEqual({
+			x: 120,
+			y: -48,
+			zoom: 1.5,
+		});
+		expect(onChange).toHaveBeenCalledTimes(1);
+		expect(onChange).toHaveBeenLastCalledWith({ x: 120, y: -48, zoom: 1.5 });
+		expect(onAnimationStateChange).not.toHaveBeenCalled();
+	});
+
+	it("smooth camera 会按显式插值逐帧写回并在结束时关闭动画状态", () => {
 		const onChange = vi.fn();
 		const onAnimationStateChange = vi.fn();
 		let controller: UseCanvasCameraControllerResult | null = null;
@@ -58,35 +135,34 @@ describe("useCanvasCameraController", () => {
 
 		expect(controller).not.toBeNull();
 		if (!controller) return;
-		const readyController = controller as UseCanvasCameraControllerResult;
+		expect(onAnimationStateChange).toHaveBeenCalledTimes(1);
+		expect(onAnimationStateChange).toHaveBeenLastCalledWith(true);
 		expect(onChange).not.toHaveBeenCalled();
-		expect(readyController.renderCamera).toEqual({
+
+		act(() => {
+			vi.advanceTimersByTime(260);
+		});
+
+		expect(onChange.mock.calls.length).toBeGreaterThan(1);
+		expect(onChange).toHaveBeenLastCalledWith({ x: 120, y: -48, zoom: 1.5 });
+		expect(controller.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
+		expect(controller.cameraSharedValue.value).toEqual({
 			x: 120,
 			y: -48,
 			zoom: 1.5,
 		});
-		expect(onAnimationStateChange).toHaveBeenNthCalledWith(1, true);
-		expect(onChange).not.toHaveBeenCalled();
-
-		act(() => {
-			readyController.finishCameraAnimation(readyController.cameraAnimationKey);
-		});
-
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenLastCalledWith({ x: 120, y: -48, zoom: 1.5 });
-		expect(onAnimationStateChange).toHaveBeenNthCalledWith(2, false);
+		expect(onAnimationStateChange).toHaveBeenCalledTimes(2);
+		expect(onAnimationStateChange).toHaveBeenLastCalledWith(false);
 	});
 
-	it("ignores instant camera writes while smooth animation is active", () => {
+	it("smooth 动画期间会忽略 instant 输入", () => {
 		const onChange = vi.fn();
-		const onAnimationStateChange = vi.fn();
 		let controller: UseCanvasCameraControllerResult | null = null;
 
 		render(
 			<CameraControllerProbe
 				camera={{ x: 0, y: 0, zoom: 1 }}
 				onChange={onChange}
-				onAnimationStateChange={onAnimationStateChange}
 				onReady={(api) => {
 					controller = api;
 				}}
@@ -102,69 +178,15 @@ describe("useCanvasCameraController", () => {
 				{ transition: "instant" },
 			);
 		});
-
-		expect(controller).not.toBeNull();
-		if (!controller) return;
-		const readyController = controller as UseCanvasCameraControllerResult;
-		expect(onChange).not.toHaveBeenCalled();
-		expect(readyController.renderCamera).toEqual({
-			x: 64,
-			y: 32,
-			zoom: 1.2,
-		});
-
 		act(() => {
-			readyController.finishCameraAnimation(readyController.cameraAnimationKey);
+			vi.advanceTimersByTime(260);
 		});
 
-		expect(onChange).toHaveBeenCalledTimes(1);
+		expect(onChange).toHaveBeenCalled();
 		expect(onChange).toHaveBeenLastCalledWith({ x: 64, y: 32, zoom: 1.2 });
 	});
 
-	it("allows smooth camera transitions to reverse from the current render target", () => {
-		const initialCamera = { x: 0, y: 0, zoom: 1 };
-		const focusedCamera = { x: 120, y: -48, zoom: 1.5 };
-		const onChange = vi.fn();
-		let controller: UseCanvasCameraControllerResult | null = null;
-
-		render(
-			<CameraControllerProbe
-				camera={initialCamera}
-				onChange={onChange}
-				onReady={(api) => {
-					controller = api;
-				}}
-			/>,
-		);
-
-		act(() => {
-			controller?.applyCamera(focusedCamera);
-		});
-		expect(controller).not.toBeNull();
-		if (!controller) return;
-		const readyController = controller as UseCanvasCameraControllerResult;
-		expect(readyController.renderCamera).toEqual(focusedCamera);
-
-		act(() => {
-			readyController.applyCamera(initialCamera);
-		});
-		expect(controller).not.toBeNull();
-		if (!controller) return;
-		const reversedController = controller as UseCanvasCameraControllerResult;
-		expect(reversedController.renderCamera).toEqual(initialCamera);
-
-		act(() => {
-			reversedController.finishCameraAnimation(
-				reversedController.cameraAnimationKey,
-			);
-		});
-
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenLastCalledWith(initialCamera);
-	});
-
-	it("keeps smooth animation running when the same target is applied again", () => {
-		const targetCamera = { x: 120, y: -48, zoom: 1.5 };
+	it("未完成 smooth 动画可被新的 smooth 目标覆盖", () => {
 		const onChange = vi.fn();
 		const onAnimationStateChange = vi.fn();
 		let controller: UseCanvasCameraControllerResult | null = null;
@@ -181,100 +203,21 @@ describe("useCanvasCameraController", () => {
 		);
 
 		act(() => {
-			controller?.applyCamera(targetCamera);
+			controller?.applyCamera({ x: 120, y: -48, zoom: 1.5 });
 		});
 		act(() => {
-			controller?.applyCamera(targetCamera);
+			vi.advanceTimersByTime(80);
 		});
-
-		expect(controller).not.toBeNull();
-		if (!controller) return;
-		const readyController = controller as UseCanvasCameraControllerResult;
-		expect(readyController.renderCamera).toEqual(targetCamera);
-		expect(onChange).not.toHaveBeenCalled();
-		expect(onAnimationStateChange).toHaveBeenCalledTimes(1);
-		expect(onAnimationStateChange).toHaveBeenLastCalledWith(true);
-
 		act(() => {
-			readyController.finishCameraAnimation(readyController.cameraAnimationKey);
+			controller?.applyCamera({ x: 0, y: 0, zoom: 1 });
+		});
+		act(() => {
+			vi.advanceTimersByTime(260);
 		});
 
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenLastCalledWith(targetCamera);
-		expect(onAnimationStateChange).toHaveBeenCalledTimes(2);
+		expect(onChange).toHaveBeenCalled();
+		expect(onChange).toHaveBeenLastCalledWith({ x: 0, y: 0, zoom: 1 });
+		expect(onAnimationStateChange).toHaveBeenNthCalledWith(1, true);
 		expect(onAnimationStateChange).toHaveBeenLastCalledWith(false);
-	});
-
-	it("ignores instant pan while smooth animation is active", () => {
-		const smoothTarget = { x: 0, y: 0, zoom: 1 };
-		const panTarget = { x: 48, y: -32, zoom: 1 };
-		const onChange = vi.fn();
-		const onAnimationStateChange = vi.fn();
-		let controller: UseCanvasCameraControllerResult | null = null;
-
-		render(
-			<CameraControllerProbe
-				camera={{ x: 120, y: -48, zoom: 1.5 }}
-				onChange={onChange}
-				onAnimationStateChange={onAnimationStateChange}
-				onReady={(api) => {
-					controller = api;
-				}}
-			/>,
-		);
-
-		act(() => {
-			controller?.applyCamera(smoothTarget);
-		});
-		act(() => {
-			controller?.applyCamera(panTarget, { transition: "instant" });
-		});
-
-		expect(controller).not.toBeNull();
-		if (!controller) return;
-		const readyController = controller as UseCanvasCameraControllerResult;
-		expect(readyController.renderCamera).toEqual(smoothTarget);
-		expect(onChange).not.toHaveBeenCalled();
-		expect(onAnimationStateChange).toHaveBeenCalledTimes(1);
-		expect(onAnimationStateChange).toHaveBeenLastCalledWith(true);
-
-		act(() => {
-			readyController.finishCameraAnimation(readyController.cameraAnimationKey);
-		});
-
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenLastCalledWith(smoothTarget);
-		expect(onAnimationStateChange).toHaveBeenCalledTimes(2);
-		expect(onAnimationStateChange).toHaveBeenLastCalledWith(false);
-	});
-
-	it("commits settled camera when animation completion reports real-time state", () => {
-		const smoothTarget = { x: 120, y: -48, zoom: 1.5 };
-		const settledCamera = { x: 96, y: -40, zoom: 1.5 };
-		const onChange = vi.fn();
-		let controller: UseCanvasCameraControllerResult | null = null;
-
-		render(
-			<CameraControllerProbe
-				camera={{ x: 0, y: 0, zoom: 1 }}
-				onChange={onChange}
-				onReady={(api) => {
-					controller = api;
-				}}
-			/>,
-		);
-
-		act(() => {
-			controller?.applyCamera(smoothTarget);
-		});
-		act(() => {
-			controller?.finishCameraAnimation(
-				controller?.cameraAnimationKey ?? 0,
-				settledCamera,
-			);
-		});
-
-		expect(onChange).toHaveBeenCalledTimes(1);
-		expect(onChange).toHaveBeenLastCalledWith(settledCamera);
 	});
 });

@@ -1,6 +1,7 @@
 import type { VideoCanvasNode } from "core/studio/types";
 import { describe, expect, it } from "vitest";
 import {
+	resolveCanvasCameraTransformMatrix,
 	resolveCanvasNodeLabelLayout,
 	resolveCanvasNodeScreenFrame,
 } from "./canvasNodeLabelUtils";
@@ -79,5 +80,36 @@ describe("canvasNodeLabelUtils", () => {
 
 		expect(layout?.y).toBe(-22);
 		expect(layout?.x).toBe(24);
+	});
+
+	it("camera matrix 与 world->screen 公式保持先平移再缩放", () => {
+		const node = createVideoNode({
+			x: 40,
+			y: 25,
+			width: 120,
+			height: 60,
+		});
+		const camera = {
+			x: 24,
+			y: -12,
+			zoom: 1.25,
+		};
+		const frame = resolveCanvasNodeScreenFrame(node, camera);
+		const transform = resolveCanvasCameraTransformMatrix(camera);
+		const matrix = transform[0]?.matrix;
+		if (!matrix) {
+			throw new Error("camera matrix 缺失");
+		}
+		const mappedTopLeft = {
+			x: matrix[0] * node.x + matrix[1] * node.y + matrix[3],
+			y: matrix[4] * node.x + matrix[5] * node.y + matrix[7],
+		};
+
+		expect(frame.x).toBe((node.x + camera.x) * camera.zoom);
+		expect(frame.y).toBe((node.y + camera.y) * camera.zoom);
+		expect(mappedTopLeft).toEqual({
+			x: frame.x,
+			y: frame.y,
+		});
 	});
 });

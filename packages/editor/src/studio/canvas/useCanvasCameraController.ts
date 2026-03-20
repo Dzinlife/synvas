@@ -1,8 +1,13 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
+import type { SharedValue } from "react-skia-lite";
+import { useSharedValue } from "react-skia-lite";
 import {
+	CAMERA_SMOOTH_DURATION_MS,
 	type ApplyCameraOptions,
 	type CameraState,
+	easeOutCubic,
 	isCameraAlmostEqual,
+	lerpCamera,
 } from "./canvasWorkspaceUtils";
 
 interface UseCanvasCameraControllerOptions {
@@ -12,15 +17,16 @@ interface UseCanvasCameraControllerOptions {
 }
 
 export interface UseCanvasCameraControllerResult {
-	renderCamera: CameraState;
-	cameraAnimationKey: number;
+	cameraSharedValue: SharedValue<CameraState>;
 	getCamera: () => CameraState;
 	applyCamera: (camera: CameraState, options?: ApplyCameraOptions) => void;
 	stopCameraAnimation: () => void;
-	finishCameraAnimation: (
-		animationKey: number,
-		settledCamera?: CameraState,
-	) => void;
+}
+
+interface CameraAnimationState {
+	from: CameraState;
+	to: CameraState;
+	startTime: number | null;
 }
 
 export const useCanvasCameraController = ({
@@ -28,109 +34,137 @@ export const useCanvasCameraController = ({
 	onChange,
 	onAnimationStateChange,
 }: UseCanvasCameraControllerOptions): UseCanvasCameraControllerResult => {
-	const cameraAnimationKeyRef = useRef(0);
-	const activeCameraAnimationKeyRef = useRef<number | null>(null);
-	const pendingCameraRef = useRef<CameraState | null>(null);
-	const [renderCamera, setRenderCamera] = useState(camera);
-	const [cameraAnimationKey, setCameraAnimationKey] = useState(0);
+	const cameraRef = useRef(camera);
+	const cameraSharedValue = useSharedValue(camera);
+	const animationFrameRef = useRef<number | null>(null);
+	const animationStateRef = useRef<CameraAnimationState | null>(null);
+	const isAnimatingRef = useRef(false);
 	const setCameraAnimating = useEffectEvent((isAnimating: boolean) => {
+		if (isAnimatingRef.current === isAnimating) return;
+		isAnimatingRef.current = isAnimating;
 		onAnimationStateChange?.(isAnimating);
 	});
-	const setNextRenderCamera = useEffectEvent((nextCamera: CameraState) => {
-		setRenderCamera((prev) => {
-			if (isCameraAlmostEqual(prev, nextCamera)) {
-				return prev;
-			}
-			return nextCamera;
-		});
+	const writeCamera = useEffectEvent((nextCamera: CameraState) => {
+		cameraRef.current = nextCamera;
+		cameraSharedValue.value = nextCamera;
+		onChange(nextCamera);
 	});
-
-	const getCamera = useEffectEvent((): CameraState => {
-		return renderCamera;
+	const stopAnimationFrame = useEffectEvent(() => {
+		const frameId = animationFrameRef.current;
+		if (frameId === null) return;
+		if (typeof window !== "undefined") {
+			window.cancelAnimationFrame(frameId);
+		}
+		animationFrameRef.current = null;
 	});
-
 	const stopCameraAnimation = useEffectEvent(() => {
-		const hadAnimation = activeCameraAnimationKeyRef.current !== null;
-		activeCameraAnimationKeyRef.current = null;
-		pendingCameraRef.current = null;
-		cameraAnimationKeyRef.current += 1;
-		setCameraAnimationKey(cameraAnimationKeyRef.current);
+		const hadAnimation = animationStateRef.current !== null;
+		stopAnimationFrame();
+		animationStateRef.current = null;
 		if (hadAnimation) {
 			setCameraAnimating(false);
 		}
 	});
 
-	const finishCameraAnimation = useEffectEvent(
-		(animationKey: number, settledCamera?: CameraState) => {
-			if (activeCameraAnimationKeyRef.current !== animationKey) {
-				return;
-			}
-			const nextCamera = settledCamera ?? pendingCameraRef.current ?? renderCamera;
-			activeCameraAnimationKeyRef.current = null;
-			pendingCameraRef.current = null;
-			setNextRenderCamera(nextCamera);
-			onChange(nextCamera);
+	const runAnimationFrame = useEffectEvent((timestamp: number) => {
+		const animationState = animationStateRef.current;
+		if (!animationState) return;
+		const startTime = animationState.startTime ?? timestamp;
+		if (animationState.startTime === null) {
+			animationState.startTime = startTime;
+		}
+		const elapsed = Math.max(0, timestamp - startTime);
+		const rawProgress = Math.min(
+			1,
+			elapsed / Math.max(1, CAMERA_SMOOTH_DURATION_MS),
+		);
+		const easedProgress = easeOutCubic(rawProgress);
+		const nextCamera = lerpCamera(
+			animationState.from,
+			animationState.to,
+			easedProgress,
+		);
+		writeCamera(nextCamera);
+		if (rawProgress >= 1) {
+			animationStateRef.current = null;
+			animationFrameRef.current = null;
 			setCameraAnimating(false);
-		},
-	);
+			return;
+		}
+		if (typeof window === "undefined") {
+			return;
+		}
+		animationFrameRef.current = window.requestAnimationFrame(runAnimationFrame);
+	});
+
+	const getCamera = useEffectEvent((): CameraState => {
+		return cameraRef.current;
+	});
 
 	const applyCamera = useEffectEvent(
 		(nextCamera: CameraState, options?: ApplyCameraOptions) => {
 			const transition = options?.transition ?? "smooth";
-			const isCameraAnimationRunning =
-				activeCameraAnimationKeyRef.current !== null;
-			if (transition === "instant" && isCameraAnimationRunning) {
-				return;
-			}
 			const currentCamera = getCamera();
-			const compareCamera = pendingCameraRef.current ?? currentCamera;
+			const compareCamera = animationStateRef.current?.to ?? currentCamera;
 			if (isCameraAlmostEqual(compareCamera, nextCamera)) {
 				return;
 			}
-			if (
-				transition === "instant" ||
-				typeof window === "undefined" ||
-				typeof window.requestAnimationFrame !== "function"
-			) {
+			const canAnimate =
+				typeof window !== "undefined" &&
+				typeof window.requestAnimationFrame === "function";
+			if (transition === "instant") {
+				// smooth 动画期间保持输入门控，避免显式 pan 与过渡混算。
+				if (animationStateRef.current) {
+					return;
+				}
 				stopCameraAnimation();
-				setNextRenderCamera(nextCamera);
-				onChange(nextCamera);
+				writeCamera(nextCamera);
 				return;
 			}
-			const wasAnimating = activeCameraAnimationKeyRef.current !== null;
-			cameraAnimationKeyRef.current += 1;
-			const nextAnimationKey = cameraAnimationKeyRef.current;
-			activeCameraAnimationKeyRef.current = nextAnimationKey;
-			pendingCameraRef.current = nextCamera;
-			setCameraAnimationKey(nextAnimationKey);
-			setNextRenderCamera(nextCamera);
-			if (!wasAnimating) {
-				setCameraAnimating(true);
+			if (!canAnimate) {
+				stopCameraAnimation();
+				writeCamera(nextCamera);
+				return;
 			}
+			const fromCamera = currentCamera;
+			stopAnimationFrame();
+			animationStateRef.current = {
+				from: fromCamera,
+				to: nextCamera,
+				startTime: null,
+			};
+			setCameraAnimating(true);
+			animationFrameRef.current = window.requestAnimationFrame(runAnimationFrame);
 		},
 	);
 
 	useEffect(() => {
-		if (activeCameraAnimationKeyRef.current !== null) {
+		if (animationStateRef.current) {
 			return;
 		}
-		setNextRenderCamera(camera);
-	}, [camera, setNextRenderCamera]);
+		if (isCameraAlmostEqual(cameraRef.current, camera)) {
+			return;
+		}
+		cameraRef.current = camera;
+		cameraSharedValue.value = camera;
+	}, [camera, cameraSharedValue]);
 
 	useEffect(() => {
 		return () => {
-			activeCameraAnimationKeyRef.current = null;
-			pendingCameraRef.current = null;
-			cameraAnimationKeyRef.current += 1;
+			const frameId = animationFrameRef.current;
+			if (frameId !== null && typeof window !== "undefined") {
+				window.cancelAnimationFrame(frameId);
+			}
+			animationFrameRef.current = null;
+			animationStateRef.current = null;
+			isAnimatingRef.current = false;
 		};
 	}, []);
 
 	return {
-		renderCamera,
-		cameraAnimationKey,
+		cameraSharedValue,
 		getCamera,
 		applyCamera,
 		stopCameraAnimation,
-		finishCameraAnimation,
 	};
 };

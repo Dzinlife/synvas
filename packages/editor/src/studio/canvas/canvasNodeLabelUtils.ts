@@ -53,6 +53,51 @@ export interface CanvasNodeLabelLayout {
 	availableWidth: number;
 }
 
+export interface CanvasCameraScreenOffset {
+	x: number;
+	y: number;
+	zoom: number;
+}
+
+export const resolveCanvasCameraScreenOffset = (
+	camera: CanvasCameraState,
+): CanvasCameraScreenOffset => {
+	const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+	return {
+		x: camera.x * safeZoom,
+		y: camera.y * safeZoom,
+		zoom: safeZoom,
+	};
+};
+
+export const resolveCanvasCameraTransformMatrix = (
+	camera: CanvasCameraState,
+) => {
+	const { x, y, zoom } = resolveCanvasCameraScreenOffset(camera);
+	return [
+		{
+			matrix: [
+				zoom,
+				0,
+				0,
+				x,
+				0,
+				zoom,
+				0,
+				y,
+				0,
+				0,
+				1,
+				0,
+				0,
+				0,
+				0,
+				1,
+			] as const,
+		},
+	];
+};
+
 export const resolveCanvasViewportRect = (
 	width: number,
 	height: number,
@@ -73,11 +118,11 @@ export const resolveCanvasWorldRectScreenFrame = (
 	rect: CanvasWorldRect,
 	camera: CanvasCameraState,
 ): CanvasScreenRect => {
-	const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-	const x = (rect.left + camera.x) * safeZoom;
-	const y = (rect.top + camera.y) * safeZoom;
-	const width = Math.max(1, rect.width * safeZoom);
-	const height = Math.max(1, rect.height * safeZoom);
+	const cameraOffset = resolveCanvasCameraScreenOffset(camera);
+	const x = rect.left * cameraOffset.zoom + cameraOffset.x;
+	const y = rect.top * cameraOffset.zoom + cameraOffset.y;
+	const width = Math.max(1, rect.width * cameraOffset.zoom);
+	const height = Math.max(1, rect.height * cameraOffset.zoom);
 	return {
 		x,
 		y,

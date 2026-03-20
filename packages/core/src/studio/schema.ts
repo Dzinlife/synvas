@@ -135,17 +135,17 @@ const studioProjectSchema = z.object({
 	canvas: canvasDocumentSchema,
 	scenes: z.record(nonEmptyStringSchema, sceneDocumentSchema),
 	assets: z.array(z.unknown()),
+	camera: z.object({
+		x: finiteNumberSchema,
+		y: finiteNumberSchema,
+		zoom: z.number().positive(),
+	}),
 	ot: studioOtSchema.optional(),
 	ui: z.object({
 		activeSceneId: nonEmptyStringSchema.nullable(),
 		focusedNodeId: nonEmptyStringSchema.nullable(),
 		activeNodeId: nonEmptyStringSchema.nullable(),
 		canvasSnapEnabled: z.boolean().default(true),
-		camera: z.object({
-			x: finiteNumberSchema,
-			y: finiteNumberSchema,
-			zoom: z.number().positive(),
-		}),
 	}),
 	createdAt: z.number(),
 	updatedAt: z.number(),

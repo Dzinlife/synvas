@@ -10,6 +10,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { useStoreWithEqualityFn } from "zustand/traditional";
 import { writeAudioToOpfs } from "@/asr/opfsAudio";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
@@ -516,8 +517,37 @@ interface ResolvedNodeDrawerTarget {
 	options: ResolvedCanvasDrawerOptions;
 }
 
+const isProjectEqualExceptCamera = (
+	left: { currentProject: ReturnType<typeof useProjectStore.getState>["currentProject"] },
+	right: {
+		currentProject: ReturnType<typeof useProjectStore.getState>["currentProject"];
+	},
+): boolean => {
+	const leftProject = left.currentProject;
+	const rightProject = right.currentProject;
+	if (leftProject === rightProject) return true;
+	if (!leftProject || !rightProject) return leftProject === rightProject;
+	return (
+		leftProject.id === rightProject.id &&
+		leftProject.revision === rightProject.revision &&
+		leftProject.canvas === rightProject.canvas &&
+		leftProject.scenes === rightProject.scenes &&
+		leftProject.assets === rightProject.assets &&
+		leftProject.ot === rightProject.ot &&
+		leftProject.ui === rightProject.ui &&
+		leftProject.createdAt === rightProject.createdAt &&
+		leftProject.updatedAt === rightProject.updatedAt
+	);
+};
+
 const CanvasWorkspace = () => {
-	const currentProject = useProjectStore((state) => state.currentProject);
+	const { currentProject } = useStoreWithEqualityFn(
+		useProjectStore,
+		(state) => ({
+			currentProject: state.currentProject,
+		}),
+		isProjectEqualExceptCamera,
+	);
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const createCanvasNode = useProjectStore((state) => state.createCanvasNode);
 	const updateCanvasNodeLayout = useProjectStore(
@@ -578,7 +608,7 @@ const CanvasWorkspace = () => {
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
-	const camera = currentProject?.ui.camera ?? DEFAULT_CAMERA;
+	const initialCamera = currentProject?.camera ?? DEFAULT_CAMERA;
 	const isCanvasInteractionLocked = Boolean(focusedNodeId);
 	const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
 	const [visibleDrawerHeight, setVisibleDrawerHeight] = useState(
@@ -620,13 +650,11 @@ const CanvasWorkspace = () => {
 		null,
 	);
 	const {
-		renderCamera,
-		cameraAnimationKey,
+		cameraSharedValue,
 		getCamera,
 		applyCamera,
-		finishCameraAnimation,
 	} = useCanvasCameraController({
-		camera,
+		camera: initialCamera,
 		onChange: setCanvasCamera,
 		onAnimationStateChange: setIsCameraAnimating,
 	});
@@ -1065,13 +1093,14 @@ const CanvasWorkspace = () => {
 			const safeClientY = Number.isFinite(clientY) ? clientY : rect.top;
 			const localX = safeClientX - rect.left;
 			const localY = safeClientY - rect.top;
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const currentCamera = getCamera();
+			const safeZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
 			return {
-				x: localX / safeZoom - camera.x,
-				y: localY / safeZoom - camera.y,
+				x: localX / safeZoom - currentCamera.x,
+				y: localY / safeZoom - currentCamera.y,
 			};
 		},
-		[camera],
+		[getCamera],
 	);
 	const resolveLocalPoint = useCallback((clientX: number, clientY: number) => {
 		const container = containerRef.current;
@@ -1098,9 +1127,11 @@ const CanvasWorkspace = () => {
 				clearCanvasSnapGuides();
 				return;
 			}
-			setSnapGuidesScreen(projectCanvasSnapGuidesToScreen(guidesWorld, camera));
+			setSnapGuidesScreen(
+				projectCanvasSnapGuidesToScreen(guidesWorld, getCamera()),
+			);
 		},
-		[camera, clearCanvasSnapGuides],
+		[clearCanvasSnapGuides, getCamera],
 	);
 	const resolveCanvasGuideValues = useCallback(
 		(excludeNodeIds: string[]): CanvasSnapGuideValues => {
@@ -1146,12 +1177,13 @@ const CanvasWorkspace = () => {
 	}, [canvasSnapEnabled, clearCanvasSnapGuides]);
 	const isResizeAnchorHitAtWorldPoint = useCallback(
 		(worldX: number, worldY: number) => {
+			const currentZoom = getCamera().zoom;
 			if (activeNode && !activeNode.locked && isSingleSelection) {
 				const hitAnchor = resolveCanvasResizeAnchorAtWorldPoint({
 					node: activeNode,
 					worldX,
 					worldY,
-					cameraZoom: camera.zoom,
+					cameraZoom: currentZoom,
 				});
 				if (hitAnchor) return true;
 			}
@@ -1167,13 +1199,13 @@ const CanvasWorkspace = () => {
 					height: selectedBounds.height,
 					worldX,
 					worldY,
-					cameraZoom: camera.zoom,
+					cameraZoom: currentZoom,
 				});
 				if (hitAnchor) return true;
 			}
 			return false;
 		},
-		[activeNode, camera.zoom, isSingleSelection, selectedBounds, selectedNodes],
+		[getCamera, activeNode, isSingleSelection, selectedBounds, selectedNodes],
 	);
 
 	const commitSelectedNodeIds = useCallback(
@@ -1463,11 +1495,12 @@ const CanvasWorkspace = () => {
 
 	const collectIntersectedNodeIds = useCallback(
 		(rect: CanvasMarqueeRect): string[] => {
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
-			const left = Math.min(rect.x1, rect.x2) / safeZoom - camera.x;
-			const right = Math.max(rect.x1, rect.x2) / safeZoom - camera.x;
-			const top = Math.min(rect.y1, rect.y2) / safeZoom - camera.y;
-			const bottom = Math.max(rect.y1, rect.y2) / safeZoom - camera.y;
+			const currentCamera = getCamera();
+			const safeZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
+			const left = Math.min(rect.x1, rect.x2) / safeZoom - currentCamera.x;
+			const right = Math.max(rect.x1, rect.x2) / safeZoom - currentCamera.x;
+			const top = Math.min(rect.y1, rect.y2) / safeZoom - currentCamera.y;
+			const bottom = Math.max(rect.y1, rect.y2) / safeZoom - currentCamera.y;
 			return sortedNodes
 				.filter((node) =>
 					isNodeIntersectRect(node, {
@@ -1479,7 +1512,7 @@ const CanvasWorkspace = () => {
 				)
 				.map((node) => node.id);
 		},
-		[camera.x, camera.y, camera.zoom, sortedNodes],
+		[getCamera, sortedNodes],
 	);
 
 	const applyMarqueeSelection = useCallback(
@@ -1959,10 +1992,11 @@ const CanvasWorkspace = () => {
 			return lastCanvasPointerWorldRef.current;
 		}
 		const container = containerRef.current;
+		const currentCamera = getCamera();
 		if (!container) {
 			return {
-				x: -camera.x,
-				y: -camera.y,
+				x: -currentCamera.x,
+				y: -currentCamera.y,
 			};
 		}
 		const rect = container.getBoundingClientRect();
@@ -1970,7 +2004,7 @@ const CanvasWorkspace = () => {
 			rect.left + rect.width / 2,
 			rect.top + rect.height / 2,
 		);
-	}, [camera.x, camera.y, resolveWorldPoint]);
+	}, [getCamera, resolveWorldPoint]);
 
 	const commitCreatedCanvasEntries = useCallback(
 		(entries: CanvasGraphHistoryEntry[]): boolean => {
@@ -2201,7 +2235,8 @@ const CanvasWorkspace = () => {
 			if (resizeSession.nodeId !== node.id) return;
 			if (resizeSession.anchor !== anchor) return;
 
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const currentZoom = getCamera().zoom;
+			const safeZoom = Math.max(currentZoom, CAMERA_ZOOM_EPSILON);
 			const deltaX = event.movementX / safeZoom;
 			const deltaY = event.movementY / safeZoom;
 			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
@@ -2228,7 +2263,7 @@ const CanvasWorkspace = () => {
 			});
 			if (canvasSnapEnabled) {
 				const guideValues = resolveCanvasGuideValues([resizeSession.nodeId]);
-				const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
+				const snapThreshold = resolveCanvasSnapThresholdWorld(currentZoom);
 				const candidateBox = {
 					x: nextLayout.x,
 					y: nextLayout.y,
@@ -2297,8 +2332,8 @@ const CanvasWorkspace = () => {
 		},
 		[
 			canvasSnapEnabled,
-			camera.zoom,
 			clearCanvasSnapGuides,
+			getCamera,
 			resolveCanvasGuideValues,
 			setCanvasSnapGuides,
 			updateCanvasNodeLayout,
@@ -2490,7 +2525,8 @@ const CanvasWorkspace = () => {
 					? dragSession.copyEntries.map((entry) => entry.node.id)
 					: dragSession.dragNodeIds;
 			if (targetNodeIds.length === 0) return;
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const currentZoom = getCamera().zoom;
+			const safeZoom = Math.max(currentZoom, CAMERA_ZOOM_EPSILON);
 			let deltaX = event.movementX / safeZoom;
 			let deltaY = event.movementY / safeZoom;
 			if (
@@ -2511,7 +2547,7 @@ const CanvasWorkspace = () => {
 			}
 			if (canvasSnapEnabled) {
 				const guideValues = resolveCanvasGuideValues(targetNodeIds);
-				const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
+				const snapThreshold = resolveCanvasSnapThresholdWorld(currentZoom);
 				const movingBox = {
 					x: dragSession.initialBounds.x + deltaX,
 					y: dragSession.initialBounds.y + deltaY,
@@ -2564,8 +2600,8 @@ const CanvasWorkspace = () => {
 			appendCanvasGraphBatch,
 			buildCanvasCopyEntries,
 			canvasSnapEnabled,
-			camera.zoom,
 			clearCanvasSnapGuides,
+			getCamera,
 			resetCanvasDragSession,
 			resolveCanvasNodeTimelineDropTarget,
 			resolveCanvasGuideValues,
@@ -2881,7 +2917,8 @@ const CanvasWorkspace = () => {
 			const resizeSession = selectionResizeSessionRef.current;
 			if (!resizeSession) return;
 			if (resizeSession.anchor !== anchor) return;
-			const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+			const currentZoom = getCamera().zoom;
+			const safeZoom = Math.max(currentZoom, CAMERA_ZOOM_EPSILON);
 			const deltaX = event.movementX / safeZoom;
 			const deltaY = event.movementY / safeZoom;
 			if (Math.abs(deltaX) + Math.abs(deltaY) < 1e-9) return;
@@ -2928,7 +2965,7 @@ const CanvasWorkspace = () => {
 				const guideValues = resolveCanvasGuideValues(
 					Object.keys(resizeSession.snapshots),
 				);
-				const snapThreshold = resolveCanvasSnapThresholdWorld(camera.zoom);
+				const snapThreshold = resolveCanvasSnapThresholdWorld(currentZoom);
 				const snapResult = resolveCanvasRectSnap({
 					guideValues,
 					threshold: snapThreshold,
@@ -3040,8 +3077,8 @@ const CanvasWorkspace = () => {
 		},
 		[
 			canvasSnapEnabled,
-			camera.zoom,
 			clearCanvasSnapGuides,
+			getCamera,
 			resolveCanvasGuideValues,
 			setCanvasSnapGuides,
 			updateCanvasNodeLayout,
@@ -3884,8 +3921,7 @@ const CanvasWorkspace = () => {
 			<InfiniteSkiaCanvas
 				width={stageSize.width}
 				height={stageSize.height}
-				camera={renderCamera}
-				cameraAnimationKey={cameraAnimationKey}
+				camera={cameraSharedValue}
 				nodes={sortedNodes}
 				scenes={currentProject.scenes}
 				assets={currentProject.assets}
@@ -3904,7 +3940,6 @@ const CanvasWorkspace = () => {
 				onSelectionResize={handleSelectionResize}
 				onNodeClick={handleSkiaNodeClick}
 				onNodeDoubleClick={handleSkiaNodeDoubleClick}
-				onCameraAnimationComplete={finishCameraAnimation}
 			/>
 			{marqueeRect.visible && (
 				<div

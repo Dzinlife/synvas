@@ -99,17 +99,17 @@ export interface StudioProject {
 	canvas: CanvasDocument;
 	scenes: Record<string, SceneDocument>;
 	assets: TimelineAsset[];
+	camera: {
+		x: number;
+		y: number;
+		zoom: number;
+	};
 	ot?: StudioProjectOt;
 	ui: {
 		activeSceneId: string | null;
 		focusedNodeId: string | null;
 		activeNodeId: string | null;
 		canvasSnapEnabled: boolean;
-		camera: {
-			x: number;
-			y: number;
-			zoom: number;
-		};
 	};
 	createdAt: number;
 	updatedAt: number;

@@ -9,18 +9,14 @@ import {
 } from "react";
 import { useDrag } from "@use-gesture/react";
 import {
-	cancelAnimation,
 	Canvas,
 	type CanvasRef,
-	Easing,
 	Group,
 	makeMutable,
 	Rect,
 	type SharedValue,
 	type SkiaPointerEvent,
 	useDerivedValue,
-	useSharedValue,
-	withTiming,
 } from "react-skia-lite";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
@@ -39,6 +35,7 @@ import {
 } from "./NodeInteractionWrapper";
 import {
 	type CanvasNodeLayoutState,
+	resolveCanvasCameraTransformMatrix,
 	resolveCanvasNodeLayoutWorldRect,
 } from "./canvasNodeLabelUtils";
 import { getCanvasNodeDefinition } from "./node-system/registry";
@@ -47,7 +44,7 @@ import type {
 	CanvasNodeFocusEditorLayerState,
 } from "./node-system/types";
 import {
-	CAMERA_SMOOTH_DURATION_MS,
+	type CameraState,
 } from "./canvasWorkspaceUtils";
 
 export type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
@@ -72,11 +69,7 @@ export interface CanvasSelectionResizeEvent {
 interface InfiniteSkiaCanvasProps {
 	width: number;
 	height: number;
-	camera: {
-		x: number;
-		y: number;
-		zoom: number;
-	};
+	camera: SharedValue<CameraState>;
 	nodes: CanvasNode[];
 	scenes: StudioProject["scenes"];
 	assets: StudioProject["assets"];
@@ -85,7 +78,6 @@ interface InfiniteSkiaCanvasProps {
 	focusedNodeId: string | null;
 	snapGuidesScreen?: CanvasSnapGuidesScreen;
 	suspendHover?: boolean;
-	cameraAnimationKey?: number;
 	onNodeClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onNodeDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onNodeDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
@@ -96,10 +88,6 @@ interface InfiniteSkiaCanvasProps {
 	onSelectionDrag?: (event: CanvasNodeDragEvent) => void;
 	onSelectionDragEnd?: (event: CanvasNodeDragEvent) => void;
 	onSelectionResize?: (event: CanvasSelectionResizeEvent) => void;
-	onCameraAnimationComplete?: (
-		animationKey: number,
-		settledCamera: InfiniteSkiaCanvasProps["camera"],
-	) => void;
 }
 
 const SELECTION_DRAG_CONFIG = {
@@ -115,10 +103,6 @@ const EMPTY_SNAP_GUIDES_SCREEN: CanvasSnapGuidesScreen = {
 };
 
 const LAYOUT_EPSILON = 1e-6;
-const CAMERA_TIMING_CONFIG = {
-	duration: CAMERA_SMOOTH_DURATION_MS,
-	easing: Easing.out(Easing.cubic),
-} as const;
 
 const resolveNodeLayoutState = (node: CanvasNode): CanvasNodeLayoutState => {
 	return {
@@ -400,55 +384,6 @@ const isLayerValueEqual = (left: unknown, right: unknown): boolean => {
 	return false;
 };
 
-const resolveCameraTransform = (camera: InfiniteSkiaCanvasProps["camera"]) => {
-	// 用显式矩阵固定为“先平移再缩放”的语义，避免 transform 序列语义差异带来的漂移。
-	const tx = camera.x * camera.zoom;
-	const ty = camera.y * camera.zoom;
-	return [
-		{
-			matrix: [
-				camera.zoom,
-				0,
-				0,
-				tx,
-				0,
-				camera.zoom,
-				0,
-				ty,
-				0,
-				0,
-				1,
-				0,
-				0,
-				0,
-				0,
-				1,
-			] as const,
-		},
-	];
-};
-
-const resolveCameraScreenOffset = (
-	camera: InfiniteSkiaCanvasProps["camera"],
-) => {
-	return {
-		x: camera.x * camera.zoom,
-		y: camera.y * camera.zoom,
-	};
-};
-
-const resolveCameraFromScreenOffset = (
-	screenOffset: { x: number; y: number },
-	zoom: number,
-): InfiniteSkiaCanvasProps["camera"] => {
-	const safeZoom = Math.max(zoom, 1e-6);
-	return {
-		x: screenOffset.x / safeZoom,
-		y: screenOffset.y / safeZoom,
-		zoom,
-	};
-};
-
 const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	width,
 	height,
@@ -461,7 +396,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	focusedNodeId,
 	snapGuidesScreen = EMPTY_SNAP_GUIDES_SCREEN,
 	suspendHover = false,
-	cameraAnimationKey = 0,
 	onNodeClick,
 	onNodeDoubleClick,
 	onNodeDragStart,
@@ -472,7 +406,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	onSelectionDrag,
 	onSelectionDragEnd,
 	onSelectionResize,
-	onCameraAnimationComplete,
 }) => {
 	const runtimeManager = useStudioRuntimeManager();
 	const canvasRef = useRef<CanvasRef>(null);
@@ -496,23 +429,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		};
 	}
 	const renderNodes = renderNodesRef.current.nodes;
-	const animatedCameraZoom = useSharedValue(camera.zoom);
-	const animatedCameraScreenOffset = useSharedValue(
-		resolveCameraScreenOffset(camera),
-	);
-	const cameraAnimationCompletionRef = useRef({
-		key: cameraAnimationKey,
-		remaining: 0,
-		completed: false,
-	});
-	const animatedCamera = useDerivedValue(() => {
-		return resolveCameraFromScreenOffset(
-			animatedCameraScreenOffset.value,
-			animatedCameraZoom.value,
-		);
+	const animatedCamera = camera;
+	const animatedCameraZoom = useDerivedValue(() => {
+		return animatedCamera.value.zoom;
 	});
 	const animatedCameraTransform = useDerivedValue(() => {
-		return resolveCameraTransform(animatedCamera.value);
+		// 使用显式矩阵，确保世界层与 overlay 的 world->screen 公式严格一致。
+		return resolveCanvasCameraTransformMatrix(animatedCamera.value);
 	});
 	const animatedGridUniforms = useDerivedValue(() => {
 		return resolveDotGridUniforms(width, height, animatedCamera.value);
@@ -733,76 +656,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	);
 
 	useLayoutEffect(() => {
-		const nextCamera = camera;
-		const nextScreenOffset = resolveCameraScreenOffset(nextCamera);
-		const resolveSettledCamera = () => {
-			return resolveCameraFromScreenOffset(
-				animatedCameraScreenOffset.value,
-				animatedCameraZoom.value,
-			);
-		};
-		if (suspendHover) {
-			cameraAnimationCompletionRef.current = {
-				key: cameraAnimationKey,
-				remaining: 2,
-				completed: false,
-			};
-			const markAnimationPartFinished = (finished: boolean) => {
-				if (!finished) {
-					return;
-				}
-				const completionState = cameraAnimationCompletionRef.current;
-				if (
-					completionState.key !== cameraAnimationKey ||
-					completionState.completed
-				) {
-					return;
-				}
-				completionState.remaining -= 1;
-				if (completionState.remaining > 0) {
-					return;
-				}
-				completionState.completed = true;
-				onCameraAnimationComplete?.(
-					cameraAnimationKey,
-					resolveSettledCamera(),
-				);
-			};
-			animatedCameraZoom.value = withTiming(
-				nextCamera.zoom,
-				CAMERA_TIMING_CONFIG,
-				(finished) => {
-					markAnimationPartFinished(finished === true);
-				},
-			);
-			animatedCameraScreenOffset.value = withTiming(
-				nextScreenOffset,
-				CAMERA_TIMING_CONFIG,
-				(finished) => {
-					markAnimationPartFinished(finished === true);
-				},
-			);
-			return;
-		}
-		cameraAnimationCompletionRef.current = {
-			key: cameraAnimationKey,
-			remaining: 0,
-			completed: false,
-		};
-		cancelAnimation(animatedCameraZoom);
-		cancelAnimation(animatedCameraScreenOffset);
-		animatedCameraZoom.value = nextCamera.zoom;
-		animatedCameraScreenOffset.value = nextScreenOffset;
-	}, [
-		animatedCameraZoom,
-		animatedCameraScreenOffset,
-		camera,
-		cameraAnimationKey,
-		onCameraAnimationComplete,
-		suspendHover,
-	]);
-
-	useLayoutEffect(() => {
 		const root = canvasRef.current?.getRoot();
 		if (!root) return;
 		root.render(
@@ -926,7 +779,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		animatedCamera,
 		animatedCameraTransform,
 		animatedCameraZoom,
-		animatedCameraScreenOffset,
 		animatedGridUniforms,
 	]);
 
@@ -945,7 +797,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				<FocusEditorBridge
 					width={width}
 					height={height}
-					camera={camera}
+					camera={camera.value}
 					runtimeManager={runtimeManager}
 					focusedNode={focusedNode}
 					suspendHover={suspendHover}

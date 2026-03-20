@@ -120,16 +120,16 @@ const createValidProject = () => ({
 			},
 		},
 	},
+	camera: {
+		x: 0,
+		y: 0,
+		zoom: 1,
+	},
 	ui: {
 		activeSceneId: "scene-1",
 		focusedNodeId: null,
 		activeNodeId: "node-1",
 		canvasSnapEnabled: true,
-		camera: {
-			x: 0,
-			y: 0,
-			zoom: 1,
-		},
 	},
 	createdAt: 1,
 	updatedAt: 1,
@@ -140,9 +140,9 @@ describe("studio schema", () => {
 		expect(() => parseStudioProject(createValidProject())).not.toThrow();
 	});
 
-	it("缺失 ui.camera 时应报错", () => {
+	it("缺失根级 camera 时应报错", () => {
 		const invalid = createValidProject();
-		delete (invalid.ui as { camera?: unknown }).camera;
+		delete (invalid as { camera?: unknown }).camera;
 		expect(() => parseStudioProject(invalid)).toThrow();
 	});
 

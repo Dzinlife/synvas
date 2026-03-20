@@ -8,7 +8,6 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import type { CanvasNode, StudioProject } from "core/studio/types";
-import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { resolveClipboardNodeGeometry } from "@/element/model/clipboardTransform";
@@ -22,10 +21,7 @@ import { useDragStore } from "@/scene-editor/drag";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
-import {
-	CAMERA_SMOOTH_DURATION_MS,
-	type CameraState,
-} from "./canvasWorkspaceUtils";
+import type { CameraState } from "./canvasWorkspaceUtils";
 import CanvasWorkspace from "./CanvasWorkspace";
 
 const togglePlaybackMock = vi.fn();
@@ -57,7 +53,7 @@ interface MockCanvasNodeDragEvent extends MockCanvasNodePointerEvent {
 interface MockInfiniteSkiaCanvasProps {
 	width: number;
 	height: number;
-	camera?: CameraState;
+	camera?: { value: CameraState; _isSharedValue?: boolean };
 	focusedNodeId?: string | null;
 	selectedNodeIds?: string[];
 	snapGuidesScreen?: {
@@ -65,11 +61,6 @@ interface MockInfiniteSkiaCanvasProps {
 		horizontal: number[];
 	};
 	suspendHover?: boolean;
-	cameraAnimationKey?: number;
-	onCameraAnimationComplete?: (
-		animationKey: number,
-		settledCamera?: CameraState,
-	) => void;
 	onNodeClick?: (node: CanvasNode, event: MockCanvasNodePointerEvent) => void;
 	onNodeDoubleClick?: (
 		node: CanvasNode,
@@ -103,21 +94,6 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 
 vi.mock("./InfiniteSkiaCanvas", () => ({
 	default: (props: MockInfiniteSkiaCanvasProps) => {
-		useEffect(() => {
-			if (!props.suspendHover) return;
-			if (!props.onCameraAnimationComplete) return;
-			const animationKey = props.cameraAnimationKey ?? 0;
-			const timer = window.setTimeout(() => {
-				props.onCameraAnimationComplete?.(animationKey);
-			}, CAMERA_SMOOTH_DURATION_MS);
-			return () => {
-				window.clearTimeout(timer);
-			};
-		}, [
-			props.cameraAnimationKey,
-			props.onCameraAnimationComplete,
-			props.suspendHover,
-		]);
 		infiniteSkiaCanvasPropsMock(props);
 		return (
 			<>
@@ -836,12 +812,12 @@ const createProject = (): StudioProject => ({
 			},
 		},
 	},
+	camera: { x: 0, y: 0, zoom: 1 },
 	ui: {
 		activeSceneId: "scene-1",
 		focusedNodeId: null,
 		activeNodeId: "node-scene-1",
 		canvasSnapEnabled: true,
-		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,
 	updatedAt: 1,
@@ -1525,12 +1501,12 @@ describe("CanvasWorkspace", () => {
 
 	it("在右侧面板滚轮不会触发画布 camera 平移", () => {
 		render(<CanvasWorkspace />);
-		const before = useProjectStore.getState().currentProject?.ui.camera;
+		const before = useProjectStore.getState().currentProject?.camera;
 		const panel = screen.getByTestId("canvas-active-node-meta-panel");
 		fireEvent.wheel(panel, {
 			deltaY: 120,
 		});
-		const after = useProjectStore.getState().currentProject?.ui.camera;
+		const after = useProjectStore.getState().currentProject?.camera;
 		expect(before).toBeTruthy();
 		expect(after).toBeTruthy();
 		if (!before || !after) return;
@@ -1589,7 +1565,7 @@ describe("CanvasWorkspace", () => {
 		});
 		await waitFor(() => {
 			const zoom =
-				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 1;
+				useProjectStore.getState().currentProject?.camera.zoom ?? 1;
 			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1598,11 +1574,11 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const beforeZoom =
-			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
 		fireEvent.click(screen.getByLabelText("收起侧边栏"));
 		await waitFor(() => {
 			const zoom =
-				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+				useProjectStore.getState().currentProject?.camera.zoom ?? 0;
 			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1611,7 +1587,7 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const afterZoom =
-			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
@@ -1623,7 +1599,7 @@ describe("CanvasWorkspace", () => {
 		});
 		await waitFor(() => {
 			const zoom =
-				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 1;
+				useProjectStore.getState().currentProject?.camera.zoom ?? 1;
 			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1632,7 +1608,7 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const beforeZoom =
-			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
 		act(() => {
 			useProjectStore.getState().setActiveNode(null);
 		});
@@ -1641,7 +1617,7 @@ describe("CanvasWorkspace", () => {
 		});
 		await waitFor(() => {
 			const zoom =
-				useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+				useProjectStore.getState().currentProject?.camera.zoom ?? 0;
 			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1650,7 +1626,7 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const afterZoom =
-			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
@@ -1702,15 +1678,15 @@ describe("CanvasWorkspace", () => {
 
 	it("点击 viewport 外节点只平移 camera，不改变 zoom", async () => {
 		render(<CanvasWorkspace />);
-		const before = useProjectStore.getState().currentProject?.ui.camera;
+		const before = useProjectStore.getState().currentProject?.camera;
 		clickSidebarNode("node-video-offscreen");
-		const immediate = useProjectStore.getState().currentProject?.ui.camera;
+		const immediate = useProjectStore.getState().currentProject?.camera;
 		expect(before).toBeTruthy();
 		expect(immediate).toBeTruthy();
 		if (!before || !immediate) return;
 		expect(immediate).toEqual(before);
 		await waitFor(() => {
-			const after = useProjectStore.getState().currentProject?.ui.camera;
+			const after = useProjectStore.getState().currentProject?.camera;
 			expect(after).toBeTruthy();
 			if (!after) return;
 			expect(after.zoom).toBe(before.zoom);
@@ -1720,15 +1696,15 @@ describe("CanvasWorkspace", () => {
 
 	it("点击被面板遮挡的节点会触发 camera 平移进入安全区", async () => {
 		render(<CanvasWorkspace />);
-		const before = useProjectStore.getState().currentProject?.ui.camera;
+		const before = useProjectStore.getState().currentProject?.camera;
 		clickSidebarNode("node-video-1");
-		const immediate = useProjectStore.getState().currentProject?.ui.camera;
+		const immediate = useProjectStore.getState().currentProject?.camera;
 		expect(before).toBeTruthy();
 		expect(immediate).toBeTruthy();
 		if (!before || !immediate) return;
 		expect(immediate).toEqual(before);
 		await waitFor(() => {
-			const after = useProjectStore.getState().currentProject?.ui.camera;
+			const after = useProjectStore.getState().currentProject?.camera;
 			expect(after).toBeTruthy();
 			if (!after) return;
 			expect(after.zoom).toBe(before.zoom);
@@ -1745,24 +1721,26 @@ describe("CanvasWorkspace", () => {
 		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-nodes"));
 		expect(screen.getByText("拖拽 node asset 到时间线（待实现）")).toBeTruthy();
 		const beforeUi = useProjectStore.getState().currentProject?.ui;
+		const beforeCamera = useProjectStore.getState().currentProject?.camera;
 		const nodeButton = screen.getByTestId(
 			"canvas-sidebar-node-item-node-video-1",
 		);
 		expect(nodeButton.getAttribute("disabled")).not.toBeNull();
 		fireEvent.click(nodeButton);
 		const afterUi = useProjectStore.getState().currentProject?.ui;
+		const afterCamera = useProjectStore.getState().currentProject?.camera;
 		expect(beforeUi).toBeTruthy();
 		expect(afterUi).toBeTruthy();
 		expect(afterUi?.activeNodeId).toBe(beforeUi?.activeNodeId);
-		expect(afterUi?.camera).toEqual(beforeUi?.camera);
+		expect(afterCamera).toEqual(beforeCamera);
 	});
 
 	it("双击非 focusable 节点仅调整 camera，不进入 focus", async () => {
 		render(<CanvasWorkspace />);
-		const beforeCamera = useProjectStore.getState().currentProject?.ui.camera;
+		const beforeCamera = useProjectStore.getState().currentProject?.camera;
 		doubleClickNodeAt(300, 160);
 		const immediateCamera =
-			useProjectStore.getState().currentProject?.ui.camera;
+			useProjectStore.getState().currentProject?.camera;
 		expect(
 			useProjectStore.getState().currentProject?.ui.focusedNodeId,
 		).toBeNull();
@@ -1772,7 +1750,7 @@ describe("CanvasWorkspace", () => {
 		if (!immediateCamera || !beforeCamera) return;
 		expect(immediateCamera).toEqual(beforeCamera);
 		await waitFor(() => {
-			const afterCamera = useProjectStore.getState().currentProject?.ui.camera;
+			const afterCamera = useProjectStore.getState().currentProject?.camera;
 			expect(afterCamera).toBeTruthy();
 			if (!afterCamera) return;
 			expect(
@@ -1792,12 +1770,12 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const workspace = screen.getByTestId("canvas-workspace");
-		const beforeCamera = useProjectStore.getState().currentProject?.ui.camera;
+		const beforeCamera = useProjectStore.getState().currentProject?.camera;
 		fireEvent.wheel(workspace, {
 			deltaX: 120,
 			deltaY: 80,
 		});
-		const afterCamera = useProjectStore.getState().currentProject?.ui.camera;
+		const afterCamera = useProjectStore.getState().currentProject?.camera;
 		expect(beforeCamera).toBeTruthy();
 		expect(afterCamera).toBeTruthy();
 		if (!beforeCamera || !afterCamera) return;
@@ -1805,16 +1783,39 @@ describe("CanvasWorkspace", () => {
 		expect(afterCamera.y).not.toBe(beforeCamera.y);
 	});
 
+	it("连续 wheel pan 不会触发 InfiniteSkiaCanvas React 重渲染", () => {
+		render(<CanvasWorkspace />);
+		const workspace = screen.getByTestId("canvas-workspace");
+		const initialRenderCount = infiniteSkiaCanvasPropsMock.mock.calls.length;
+		const beforeCamera = useProjectStore.getState().currentProject?.camera;
+		fireEvent.wheel(workspace, {
+			deltaX: 64,
+			deltaY: 32,
+		});
+		fireEvent.wheel(workspace, {
+			deltaX: -48,
+			deltaY: 20,
+		});
+		const afterCamera = useProjectStore.getState().currentProject?.camera;
+		expect(beforeCamera).toBeTruthy();
+		expect(afterCamera).toBeTruthy();
+		if (!beforeCamera || !afterCamera) return;
+		expect(
+			afterCamera.x !== beforeCamera.x || afterCamera.y !== beforeCamera.y,
+		).toBe(true);
+		expect(infiniteSkiaCanvasPropsMock.mock.calls.length).toBe(initialRenderCount);
+	});
+
 	it("smooth 动画期间 instant zoom 更新会被忽略", async () => {
 		render(<CanvasWorkspace />);
 		const workspace = screen.getByTestId("canvas-workspace");
 		clickSidebarNode("node-video-offscreen");
-		const beforeWheel = useProjectStore.getState().currentProject?.ui.camera;
+		const beforeWheel = useProjectStore.getState().currentProject?.camera;
 		fireEvent.wheel(workspace, {
 			deltaY: 80,
 			ctrlKey: true,
 		});
-		const afterWheel = useProjectStore.getState().currentProject?.ui.camera;
+		const afterWheel = useProjectStore.getState().currentProject?.camera;
 		expect(beforeWheel).toBeTruthy();
 		expect(afterWheel).toBeTruthy();
 		if (!beforeWheel || !afterWheel) return;
@@ -1822,7 +1823,7 @@ describe("CanvasWorkspace", () => {
 
 		await waitFor(() => {
 			const cameraAfterAnimation =
-				useProjectStore.getState().currentProject?.ui.camera;
+				useProjectStore.getState().currentProject?.camera;
 			expect(cameraAfterAnimation).toBeTruthy();
 			if (!cameraAfterAnimation) return;
 			expect(
@@ -1837,7 +1838,7 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const settled = useProjectStore.getState().currentProject?.ui.camera;
+		const settled = useProjectStore.getState().currentProject?.camera;
 		expect(settled).toBeTruthy();
 		if (!settled) return;
 		expect(
@@ -1877,7 +1878,7 @@ describe("CanvasWorkspace", () => {
 
 	it("未完成的 smooth 动画会被新的 smooth 动画覆盖", async () => {
 		render(<CanvasWorkspace />);
-		const initialCamera = useProjectStore.getState().currentProject?.ui.camera;
+		const initialCamera = useProjectStore.getState().currentProject?.camera;
 		clickSidebarNode("node-video-offscreen");
 		await act(async () => {
 			await new Promise((resolve) => {
@@ -1893,7 +1894,7 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const settled = useProjectStore.getState().currentProject?.ui.camera;
+		const settled = useProjectStore.getState().currentProject?.camera;
 		expect(settled).toBeTruthy();
 		if (!settled) return;
 		expect(settled.x).toBeCloseTo(initialCamera.x, 3);
@@ -1913,12 +1914,12 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const beforeResizeZoom =
-			useProjectStore.getState().currentProject?.ui.camera.zoom ?? 0;
+			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
 
 		const handle = screen.getByLabelText("调整 Drawer 高度");
 		const zoomSamples: number[] = [];
 		const unsubscribe = useProjectStore.subscribe((state) => {
-			const zoom = state.currentProject?.ui.camera.zoom;
+			const zoom = state.currentProject?.camera.zoom;
 			if (typeof zoom !== "number") return;
 			zoomSamples.push(zoom);
 		});
@@ -3502,12 +3503,9 @@ describe("CanvasWorkspace", () => {
 				...state,
 				currentProject: {
 					...project,
-					ui: {
-						...project.ui,
-						camera: {
-							...project.ui.camera,
-							zoom: 1.3,
-						},
+					camera: {
+						...project.camera,
+						zoom: 1.3,
 					},
 				},
 			};

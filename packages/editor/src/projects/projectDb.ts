@@ -104,6 +104,11 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 			},
 		},
 		assets: [],
+		camera: {
+			x: 0,
+			y: 0,
+			zoom: 1,
+		},
 		ot: createEmptyStudioOt({
 			streamIds: ["canvas", `timeline:${sceneId}`],
 		}),
@@ -112,11 +117,6 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 			focusedNodeId: null,
 			activeNodeId: nodeId,
 			canvasSnapEnabled: true,
-			camera: {
-				x: 0,
-				y: 0,
-				zoom: 1,
-			},
 		},
 		createdAt: now,
 		updatedAt: now,

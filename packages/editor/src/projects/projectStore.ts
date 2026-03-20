@@ -850,10 +850,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			if (!state.currentProject) return state;
 			const nextProject = {
 				...state.currentProject,
-				ui: {
-					...state.currentProject.ui,
-					camera,
-				},
+				camera,
 			};
 			return {
 				currentProject: nextProject,

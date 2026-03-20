@@ -3,6 +3,7 @@ import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import type React from "react";
 import { useMemo } from "react";
+import { useStoreWithEqualityFn } from "zustand/traditional";
 import { SnapIcon } from "@/components/icons";
 import { useProjectStore } from "@/projects/projectStore";
 import ElementSettingsPanel from "@/scene-editor/components/ElementSettingsPanel";
@@ -65,6 +66,34 @@ interface CanvasWorkspaceOverlayProps {
 	onCloseContextMenu: () => void;
 }
 
+const isProjectEqualExceptCamera = (
+	left: { currentProject: ReturnType<typeof useProjectStore.getState>["currentProject"] },
+	right: {
+		currentProject: ReturnType<typeof useProjectStore.getState>["currentProject"];
+	},
+): boolean => {
+	const leftProject = left.currentProject;
+	const rightProject = right.currentProject;
+	if (leftProject === rightProject) return true;
+	if (!leftProject || !rightProject) return leftProject === rightProject;
+	return (
+		leftProject.id === rightProject.id &&
+		leftProject.revision === rightProject.revision &&
+		leftProject.canvas === rightProject.canvas &&
+		leftProject.scenes === rightProject.scenes &&
+		leftProject.assets === rightProject.assets &&
+		leftProject.ot === rightProject.ot &&
+		leftProject.ui === rightProject.ui &&
+		leftProject.createdAt === rightProject.createdAt &&
+		leftProject.updatedAt === rightProject.updatedAt
+	);
+};
+
+const CameraZoomBadge = () => {
+	const cameraZoom = useProjectStore((state) => state.currentProject?.camera.zoom ?? 1);
+	return <span className="text-white/70">{Math.round(cameraZoom * 100)}%</span>;
+};
+
 const CanvasWorkspaceOverlay = ({
 	toolbarLeftOffset,
 	toolbarTopOffset,
@@ -96,7 +125,13 @@ const CanvasWorkspaceOverlay = ({
 	contextMenuActions,
 	onCloseContextMenu,
 }: CanvasWorkspaceOverlayProps) => {
-	const currentProject = useProjectStore((state) => state.currentProject);
+	const { currentProject } = useStoreWithEqualityFn(
+		useProjectStore,
+		(state) => ({
+			currentProject: state.currentProject,
+		}),
+		isProjectEqualExceptCamera,
+	);
 	const updateCanvasNode = useProjectStore((state) => state.updateCanvasNode);
 	const setFocusedNode = useProjectStore((state) => state.setFocusedNode);
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
@@ -106,7 +141,6 @@ const CanvasWorkspaceOverlay = ({
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
-	const cameraZoom = currentProject?.ui.camera.zoom ?? 1;
 	const sidebarNodes = useMemo(() => {
 		if (!currentProject) return [];
 		return [...currentProject.canvas.nodes].sort((left, right) => {
@@ -213,7 +247,7 @@ const CanvasWorkspaceOverlay = ({
 					>
 						重置视图
 					</button>
-					<span className="text-white/70">{Math.round(cameraZoom * 100)}%</span>
+					<CameraZoomBadge />
 				</div>
 			)}
 

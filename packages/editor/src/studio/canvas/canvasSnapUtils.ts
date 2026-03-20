@@ -1,4 +1,5 @@
 import type { CanvasNode } from "core/studio/types";
+import { resolveCanvasCameraScreenOffset } from "./canvasNodeLabelUtils";
 
 const CAMERA_ZOOM_EPSILON = 1e-6;
 const CANVAS_SNAP_GUIDE_THRESHOLD_PX = 6;
@@ -197,13 +198,13 @@ export const projectCanvasSnapGuidesToScreen = (
 		zoom: number;
 	},
 ): CanvasSnapGuidesScreen => {
-	const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+	const cameraOffset = resolveCanvasCameraScreenOffset(camera);
 	return {
 		vertical: guidesWorld.vertical.map((worldX) => {
-			return (worldX + camera.x) * safeZoom;
+			return worldX * cameraOffset.zoom + cameraOffset.x;
 		}),
 		horizontal: guidesWorld.horizontal.map((worldY) => {
-			return (worldY + camera.y) * safeZoom;
+			return worldY * cameraOffset.zoom + cameraOffset.y;
 		}),
 	};
 };

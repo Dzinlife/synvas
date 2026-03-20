@@ -360,6 +360,35 @@ const createSceneNode = (id: string, zIndex: number) => ({
 	sceneId: "scene-1",
 });
 
+const createCameraShared = (camera: { x: number; y: number; zoom: number }) => {
+	let currentValue = camera;
+	const listeners = new Map<
+		number,
+		(nextCamera: { x: number; y: number; zoom: number }) => void
+	>();
+	return {
+		_isSharedValue: true as const,
+		get value() {
+			return currentValue;
+		},
+		set value(nextValue: { x: number; y: number; zoom: number }) {
+			currentValue = nextValue;
+			for (const listener of listeners.values()) {
+				listener(nextValue);
+			}
+		},
+		addListener: (
+			listenerId: number,
+			listener: (nextCamera: { x: number; y: number; zoom: number }) => void,
+		) => {
+			listeners.set(listenerId, listener);
+		},
+		removeListener: (listenerId: number) => {
+			listeners.delete(listenerId);
+		},
+	};
+};
+
 const emptyScenes: StudioProject["scenes"] = {};
 
 describe("InfiniteSkiaCanvas", () => {
@@ -380,7 +409,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createVideoNode("node-a", 0)]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -410,7 +439,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createVideoNode("node-a", 0)]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -442,7 +471,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createVideoNode("node-a", 0), createVideoNode("node-b", 1)]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -494,7 +523,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[
 					createVideoNode("node-a", 0),
 					createVideoNode("node-b", 1),
@@ -543,7 +572,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createVideoNode("node-a", 0, { locked: true })]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -571,7 +600,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createVideoNode("node-a", 0)]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -595,7 +624,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createVideoNode("node-a", 0), createVideoNode("node-b", 1)]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -628,7 +657,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 24, y: -12, zoom: 1.25 }}
+				camera={createCameraShared({ x: 24, y: -12, zoom: 1.25 })}
 				nodes={[createVideoNode("node-a", 0), createVideoNode("node-b", 1)]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -712,11 +741,12 @@ describe("InfiniteSkiaCanvas", () => {
 		const selectedNodeIds = ["node-a"];
 		const assets: StudioProject["assets"] = [];
 		const snapGuidesScreen = { vertical: [], horizontal: [] };
+		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
 		const { rerender } = render(
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={camera}
 				nodes={nodes}
 				scenes={emptyScenes}
 				assets={assets}
@@ -733,11 +763,12 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const initialRenderCount = rootRenderSpy.mock.calls.length;
 
+		camera.value = { x: 48, y: -24, zoom: 1.5 };
 		rerender(
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 48, y: -24, zoom: 1.5 }}
+				camera={camera}
 				nodes={nodes}
 				scenes={emptyScenes}
 				assets={assets}
@@ -759,11 +790,12 @@ describe("InfiniteSkiaCanvas", () => {
 		const nodes = [createVideoNode("node-a", 0)];
 		const assets: StudioProject["assets"] = [];
 		const selectedNodeIds = ["node-a"];
+		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
 		const { rerender } = render(
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={camera}
 				nodes={nodes}
 				scenes={emptyScenes}
 				assets={assets}
@@ -782,7 +814,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={camera}
 				nodes={[
 					createVideoNode("node-a", 0, {
 						x: 180,
@@ -842,7 +874,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[
 					createSceneNode("node-scene", 0),
 					createVideoNode("node-video", 1),
@@ -1027,7 +1059,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createSceneNode("node-scene", 0)]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -1089,7 +1121,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createSceneNode("node-scene", 0)]}
 				scenes={emptyScenes}
 				assets={[]}
@@ -1116,7 +1148,7 @@ describe("InfiniteSkiaCanvas", () => {
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={{ x: 0, y: 0, zoom: 1 }}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
 				nodes={[createVideoNode("node-a", 0)]}
 				scenes={emptyScenes}
 				assets={[]}
