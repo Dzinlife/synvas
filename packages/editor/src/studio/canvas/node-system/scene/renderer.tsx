@@ -7,11 +7,14 @@ import { schedulePrecompileTask } from "core/editor/preview/framePrecompileSched
 import type { TimelineElement } from "core/element/types";
 import type { SceneNode } from "core/studio/types";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
 	Group,
 	Picture,
 	Rect,
+	Skia,
+	type SkPicture,
+	useSharedValue,
 } from "react-skia-lite";
 import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
 import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
@@ -75,6 +78,12 @@ const getTrackIndexForElement = (element: TimelineElement): number => {
 	return element.timeline.trackIndex ?? 0;
 };
 
+const createEmptyPicture = (): SkPicture => {
+	const recorder = Skia.PictureRecorder();
+	recorder.beginRecording();
+	return recorder.finishRecordingAsPicture();
+};
+
 export const SceneNodeSkiaRenderer: React.FC<
 	CanvasNodeSkiaRenderProps<SceneNode>
 > = ({ node, scene, runtimeManager }) => {
@@ -91,9 +100,12 @@ export const SceneNodeSkiaRenderer: React.FC<
 			toSceneTimelineRef(node.sceneId),
 		);
 	}, [node.sceneId, runtimeManager, scene]);
-	const [currentFrame, setCurrentFrame] = useState<ScenePreviewFrame | null>(
-		null,
-	);
+	const emptyPicture = useMemo(() => {
+		return createEmptyPicture();
+	}, []);
+	const picture = useSharedValue<SkPicture>(emptyPicture);
+	const pictureOpacity = useSharedValue(0);
+	const fallbackOpacity = useSharedValue(1);
 	const renderTokenRef = useRef(0);
 	const lastRequestedFrameRef = useRef<number | null>(null);
 	const disposeRef = useRef<(() => void) | null>(null);
@@ -154,22 +166,25 @@ export const SceneNodeSkiaRenderer: React.FC<
 			}
 			deferredDisposeFrameRef.current = window.requestAnimationFrame(() => {
 				deferredDisposeFrameRef.current = null;
-				// 延后一帧再释放旧渲染资源，避免父画布尚未 present 新帧时读到已释放对象。
+				// 延后一帧再释放旧 picture，避免父画布尚未 present 新帧时读到已释放资源。
 				flushDeferredDisposeQueue();
 			});
 		},
 		[flushDeferredDisposeQueue],
 	);
 
-	const replaceCurrentFrame = useCallback(
-		(nextFrame: ScenePreviewFrame, nextDispose: (() => void) | null = null) => {
+	const replaceCurrentPicture = useCallback(
+		(nextPicture: SkPicture, nextDispose: (() => void) | null = null) => {
 			const previousDispose = disposeRef.current;
-			setCurrentFrame(nextFrame);
+			// SkPicture 是 JSI 对象，直接走 shared value 赋值会触发深比较，代价很高。
+			picture.modify(() => nextPicture, true);
+			pictureOpacity.value = 1;
+			fallbackOpacity.value = 0;
 			hasRenderedContentRef.current = true;
 			disposeRef.current = nextDispose;
 			scheduleDeferredDispose(previousDispose);
 		},
-		[scheduleDeferredDispose],
+		[fallbackOpacity, picture, pictureOpacity, scheduleDeferredDispose],
 	);
 
 	const preemptBuildQueue = useCallback(() => {
@@ -201,11 +216,13 @@ export const SceneNodeSkiaRenderer: React.FC<
 		[],
 	);
 
-	const renderFallback = useCallback(() => {
-		if (hasRenderedContentRef.current) return;
+	const clearCommittedFrame = useCallback(() => {
+		disposeRef.current?.();
+		disposeRef.current = null;
 		hasRenderedContentRef.current = true;
-		setCurrentFrame(null);
-	}, []);
+		fallbackOpacity.value = 1;
+		pictureOpacity.value = 0;
+	}, [fallbackOpacity, pictureOpacity]);
 
 	const runRender = useCallback(
 		(elements: TimelineElement[], displayTime: number) => {
@@ -326,7 +343,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 							frameState.dispose?.();
 							return;
 						}
-						replaceCurrentFrame(frameState, frameState.dispose ?? null);
+						replaceCurrentPicture(frameState.picture, frameState.dispose ?? null);
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) return;
@@ -335,7 +352,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 							`Failed to build scene skia frame snapshot (${node.sceneId}):`,
 							error,
 						);
-						renderFallback();
+						clearCommittedFrame();
 					});
 				return;
 			}
@@ -350,7 +367,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 							frameState.dispose?.();
 							return;
 						}
-						replaceCurrentFrame(frameState, frameState.dispose ?? null);
+						replaceCurrentPicture(frameState.picture, frameState.dispose ?? null);
 						frameControllerRef.current.commitFrame(
 							frameIndex,
 							buildFrameState,
@@ -363,7 +380,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 							`Failed to build scene skia frame snapshot (${node.sceneId}):`,
 							error,
 						);
-						renderFallback();
+						clearCommittedFrame();
 					});
 				return;
 			}
@@ -373,7 +390,10 @@ export const SceneNodeSkiaRenderer: React.FC<
 				.then((entry) => {
 					if (renderTokenRef.current !== renderToken) return;
 					if (!entry.state) return;
-					replaceCurrentFrame(entry.state, frameControllerRef.current.takeDispose(entry) ?? null);
+					replaceCurrentPicture(
+						entry.state.picture,
+						frameControllerRef.current.takeDispose(entry) ?? null,
+					);
 					frameControllerRef.current.commitFrame(
 						frameIndex,
 						buildFrameState,
@@ -386,15 +406,15 @@ export const SceneNodeSkiaRenderer: React.FC<
 						`Failed to build scene skia frame snapshot (${node.sceneId}):`,
 						error,
 					);
-					renderFallback();
+					clearCommittedFrame();
 				});
 		},
 		[
 			enqueueBuild,
 			node.sceneId,
 			preemptBuildQueue,
-			replaceCurrentFrame,
-			renderFallback,
+			clearCommittedFrame,
+			replaceCurrentPicture,
 			runtime,
 			runtimeManager,
 			sceneCanvasHeight,
@@ -414,7 +434,9 @@ export const SceneNodeSkiaRenderer: React.FC<
 			disposeRef.current?.();
 			disposeRef.current = null;
 			hasRenderedContentRef.current = false;
-			setCurrentFrame(null);
+			picture.modify(() => emptyPicture, true);
+			pictureOpacity.value = 0;
+			fallbackOpacity.value = 1;
 			return;
 		}
 
@@ -480,8 +502,12 @@ export const SceneNodeSkiaRenderer: React.FC<
 		};
 	}, [
 		cancelDeferredDisposeFrame,
+		emptyPicture,
+		fallbackOpacity,
 		flushDeferredDisposeQueue,
 		invalidateBuffer,
+		picture,
+		pictureOpacity,
 		runRender,
 		runtime,
 	]);
@@ -496,8 +522,9 @@ export const SceneNodeSkiaRenderer: React.FC<
 			disposeRef.current = null;
 			hasRenderedContentRef.current = false;
 			lastRequestedFrameRef.current = null;
+			emptyPicture.dispose?.();
 		};
-	}, [cancelDeferredDisposeFrame, flushDeferredDisposeQueue]);
+	}, [cancelDeferredDisposeFrame, emptyPicture, flushDeferredDisposeQueue]);
 
 	if (!scene) {
 		return (
@@ -524,10 +551,9 @@ export const SceneNodeSkiaRenderer: React.FC<
 				width={sourceWidth}
 				height={sourceHeight}
 				color="#171717"
+				opacity={fallbackOpacity}
 			/>
-			{currentFrame?.kind === "picture" ? (
-				<Picture picture={currentFrame.picture} />
-			) : null}
+			<Picture picture={picture} opacity={pictureOpacity} />
 		</Group>
 	);
 };

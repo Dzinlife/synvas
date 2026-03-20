@@ -86,12 +86,12 @@ const flushMicrotasks = async () => {
 	});
 };
 
-describe("SceneNodeSkiaRenderer", () => {
+describe("SceneNodeSkiaRenderer flicker fix", () => {
 	beforeEach(() => {
 		buildSkiaFrameSnapshotMock.mockReset();
 	});
 
-	it("切换 scene render state 时会延后一帧释放旧资源", async () => {
+	it("用 shared value 提交 picture 时不会触发 React 重渲染，并会延后一帧释放旧 picture", async () => {
 		const rafQueue: FrameRequestCallback[] = [];
 		vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
 			rafQueue.push(callback);
@@ -177,27 +177,11 @@ describe("SceneNodeSkiaRenderer", () => {
 
 		buildSkiaFrameSnapshotMock
 			.mockResolvedValueOnce({
-				children: [],
-				orderedElements: [],
-				visibleElements: [],
-				transitionFrameState: {
-					activeTransitions: [],
-					hiddenElementIds: [],
-				},
-				picture: { id: "frame-1" },
-				ready: Promise.resolve(),
+				picture: { id: "picture-1" },
 				dispose: disposeFirst,
 			})
 			.mockResolvedValueOnce({
-				children: [],
-				orderedElements: [],
-				visibleElements: [],
-				transitionFrameState: {
-					activeTransitions: [],
-					hiddenElementIds: [],
-				},
-				picture: { id: "frame-2" },
-				ready: Promise.resolve(),
+				picture: { id: "picture-2" },
 				dispose: disposeSecond,
 			});
 
@@ -218,9 +202,11 @@ describe("SceneNodeSkiaRenderer", () => {
 			</React.Profiler>,
 		);
 
+		expect(profileSpy).toHaveBeenCalledTimes(1);
+
 		await flushMicrotasks();
 
-		expect(profileSpy).toHaveBeenCalled();
+		expect(profileSpy).toHaveBeenCalledTimes(1);
 		expect(disposeFirst).not.toHaveBeenCalled();
 
 		act(() => {
@@ -229,6 +215,7 @@ describe("SceneNodeSkiaRenderer", () => {
 
 		await flushMicrotasks();
 
+		expect(profileSpy).toHaveBeenCalledTimes(1);
 		expect(disposeFirst).not.toHaveBeenCalled();
 		expect(disposeSecond).not.toHaveBeenCalled();
 
