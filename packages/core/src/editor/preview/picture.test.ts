@@ -65,7 +65,7 @@ vi.mock("react-skia-lite", async () => {
 	};
 });
 
-import { renderNodeToImage, renderNodeToPicture } from "./picture";
+import { renderNodeToImage, renderNodeToPicture } from "./renderNodeSnapshot";
 
 describe("renderNodeToPicture", () => {
 	beforeEach(() => {

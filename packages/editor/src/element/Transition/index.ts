@@ -5,7 +5,6 @@ import TransitionRenderer from "./renderer";
 import { TransitionTimeline } from "./timeline";
 
 export { createTransitionModel, type TransitionProps } from "./model";
-export { renderNodeToImage, renderNodeToPicture } from "./picture";
 export { TransitionTimeline } from "./timeline";
 
 export const TransitionDefinition: ElementComponentDefinition<TransitionProps> = {

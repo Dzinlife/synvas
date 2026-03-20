@@ -4,7 +4,7 @@ export * from "./element/types";
 export * from "./element/position";
 export * from "./element/model/types";
 export * from "./element/export";
-export * from "./element/Transition/picture";
+export * from "./editor/preview/renderNodeSnapshot";
 export * from "./editor/timelineLoader";
 export * from "./editor/preview/utils";
 export * from "./editor/preview/buildSkiaTree";
