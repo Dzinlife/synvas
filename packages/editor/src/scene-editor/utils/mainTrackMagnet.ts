@@ -2,6 +2,7 @@ import {
 	compactMainTrackElements as compactMainTrackElementsCore,
 	finalizeTimelineElements as finalizeTimelineElementsCore,
 	insertElementIntoMainTrack as insertElementIntoMainTrackCore,
+	insertElementsIntoMainTrackGroup as insertElementsIntoMainTrackGroupCore,
 	type MainTrackMagnetOptions,
 	shiftMainTrackElementsAfter as shiftMainTrackElementsAfterCore,
 	type TimelinePostProcessOptions,
@@ -59,5 +60,20 @@ export const insertElementIntoMainTrack = (
 		dropStart,
 		withResolveRole(options),
 		targetOverride,
+		insertPointerTime,
+	);
+
+export const insertElementsIntoMainTrackGroup = (
+	elements: TimelineElement[],
+	targetIds: string[],
+	dropStart: number,
+	options: TimelinePostProcessOptions,
+	insertPointerTime?: number,
+): TimelineElement[] =>
+	insertElementsIntoMainTrackGroupCore(
+		elements,
+		targetIds,
+		dropStart,
+		withResolveRole(options),
 		insertPointerTime,
 	);

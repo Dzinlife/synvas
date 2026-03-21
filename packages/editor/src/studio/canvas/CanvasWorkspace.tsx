@@ -35,7 +35,11 @@ import { DEFAULT_TRACK_HEIGHT } from "@/scene-editor/timeline/trackConfig";
 import { getAudioTrackControlState } from "@/scene-editor/utils/audioTrackState";
 import { findAttachments } from "@/scene-editor/utils/attachments";
 import { resolveExternalVideoUri } from "@/scene-editor/utils/externalVideo";
-import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
+import {
+	finalizeTimelineElements,
+	insertElementIntoMainTrack,
+	insertElementsIntoMainTrackGroup,
+} from "@/scene-editor/utils/mainTrackMagnet";
 import { getPixelsPerFrame } from "@/scene-editor/utils/timelineScale";
 import { pasteTimelineClipboardPayload } from "@/scene-editor/utils/timelineClipboard";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
@@ -1979,27 +1983,53 @@ const CanvasWorkspace = () => {
 				timelineState.fps,
 			);
 			if (!payload) return false;
+			const postProcessOptions = {
+				rippleEditingEnabled: timelineState.rippleEditingEnabled,
+				attachments: timelineState.autoAttach
+					? findAttachments(timelineState.elements)
+					: undefined,
+				autoAttach: timelineState.autoAttach,
+				fps: timelineState.fps,
+				trackLockedMap: resolveTimelineTrackLockedMap(
+					timelineState.tracks,
+					timelineState.audioTrackStates,
+				),
+			};
 			const pasteResult = pasteTimelineClipboardPayload({
 				payload,
 				elements: timelineState.elements,
 				targetTime: dropTarget.time,
 				targetTrackIndex: dropTarget.trackIndex,
 				targetType: dropTarget.type ?? "track",
-				postProcessOptions: {
-					rippleEditingEnabled: timelineState.rippleEditingEnabled,
-					attachments: timelineState.autoAttach
-						? findAttachments(timelineState.elements)
-						: undefined,
-					autoAttach: timelineState.autoAttach,
-					fps: timelineState.fps,
-					trackLockedMap: resolveTimelineTrackLockedMap(
-						timelineState.tracks,
-						timelineState.audioTrackStates,
-					),
-				},
+				postProcessOptions,
 			});
 			if (pasteResult.insertedIds.length === 0) return false;
-			timelineState.setElements(pasteResult.elements);
+			const shouldUseMainTrackRippleInsert =
+				timelineState.rippleEditingEnabled &&
+				(dropTarget.type ?? "track") === "track" &&
+				dropTarget.trackIndex === 0;
+			const firstInsertedId = pasteResult.insertedIds[0] ?? null;
+			const committedElements = shouldUseMainTrackRippleInsert
+				? pasteResult.insertedIds.length <= 1 && firstInsertedId
+					? insertElementIntoMainTrack(
+							pasteResult.elements,
+							firstInsertedId,
+							dropTarget.time,
+							postProcessOptions,
+							undefined,
+							dropTarget.time,
+						)
+					: pasteResult.insertedIds.length <= 1
+						? pasteResult.elements
+					: insertElementsIntoMainTrackGroup(
+							pasteResult.elements,
+							pasteResult.insertedIds,
+							dropTarget.time,
+							postProcessOptions,
+							dropTarget.time,
+						)
+				: pasteResult.elements;
+			timelineState.setElements(committedElements);
 			timelineState.setSelectedIds(
 				pasteResult.insertedIds,
 				pasteResult.primaryId,
