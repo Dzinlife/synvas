@@ -1046,6 +1046,51 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(box.x + box.width).toBeCloseTo(450, 2);
 	});
 
+	it("Alt 对角线中心缩放吸附后保持等比", () => {
+		const elementA = createElement("element-a", 300, 300);
+		const elementB = createElement("element-b", 450, 700);
+		const { result, timelineStore } = setupInteractions([elementA, elementB]);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(300, 300));
+			result.current.onLayerPointerUp(createPointerEvent(300, 300));
+		});
+
+		const topLeftHandle = result.current.handleItems.find(
+			(item) => item.handle === "top-left",
+		);
+		expect(topLeftHandle).toBeTruthy();
+		if (!topLeftHandle) return;
+
+		act(() => {
+			result.current.onLayerPointerDown(
+				createPointerEvent(topLeftHandle.screenX, topLeftHandle.screenY),
+			);
+			result.current.onLayerPointerMove(
+				createPointerEvent(198, 220, { altKey: true }),
+			);
+		});
+		expect(result.current.snapGuidesScreen.vertical.length).toBeGreaterThan(0);
+
+		act(() => {
+			result.current.onLayerPointerUp(
+				createPointerEvent(198, 220, { altKey: true }),
+			);
+		});
+
+		const resizedElement = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "element-a");
+		expect(resizedElement?.transform).toBeTruthy();
+		if (!resizedElement?.transform) return;
+		expect(Math.abs(resizedElement.transform.scale.x)).toBeCloseTo(
+			Math.abs(resizedElement.transform.scale.y),
+			3,
+		);
+		const box = resolveSceneBox(resizedElement);
+		expect(box.width / box.height).toBeCloseTo(100 / 80, 3);
+	});
+
 	it("多选旋转后在 selection 变化前保持旋转框", () => {
 		const elementA = createElement("element-a", 260, 300);
 		const elementB = createElement("element-b", 420, 300);

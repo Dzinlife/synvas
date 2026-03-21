@@ -1756,10 +1756,24 @@ export const useFocusSceneSkiaInteractions = ({
 								snapY.line !== null && snapY.distance <= threshold
 									? snapY.delta
 									: 0;
+							const cornerHandle =
+								(session.handle.includes("left") ||
+									session.handle.includes("right")) &&
+								(session.handle.includes("top") ||
+									session.handle.includes("bottom"));
 							const cornerLike =
+								cornerHandle &&
 								moveLeftForSnap !== moveRightForSnap &&
 								moveTopForSnap !== moveBottomForSnap;
-							if (cornerLike && deltaX !== 0 && deltaY !== 0) {
+							const centeredCornerLike =
+								cornerHandle &&
+								centered &&
+								moveLeftForSnap &&
+								moveRightForSnap &&
+								moveTopForSnap &&
+								moveBottomForSnap;
+							const shouldKeepCornerAspect = cornerLike || centeredCornerLike;
+							if (shouldKeepCornerAspect && deltaX !== 0 && deltaY !== 0) {
 								if (Math.abs(deltaX) <= Math.abs(deltaY)) {
 									deltaY = 0;
 								} else {
@@ -1820,34 +1834,51 @@ export const useFocusSceneSkiaInteractions = ({
 										}
 									}
 								}
-								if (cornerLike) {
+								if (shouldKeepCornerAspect) {
 									const ratio =
 										currentRect.width /
 										Math.max(currentRect.height, FOCUS_SCENE_EPSILON);
-									const fixedX =
-										moveLeftForSnap && !moveRightForSnap
-											? currentRect.x + currentRect.width
-											: currentRect.x;
-									const fixedY =
-										moveTopForSnap && !moveBottomForSnap
-											? currentRect.y + currentRect.height
-											: currentRect.y;
-									if (deltaX !== 0) {
-										const nextHeight =
-											snappedRect.width / Math.max(ratio, FOCUS_SCENE_EPSILON);
-										snappedRect.height = nextHeight;
-										if (moveTopForSnap && !moveBottomForSnap) {
-											snappedRect.y = fixedY - nextHeight;
-										} else if (moveBottomForSnap && !moveTopForSnap) {
-											snappedRect.y = fixedY;
+									if (centeredCornerLike) {
+										const centerX = currentRect.x + currentRect.width / 2;
+										const centerY = currentRect.y + currentRect.height / 2;
+										if (deltaX !== 0) {
+											const nextHeight =
+												snappedRect.width /
+												Math.max(ratio, FOCUS_SCENE_EPSILON);
+											snappedRect.height = nextHeight;
+											snappedRect.y = centerY - nextHeight / 2;
+										} else if (deltaY !== 0) {
+											const nextWidth = snappedRect.height * ratio;
+											snappedRect.width = nextWidth;
+											snappedRect.x = centerX - nextWidth / 2;
 										}
-									} else if (deltaY !== 0) {
-										const nextWidth = snappedRect.height * ratio;
-										snappedRect.width = nextWidth;
-										if (moveLeftForSnap && !moveRightForSnap) {
-											snappedRect.x = fixedX - nextWidth;
-										} else if (moveRightForSnap && !moveLeftForSnap) {
-											snappedRect.x = fixedX;
+									} else {
+										const fixedX =
+											moveLeftForSnap && !moveRightForSnap
+												? currentRect.x + currentRect.width
+												: currentRect.x;
+										const fixedY =
+											moveTopForSnap && !moveBottomForSnap
+												? currentRect.y + currentRect.height
+												: currentRect.y;
+										if (deltaX !== 0) {
+											const nextHeight =
+												snappedRect.width /
+												Math.max(ratio, FOCUS_SCENE_EPSILON);
+											snappedRect.height = nextHeight;
+											if (moveTopForSnap && !moveBottomForSnap) {
+												snappedRect.y = fixedY - nextHeight;
+											} else if (moveBottomForSnap && !moveTopForSnap) {
+												snappedRect.y = fixedY;
+											}
+										} else if (deltaY !== 0) {
+											const nextWidth = snappedRect.height * ratio;
+											snappedRect.width = nextWidth;
+											if (moveLeftForSnap && !moveRightForSnap) {
+												snappedRect.x = fixedX - nextWidth;
+											} else if (moveRightForSnap && !moveLeftForSnap) {
+												snappedRect.x = fixedX;
+											}
 										}
 									}
 								}
