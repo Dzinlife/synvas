@@ -2483,20 +2483,38 @@ const CanvasWorkspace = () => {
 					pointerX,
 					pointerY,
 				);
-				const resolvedDropTarget =
-					timelineDropTarget?.zone === "timeline"
-						? timelineDropTarget
-						: ({
-								zone: "none",
-								canDrop: false,
-							} as const);
-				dragSession.timelineDropTarget = resolvedDropTarget;
-				updateCanvasTimelineDropPreview(
-					pointerX,
-					pointerY,
-					resolvedDropTarget,
-				);
-				return;
+				if (timelineDropTarget?.zone === "timeline") {
+					dragSession.timelineDropTarget = timelineDropTarget;
+					updateCanvasTimelineDropPreview(
+						pointerX,
+						pointerY,
+						timelineDropTarget,
+					);
+					return;
+				}
+				const pointerTarget =
+					typeof document.elementFromPoint === "function"
+						? document.elementFromPoint(pointerX, pointerY)
+						: null;
+				const isPointerOnCanvasSurface =
+					isCanvasSurfaceTarget(pointerTarget) &&
+					!isOverlayWheelTarget(pointerTarget);
+				if (!isPointerOnCanvasSurface) {
+					const resolvedDropTarget = {
+						zone: "none",
+						canDrop: false,
+					} as const;
+					dragSession.timelineDropTarget = resolvedDropTarget;
+					updateCanvasTimelineDropPreview(
+						pointerX,
+						pointerY,
+						resolvedDropTarget,
+					);
+					return;
+				}
+				stopCanvasTimelineDropPreview(dragSession);
+				dragSession.timelineDropMode = false;
+				dragSession.timelineDropTarget = null;
 			}
 			if (
 				Math.abs(event.movementX) + Math.abs(event.movementY) <
@@ -2621,6 +2639,7 @@ const CanvasWorkspace = () => {
 			resolveCanvasNodeTimelineDropTarget,
 			resolveCanvasGuideValues,
 			startCanvasTimelineDropPreview,
+			stopCanvasTimelineDropPreview,
 			setCanvasSnapGuides,
 			updateCanvasNodeLayout,
 			updateCanvasTimelineDropPreview,

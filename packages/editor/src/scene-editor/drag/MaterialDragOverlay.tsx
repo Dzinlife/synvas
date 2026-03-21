@@ -20,10 +20,18 @@ import { parseTrackHeights } from "./timelineDropTargets";
 
 const MaterialDragGhost: React.FC = () => {
 	const { isDragging, ghostInfo, dragSource, dropTarget } = useDragStore();
+	const dragData = useDragStore((state) => state.dragData);
+	const isCanvasNodeGhost =
+		dragSource === "external-file" &&
+		dragData !== null &&
+		isMaterialDragData(dragData) &&
+		dragData.uri === "" &&
+		dragData.name === "Canvas Node";
 	if (
 		!isDragging ||
 		!ghostInfo ||
-		(dragSource !== "material-library" && dragSource !== "external-file")
+		(dragSource !== "material-library" && dragSource !== "external-file") ||
+		isCanvasNodeGhost
 	) {
 		return null;
 	}
