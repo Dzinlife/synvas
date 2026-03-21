@@ -8,6 +8,7 @@ import {
 } from "@/scene-editor/utils/externalVideo";
 import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
+import { VideoNodeDrawer } from "./drawer";
 import { VideoNodeSkiaRenderer } from "./renderer";
 import { VideoNodeToolbar } from "./toolbar";
 
@@ -17,6 +18,10 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 	create: () => ({ type: "video" }),
 	skiaRenderer: VideoNodeSkiaRenderer,
 	toolbar: VideoNodeToolbar,
+	drawer: VideoNodeDrawer,
+	drawerOptions: {
+		trigger: "active",
+	},
 	resolveResizeConstraints: ({ node, asset }) => {
 		const sourceWidth = asset?.meta?.sourceSize?.width ?? node.width;
 		const sourceHeight = asset?.meta?.sourceSize?.height ?? node.height;
