@@ -13,6 +13,10 @@ import type {
 	StudioProject,
 } from "core/studio/types";
 import { create } from "zustand";
+import {
+	getCanvasCamera,
+	setCanvasCameraFromProject,
+} from "@/studio/canvas/cameraStore";
 import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import {
 	buildAutoProjectName,
@@ -88,12 +92,6 @@ interface EnsureProjectAssetInput {
 	name?: string;
 }
 
-interface CameraState {
-	x: number;
-	y: number;
-	zoom: number;
-}
-
 interface ProjectStoreState {
 	status: ProjectStatus;
 	projects: ProjectSummary[];
@@ -127,7 +125,6 @@ interface ProjectStoreState {
 	setFocusedNode: (nodeId: string | null) => void;
 	setActiveScene: (sceneId: string | null) => void;
 	setCanvasSnapEnabled: (enabled: boolean) => void;
-	setCanvasCamera: (camera: CameraState) => void;
 	updateSceneTimeline: (
 		sceneId: string,
 		timeline: TimelineJSON,
@@ -332,6 +329,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					sceneTimelineMutationOpIds: {},
 					error: null,
 				});
+				setCanvasCameraFromProject(project.ui.camera);
 				return;
 			}
 			const sortedRecords = sortProjectRecords(validRecords);
@@ -346,15 +344,17 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				currentId = currentRecord.id;
 				await setCurrentProjectId(currentId);
 			}
+			const currentProject = normalizeProjectFocusState(currentRecord.data);
 			set({
 				status: "ready",
 				projects: sortedRecords.map(toSummary),
 				currentProjectId: currentId,
-				currentProject: normalizeProjectFocusState(currentRecord.data),
+				currentProject,
 				focusedSceneDrafts: {},
 				sceneTimelineMutationOpIds: {},
 				error: null,
 			});
+			setCanvasCameraFromProject(currentProject.ui.camera);
 		} catch (error) {
 			console.error("Failed to initialize projects:", error);
 			set({
@@ -385,6 +385,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				sceneTimelineMutationOpIds: {},
 				error: null,
 			});
+			setCanvasCameraFromProject(project.ui.camera);
 		} catch (error) {
 			console.error("Failed to create project:", error);
 			set({ error: formatError(error) });
@@ -397,9 +398,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const { currentProjectId, projects, currentProject } = get();
 			const nextProjectId = currentProjectId ?? createProjectId();
 			const baseProject = currentProject ?? buildEmptyProject(nextProjectId);
+			const camera = getCanvasCamera();
 			const nextProject = withProjectRevision({
 				...baseProject,
 				id: nextProjectId,
+				ui: {
+					...baseProject.ui,
+					camera,
+				},
 			});
 			const persistedProject = stripProjectOtForPersistence(nextProject);
 			if (!currentProjectId) {
@@ -467,13 +473,15 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				throw new Error("Project is invalid with current schema.");
 			}
 			await setCurrentProjectId(id);
+			const currentProject = normalizeProjectFocusState(validRecord.data);
 			set({
 				currentProjectId: id,
-				currentProject: normalizeProjectFocusState(validRecord.data),
+				currentProject,
 				focusedSceneDrafts: {},
 				sceneTimelineMutationOpIds: {},
 				error: null,
 			});
+			setCanvasCameraFromProject(currentProject.ui.camera);
 		} catch (error) {
 			console.error("Failed to switch project:", error);
 			set({ error: formatError(error) });
@@ -839,18 +847,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					...state.currentProject.ui,
 					canvasSnapEnabled: enabled,
 				},
-			};
-			return {
-				currentProject: nextProject,
-			};
-		});
-	},
-	setCanvasCamera: (camera) => {
-		set((state) => {
-			if (!state.currentProject) return state;
-			const nextProject = {
-				...state.currentProject,
-				camera,
 			};
 			return {
 				currentProject: nextProject,

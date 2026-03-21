@@ -1,6 +1,7 @@
 import type { TimelineJSON } from "core/editor/timelineLoader";
 import type { StudioProject } from "core/studio/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
 import {
 	getAllProjects,
 	getCurrentProjectId,
@@ -137,6 +138,7 @@ beforeEach(() => {
 		sceneTimelineMutationOpIds: {},
 		error: null,
 	});
+	useCanvasCameraStore.getState().setFromProject(project.ui.camera);
 });
 
 describe("projectStore", () => {
@@ -325,6 +327,7 @@ describe("projectStore", () => {
 
 	it("initialize 会清理 non-focusable 节点的 focusedNodeId", async () => {
 		const project = createProjectWithFocusedVideo();
+		project.ui.camera = { x: 12, y: -18, zoom: 1.2 };
 		const record: ProjectRecord = {
 			id: project.id,
 			name: "project",
@@ -349,10 +352,23 @@ describe("projectStore", () => {
 		expect(
 			useProjectStore.getState().currentProject?.ui.focusedNodeId,
 		).toBeNull();
+		expect(useCanvasCameraStore.getState().camera).toEqual(project.ui.camera);
+	});
+
+	it("createProject 会把新项目 ui.camera 同步到 cameraStore", async () => {
+		useCanvasCameraStore.getState().setCamera({ x: 88, y: -32, zoom: 1.4 });
+
+		await expect(useProjectStore.getState().createProject()).resolves.toBeUndefined();
+
+		const project = useProjectStore.getState().currentProject;
+		expect(project).toBeTruthy();
+		if (!project) return;
+		expect(useCanvasCameraStore.getState().camera).toEqual(project.ui.camera);
 	});
 
 	it("switchProject 会清理 non-focusable 节点的 focusedNodeId", async () => {
 		const project = createProjectWithFocusedVideo();
+		project.ui.camera = { x: -45, y: 30, zoom: 0.85 };
 		const record: ProjectRecord = {
 			id: "project-2",
 			name: "project-2",
@@ -370,23 +386,32 @@ describe("projectStore", () => {
 		expect(
 			useProjectStore.getState().currentProject?.ui.focusedNodeId,
 		).toBeNull();
+		expect(useCanvasCameraStore.getState().camera).toEqual(project.ui.camera);
 	});
 
 	it("saveCurrentProject 可持久化当前项目", async () => {
+		const nextCamera = { x: 33, y: 44, zoom: 1.3 };
+		useCanvasCameraStore.getState().setCamera(nextCamera);
 		await expect(
 			useProjectStore.getState().saveCurrentProject(),
 		).resolves.toBeUndefined();
 		expect(useProjectStore.getState().currentProject?.revision).toBeGreaterThan(
 			0,
 		);
+		expect(useProjectStore.getState().currentProject?.ui.camera).toEqual(
+			nextCamera,
+		);
 	});
 
 	it("saveCurrentProject 持久化时不写入 ot 调试数据", async () => {
+		const nextCamera = { x: -20, y: 16, zoom: 0.9 };
+		useCanvasCameraStore.getState().setCamera(nextCamera);
 		await expect(
 			useProjectStore.getState().saveCurrentProject(),
 		).resolves.toBeUndefined();
 		const lastCall = vi.mocked(putProject).mock.calls.at(-1)?.[0];
 		expect(lastCall).toBeDefined();
 		expect(lastCall?.data.ot).toBeUndefined();
+		expect(lastCall?.data.ui.camera).toEqual(nextCamera);
 	});
 });

@@ -1,23 +1,36 @@
 import type { TimelineAsset, TimelineElement } from "core/element/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
+import { AnimatePresence, motion, usePresence } from "motion/react";
 import type React from "react";
-import { useMemo } from "react";
+import { useCallback, useContext, useEffect, useMemo } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
+import { getOwner, releaseOwner, subscribeOwnerChange } from "@/audio/owner";
 import { SnapIcon } from "@/components/icons";
 import { useProjectStore } from "@/projects/projectStore";
+import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
 import ElementSettingsPanel from "@/scene-editor/components/ElementSettingsPanel";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
 } from "@/scene-editor/components/TimelineContextMenu";
+import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import CanvasNodeDrawerShell from "@/studio/canvas/CanvasNodeDrawerShell";
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
 import type { CanvasNodeDrawerProps } from "@/studio/canvas/node-system/types";
 import CanvasSidebar, {
 	type CanvasSidebarTab,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
+import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
+import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
+import {
+	resolveCanvasNodeLayoutWorldRect,
+	resolveCanvasWorldRectScreenFrame,
+} from "./canvasNodeLabelUtils";
 import type { ResolvedCanvasDrawerOptions } from "./canvasWorkspaceUtils";
+
+const SCENE_OWNER_PREFIX = "scene:";
 
 interface OverlayRect {
 	x: number;
@@ -32,6 +45,9 @@ interface DrawerViewData {
 	scene: SceneDocument | null;
 	asset: TimelineAsset | null;
 	options: ResolvedCanvasDrawerOptions;
+	onDropTimelineElementsToCanvas?: (
+		request: StudioTimelineCanvasDropRequest,
+	) => boolean;
 }
 
 interface CanvasWorkspaceOverlayProps {
@@ -59,6 +75,9 @@ interface CanvasWorkspaceOverlayProps {
 	drawerBottomOffset: number;
 	onDrawerHeightChange: (height: number) => void;
 	onCloseDrawer: () => void;
+	onDropTimelineElementsToCanvas?: (
+		request: StudioTimelineCanvasDropRequest,
+	) => boolean;
 	contextMenuOpen: boolean;
 	contextMenuX: number;
 	contextMenuY: number;
@@ -66,10 +85,84 @@ interface CanvasWorkspaceOverlayProps {
 	onCloseContextMenu: () => void;
 }
 
+const DRAWER_PRESENCE_TRANSITION = {
+	duration: 0.2,
+	ease: [0.22, 1, 0.36, 1] as const,
+};
+
+const RIGHT_PANEL_PRESENCE_TRANSITION = {
+	duration: 0.18,
+	ease: [0.22, 1, 0.36, 1] as const,
+};
+
+const ACTIVE_NODE_OVERLAY_PRESENCE_TRANSITION = {
+	duration: 0.16,
+	ease: [0.22, 1, 0.36, 1] as const,
+};
+
+const RIGHT_PANEL_EXIT_DURATION_MS = Math.round(
+	RIGHT_PANEL_PRESENCE_TRANSITION.duration * 1000,
+);
+const IS_JSDOM_ENV =
+	typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent);
+interface AnimatedRightPanelProps {
+	rightPanelRect: OverlayRect;
+	children: React.ReactNode;
+}
+
+const AnimatedRightPanel: React.FC<AnimatedRightPanelProps> = ({
+	rightPanelRect,
+	children,
+}) => {
+	const [isPresent, safeToRemove] = usePresence();
+
+	useEffect(() => {
+		if (isPresent) return;
+		if (IS_JSDOM_ENV) {
+			safeToRemove();
+			return;
+		}
+		const timer = window.setTimeout(safeToRemove, RIGHT_PANEL_EXIT_DURATION_MS);
+		return () => {
+			window.clearTimeout(timer);
+		};
+	}, [isPresent, safeToRemove]);
+
+	return (
+		<motion.div
+			data-testid={isPresent ? "canvas-overlay-right-panel" : undefined}
+			className="pointer-events-none absolute z-50"
+			style={{
+				left: rightPanelRect.x,
+				top: rightPanelRect.y,
+				width: rightPanelRect.width,
+				height: rightPanelRect.height,
+			}}
+			initial={{ x: 20, opacity: 0 }}
+			animate={{ x: 0, opacity: 1 }}
+			exit={{ x: 20, opacity: 0 }}
+			transition={RIGHT_PANEL_PRESENCE_TRANSITION}
+		>
+			<div
+				className="pointer-events-auto h-full w-full"
+				data-canvas-overlay-ui="true"
+			>
+				{isPresent ? children : null}
+			</div>
+		</motion.div>
+	);
+};
+
 const isProjectEqualExceptCamera = (
-	left: { currentProject: ReturnType<typeof useProjectStore.getState>["currentProject"] },
+	left: {
+		currentProject: ReturnType<
+			typeof useProjectStore.getState
+		>["currentProject"];
+	},
 	right: {
-		currentProject: ReturnType<typeof useProjectStore.getState>["currentProject"];
+		currentProject: ReturnType<
+			typeof useProjectStore.getState
+		>["currentProject"];
 	},
 ): boolean => {
 	const leftProject = left.currentProject;
@@ -90,8 +183,50 @@ const isProjectEqualExceptCamera = (
 };
 
 const CameraZoomBadge = () => {
-	const cameraZoom = useProjectStore((state) => state.currentProject?.camera.zoom ?? 1);
+	const cameraZoom = useCanvasCameraStore((state) => state.camera.zoom);
 	return <span className="text-white/70">{Math.round(cameraZoom * 100)}%</span>;
+};
+
+interface ActiveNodeToolbarOverlayProps {
+	node: CanvasNode;
+	children: React.ReactNode;
+}
+
+const ActiveNodeToolbarOverlay = ({
+	node,
+	children,
+}: ActiveNodeToolbarOverlayProps) => {
+	const camera = useCanvasCameraStore((state) => state.camera);
+	const overlayFrame = useMemo(() => {
+		return resolveCanvasWorldRectScreenFrame(
+			resolveCanvasNodeLayoutWorldRect(node),
+			camera,
+		);
+	}, [camera, node]);
+
+	return (
+		<motion.div
+			data-testid="canvas-active-node-overlay"
+			className="pointer-events-none absolute z-40 overflow-visible"
+			style={{
+				left: overlayFrame.x,
+				top: overlayFrame.y,
+				width: overlayFrame.width,
+				height: overlayFrame.height,
+			}}
+			initial={{ opacity: 0 }}
+			animate={{ opacity: 1 }}
+			exit={{ opacity: 0 }}
+			transition={ACTIVE_NODE_OVERLAY_PRESENCE_TRANSITION}
+		>
+			<div
+				data-testid="canvas-active-node-toolbar"
+				className="pointer-events-auto absolute bottom-full left-1/2 mb-6.5 w-max max-w-none -translate-x-1/2 rounded-full border border-white/10 bg-black/65 px-3 py-2 backdrop-blur"
+			>
+				{children}
+			</div>
+		</motion.div>
+	);
 };
 
 const CanvasWorkspaceOverlay = ({
@@ -119,12 +254,21 @@ const CanvasWorkspaceOverlay = ({
 	drawerBottomOffset,
 	onDrawerHeightChange,
 	onCloseDrawer,
+	onDropTimelineElementsToCanvas,
 	contextMenuOpen,
 	contextMenuX,
 	contextMenuY,
 	contextMenuActions,
 	onCloseContextMenu,
 }: CanvasWorkspaceOverlayProps) => {
+	const runtime = useContext(EditorRuntimeContext);
+	const runtimeManager = useMemo<StudioRuntimeManager | null>(() => {
+		const manager = runtime as Partial<StudioRuntimeManager> | null;
+		if (!manager?.getTimelineRuntime || !manager.listTimelineRuntimes) {
+			return null;
+		}
+		return manager as StudioRuntimeManager;
+	}, [runtime]);
 	const { currentProject } = useStoreWithEqualityFn(
 		useProjectStore,
 		(state) => ({
@@ -180,24 +324,57 @@ const CanvasWorkspaceOverlay = ({
 			null
 		);
 	}, [activeNode, currentProject]);
+	const pauseBlurredSceneOwnerPlayback = useCallback(() => {
+		if (!runtimeManager || !currentProject) return;
+		const ownerId = getOwner();
+		if (!ownerId || !ownerId.startsWith(SCENE_OWNER_PREFIX)) return;
+		const sceneId = ownerId.slice(SCENE_OWNER_PREFIX.length).trim();
+		if (!sceneId) return;
+		const ownerSceneNode = currentProject.canvas.nodes.find((node) => {
+			return node.type === "scene" && node.sceneId === sceneId;
+		});
+		if (ownerSceneNode?.id === activeNodeId) return;
+		const ownerRuntime = runtimeManager.getTimelineRuntime(
+			toSceneTimelineRef(sceneId),
+		);
+		ownerRuntime?.timelineStore.getState().pause();
+		releaseOwner(ownerId);
+	}, [activeNodeId, currentProject, runtimeManager]);
+
+	useEffect(() => {
+		pauseBlurredSceneOwnerPlayback();
+	}, [pauseBlurredSceneOwnerPlayback]);
+
+	useEffect(() => {
+		const unsubscribe = subscribeOwnerChange(() => {
+			pauseBlurredSceneOwnerPlayback();
+		});
+		return unsubscribe;
+	}, [pauseBlurredSceneOwnerPlayback]);
+
 	const DrawerComponent = resolvedDrawer?.Drawer;
 
 	return (
 		<>
-			{activeNode && ActiveNodeToolbar && (
-				<div className="absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-xl border border-white/10 bg-black/65 px-3 py-2 backdrop-blur">
-					<ActiveNodeToolbar
+			<AnimatePresence mode="sync" initial={false}>
+				{activeNode && ActiveNodeToolbar && (
+					<ActiveNodeToolbarOverlay
+						key={`active-node-overlay:${activeNode.id}`}
 						node={activeNode}
-						scene={activeNodeScene}
-						asset={activeNodeAsset}
-						updateNode={(patch) => {
-							updateCanvasNode(activeNode.id, patch as never);
-						}}
-						setFocusedNode={setFocusedNode}
-						setActiveScene={setActiveScene}
-					/>
-				</div>
-			)}
+					>
+						<ActiveNodeToolbar
+							node={activeNode}
+							scene={activeNodeScene}
+							asset={activeNodeAsset}
+							updateNode={(patch) => {
+								updateCanvasNode(activeNode.id, patch as never);
+							}}
+							setFocusedNode={setFocusedNode}
+							setActiveScene={setActiveScene}
+						/>
+					</ActiveNodeToolbarOverlay>
+				)}
+			</AnimatePresence>
 
 			{!focusedNodeId && (
 				<div
@@ -291,21 +468,9 @@ const CanvasWorkspaceOverlay = ({
 				</button>
 			)}
 
-			{rightPanelShouldRender && (activeNode || selectedTimelineElement) && (
-				<div
-					data-testid="canvas-overlay-right-panel"
-					className="pointer-events-none absolute z-50"
-					style={{
-						left: rightPanelRect.x,
-						top: rightPanelRect.y,
-						width: rightPanelRect.width,
-						height: rightPanelRect.height,
-					}}
-				>
-					<div
-						className="pointer-events-auto h-full w-full"
-						data-canvas-overlay-ui="true"
-					>
+			<AnimatePresence>
+				{rightPanelShouldRender && (activeNode || selectedTimelineElement) && (
+					<AnimatedRightPanel rightPanelRect={rightPanelRect}>
 						{selectedTimelineElement ? (
 							<div
 								data-testid="canvas-timeline-element-settings-panel"
@@ -327,39 +492,49 @@ const CanvasWorkspaceOverlay = ({
 								/>
 							)
 						)}
-					</div>
-				</div>
-			)}
+					</AnimatedRightPanel>
+				)}
+			</AnimatePresence>
 
-			{resolvedDrawer && DrawerComponent && (
-				<div
-					data-testid="canvas-overlay-drawer"
-					className="absolute z-40 pointer-events-auto"
-					data-canvas-overlay-ui="true"
-					style={{
-						left: drawerRect.x,
-						bottom: drawerBottomOffset,
-						width: drawerRect.width,
-					}}
-				>
-					<CanvasNodeDrawerShell
-						key={drawerIdentity ?? undefined}
-						defaultHeight={resolvedDrawer.options.defaultHeight}
-						minHeight={resolvedDrawer.options.minHeight}
-						maxHeightRatio={resolvedDrawer.options.maxHeightRatio}
-						resizable={resolvedDrawer.options.resizable}
-						onHeightChange={onDrawerHeightChange}
+			<AnimatePresence>
+				{resolvedDrawer && DrawerComponent && (
+					<motion.div
+						data-testid="canvas-overlay-drawer"
+						className="absolute z-40 pointer-events-auto"
+						data-canvas-overlay-ui="true"
+						style={{
+							left: drawerRect.x,
+							bottom: drawerBottomOffset,
+							width: drawerRect.width,
+						}}
+						initial={{ y: 24, opacity: 0 }}
+						animate={{ y: 0, opacity: 1 }}
+						exit={{ y: 24, opacity: 0 }}
+						transition={DRAWER_PRESENCE_TRANSITION}
 					>
-						<DrawerComponent
-							node={resolvedDrawer.node}
-							scene={resolvedDrawer.scene}
-							asset={resolvedDrawer.asset}
-							onClose={onCloseDrawer}
+						<CanvasNodeDrawerShell
+							key={drawerIdentity ?? undefined}
+							defaultHeight={resolvedDrawer.options.defaultHeight}
+							minHeight={resolvedDrawer.options.minHeight}
+							maxHeightRatio={resolvedDrawer.options.maxHeightRatio}
+							resizable={resolvedDrawer.options.resizable}
 							onHeightChange={onDrawerHeightChange}
-						/>
-					</CanvasNodeDrawerShell>
-				</div>
-			)}
+						>
+							<DrawerComponent
+								node={resolvedDrawer.node}
+								scene={resolvedDrawer.scene}
+								asset={resolvedDrawer.asset}
+								onClose={onCloseDrawer}
+								onHeightChange={onDrawerHeightChange}
+								onDropTimelineElementsToCanvas={
+									resolvedDrawer.onDropTimelineElementsToCanvas ??
+									onDropTimelineElementsToCanvas
+								}
+							/>
+						</CanvasNodeDrawerShell>
+					</motion.div>
+				)}
+			</AnimatePresence>
 
 			<TimelineContextMenu
 				open={contextMenuOpen}

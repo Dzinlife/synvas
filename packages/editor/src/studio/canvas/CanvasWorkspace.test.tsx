@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetAudioOwnerForTests, getOwner, requestOwner } from "@/audio/owner";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { resolveClipboardNodeGeometry } from "@/element/model/clipboardTransform";
 import { createTransformMeta } from "@/element/transform";
@@ -20,6 +21,7 @@ import {
 import { useDragStore } from "@/scene-editor/drag";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
+import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import type { CameraState } from "./canvasWorkspaceUtils";
 import CanvasWorkspace from "./CanvasWorkspace";
@@ -30,6 +32,17 @@ const rafTimers = new Map<number, ReturnType<typeof setTimeout>>();
 let rafCounter = 1;
 let nativeRequestAnimationFrame: typeof window.requestAnimationFrame;
 let nativeCancelAnimationFrame: typeof window.cancelAnimationFrame;
+const { latestSceneDrawerPropsRef } = vi.hoisted(() => ({
+	latestSceneDrawerPropsRef: {
+		current: null as null | {
+			onDropTimelineElementsToCanvas?: (request: {
+				payload: unknown;
+				clientX: number;
+				clientY: number;
+			}) => boolean;
+		},
+	},
+}));
 
 interface MockCanvasNodePointerEvent {
 	clientX: number;
@@ -128,11 +141,30 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 	const createToolbar = (type: string) => () => (
 		<div data-testid={`node-toolbar-${type}`} />
 	);
-	const SceneDrawer = ({ onClose }: { onClose: () => void }) => (
-		<button type="button" data-testid="scene-timeline-drawer" onClick={onClose}>
-			drawer
-		</button>
-	);
+	const SceneDrawer = ({
+		onClose,
+		onDropTimelineElementsToCanvas,
+	}: {
+		onClose: () => void;
+		onDropTimelineElementsToCanvas?: (request: {
+			payload: unknown;
+			clientX: number;
+			clientY: number;
+		}) => boolean;
+	}) => {
+		latestSceneDrawerPropsRef.current = {
+			onDropTimelineElementsToCanvas,
+		};
+		return (
+			<button
+				type="button"
+				data-testid="scene-timeline-drawer"
+				onClick={onClose}
+			>
+				drawer
+			</button>
+		);
+	};
 	const VideoDrawer = ({ onClose }: { onClose: () => void }) => (
 		<button type="button" data-testid="video-node-drawer" onClick={onClose}>
 			drawer
@@ -812,12 +844,12 @@ const createProject = (): StudioProject => ({
 			},
 		},
 	},
-	camera: { x: 0, y: 0, zoom: 1 },
 	ui: {
 		activeSceneId: "scene-1",
 		focusedNodeId: null,
 		activeNodeId: "node-scene-1",
 		canvasSnapEnabled: true,
+		camera: { x: 0, y: 0, zoom: 1 },
 	},
 	createdAt: 1,
 	updatedAt: 1,
@@ -860,6 +892,8 @@ const registerClipboardConvertersForTests = (): void => {
 beforeEach(() => {
 	togglePlaybackMock.mockReset();
 	infiniteSkiaCanvasPropsMock.mockReset();
+	latestSceneDrawerPropsRef.current = null;
+	__resetAudioOwnerForTests();
 	registerClipboardConvertersForTests();
 	nativeRequestAnimationFrame = window.requestAnimationFrame;
 	nativeCancelAnimationFrame = window.cancelAnimationFrame;
@@ -881,14 +915,16 @@ beforeEach(() => {
 		clearTimeout(timer);
 		rafTimers.delete(rafId);
 	};
+	const project = createProject();
 	useProjectStore.setState({
 		status: "ready",
 		projects: [],
 		currentProjectId: "project-1",
-		currentProject: createProject(),
+		currentProject: project,
 		focusedSceneDrafts: {},
 		error: null,
 	});
+	useCanvasCameraStore.getState().setFromProject(project.ui.camera);
 	useStudioHistoryStore.getState().clear();
 	useStudioClipboardStore.getState().clearPayload();
 	useDragStore.getState().endDrag();
@@ -896,6 +932,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	__resetAudioOwnerForTests();
 	for (const timer of rafTimers.values()) {
 		clearTimeout(timer);
 	}
@@ -1501,12 +1538,12 @@ describe("CanvasWorkspace", () => {
 
 	it("在右侧面板滚轮不会触发画布 camera 平移", () => {
 		render(<CanvasWorkspace />);
-		const before = useProjectStore.getState().currentProject?.camera;
+		const before = useCanvasCameraStore.getState().camera;
 		const panel = screen.getByTestId("canvas-active-node-meta-panel");
 		fireEvent.wheel(panel, {
 			deltaY: 120,
 		});
-		const after = useProjectStore.getState().currentProject?.camera;
+		const after = useCanvasCameraStore.getState().camera;
 		expect(before).toBeTruthy();
 		expect(after).toBeTruthy();
 		if (!before || !after) return;
@@ -1565,7 +1602,7 @@ describe("CanvasWorkspace", () => {
 		});
 		await waitFor(() => {
 			const zoom =
-				useProjectStore.getState().currentProject?.camera.zoom ?? 1;
+				useCanvasCameraStore.getState().camera.zoom ?? 1;
 			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1574,11 +1611,11 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const beforeZoom =
-			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
+			useCanvasCameraStore.getState().camera.zoom ?? 0;
 		fireEvent.click(screen.getByLabelText("收起侧边栏"));
 		await waitFor(() => {
 			const zoom =
-				useProjectStore.getState().currentProject?.camera.zoom ?? 0;
+				useCanvasCameraStore.getState().camera.zoom ?? 0;
 			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1587,7 +1624,7 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const afterZoom =
-			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
+			useCanvasCameraStore.getState().camera.zoom ?? 0;
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
@@ -1599,7 +1636,7 @@ describe("CanvasWorkspace", () => {
 		});
 		await waitFor(() => {
 			const zoom =
-				useProjectStore.getState().currentProject?.camera.zoom ?? 1;
+				useCanvasCameraStore.getState().camera.zoom ?? 1;
 			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1608,7 +1645,7 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const beforeZoom =
-			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
+			useCanvasCameraStore.getState().camera.zoom ?? 0;
 		act(() => {
 			useProjectStore.getState().setActiveNode(null);
 		});
@@ -1617,7 +1654,7 @@ describe("CanvasWorkspace", () => {
 		});
 		await waitFor(() => {
 			const zoom =
-				useProjectStore.getState().currentProject?.camera.zoom ?? 0;
+				useCanvasCameraStore.getState().camera.zoom ?? 0;
 			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1626,12 +1663,54 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const afterZoom =
-			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
+			useCanvasCameraStore.getState().camera.zoom ?? 0;
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
-	it("active node 切换会更新顶部 toolbar", () => {
+	it("初始 active node 会渲染同位同尺寸 overlay", () => {
 		render(<CanvasWorkspace />);
+		const overlay = screen.getByTestId("canvas-active-node-overlay");
+		expect(overlay.style.left).toBe("0px");
+		expect(overlay.style.top).toBe("0px");
+		expect(overlay.style.width).toBe("960px");
+		expect(overlay.style.height).toBe("540px");
+		expect(screen.getByTestId("node-toolbar-scene")).toBeTruthy();
+	});
+
+	it("camera 变化会同步 active node overlay 屏幕坐标", async () => {
+		render(<CanvasWorkspace />);
+		act(() => {
+			useCanvasCameraStore.getState().setCamera({
+				x: 10,
+				y: 20,
+				zoom: 2,
+			});
+		});
+		await waitFor(() => {
+			const overlay = screen.getByTestId("canvas-active-node-overlay");
+			expect(overlay.style.left).toBe("20px");
+			expect(overlay.style.top).toBe("40px");
+			expect(overlay.style.width).toBe("1920px");
+			expect(overlay.style.height).toBe("1080px");
+		});
+	});
+
+	it("active node overlay 本体不可点击且 toolbar 使用 bottom-full 并可点击", () => {
+		render(<CanvasWorkspace />);
+		const overlay = screen.getByTestId("canvas-active-node-overlay");
+		const toolbar = screen.getByTestId("canvas-active-node-toolbar");
+		expect(overlay.className).toContain("pointer-events-none");
+		expect(toolbar.className).toContain("bottom-full");
+		expect(toolbar.className).toContain("pointer-events-auto");
+	});
+
+	it("active node 切换会更新节点 overlay toolbar", () => {
+		render(<CanvasWorkspace />);
+		const beforeOverlay = screen.getByTestId("canvas-active-node-overlay");
+		expect(beforeOverlay.style.left).toBe("0px");
+		expect(beforeOverlay.style.top).toBe("0px");
+		expect(beforeOverlay.style.width).toBe("960px");
+		expect(beforeOverlay.style.height).toBe("540px");
 		expect(screen.getByTestId("node-toolbar-scene")).toBeTruthy();
 
 		clickNodeAt(300, 160);
@@ -1639,6 +1718,14 @@ describe("CanvasWorkspace", () => {
 			"node-video-1",
 		);
 		expect(screen.getByTestId("node-toolbar-video")).toBeTruthy();
+		const afterOverlay = screen
+			.getByTestId("node-toolbar-video")
+			.closest('[data-testid="canvas-active-node-overlay"]');
+		expect(afterOverlay).toBeTruthy();
+		expect(afterOverlay?.style.left).toBe("240px");
+		expect(afterOverlay?.style.top).toBe("120px");
+		expect(afterOverlay?.style.width).toBe("320px");
+		expect(afterOverlay?.style.height).toBe("180px");
 	});
 
 	it("单击仅 active，双击 scene 才进入 focus", async () => {
@@ -1665,6 +1752,323 @@ describe("CanvasWorkspace", () => {
 		expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
 	});
 
+	it("scene 失去 active 时会暂停并保留时间", async () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const sceneRuntime = runtime.getTimelineRuntime({
+			kind: "scene" as const,
+			sceneId: "scene-1",
+		});
+		expect(sceneRuntime).toBeTruthy();
+		if (!sceneRuntime) return;
+
+		sceneRuntime.timelineStore.setState({
+			currentTime: 42,
+			previewTime: null,
+			isPlaying: true,
+		});
+		requestOwner("scene:scene-1");
+
+		render(<CanvasWorkspace />, {
+			wrapper: createRuntimeProviderWrapper(runtime),
+		});
+
+		expect(sceneRuntime.timelineStore.getState().isPlaying).toBe(true);
+		expect(getOwner()).toBe("scene:scene-1");
+
+		clickNodeAt(300, 160);
+		await waitFor(() => {
+			expect(sceneRuntime.timelineStore.getState().isPlaying).toBe(false);
+			expect(getOwner()).toBeNull();
+		});
+		expect(sceneRuntime.timelineStore.getState().currentTime).toBe(42);
+	});
+
+	it("scene drawer 回调投放 timeline payload 到画布会创建副本节点并写入 batch 历史", async () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const originalElementFromPoint = (
+			document as Document & {
+				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+			}
+		).elementFromPoint;
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			doubleClickNodeAt(80, 80);
+			await waitFor(() => {
+				expect(screen.getByTestId("scene-timeline-drawer")).toBeTruthy();
+			});
+			const drawerOverlay = screen.getByTestId("canvas-overlay-drawer");
+			Object.defineProperty(drawerOverlay, "getBoundingClientRect", {
+				value: () => ({
+					left: 200,
+					top: 420,
+					right: 1000,
+					bottom: 780,
+					width: 800,
+					height: 360,
+					x: 200,
+					y: 420,
+					toJSON: () => ({}),
+				}),
+			});
+			const canvasSurface = screen.getByTestId("infinite-skia-canvas");
+			Object.defineProperty(document, "elementFromPoint", {
+				configurable: true,
+				value: () => canvasSurface,
+			});
+			const timelineElement = {
+				...createTimelineSelectionElement("element-drawer-drop"),
+				name: "Drawer Clip",
+			};
+			let handled = false;
+			act(() => {
+				handled = Boolean(
+					latestSceneDrawerPropsRef.current?.onDropTimelineElementsToCanvas?.({
+						payload: {
+							kind: "timeline-elements",
+							payload: {
+								elements: [timelineElement],
+								primaryId: timelineElement.id,
+								anchor: {
+									assetId: timelineElement.id,
+									start: timelineElement.timeline.start,
+									trackIndex: timelineElement.timeline.trackIndex ?? 0,
+								},
+								source: {
+									sceneId: "scene-1",
+									canvasSize: { width: 1920, height: 1080 },
+									fps: 30,
+								},
+							},
+							source: {
+								sceneId: "scene-1",
+								canvasSize: { width: 1920, height: 1080 },
+								fps: 30,
+							},
+						},
+						clientX: 900,
+						clientY: 120,
+					}),
+				);
+			});
+			expect(handled).toBe(true);
+			const project = useProjectStore.getState().currentProject;
+			const createdNode = project?.canvas.nodes.find(
+				(node) => node.name === "Drawer Clip副本",
+			);
+			expect(createdNode).toBeTruthy();
+			expect(createdNode?.x).toBe(900);
+			expect(createdNode?.y).toBe(120);
+			const timelineElements =
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
+				[];
+			expect(timelineElements).toHaveLength(0);
+			const past = useStudioHistoryStore.getState().past;
+			expect(past.at(-1)?.kind).toBe("canvas.node-create.batch");
+		} finally {
+			if (typeof originalElementFromPoint === "function") {
+				Object.defineProperty(document, "elementFromPoint", {
+					configurable: true,
+					value: originalElementFromPoint,
+				});
+			} else {
+				delete (
+					document as Document & {
+						elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+					}
+				).elementFromPoint;
+			}
+		}
+	});
+
+	it("scene drawer 回调在轨道区域释放时不应接管 timeline 拖拽", async () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const originalElementFromPoint = (
+			document as Document & {
+				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+			}
+		).elementFromPoint;
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			doubleClickNodeAt(80, 80);
+			await waitFor(() => {
+				expect(screen.getByTestId("scene-timeline-drawer")).toBeTruthy();
+			});
+			const timelineZone = document.createElement("div");
+			timelineZone.setAttribute("data-track-drop-zone", "main");
+			Object.defineProperty(timelineZone, "getBoundingClientRect", {
+				value: () => ({
+					left: 200,
+					top: 300,
+					right: 900,
+					bottom: 700,
+					width: 700,
+					height: 400,
+					x: 200,
+					y: 300,
+					toJSON: () => ({}),
+				}),
+			});
+			document.body.appendChild(timelineZone);
+			Object.defineProperty(document, "elementFromPoint", {
+				configurable: true,
+				value: () => timelineZone,
+			});
+			const timelineElement = {
+				...createTimelineSelectionElement("element-drawer-drop-track"),
+				name: "Drawer Track Drag",
+			};
+			const beforeNodeCount =
+				useProjectStore.getState().currentProject?.canvas.nodes.length ?? 0;
+			let handled = true;
+			act(() => {
+				handled = Boolean(
+					latestSceneDrawerPropsRef.current?.onDropTimelineElementsToCanvas?.({
+						payload: {
+							kind: "timeline-elements",
+							payload: {
+								elements: [timelineElement],
+								primaryId: timelineElement.id,
+								anchor: {
+									assetId: timelineElement.id,
+									start: timelineElement.timeline.start,
+									trackIndex: timelineElement.timeline.trackIndex ?? 0,
+								},
+								source: {
+									sceneId: "scene-1",
+									canvasSize: { width: 1920, height: 1080 },
+									fps: 30,
+								},
+							},
+							source: {
+								sceneId: "scene-1",
+								canvasSize: { width: 1920, height: 1080 },
+								fps: 30,
+							},
+						},
+						clientX: 520,
+						clientY: 420,
+					}),
+				);
+			});
+			expect(handled).toBe(false);
+			const afterNodeCount =
+				useProjectStore.getState().currentProject?.canvas.nodes.length ?? 0;
+			expect(afterNodeCount).toBe(beforeNodeCount);
+			timelineZone.remove();
+		} finally {
+			if (typeof originalElementFromPoint === "function") {
+				Object.defineProperty(document, "elementFromPoint", {
+					configurable: true,
+					value: originalElementFromPoint,
+				});
+			} else {
+				delete (
+					document as Document & {
+						elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+					}
+				).elementFromPoint;
+			}
+		}
+	});
+
+	it("scene drawer 回调在 timeline-editor 区域内释放时不应判定为画布投放", async () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const originalElementFromPoint = (
+			document as Document & {
+				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+			}
+		).elementFromPoint;
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			doubleClickNodeAt(80, 80);
+			await waitFor(() => {
+				expect(screen.getByTestId("scene-timeline-drawer")).toBeTruthy();
+			});
+			const timelineEditor = document.createElement("div");
+			timelineEditor.setAttribute("data-testid", "timeline-editor");
+			Object.defineProperty(timelineEditor, "getBoundingClientRect", {
+				value: () => ({
+					left: 200,
+					top: 200,
+					right: 1000,
+					bottom: 760,
+					width: 800,
+					height: 560,
+					x: 200,
+					y: 200,
+					toJSON: () => ({}),
+				}),
+			});
+			document.body.appendChild(timelineEditor);
+			const canvasSurface = screen.getByTestId("infinite-skia-canvas");
+			Object.defineProperty(document, "elementFromPoint", {
+				configurable: true,
+				value: () => canvasSurface,
+			});
+			const timelineElement = {
+				...createTimelineSelectionElement("element-drawer-drop-editor"),
+				name: "Drawer Editor Drag",
+			};
+			const beforeNodeCount =
+				useProjectStore.getState().currentProject?.canvas.nodes.length ?? 0;
+			let handled = true;
+			act(() => {
+				handled = Boolean(
+					latestSceneDrawerPropsRef.current?.onDropTimelineElementsToCanvas?.({
+						payload: {
+							kind: "timeline-elements",
+							payload: {
+								elements: [timelineElement],
+								primaryId: timelineElement.id,
+								anchor: {
+									assetId: timelineElement.id,
+									start: timelineElement.timeline.start,
+									trackIndex: timelineElement.timeline.trackIndex ?? 0,
+								},
+								source: {
+									sceneId: "scene-1",
+									canvasSize: { width: 1920, height: 1080 },
+									fps: 30,
+								},
+							},
+							source: {
+								sceneId: "scene-1",
+								canvasSize: { width: 1920, height: 1080 },
+								fps: 30,
+							},
+						},
+						clientX: 420,
+						clientY: 360,
+					}),
+				);
+			});
+			expect(handled).toBe(false);
+			const afterNodeCount =
+				useProjectStore.getState().currentProject?.canvas.nodes.length ?? 0;
+			expect(afterNodeCount).toBe(beforeNodeCount);
+			timelineEditor.remove();
+		} finally {
+			if (typeof originalElementFromPoint === "function") {
+				Object.defineProperty(document, "elementFromPoint", {
+					configurable: true,
+					value: originalElementFromPoint,
+				});
+			} else {
+				delete (
+					document as Document & {
+						elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+					}
+				).elementFromPoint;
+			}
+		}
+	});
+
 	it("点击侧边栏 scene 节点会同步 activeScene", () => {
 		render(<CanvasWorkspace />);
 		clickSidebarNode("node-scene-2");
@@ -1678,15 +2082,15 @@ describe("CanvasWorkspace", () => {
 
 	it("点击 viewport 外节点只平移 camera，不改变 zoom", async () => {
 		render(<CanvasWorkspace />);
-		const before = useProjectStore.getState().currentProject?.camera;
+		const before = useCanvasCameraStore.getState().camera;
 		clickSidebarNode("node-video-offscreen");
-		const immediate = useProjectStore.getState().currentProject?.camera;
+		const immediate = useCanvasCameraStore.getState().camera;
 		expect(before).toBeTruthy();
 		expect(immediate).toBeTruthy();
 		if (!before || !immediate) return;
 		expect(immediate).toEqual(before);
 		await waitFor(() => {
-			const after = useProjectStore.getState().currentProject?.camera;
+			const after = useCanvasCameraStore.getState().camera;
 			expect(after).toBeTruthy();
 			if (!after) return;
 			expect(after.zoom).toBe(before.zoom);
@@ -1696,15 +2100,15 @@ describe("CanvasWorkspace", () => {
 
 	it("点击被面板遮挡的节点会触发 camera 平移进入安全区", async () => {
 		render(<CanvasWorkspace />);
-		const before = useProjectStore.getState().currentProject?.camera;
+		const before = useCanvasCameraStore.getState().camera;
 		clickSidebarNode("node-video-1");
-		const immediate = useProjectStore.getState().currentProject?.camera;
+		const immediate = useCanvasCameraStore.getState().camera;
 		expect(before).toBeTruthy();
 		expect(immediate).toBeTruthy();
 		if (!before || !immediate) return;
 		expect(immediate).toEqual(before);
 		await waitFor(() => {
-			const after = useProjectStore.getState().currentProject?.camera;
+			const after = useCanvasCameraStore.getState().camera;
 			expect(after).toBeTruthy();
 			if (!after) return;
 			expect(after.zoom).toBe(before.zoom);
@@ -1721,14 +2125,14 @@ describe("CanvasWorkspace", () => {
 		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-nodes"));
 		expect(screen.getByText("拖拽 node asset 到时间线（待实现）")).toBeTruthy();
 		const beforeUi = useProjectStore.getState().currentProject?.ui;
-		const beforeCamera = useProjectStore.getState().currentProject?.camera;
+		const beforeCamera = useCanvasCameraStore.getState().camera;
 		const nodeButton = screen.getByTestId(
 			"canvas-sidebar-node-item-node-video-1",
 		);
 		expect(nodeButton.getAttribute("disabled")).not.toBeNull();
 		fireEvent.click(nodeButton);
 		const afterUi = useProjectStore.getState().currentProject?.ui;
-		const afterCamera = useProjectStore.getState().currentProject?.camera;
+		const afterCamera = useCanvasCameraStore.getState().camera;
 		expect(beforeUi).toBeTruthy();
 		expect(afterUi).toBeTruthy();
 		expect(afterUi?.activeNodeId).toBe(beforeUi?.activeNodeId);
@@ -1737,10 +2141,10 @@ describe("CanvasWorkspace", () => {
 
 	it("双击非 focusable 节点仅调整 camera，不进入 focus", async () => {
 		render(<CanvasWorkspace />);
-		const beforeCamera = useProjectStore.getState().currentProject?.camera;
+		const beforeCamera = useCanvasCameraStore.getState().camera;
 		doubleClickNodeAt(300, 160);
 		const immediateCamera =
-			useProjectStore.getState().currentProject?.camera;
+			useCanvasCameraStore.getState().camera;
 		expect(
 			useProjectStore.getState().currentProject?.ui.focusedNodeId,
 		).toBeNull();
@@ -1750,7 +2154,7 @@ describe("CanvasWorkspace", () => {
 		if (!immediateCamera || !beforeCamera) return;
 		expect(immediateCamera).toEqual(beforeCamera);
 		await waitFor(() => {
-			const afterCamera = useProjectStore.getState().currentProject?.camera;
+			const afterCamera = useCanvasCameraStore.getState().camera;
 			expect(afterCamera).toBeTruthy();
 			if (!afterCamera) return;
 			expect(
@@ -1770,12 +2174,12 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const workspace = screen.getByTestId("canvas-workspace");
-		const beforeCamera = useProjectStore.getState().currentProject?.camera;
+		const beforeCamera = useCanvasCameraStore.getState().camera;
 		fireEvent.wheel(workspace, {
 			deltaX: 120,
 			deltaY: 80,
 		});
-		const afterCamera = useProjectStore.getState().currentProject?.camera;
+		const afterCamera = useCanvasCameraStore.getState().camera;
 		expect(beforeCamera).toBeTruthy();
 		expect(afterCamera).toBeTruthy();
 		if (!beforeCamera || !afterCamera) return;
@@ -1787,7 +2191,7 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		const workspace = screen.getByTestId("canvas-workspace");
 		const initialRenderCount = infiniteSkiaCanvasPropsMock.mock.calls.length;
-		const beforeCamera = useProjectStore.getState().currentProject?.camera;
+		const beforeCamera = useCanvasCameraStore.getState().camera;
 		fireEvent.wheel(workspace, {
 			deltaX: 64,
 			deltaY: 32,
@@ -1796,7 +2200,7 @@ describe("CanvasWorkspace", () => {
 			deltaX: -48,
 			deltaY: 20,
 		});
-		const afterCamera = useProjectStore.getState().currentProject?.camera;
+		const afterCamera = useCanvasCameraStore.getState().camera;
 		expect(beforeCamera).toBeTruthy();
 		expect(afterCamera).toBeTruthy();
 		if (!beforeCamera || !afterCamera) return;
@@ -1806,16 +2210,35 @@ describe("CanvasWorkspace", () => {
 		expect(infiniteSkiaCanvasPropsMock.mock.calls.length).toBe(initialRenderCount);
 	});
 
+	it("wheel pan 不会改写 projectStore.currentProject 引用", () => {
+		render(<CanvasWorkspace />);
+		const workspace = screen.getByTestId("canvas-workspace");
+		const beforeProject = useProjectStore.getState().currentProject;
+		const beforeCamera = useCanvasCameraStore.getState().camera;
+		fireEvent.wheel(workspace, {
+			deltaX: 24,
+			deltaY: 18,
+		});
+		const afterProject = useProjectStore.getState().currentProject;
+		const afterCamera = useCanvasCameraStore.getState().camera;
+		expect(beforeProject).toBeTruthy();
+		expect(afterProject).toBeTruthy();
+		expect(afterProject).toBe(beforeProject);
+		expect(
+			afterCamera.x !== beforeCamera.x || afterCamera.y !== beforeCamera.y,
+		).toBe(true);
+	});
+
 	it("smooth 动画期间 instant zoom 更新会被忽略", async () => {
 		render(<CanvasWorkspace />);
 		const workspace = screen.getByTestId("canvas-workspace");
 		clickSidebarNode("node-video-offscreen");
-		const beforeWheel = useProjectStore.getState().currentProject?.camera;
+		const beforeWheel = useCanvasCameraStore.getState().camera;
 		fireEvent.wheel(workspace, {
 			deltaY: 80,
 			ctrlKey: true,
 		});
-		const afterWheel = useProjectStore.getState().currentProject?.camera;
+		const afterWheel = useCanvasCameraStore.getState().camera;
 		expect(beforeWheel).toBeTruthy();
 		expect(afterWheel).toBeTruthy();
 		if (!beforeWheel || !afterWheel) return;
@@ -1823,7 +2246,7 @@ describe("CanvasWorkspace", () => {
 
 		await waitFor(() => {
 			const cameraAfterAnimation =
-				useProjectStore.getState().currentProject?.camera;
+				useCanvasCameraStore.getState().camera;
 			expect(cameraAfterAnimation).toBeTruthy();
 			if (!cameraAfterAnimation) return;
 			expect(
@@ -1838,7 +2261,7 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const settled = useProjectStore.getState().currentProject?.camera;
+		const settled = useCanvasCameraStore.getState().camera;
 		expect(settled).toBeTruthy();
 		if (!settled) return;
 		expect(
@@ -1878,7 +2301,7 @@ describe("CanvasWorkspace", () => {
 
 	it("未完成的 smooth 动画会被新的 smooth 动画覆盖", async () => {
 		render(<CanvasWorkspace />);
-		const initialCamera = useProjectStore.getState().currentProject?.camera;
+		const initialCamera = useCanvasCameraStore.getState().camera;
 		clickSidebarNode("node-video-offscreen");
 		await act(async () => {
 			await new Promise((resolve) => {
@@ -1894,7 +2317,7 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const settled = useProjectStore.getState().currentProject?.camera;
+		const settled = useCanvasCameraStore.getState().camera;
 		expect(settled).toBeTruthy();
 		if (!settled) return;
 		expect(settled.x).toBeCloseTo(initialCamera.x, 3);
@@ -1914,14 +2337,12 @@ describe("CanvasWorkspace", () => {
 			});
 		});
 		const beforeResizeZoom =
-			useProjectStore.getState().currentProject?.camera.zoom ?? 0;
+			useCanvasCameraStore.getState().camera.zoom ?? 0;
 
 		const handle = screen.getByLabelText("调整 Drawer 高度");
 		const zoomSamples: number[] = [];
-		const unsubscribe = useProjectStore.subscribe((state) => {
-			const zoom = state.currentProject?.camera.zoom;
-			if (typeof zoom !== "number") return;
-			zoomSamples.push(zoom);
+		const unsubscribe = useCanvasCameraStore.subscribe((state) => {
+			zoomSamples.push(state.camera.zoom);
 		});
 
 		fireEvent.mouseDown(handle, { clientY: 700 });
@@ -2788,6 +3209,33 @@ describe("CanvasWorkspace", () => {
 		}
 	});
 
+	it("主轨波纹开启时从画布拖入主轨会执行插入而不是落到新轨道", () => {
+		const runtime = createCanvasWorkspaceRuntime();
+		const removeDropZone = mountMainTimelineDropZone();
+		try {
+			const timelineRuntime = runtime.getActiveEditTimelineRuntime();
+			timelineRuntime?.timelineStore.setState({
+				rippleEditingEnabled: true,
+				elements: [createTimelineSelectionElement("existing-main-clip")],
+			});
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			dragNodeAt(300, 160, 120, 80);
+			const timelineElements =
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
+				[];
+			expect(timelineElements.length).toBe(2);
+			expect(
+				timelineElements
+					.filter((element) => element.type !== "AudioClip")
+					.every((element) => (element.timeline.trackIndex ?? 0) === 0),
+			).toBe(true);
+		} finally {
+			removeDropZone();
+		}
+	});
+
 	it("Alt 拖入 timeline 区域会取消画布复制态并进入 timeline drop", () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const removeDropZone = mountMainTimelineDropZone();
@@ -2819,12 +3267,23 @@ describe("CanvasWorkspace", () => {
 		}
 	});
 
-	it("进入 timeline drop 态后拖离并松手，不会恢复画布拖拽也不会投放", () => {
+	it("进入 timeline drop 态后拖离并松手，会恢复画布拖拽但不会投放", () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const removeDropZone = mountMainTimelineDropZone();
+		const originalElementFromPoint = (
+			document as Document & {
+				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+			}
+		).elementFromPoint;
 		try {
 			render(<CanvasWorkspace />, {
 				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			const canvasSurface = screen.getByTestId("infinite-skia-canvas");
+			Object.defineProperty(document, "elementFromPoint", {
+				configurable: true,
+				value: (x: number, y: number) =>
+					x >= 500 && y >= 300 ? canvasSurface : null,
 			});
 			const node = getTopVisibleNodeAt(300, 160);
 			act(() => {
@@ -2867,14 +3326,28 @@ describe("CanvasWorkspace", () => {
 			const draggedNode = project?.canvas.nodes.find(
 				(item) => item.id === "node-video-1",
 			);
-			expect(draggedNode?.x).toBe(240);
-			expect(draggedNode?.y).toBe(120);
+			expect(draggedNode?.x).toBe(560);
+			expect(draggedNode?.y).toBe(320);
 			const timelineElements =
 				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
 				[];
 			expect(timelineElements).toHaveLength(0);
-			expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+			const past = useStudioHistoryStore.getState().past;
+			expect(past).toHaveLength(1);
+			expect(past[0]?.kind).toBe("canvas.node-layout");
 		} finally {
+			if (typeof originalElementFromPoint === "function") {
+				Object.defineProperty(document, "elementFromPoint", {
+					configurable: true,
+					value: originalElementFromPoint,
+				});
+			} else {
+				delete (
+					document as Document & {
+						elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+					}
+				).elementFromPoint;
+			}
 			removeDropZone();
 		}
 	});
@@ -3496,19 +3969,10 @@ describe("CanvasWorkspace", () => {
 	});
 
 	it("节点拖拽后坐标会被约束为整数", () => {
-		useProjectStore.setState((state) => {
-			const project = state.currentProject;
-			if (!project) return state;
-			return {
-				...state,
-				currentProject: {
-					...project,
-					camera: {
-						...project.camera,
-						zoom: 1.3,
-					},
-				},
-			};
+		useCanvasCameraStore.getState().setCamera({
+			x: 0,
+			y: 0,
+			zoom: 1.3,
 		});
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 420, 260);

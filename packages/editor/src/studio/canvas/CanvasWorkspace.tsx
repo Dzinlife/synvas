@@ -6,6 +6,7 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useEffectEvent,
 	useMemo,
 	useRef,
 	useState,
@@ -16,6 +17,10 @@ import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
 import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
+import {
+	getCanvasCamera,
+	useCanvasCameraStore,
+} from "@/studio/canvas/cameraStore";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
 import {
 	calculateAutoScrollSpeed,
@@ -565,7 +570,7 @@ const CanvasWorkspace = () => {
 	const setFocusedNode = useProjectStore((state) => state.setFocusedNode);
 	const setActiveScene = useProjectStore((state) => state.setActiveScene);
 	const setActiveNode = useProjectStore((state) => state.setActiveNode);
-	const setCanvasCamera = useProjectStore((state) => state.setCanvasCamera);
+	const setCanvasCamera = useCanvasCameraStore((state) => state.setCamera);
 	const appendCanvasGraphBatch = useProjectStore(
 		(state) => state.appendCanvasGraphBatch,
 	);
@@ -608,7 +613,7 @@ const CanvasWorkspace = () => {
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
-	const initialCamera = currentProject?.camera ?? DEFAULT_CAMERA;
+	const initialCameraRef = useRef(getCanvasCamera());
 	const isCanvasInteractionLocked = Boolean(focusedNodeId);
 	const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
 	const [visibleDrawerHeight, setVisibleDrawerHeight] = useState(
@@ -653,11 +658,21 @@ const CanvasWorkspace = () => {
 		cameraSharedValue,
 		getCamera,
 		applyCamera,
+		stopCameraAnimation,
 	} = useCanvasCameraController({
-		camera: initialCamera,
+		camera: initialCameraRef.current,
 		onChange: setCanvasCamera,
 		onAnimationStateChange: setIsCameraAnimating,
 	});
+	const syncCameraFromStore = useEffectEvent(() => {
+		stopCameraAnimation();
+		applyCamera(getCanvasCamera(), {
+			transition: "instant",
+		});
+	});
+	useEffect(() => {
+		syncCameraFromStore();
+	}, [currentProjectId]);
 	useEffect(() => {
 		const handleWindowMouseMove = (event: MouseEvent) => {
 			lastPointerClientRef.current = { x: event.clientX, y: event.clientY };

@@ -4,6 +4,11 @@ import type { StudioProject } from "./types";
 
 const nonEmptyStringSchema = z.string().min(1);
 const finiteNumberSchema = z.number().finite();
+const defaultCamera = {
+	x: 0,
+	y: 0,
+	zoom: 1,
+} as const;
 
 const canvasNodeBaseSchema = z.object({
 	id: nonEmptyStringSchema,
@@ -135,17 +140,17 @@ const studioProjectSchema = z.object({
 	canvas: canvasDocumentSchema,
 	scenes: z.record(nonEmptyStringSchema, sceneDocumentSchema),
 	assets: z.array(z.unknown()),
-	camera: z.object({
-		x: finiteNumberSchema,
-		y: finiteNumberSchema,
-		zoom: z.number().positive(),
-	}),
 	ot: studioOtSchema.optional(),
 	ui: z.object({
 		activeSceneId: nonEmptyStringSchema.nullable(),
 		focusedNodeId: nonEmptyStringSchema.nullable(),
 		activeNodeId: nonEmptyStringSchema.nullable(),
 		canvasSnapEnabled: z.boolean().default(true),
+		camera: z.object({
+			x: finiteNumberSchema,
+			y: finiteNumberSchema,
+			zoom: z.number().positive(),
+		}).default(defaultCamera),
 	}),
 	createdAt: z.number(),
 	updatedAt: z.number(),
