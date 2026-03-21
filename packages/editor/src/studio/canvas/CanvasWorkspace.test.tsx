@@ -22,8 +22,18 @@ import { useDragStore } from "@/scene-editor/drag";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
+import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
-import type { CameraState } from "./canvasWorkspaceUtils";
+import {
+	CANVAS_OVERLAY_GAP_PX,
+	CANVAS_OVERLAY_OUTER_PADDING_PX,
+	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
+	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
+} from "./canvasOverlayLayout";
+import {
+	resolveDynamicMinZoom,
+	type CameraState,
+} from "./canvasWorkspaceUtils";
 import CanvasWorkspace from "./CanvasWorkspace";
 
 const togglePlaybackMock = vi.fn();
@@ -854,6 +864,32 @@ const createProject = (): StudioProject => ({
 	createdAt: 1,
 	updatedAt: 1,
 });
+
+const resolveFixedCameraSafeInsets = () => ({
+	top: CANVAS_OVERLAY_OUTER_PADDING_PX,
+	bottom: CANVAS_OVERLAY_OUTER_PADDING_PX,
+	left:
+		CANVAS_OVERLAY_OUTER_PADDING_PX +
+		CANVAS_OVERLAY_SIDEBAR_WIDTH_PX +
+		CANVAS_OVERLAY_GAP_PX,
+	right:
+		CANVAS_OVERLAY_OUTER_PADDING_PX +
+		CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX +
+		CANVAS_OVERLAY_GAP_PX,
+});
+
+const resolveExpectedDynamicMinZoom = (): number => {
+	const project = useProjectStore.getState().currentProject;
+	if (!project) {
+		throw new Error("project 不存在");
+	}
+	return resolveDynamicMinZoom({
+		nodes: project.canvas.nodes,
+		stageWidth: mockDOMRect.width,
+		stageHeight: mockDOMRect.height,
+		safeInsets: resolveFixedCameraSafeInsets(),
+	});
+};
 
 let clipboardConvertersRegistered = false;
 
@@ -2226,6 +2262,182 @@ describe("CanvasWorkspace", () => {
 		expect(
 			afterCamera.x !== beforeCamera.x || afterCamera.y !== beforeCamera.y,
 		).toBe(true);
+	});
+
+	it("全局可俯瞰时 ctrl+wheel 使用默认下限 0.1", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: project.canvas.nodes.map((node) => ({
+							...node,
+							x: 0,
+							y: 0,
+							width: 400,
+							height: 200,
+						})),
+					},
+				},
+			};
+		});
+		const expectedFloor = resolveExpectedDynamicMinZoom();
+		render(<CanvasWorkspace />);
+		const workspace = screen.getByTestId("canvas-workspace");
+		for (let i = 0; i < 120; i += 1) {
+			fireEvent.wheel(workspace, {
+				deltaY: 80,
+				ctrlKey: true,
+				clientX: 600,
+				clientY: 400,
+			});
+		}
+		const zoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
+		expect(expectedFloor).toBeCloseTo(0.1, 3);
+		expect(zoom).toBeCloseTo(expectedFloor, 3);
+	});
+
+	it("节点分布较散时 ctrl+wheel 可缩放到 0.1 以下", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: project.canvas.nodes.map((node) => {
+							if (node.id === "node-image-hidden") {
+								return {
+									...node,
+									x: 0,
+									y: 0,
+									width: 12000,
+									height: 100,
+									hidden: true,
+								};
+							}
+							return {
+								...node,
+								x: 0,
+								y: 0,
+								width: 400,
+								height: 200,
+							};
+						}),
+					},
+				},
+			};
+		});
+		const expectedFloor = resolveExpectedDynamicMinZoom();
+		render(<CanvasWorkspace />);
+		const workspace = screen.getByTestId("canvas-workspace");
+		for (let i = 0; i < 120; i += 1) {
+			fireEvent.wheel(workspace, {
+				deltaY: 80,
+				ctrlKey: true,
+				clientX: 600,
+				clientY: 400,
+			});
+		}
+		const zoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
+		expect(expectedFloor).toBeLessThan(0.1);
+		expect(zoom).toBeCloseTo(expectedFloor, 3);
+	});
+
+	it("drawer 高度变化前后最小缩放阈值保持一致", async () => {
+		const sceneDefinition = getCanvasNodeDefinition("scene");
+		const drawerOptions = sceneDefinition?.drawerOptions;
+		const previousTrigger = drawerOptions?.trigger;
+		if (drawerOptions) {
+			drawerOptions.trigger = "active";
+		}
+		try {
+			useProjectStore.setState((state) => {
+				const project = state.currentProject;
+				if (!project) return state;
+				return {
+					...state,
+					currentProject: {
+						...project,
+						canvas: {
+							...project.canvas,
+							nodes: project.canvas.nodes.map((node) => {
+								if (node.id === "node-image-hidden") {
+									return {
+										...node,
+										x: 0,
+										y: 0,
+										width: 12000,
+										height: 100,
+										hidden: true,
+									};
+								}
+								return {
+									...node,
+									x: 0,
+									y: 0,
+									width: 400,
+									height: 200,
+								};
+							}),
+						},
+					},
+				};
+			});
+			const expectedFloor = resolveExpectedDynamicMinZoom();
+			render(<CanvasWorkspace />);
+			const workspace = screen.getByTestId("canvas-workspace");
+			await waitFor(() => {
+				expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
+			});
+
+			for (let i = 0; i < 120; i += 1) {
+				fireEvent.wheel(workspace, {
+					deltaY: 80,
+					ctrlKey: true,
+					clientX: 600,
+					clientY: 400,
+				});
+			}
+			const beforeFloor = useCanvasCameraStore.getState().camera.zoom ?? 0;
+
+			for (let i = 0; i < 40; i += 1) {
+				fireEvent.wheel(workspace, {
+					deltaY: -80,
+					ctrlKey: true,
+					clientX: 600,
+					clientY: 400,
+				});
+			}
+
+			const handle = screen.getByLabelText("调整 Drawer 高度");
+			fireEvent.mouseDown(handle, { clientY: 700 });
+			fireEvent.mouseMove(document, { clientY: 760 });
+			fireEvent.mouseUp(document);
+
+			for (let i = 0; i < 120; i += 1) {
+				fireEvent.wheel(workspace, {
+					deltaY: 80,
+					ctrlKey: true,
+					clientX: 600,
+					clientY: 400,
+				});
+			}
+			const afterFloor = useCanvasCameraStore.getState().camera.zoom ?? 0;
+			expect(beforeFloor).toBeCloseTo(expectedFloor, 3);
+			expect(afterFloor).toBeCloseTo(expectedFloor, 3);
+			expect(afterFloor).toBeCloseTo(beforeFloor, 3);
+		} finally {
+			if (drawerOptions) {
+				drawerOptions.trigger = previousTrigger;
+			}
+		}
 	});
 
 	it("smooth 动画期间 instant zoom 更新会被忽略", async () => {

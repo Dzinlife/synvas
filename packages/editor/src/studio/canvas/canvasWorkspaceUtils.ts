@@ -14,6 +14,7 @@ import type { CanvasNodeLayoutSnapshot } from "@/studio/history/studioHistorySto
 import type { CameraSafeInsets } from "./canvasOverlayLayout";
 
 export const MIN_ZOOM = 0.2;
+export const DEFAULT_MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 2;
 export const GRID_SIZE = 120;
 export const CAMERA_ZOOM_EPSILON = 1e-6;
@@ -44,6 +45,11 @@ export type CameraTransitionMode = "smooth" | "instant";
 
 export interface ApplyCameraOptions {
 	transition?: CameraTransitionMode;
+}
+
+export interface ClampZoomOptions {
+	minZoom?: number;
+	maxZoom?: number;
 }
 
 export const DEFAULT_CAMERA: CameraState = {
@@ -87,8 +93,14 @@ export interface ResolvedCanvasDrawerOptions {
 	maxHeightRatio: number;
 }
 
-export const clampZoom = (zoom: number): number => {
-	return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+export const clampZoom = (zoom: number, options?: ClampZoomOptions): number => {
+	const minZoom = Number.isFinite(options?.minZoom)
+		? Math.max(CAMERA_ZOOM_EPSILON, options?.minZoom ?? MIN_ZOOM)
+		: MIN_ZOOM;
+	const maxZoom = Number.isFinite(options?.maxZoom)
+		? Math.max(minZoom, options?.maxZoom ?? MAX_ZOOM)
+		: Math.max(minZoom, MAX_ZOOM);
+	return Math.max(minZoom, Math.min(maxZoom, zoom));
 };
 
 const resolveSafeViewportRect = (
@@ -259,6 +271,44 @@ export const resolveCanvasNodeBounds = (
 		width: Math.max(1, right - left),
 		height: Math.max(1, bottom - top),
 	};
+};
+
+export interface DynamicMinZoomInput {
+	nodes: CanvasNode[];
+	stageWidth: number;
+	stageHeight: number;
+	safeInsets: CameraSafeInsets;
+	defaultMinZoom?: number;
+}
+
+export const resolveDynamicMinZoom = ({
+	nodes,
+	stageWidth,
+	stageHeight,
+	safeInsets,
+	defaultMinZoom = DEFAULT_MIN_ZOOM,
+}: DynamicMinZoomInput): number => {
+	const fallbackMinZoom = Math.max(CAMERA_ZOOM_EPSILON, defaultMinZoom);
+	if (stageWidth <= 0 || stageHeight <= 0) {
+		return fallbackMinZoom;
+	}
+	if (nodes.length === 0) {
+		return fallbackMinZoom;
+	}
+	const bounds = resolveCanvasNodeBounds(nodes);
+	if (!bounds) {
+		return fallbackMinZoom;
+	}
+	const viewport = resolveSafeViewportRect(stageWidth, stageHeight, safeInsets);
+	const fitAllNodesZoom = Math.min(
+		viewport.width / bounds.width,
+		viewport.height / bounds.height,
+	);
+	if (!Number.isFinite(fitAllNodesZoom) || fitAllNodesZoom <= 0) {
+		return fallbackMinZoom;
+	}
+	const fitHalf = fitAllNodesZoom / 2;
+	return Math.max(CAMERA_ZOOM_EPSILON, Math.min(fallbackMinZoom, fitHalf));
 };
 
 export const isWorldPointInBounds = (

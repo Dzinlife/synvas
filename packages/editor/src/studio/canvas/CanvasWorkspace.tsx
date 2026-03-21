@@ -92,6 +92,8 @@ import {
 	type CanvasSnapRect,
 } from "./canvasSnapUtils";
 import {
+	CANVAS_OVERLAY_GAP_PX,
+	CANVAS_OVERLAY_OUTER_PADDING_PX,
 	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
 	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
 	resolveCanvasOverlayLayout,
@@ -113,6 +115,7 @@ import {
 	isWorldPointInBounds,
 	isWorldPointInNode,
 	pickLayout,
+	resolveDynamicMinZoom,
 	resolveCanvasNodeBounds,
 	type ResolvedCanvasDrawerOptions,
 	resolveDrawerOptions,
@@ -1112,6 +1115,25 @@ const CanvasWorkspace = () => {
 		visibleDrawerHeight,
 	]);
 	const cameraSafeInsets = overlayLayout.cameraSafeInsets;
+	const dynamicMinZoom = useMemo(() => {
+		return resolveDynamicMinZoom({
+			nodes: currentProject?.canvas.nodes ?? [],
+			stageWidth: stageSize.width,
+			stageHeight: stageSize.height,
+			safeInsets: {
+				top: CANVAS_OVERLAY_OUTER_PADDING_PX,
+				bottom: CANVAS_OVERLAY_OUTER_PADDING_PX,
+				left:
+					CANVAS_OVERLAY_OUTER_PADDING_PX +
+					CANVAS_OVERLAY_SIDEBAR_WIDTH_PX +
+					CANVAS_OVERLAY_GAP_PX,
+				right:
+					CANVAS_OVERLAY_OUTER_PADDING_PX +
+					CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX +
+					CANVAS_OVERLAY_GAP_PX,
+			},
+		});
+	}, [currentProject, stageSize.height, stageSize.width]);
 	const rightPanelShouldRender =
 		rightPanelVisible &&
 		overlayLayout.rightPanelRect.width > 0 &&
@@ -1404,7 +1426,9 @@ const CanvasWorkspace = () => {
 	const handleZoomByStep = useCallback(
 		(multiplier: number) => {
 			const currentCamera = getCamera();
-			const nextZoom = clampZoom(currentCamera.zoom * multiplier);
+			const nextZoom = clampZoom(currentCamera.zoom * multiplier, {
+				minZoom: dynamicMinZoom,
+			});
 			if (nextZoom === currentCamera.zoom) return;
 			const safeCurrentZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
 			const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
@@ -1421,7 +1445,7 @@ const CanvasWorkspace = () => {
 				{ transition: "instant" },
 			);
 		},
-		[applyCamera, getCamera, stageSize.height, stageSize.width],
+		[applyCamera, dynamicMinZoom, getCamera, stageSize.height, stageSize.width],
 	);
 
 	const handleResetView = useCallback(() => {
@@ -1437,7 +1461,9 @@ const CanvasWorkspace = () => {
 			if (event.ctrlKey || event.metaKey) {
 				const oldZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
 				const zoomDelta = event.deltaY > 0 ? 0.92 : 1.08;
-				const nextZoom = clampZoom(oldZoom * zoomDelta);
+				const nextZoom = clampZoom(oldZoom * zoomDelta, {
+					minZoom: dynamicMinZoom,
+				});
 				const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
 				const container = containerRef.current;
 				if (!container) return;
@@ -1466,10 +1492,10 @@ const CanvasWorkspace = () => {
 					zoom: currentCamera.zoom,
 				},
 				{ transition: "instant" },
-			);
-		},
-		[applyCamera, focusedNodeId, getCamera],
-	);
+				);
+			},
+			[applyCamera, dynamicMinZoom, focusedNodeId, getCamera],
+		);
 
 	useEffect(() => {
 		const container = containerRef.current;
