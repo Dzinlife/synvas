@@ -4,12 +4,8 @@ import type { AudioBufferSink, VideoSample, VideoSampleSink } from "mediabunny";
 import type { SkImage } from "react-skia-lite";
 import type { AssetHandle } from "@/assets/AssetStore";
 import { type AudioAsset, acquireAudioAsset } from "@/assets/audioAsset";
-import { type VideoAsset, acquireVideoAsset } from "@/assets/videoAsset";
+import { acquireVideoAsset, type VideoAsset } from "@/assets/videoAsset";
 import { getAudioContext } from "@/audio/engine";
-import {
-	type AudioPlaybackController,
-	createAudioPlaybackController,
-} from "@/audio/playback";
 import {
 	getOwner,
 	releaseOwner,
@@ -17,6 +13,10 @@ import {
 	subscribeOwnerChange,
 } from "@/audio/owner";
 import { closeVideoSample, videoSampleToSkImage } from "@/lib/videoFrameUtils";
+import {
+	type AudioPlaybackController,
+	createAudioPlaybackController,
+} from "@/audio/playback";
 import {
 	releaseVideoPlaybackSession,
 	retainVideoPlaybackSession,
@@ -35,7 +35,10 @@ const SCENE_OWNER_PREFIX = "scene:";
 type ClockMode = "audio" | "perf" | null;
 
 const getNowMs = (): number => {
-	if (typeof performance !== "undefined" && Number.isFinite(performance.now())) {
+	if (
+		typeof performance !== "undefined" &&
+		Number.isFinite(performance.now())
+	) {
 		return performance.now();
 	}
 	return Date.now();
@@ -307,7 +310,7 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 	}
 
 	private updatePinnedFrame(nextFrame: SkImage | null) {
-		const nextAsset = nextFrame ? this.videoHandle?.asset ?? null : null;
+		const nextAsset = nextFrame ? (this.videoHandle?.asset ?? null) : null;
 		if (this.pinnedFrame === nextFrame && this.pinnedFrameAsset === nextAsset) {
 			return;
 		}
@@ -491,7 +494,11 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 	private getClockTime(nowMs: number): number {
 		if (this.clockMode === "audio") {
 			const context = getAudioContext();
-			if (context && context.state === "running" && this.audioClockStart !== null) {
+			if (
+				context &&
+				context.state === "running" &&
+				this.audioClockStart !== null
+			) {
 				const elapsed = context.currentTime - this.audioClockStart;
 				return this.clockStartTime + Math.max(0, elapsed);
 			}
@@ -735,6 +742,13 @@ export const retainVideoNodePlaybackController = (
 	const entry = getOrCreateControllerEntry(nodeId);
 	entry.refCount += 1;
 	return entry.controller;
+};
+
+export const getVideoNodePlaybackController = (
+	nodeId: string,
+): VideoNodePlaybackController | null => {
+	const entry = controllerEntryByNodeId.get(nodeId);
+	return entry?.controller ?? null;
 };
 
 export const releaseVideoNodePlaybackController = (nodeId: string): void => {

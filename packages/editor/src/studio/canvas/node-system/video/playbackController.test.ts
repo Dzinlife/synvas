@@ -2,13 +2,20 @@
 
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetAudioOwnerForTests, getOwner, requestOwner } from "@/audio/owner";
+import {
+	__resetAudioOwnerForTests,
+	getOwner,
+	requestOwner,
+} from "@/audio/owner";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 
 const mocks = vi.hoisted(() => {
 	const createFrameController = () => {
 		const getOrBuildCurrent = vi.fn(
-			async (frameIndex: number, factory: (index: number) => Promise<unknown>) => {
+			async (
+				frameIndex: number,
+				factory: (index: number) => Promise<unknown>,
+			) => {
 				const state = await factory(frameIndex);
 				return {
 					key: frameIndex,
@@ -81,6 +88,7 @@ vi.mock("@/lib/videoFrameUtils", () => ({
 
 import {
 	__resetVideoNodePlaybackControllersForTests,
+	getVideoNodePlaybackController,
 	releaseVideoNodePlaybackController,
 	retainVideoNodePlaybackController,
 } from "./playbackController";
@@ -229,6 +237,14 @@ describe("video playbackController", () => {
 		cancelAnimationFrameSpy.mockRestore();
 	});
 
+	it("getVideoNodePlaybackController 仅在 controller 已存在时返回实例", () => {
+		expect(getVideoNodePlaybackController("node-readonly")).toBeNull();
+		const retained = retainVideoNodePlaybackController("node-readonly");
+		expect(getVideoNodePlaybackController("node-readonly")).toBe(retained);
+		releaseVideoNodePlaybackController("node-readonly");
+		expect(getVideoNodePlaybackController("node-readonly")).toBeNull();
+	});
+
 	it("seek 会合并最新请求并做时间钳制", async () => {
 		const video = createVideoHandle(10);
 		const audio = createAudioHandle();
@@ -310,7 +326,9 @@ describe("video playbackController", () => {
 		mocks.acquireAudioAsset.mockResolvedValue(audio);
 		mocks.stepVideoPlaybackSession.mockResolvedValue(null);
 
-		const controller = retainVideoNodePlaybackController("node-hold-scrub-frame");
+		const controller = retainVideoNodePlaybackController(
+			"node-hold-scrub-frame",
+		);
 		controller.bind({
 			assetUri: "file:///hold-scrub-frame.mp4",
 			fps: 30,
@@ -405,7 +423,8 @@ describe("video playbackController", () => {
 
 		await controller.seekToTime(2, { fromPlayback: true });
 		expect(frameController.invalidateAll).toHaveBeenCalled();
-		const invalidateCountAfterJump = frameController.invalidateAll.mock.calls.length;
+		const invalidateCountAfterJump =
+			frameController.invalidateAll.mock.calls.length;
 
 		controller.pause();
 		expect(frameController.invalidateAll.mock.calls.length).toBeGreaterThan(

@@ -1,16 +1,23 @@
 import { useEffect } from "react";
+import { useProjectStore } from "@/projects/projectStore";
 import {
-	useActiveTimelineRuntime,
 	useStudioRuntimeManager,
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
+import {
+	dispatchActivePlaybackTarget,
+	resolveActivePlaybackTarget,
+} from "@/studio/playback/activeNodePlayback";
 import { usePlaybackOwnerController } from "@/studio/scene/usePlaybackOwnerController";
 
 export const useStudioHotkeys = (): void => {
-	const activeTimelineRuntime = useActiveTimelineRuntime();
 	const runtimeManager = useStudioRuntimeManager();
 	const { togglePlayback } = usePlaybackOwnerController();
+	const currentProject = useProjectStore((state) => state.currentProject);
+	const activeNodeId = useProjectStore(
+		(state) => state.currentProject?.ui.activeNodeId ?? null,
+	);
 	const timelineStore = useTimelineStoreApi();
 	const undo = useStudioHistoryStore((state) => state.undo);
 	const redo = useStudioHistoryStore((state) => state.redo);
@@ -26,9 +33,16 @@ export const useStudioHotkeys = (): void => {
 			}
 			if (e.code === "Space" && !e.repeat) {
 				e.preventDefault();
-				if (activeTimelineRuntime) {
-					togglePlayback(activeTimelineRuntime.ref);
-				}
+				const playbackTarget = resolveActivePlaybackTarget({
+					currentProject,
+					activeNodeId,
+					assets: currentProject?.assets ?? [],
+				});
+				void dispatchActivePlaybackTarget({
+					target: playbackTarget,
+					runtimeManager,
+					toggleScenePlayback: togglePlayback,
+				});
 				return;
 			}
 			const isModifier = e.metaKey || e.ctrlKey;
@@ -53,7 +67,8 @@ export const useStudioHotkeys = (): void => {
 			window.removeEventListener("keydown", handleKeyDown);
 		};
 	}, [
-		activeTimelineRuntime,
+		activeNodeId,
+		currentProject,
 		redo,
 		runtimeManager,
 		timelineStore,
