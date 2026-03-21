@@ -38,6 +38,7 @@ import {
 } from "@/utils/timecode";
 import type { ComponentModel, ComponentModelStore } from "../model/types";
 import { resolveVideoKeyframeTime } from "./keyframeTimeCache";
+import { shouldSeekAfterStepPlayback } from "./playbackDriftPolicy";
 import { warmFramesFromKeyframeToTarget } from "./reverseSeekWarmup";
 import {
 	releaseVideoPlaybackSession,
@@ -161,7 +162,11 @@ export const calculateVideoTime = ({
 const DEFAULT_FPS = 30;
 // 目标时间回退超过该帧数则重启流式播放（按时间线 FPS 计算）
 const PLAYBACK_BACK_JUMP_FRAMES = 3;
+const PLAYBACK_DRIFT_FLOOR_SECONDS = 1.0;
+const PLAYBACK_DRIFT_ADAPTIVE_MULTIPLIER = 2;
 const DEFAULT_FRAME_CHANNEL: RenderFrameChannel = "current";
+const getNowMs = () =>
+	typeof performance !== "undefined" ? performance.now() : Date.now();
 const resolveFrameChannel = (
 	value: RenderFrameChannel | undefined,
 ): RenderFrameChannel => {
@@ -223,6 +228,14 @@ export function createVideoClipModel(
 		current: null,
 		offscreen: null,
 	};
+	let lastPlaybackProgressAtMsByChannel: Record<string, number | null> = {
+		current: null,
+		offscreen: null,
+	};
+	let observedPlaybackFrameIntervalByChannel: Record<string, number | null> = {
+		current: null,
+		offscreen: null,
+	};
 	let audioInitEpoch = 0;
 	let audioPlayback: AudioPlaybackController | null = null;
 	let retainedPlaybackSessionKeyByChannel: Record<
@@ -244,6 +257,7 @@ export function createVideoClipModel(
 	const reversePrewarmInflight = new Set<string>();
 	const reversePrewarmCompleted = new Set<string>();
 	const reversePrewarmCompletedOrder: string[] = [];
+
 
 	const getTimelineFps = () => {
 		const fps = timelineStore.getState().fps;
@@ -330,6 +344,14 @@ export function createVideoClipModel(
 		reversePrewarmInflight.clear();
 		reversePrewarmCompleted.clear();
 		reversePrewarmCompletedOrder.length = 0;
+	};
+
+	const resetPlaybackDriftTrackingState = () => {
+		lastPlaybackProgressAtMsByChannel = { current: null, offscreen: null };
+		observedPlaybackFrameIntervalByChannel = {
+			current: null,
+			offscreen: null,
+		};
 	};
 
 	const markReversePrewarmCompleted = (key: string) => {
@@ -1033,15 +1055,59 @@ export function createVideoClipModel(
 			lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
 			return;
 		}
+		const renderedTimeBeforeStep = lastRenderedTimeByChannel[frameChannel];
 		await stepPlayback(alignedVideoTime, frameChannel);
 		const safeFps = Number.isFinite(fps) && fps > 0 ? Math.round(fps) : 30;
 		const frameInterval = 1 / safeFps;
 		const renderedTime = lastRenderedTimeByChannel[frameChannel];
-		// step 未追上目标帧时回退到 seek，避免高速 scrubbing 停在旧帧。
-		if (
-			renderedTime === null ||
-			renderedTime < alignedVideoTime - frameInterval * 0.5
-		) {
+		const isPlaying = timelineStore.getState().isPlaying;
+		const nowMs = getNowMs();
+		if (isPlaying) {
+			const hasPlaybackProgress =
+				Number.isFinite(renderedTime ?? NaN) &&
+				(renderedTimeBeforeStep === null ||
+					!Number.isFinite(renderedTimeBeforeStep) ||
+					(renderedTime as number) > renderedTimeBeforeStep + 1e-9);
+			if (hasPlaybackProgress) {
+				if (
+					renderedTimeBeforeStep !== null &&
+					Number.isFinite(renderedTimeBeforeStep)
+				) {
+					const observedFrameInterval =
+						(renderedTime as number) - renderedTimeBeforeStep;
+					if (
+						Number.isFinite(observedFrameInterval) &&
+						observedFrameInterval > 0
+					) {
+						observedPlaybackFrameIntervalByChannel[frameChannel] =
+							observedFrameInterval;
+					}
+				}
+				lastPlaybackProgressAtMsByChannel[frameChannel] = nowMs;
+			} else if (lastPlaybackProgressAtMsByChannel[frameChannel] === null) {
+				// 播放态首次进入无进展时，以当前时间作为停滞起点，避免历史状态污染。
+				lastPlaybackProgressAtMsByChannel[frameChannel] = nowMs;
+			}
+		} else {
+			lastPlaybackProgressAtMsByChannel[frameChannel] = null;
+		}
+		const lastPlaybackProgressAtMs =
+			lastPlaybackProgressAtMsByChannel[frameChannel];
+		const stalledDurationSeconds =
+			lastPlaybackProgressAtMs === null
+				? null
+				: Math.max(0, (nowMs - lastPlaybackProgressAtMs) / 1000);
+		const shouldSeek = shouldSeekAfterStepPlayback({
+			isPlaying,
+			targetTime: alignedVideoTime,
+			renderedTime,
+			timelineFrameInterval: frameInterval,
+			observedFrameInterval: observedPlaybackFrameIntervalByChannel[frameChannel],
+			stalledDurationSeconds,
+			driftFloorSeconds: PLAYBACK_DRIFT_FLOOR_SECONDS,
+			adaptiveMultiplier: PLAYBACK_DRIFT_ADAPTIVE_MULTIPLIER,
+		});
+		if (shouldSeek) {
 			await seekToTime(alignedVideoTime, { frameChannel });
 		}
 		lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
@@ -1202,6 +1268,8 @@ export function createVideoClipModel(
 					assetHandle?.release();
 					assetHandle = localHandle;
 					resetReversePrewarmState();
+					resetPlaybackDriftTrackingState();
+					dedicatedVideoSampleSink = null;
 
 					const { asset } = localHandle;
 					const elements = timelineStore.getState().elements;
@@ -1370,6 +1438,8 @@ export function createVideoClipModel(
 				pendingSeekRequestByChannel = { current: null, offscreen: null };
 				lastPreparedFrameIndexByChannel = { current: null, offscreen: null };
 				lastRenderedTimeByChannel = { current: null, offscreen: null };
+				resetPlaybackDriftTrackingState();
+				dedicatedVideoSampleSink = null;
 				stopAudioPlayback();
 				audioPlayback?.dispose();
 
