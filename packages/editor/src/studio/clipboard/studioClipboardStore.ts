@@ -11,6 +11,12 @@ export interface StudioTimelineClipboardPayload {
 	source?: TimelineClipboardSource;
 }
 
+export interface StudioTimelineCanvasDropRequest {
+	payload: StudioTimelineClipboardPayload;
+	clientX: number;
+	clientY: number;
+}
+
 export interface StudioCanvasClipboardEntry {
 	node: CanvasNode;
 	scene?: SceneDocument;

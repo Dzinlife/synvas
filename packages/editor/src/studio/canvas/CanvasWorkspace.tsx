@@ -61,6 +61,7 @@ import {
 } from "@/studio/clipboard/canvasClipboard";
 import {
 	type StudioClipboardPayload,
+	type StudioTimelineCanvasDropRequest,
 	type StudioTimelineClipboardPayload,
 	useStudioClipboardStore,
 } from "@/studio/clipboard/studioClipboardStore";
@@ -256,6 +257,19 @@ const createCanvasEntityId = (prefix: string): string => {
 const buildCopyName = (name: string): string => {
 	const trimmed = name.trim();
 	return trimmed ? `${trimmed}副本` : "副本";
+};
+
+const isPointInsideRect = (
+	clientX: number,
+	clientY: number,
+	rect: DOMRect,
+): boolean => {
+	return (
+		clientX >= rect.left &&
+		clientX <= rect.right &&
+		clientY >= rect.top &&
+		clientY <= rect.bottom
+	);
 };
 
 const cloneTimelineJson = <T,>(value: T): T => {
@@ -2084,6 +2098,131 @@ const CanvasWorkspace = () => {
 		[],
 	);
 
+	const createTimelineClipboardConvertedNodesAt = useCallback(
+		(
+			convertedInputs: ReturnType<typeof resolveTimelineClipboardConvertedInputs>,
+			anchorPoint: { x: number; y: number },
+		): boolean => {
+			if (convertedInputs.length === 0) return false;
+			const sourceLeft = convertedInputs.reduce((minValue, input) => {
+				return Math.min(minValue, input.x ?? 0);
+			}, Number.POSITIVE_INFINITY);
+			const sourceTop = convertedInputs.reduce((minValue, input) => {
+				return Math.min(minValue, input.y ?? 0);
+			}, Number.POSITIVE_INFINITY);
+			const safeLeft = Number.isFinite(sourceLeft) ? sourceLeft : 0;
+			const safeTop = Number.isFinite(sourceTop) ? sourceTop : 0;
+			const createdEntries: CanvasGraphHistoryEntry[] = [];
+			for (const input of convertedInputs) {
+				const nodeId = createCanvasNode({
+					...input,
+					x: (input.x ?? 0) - safeLeft + anchorPoint.x,
+					y: (input.y ?? 0) - safeTop + anchorPoint.y,
+				});
+				const latestProject = useProjectStore.getState().currentProject;
+				if (!latestProject) continue;
+				const node = latestProject.canvas.nodes.find(
+					(candidate) => candidate.id === nodeId,
+				);
+				if (!node) continue;
+				createdEntries.push({
+					node,
+					scene:
+						node.type === "scene"
+							? latestProject.scenes[node.sceneId]
+							: undefined,
+				});
+			}
+			return commitCreatedCanvasEntries(createdEntries);
+		},
+		[commitCreatedCanvasEntries, createCanvasNode],
+	);
+
+	const handleDropTimelineElementsToCanvas = useCallback(
+		({ payload, clientX, clientY }: StudioTimelineCanvasDropRequest): boolean => {
+			const isCanvasDropPoint = (() => {
+				if (typeof document === "undefined") return false;
+				const timelineEditors = document.querySelectorAll<HTMLElement>(
+					'[data-testid="timeline-editor"]',
+				);
+				for (const timelineEditor of timelineEditors) {
+					if (
+						isPointInsideRect(
+							clientX,
+							clientY,
+							timelineEditor.getBoundingClientRect(),
+						)
+					) {
+						return false;
+					}
+				}
+				const drawerOverlays = document.querySelectorAll<HTMLElement>(
+					'[data-testid="canvas-overlay-drawer"]',
+				);
+				for (const drawerOverlay of drawerOverlays) {
+					if (
+						isPointInsideRect(
+							clientX,
+							clientY,
+							drawerOverlay.getBoundingClientRect(),
+						)
+					) {
+						return false;
+					}
+				}
+				if (typeof document.elementFromPoint === "function") {
+					const hit = document.elementFromPoint(clientX, clientY);
+					if (hit instanceof HTMLElement) {
+						if (hit.closest("[data-track-drop-zone]")) return false;
+					}
+					if (hit && isOverlayWheelTarget(hit)) return false;
+					if (hit && isCanvasSurfaceTarget(hit)) return true;
+				}
+				const timelineDropZones = document.querySelectorAll<HTMLElement>(
+					"[data-track-drop-zone]",
+				);
+				for (const zone of timelineDropZones) {
+					if (!isPointInsideRect(clientX, clientY, zone.getBoundingClientRect())) {
+						continue;
+					}
+					return false;
+				}
+				const overlayLayers = document.querySelectorAll<HTMLElement>(
+					'[data-canvas-overlay-ui="true"]',
+				);
+				for (const layer of overlayLayers) {
+					if (!isPointInsideRect(clientX, clientY, layer.getBoundingClientRect())) {
+						continue;
+					}
+					return false;
+				}
+				const surfaces = document.querySelectorAll<HTMLElement>(
+					'[data-canvas-surface="true"]',
+				);
+				for (const surface of surfaces) {
+					if (
+						isPointInsideRect(clientX, clientY, surface.getBoundingClientRect())
+					) {
+						return true;
+					}
+				}
+				return false;
+			})();
+			if (!isCanvasDropPoint) return false;
+			const convertedInputs =
+				resolveTimelineClipboardConvertedInputs(payload);
+			if (convertedInputs.length === 0) return true;
+			const worldPoint = resolveWorldPoint(clientX, clientY);
+			createTimelineClipboardConvertedNodesAt(convertedInputs, worldPoint);
+			return true;
+		},
+		[
+			createTimelineClipboardConvertedNodesAt,
+			resolveTimelineClipboardConvertedInputs,
+			resolveWorldPoint,
+		],
+	);
+
 	const copyNodeIdsToClipboard = useCallback(
 		(nodeIds: string[]): boolean => {
 			const latestProject = useProjectStore.getState().currentProject;
@@ -2143,41 +2282,14 @@ const CanvasWorkspace = () => {
 			const convertedInputs =
 				resolveTimelineClipboardConvertedInputs(clipboardPayload);
 			if (convertedInputs.length === 0) return false;
-			const sourceLeft = convertedInputs.reduce((minValue, input) => {
-				return Math.min(minValue, input.x ?? 0);
-			}, Number.POSITIVE_INFINITY);
-			const sourceTop = convertedInputs.reduce((minValue, input) => {
-				return Math.min(minValue, input.y ?? 0);
-			}, Number.POSITIVE_INFINITY);
-			const safeLeft = Number.isFinite(sourceLeft) ? sourceLeft : 0;
-			const safeTop = Number.isFinite(sourceTop) ? sourceTop : 0;
-			const createdEntries: CanvasGraphHistoryEntry[] = [];
-			for (const input of convertedInputs) {
-				const nodeId = createCanvasNode({
-					...input,
-					x: (input.x ?? 0) - safeLeft + anchorPoint.x,
-					y: (input.y ?? 0) - safeTop + anchorPoint.y,
-				});
-				const latestProject = useProjectStore.getState().currentProject;
-				if (!latestProject) continue;
-				const node = latestProject.canvas.nodes.find(
-					(candidate) => candidate.id === nodeId,
-				);
-				if (!node) continue;
-				createdEntries.push({
-					node,
-					scene:
-						node.type === "scene"
-							? latestProject.scenes[node.sceneId]
-							: undefined,
-				});
-			}
-			return commitCreatedCanvasEntries(createdEntries);
+			return createTimelineClipboardConvertedNodesAt(
+				convertedInputs,
+				anchorPoint,
+			);
 		},
 		[
 			appendCanvasGraphBatch,
-			commitCreatedCanvasEntries,
-			createCanvasNode,
+			createTimelineClipboardConvertedNodesAt,
 			resolveTimelineClipboardConvertedInputs,
 		],
 	);
@@ -4013,6 +4125,7 @@ const CanvasWorkspace = () => {
 				drawerBottomOffset={drawerBottomOffset}
 				onDrawerHeightChange={setVisibleDrawerHeight}
 				onCloseDrawer={handleCloseDrawer}
+				onDropTimelineElementsToCanvas={handleDropTimelineElementsToCanvas}
 				contextMenuOpen={contextMenuState.open}
 				contextMenuX={contextMenuState.open ? contextMenuState.x : 0}
 				contextMenuY={contextMenuState.open ? contextMenuState.y : 0}

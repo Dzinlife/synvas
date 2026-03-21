@@ -47,6 +47,13 @@ import {
 import { getElementHeightForTrack } from "./trackConfig";
 import type { ExtendedDropTarget, SnapPoint } from "./types";
 
+export interface TimelineDropToCanvasRequest {
+	targetIds: string[];
+	primaryId: string | null;
+	clientX: number;
+	clientY: number;
+}
+
 interface UseTimelineElementDndOptions {
 	element: TimelineElement;
 	trackIndex: number;
@@ -93,6 +100,7 @@ interface UseTimelineElementDndOptions {
 	setLocalTrackY: (y: number | null) => void;
 	setLocalOffsetFrames: (offsetFrames: number | null) => void;
 	setLocalTransitionDuration: (duration: number | null) => void;
+	requestDropToCanvas?: (request: TimelineDropToCanvasRequest) => boolean;
 	stopAutoScroll: () => void;
 	updateAutoScrollFromPosition: (
 		screenX: number,
@@ -169,8 +177,81 @@ const createTrackId = () => {
 		return crypto.randomUUID();
 	}
 	return `track-${Date.now().toString(36)}-${Math.random()
-		.toString(36)
-		.slice(2, 6)}`;
+	.toString(36)
+	.slice(2, 6)}`;
+};
+
+const isPointInsideRect = (
+	clientX: number,
+	clientY: number,
+	rect: DOMRect,
+): boolean => {
+	return (
+		clientX >= rect.left &&
+		clientX <= rect.right &&
+		clientY >= rect.top &&
+		clientY <= rect.bottom
+	);
+};
+
+const shouldPreviewCanvasDropAtPoint = (
+	clientX: number,
+	clientY: number,
+): boolean => {
+	if (typeof document === "undefined") return false;
+	const timelineEditors = document.querySelectorAll<HTMLElement>(
+		'[data-testid="timeline-editor"]',
+	);
+	for (const timelineEditor of timelineEditors) {
+		if (
+			isPointInsideRect(clientX, clientY, timelineEditor.getBoundingClientRect())
+		) {
+			return false;
+		}
+	}
+	const drawerOverlays = document.querySelectorAll<HTMLElement>(
+		'[data-testid="canvas-overlay-drawer"]',
+	);
+	for (const drawerOverlay of drawerOverlays) {
+		if (
+			isPointInsideRect(clientX, clientY, drawerOverlay.getBoundingClientRect())
+		) {
+			return false;
+		}
+	}
+	if (typeof document.elementFromPoint === "function") {
+		const target = document.elementFromPoint(clientX, clientY);
+		if (target instanceof HTMLElement) {
+			if (target.closest("[data-track-drop-zone]")) return false;
+			if (target.closest('[data-canvas-overlay-ui="true"]')) return false;
+			if (target.closest('[data-canvas-surface="true"]')) return true;
+		}
+	}
+	const trackZones = document.querySelectorAll<HTMLElement>(
+		"[data-track-drop-zone]",
+	);
+	for (const zone of trackZones) {
+		if (isPointInsideRect(clientX, clientY, zone.getBoundingClientRect())) {
+			return false;
+		}
+	}
+	const overlayLayers = document.querySelectorAll<HTMLElement>(
+		'[data-canvas-overlay-ui="true"]',
+	);
+	for (const layer of overlayLayers) {
+		if (isPointInsideRect(clientX, clientY, layer.getBoundingClientRect())) {
+			return false;
+		}
+	}
+	const surfaces = document.querySelectorAll<HTMLElement>(
+		'[data-canvas-surface="true"]',
+	);
+	for (const surface of surfaces) {
+		if (isPointInsideRect(clientX, clientY, surface.getBoundingClientRect())) {
+			return true;
+		}
+	}
+	return false;
 };
 
 const normalizeOffsetFrames = (value: unknown): number => {
@@ -353,6 +434,7 @@ export const useTimelineElementDnd = ({
 	setLocalTrackY,
 	setLocalOffsetFrames,
 	setLocalTransitionDuration,
+	requestDropToCanvas,
 	stopAutoScroll,
 	updateAutoScrollFromPosition,
 	updateAutoScrollYFromPosition,
@@ -1674,8 +1756,40 @@ export const useTimelineElementDnd = ({
 				}
 
 				if (last) {
+					const hasMovement = Math.abs(mx) > 0 || Math.abs(my) > 0;
+					if (hasMovement && requestDropToCanvas) {
+						const dragSelectedIds = dragSelectedIdsRef.current;
+						const targetIds =
+							dragSelectedIds.length > 0 ? dragSelectedIds : [element.id];
+						const clientX =
+							typeof (event as MouseEvent | undefined)?.clientX === "number"
+								? (event as MouseEvent).clientX
+								: xy[0];
+						const clientY =
+							typeof (event as MouseEvent | undefined)?.clientY === "number"
+								? (event as MouseEvent).clientY
+								: xy[1];
+						const handled = requestDropToCanvas({
+							targetIds,
+							primaryId: element.id,
+							clientX,
+							clientY,
+						});
+						if (handled) {
+							setIsDragging(false);
+							setActiveSnapPoint(null);
+							setActiveDropTarget(null);
+							setDragGhosts([]);
+							setLocalStartTime(null);
+							setLocalEndTime(null);
+							setLocalTrackY(null);
+							setLocalOffsetFrames(null);
+							stopAutoScroll();
+							return;
+						}
+					}
+
 					if (isCopyDrag) {
-						const hasMovement = Math.abs(mx) > 0 || Math.abs(my) > 0;
 						const dragSelectedIds = dragSelectedIdsRef.current;
 						const copyIds = dragSelectedIds
 							.map((id) => getCopyId(id))
@@ -2083,6 +2197,24 @@ export const useTimelineElementDnd = ({
 					setLocalTrackY(null);
 					stopAutoScroll();
 				} else {
+					const previewClientX =
+						typeof (event as MouseEvent | undefined)?.clientX === "number"
+							? (event as MouseEvent).clientX
+							: xy[0];
+					const previewClientY =
+						typeof (event as MouseEvent | undefined)?.clientY === "number"
+							? (event as MouseEvent).clientY
+							: xy[1];
+					if (
+						requestDropToCanvas &&
+						shouldPreviewCanvasDropAtPoint(previewClientX, previewClientY)
+					) {
+						setActiveSnapPoint(null);
+						setActiveDropTarget(null);
+						stopAutoScroll();
+						return;
+					}
+
 					if (shouldUseRippleEditingMulti) {
 						const dropStartForRippleEditing = groupSpanStart;
 						setActiveSnapPoint(null);
@@ -2244,6 +2376,36 @@ export const useTimelineElementDnd = ({
 					: null;
 
 			if (last) {
+				const hasMovement = Math.abs(mx) > 0 || Math.abs(my) > 0;
+				if (hasMovement && requestDropToCanvas) {
+					const clientX =
+						typeof (event as MouseEvent | undefined)?.clientX === "number"
+							? (event as MouseEvent).clientX
+							: xy[0];
+					const clientY =
+						typeof (event as MouseEvent | undefined)?.clientY === "number"
+							? (event as MouseEvent).clientY
+							: xy[1];
+					const handled = requestDropToCanvas({
+						targetIds: [element.id],
+						primaryId: element.id,
+						clientX,
+						clientY,
+					});
+					if (handled) {
+						setIsDragging(false);
+						setActiveSnapPoint(null);
+						setActiveDropTarget(null);
+						setDragGhosts([]);
+						setLocalStartTime(null);
+						setLocalEndTime(null);
+						setLocalTrackY(null);
+						setLocalOffsetFrames(null);
+						stopAutoScroll();
+						return;
+					}
+				}
+
 				setIsDragging(false);
 				setActiveSnapPoint(null);
 				setActiveDropTarget(null);
@@ -2252,7 +2414,6 @@ export const useTimelineElementDnd = ({
 				stopAutoScroll();
 
 				if (isCopyDrag) {
-					const hasMovement = Math.abs(mx) > 0 || Math.abs(my) > 0;
 					if (hasMovement && activeCopyId) {
 						if (shouldUseRippleEditing) {
 							const dropStartForRippleEditing =
@@ -2408,13 +2569,26 @@ export const useTimelineElementDnd = ({
 					);
 				}
 			} else {
+				const previewClientX =
+					typeof (event as MouseEvent | undefined)?.clientX === "number"
+						? (event as MouseEvent).clientX
+						: xy[0];
+				const previewClientY =
+					typeof (event as MouseEvent | undefined)?.clientY === "number"
+						? (event as MouseEvent).clientY
+						: xy[1];
+				const shouldPreviewCanvasDrop =
+					requestDropToCanvas &&
+					shouldPreviewCanvasDropAtPoint(previewClientX, previewClientY);
 				if (!isCopyDrag) {
 					setLocalStartTime(newStart);
 					setLocalEndTime(newEnd);
 					setLocalTrackY(newY);
 					setLocalOffsetFrames(null);
 				}
-				setActiveSnapPoint(shouldUseRippleEditing ? null : snapPoint);
+				setActiveSnapPoint(
+					shouldPreviewCanvasDrop || shouldUseRippleEditing ? null : snapPoint,
+				);
 
 				const ghostWidth = isTransition
 					? Math.max(6, transitionDuration * ratio)
@@ -2431,6 +2605,12 @@ export const useTimelineElementDnd = ({
 						clonedNode: clonedNodeRef.current,
 					},
 				]);
+
+				if (shouldPreviewCanvasDrop) {
+					setActiveDropTarget(null);
+					stopAutoScroll();
+					return;
+				}
 
 				if (shouldUseRippleEditing) {
 					const dropStartForRippleEditing =

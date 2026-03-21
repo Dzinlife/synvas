@@ -4,6 +4,12 @@ import type { CanvasNodeDrawerProps } from "../types";
 
 export const SceneNodeDrawer = ({
 	onClose,
+	onDropTimelineElementsToCanvas,
 }: CanvasNodeDrawerProps<SceneNode>) => {
-	return <SceneTimelineDrawerContent onExitFocus={onClose} />;
+	return (
+		<SceneTimelineDrawerContent
+			onExitFocus={onClose}
+			onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
+		/>
+	);
 };

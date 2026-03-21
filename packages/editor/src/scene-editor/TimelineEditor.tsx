@@ -21,6 +21,10 @@ import {
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
+import type {
+	StudioTimelineCanvasDropRequest,
+	StudioTimelineClipboardPayload,
+} from "@/studio/clipboard/studioClipboardStore";
 import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { clampFrame } from "@/utils/timecode";
@@ -54,6 +58,7 @@ import {
 	getTimelineDropTimeFromScreenX,
 } from "./drag/timelineDropTargets";
 import { useExternalMaterialDnd } from "./hooks/useExternalMaterialDnd";
+import type { TimelineDropToCanvasRequest } from "./timeline/useTimelineElementDnd";
 import {
 	DEFAULT_TRACK_HEIGHT,
 	TRACK_CONTENT_GAP,
@@ -196,7 +201,15 @@ type TimelineContextMenuState =
 			pasteTarget: TimelinePasteTarget;
 	  };
 
-const TimelineEditor = () => {
+interface TimelineEditorProps {
+	onDropTimelineElementsToCanvas?: (
+		request: StudioTimelineCanvasDropRequest,
+	) => boolean;
+}
+
+const TimelineEditor: React.FC<TimelineEditorProps> = ({
+	onDropTimelineElementsToCanvas,
+}) => {
 	const timelineStore = useTimelineStoreApi();
 	const modelRegistry = useModelRegistry();
 	const runtimeManager = useStudioRuntimeManager();
@@ -289,8 +302,11 @@ const TimelineEditor = () => {
 		}
 		return runtimeManager.getActiveEditTimelineRef()?.sceneId ?? null;
 	}, [runtimeManager, timelineStore]);
-	const copyElementsByIds = useCallback(
-		(targetIds: string[], targetPrimaryId: string | null) => {
+	const buildStudioTimelineClipboardPayloadByIds = useCallback(
+		(
+			targetIds: string[],
+			targetPrimaryId: string | null,
+		): StudioTimelineClipboardPayload | null => {
 			const timelineState = timelineStore.getState();
 			const payload = buildTimelineClipboardPayload({
 				elements,
@@ -303,19 +319,41 @@ const TimelineEditor = () => {
 				},
 			});
 			if (!payload) return null;
-			setStudioClipboardPayload({
+			return {
 				kind: "timeline-elements",
 				payload,
 				source: payload.source,
-			});
-			return payload;
+			};
 		},
-		[
-			elements,
-			resolveTimelineSceneId,
-			setStudioClipboardPayload,
-			timelineStore,
-		],
+		[elements, resolveTimelineSceneId, timelineStore],
+	);
+	const copyElementsByIds = useCallback(
+		(targetIds: string[], targetPrimaryId: string | null) => {
+			const studioPayload = buildStudioTimelineClipboardPayloadByIds(
+				targetIds,
+				targetPrimaryId,
+			);
+			if (!studioPayload) return null;
+			setStudioClipboardPayload(studioPayload);
+			return studioPayload.payload;
+		},
+		[buildStudioTimelineClipboardPayloadByIds, setStudioClipboardPayload],
+	);
+	const requestDropToCanvas = useCallback(
+		(request: TimelineDropToCanvasRequest): boolean => {
+			if (!onDropTimelineElementsToCanvas) return false;
+			const studioPayload = buildStudioTimelineClipboardPayloadByIds(
+				request.targetIds,
+				request.primaryId,
+			);
+			if (!studioPayload) return true;
+			return onDropTimelineElementsToCanvas({
+				payload: studioPayload,
+				clientX: request.clientX,
+				clientY: request.clientY,
+			});
+		},
+		[buildStudioTimelineClipboardPayloadByIds, onDropTimelineElementsToCanvas],
 	);
 	const buildTimelinePayloadFromCanvasClipboard =
 		useCallback((): TimelineClipboardPayload | null => {
@@ -1854,6 +1892,7 @@ const TimelineEditor = () => {
 							trackLocked={trackLocked}
 							updateTimeRange={updateTimeRange}
 							onRequestContextMenu={handleElementContextMenu}
+							requestDropToCanvas={requestDropToCanvas}
 						/>
 					);
 				})}
@@ -1865,6 +1904,7 @@ const TimelineEditor = () => {
 		ratio,
 		updateTimeRange,
 		handleElementContextMenu,
+		requestDropToCanvas,
 		trackAssignments,
 		trackCount,
 		otherTrackCount,
@@ -1936,6 +1976,7 @@ const TimelineEditor = () => {
 							trackLocked={mainTrackLocked}
 							updateTimeRange={updateTimeRange}
 							onRequestContextMenu={handleElementContextMenu}
+							requestDropToCanvas={requestDropToCanvas}
 						/>
 					);
 				})}
@@ -1947,6 +1988,7 @@ const TimelineEditor = () => {
 		ratio,
 		updateTimeRange,
 		handleElementContextMenu,
+		requestDropToCanvas,
 		trackCount,
 		trackLayoutByIndex,
 		otherTracksHeight,
@@ -1989,6 +2031,7 @@ const TimelineEditor = () => {
 							trackLocked={audioTrackState.locked}
 							updateTimeRange={updateTimeRange}
 							onRequestContextMenu={handleElementContextMenu}
+							requestDropToCanvas={requestDropToCanvas}
 						/>
 					);
 				})}
@@ -2004,6 +2047,7 @@ const TimelineEditor = () => {
 		ratio,
 		updateTimeRange,
 		handleElementContextMenu,
+		requestDropToCanvas,
 		trackAssignments,
 		trackCount,
 	]);

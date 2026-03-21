@@ -7,6 +7,7 @@ import type {
 import type React from "react";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { CanvasNodeCreateInput } from "@/projects/projectStore";
+import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 
 export interface CanvasNodeSkiaRenderProps<
 	TNode extends CanvasNode = CanvasNode,
@@ -45,6 +46,9 @@ export interface CanvasNodeDrawerProps<TNode extends CanvasNode = CanvasNode> {
 	asset: TimelineAsset | null;
 	onClose: () => void;
 	onHeightChange?: (height: number) => void;
+	onDropTimelineElementsToCanvas?: (
+		request: StudioTimelineCanvasDropRequest,
+	) => boolean;
 }
 
 export interface CanvasNodeContextMenuAction {

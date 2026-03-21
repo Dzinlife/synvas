@@ -1,5 +1,6 @@
 import type React from "react";
 import TimelineEditor from "@/scene-editor/TimelineEditor";
+import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import CanvasNodeDrawerShell, {
 	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
 	CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO,
@@ -15,6 +16,9 @@ export const SCENE_TIMELINE_DRAWER_MAX_HEIGHT_RATIO =
 
 interface SceneTimelineDrawerContentProps {
 	onExitFocus: () => void;
+	onDropTimelineElementsToCanvas?: (
+		request: StudioTimelineCanvasDropRequest,
+	) => boolean;
 }
 
 interface SceneTimelineDrawerProps extends SceneTimelineDrawerContentProps {
@@ -27,12 +31,14 @@ interface SceneTimelineDrawerProps extends SceneTimelineDrawerContentProps {
 
 export const SceneTimelineDrawerContent: React.FC<
 	SceneTimelineDrawerContentProps
-> = ({ onExitFocus }) => {
+> = ({ onExitFocus, onDropTimelineElementsToCanvas }) => {
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<ScenePlaybackControlBar onExitFocus={onExitFocus} />
 			<div className="min-h-0 flex-1 overflow-hidden rounded-2xl [corner-shape:superellipse(1.2)] mask-[url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAA5JREFUeNpiYGBgAAgwAAAEAAGbA+oJAAAAAElFTkSuQmCC)]">
-				<TimelineEditor />
+				<TimelineEditor
+					onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
+				/>
 			</div>
 		</div>
 	);
@@ -40,6 +46,7 @@ export const SceneTimelineDrawerContent: React.FC<
 
 const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
 	onExitFocus,
+	onDropTimelineElementsToCanvas,
 	onHeightChange,
 	resizable = true,
 	defaultHeight = SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
@@ -56,7 +63,10 @@ const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
 			onHeightChange={onHeightChange}
 			resizeHandleLabel="调整时间线高度"
 		>
-			<SceneTimelineDrawerContent onExitFocus={onExitFocus} />
+			<SceneTimelineDrawerContent
+				onExitFocus={onExitFocus}
+				onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
+			/>
 		</CanvasNodeDrawerShell>
 	);
 };

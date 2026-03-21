@@ -33,7 +33,10 @@ import {
 	useTrackAssignments,
 } from "../contexts/TimelineContext";
 import { getElementHeightForTrack } from "../timeline/index";
-import { useTimelineElementDnd } from "../timeline/useTimelineElementDnd";
+import {
+	type TimelineDropToCanvasRequest,
+	useTimelineElementDnd,
+} from "../timeline/useTimelineElementDnd";
 import {
 	getTransitionDuration,
 	getTransitionDurationParts,
@@ -63,6 +66,7 @@ interface TimelineElementProps {
 		event: React.MouseEvent<HTMLDivElement>,
 		elementId: string,
 	) => void;
+	requestDropToCanvas?: (request: TimelineDropToCanvasRequest) => boolean;
 }
 
 // ============================================================================
@@ -269,6 +273,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 	trackLocked = false,
 	updateTimeRange,
 	onRequestContextMenu,
+	requestDropToCanvas,
 }) => {
 	const { id, timeline } = element;
 	const isTransition = isTransitionElement(element);
@@ -394,6 +399,7 @@ const TimelineElement: React.FC<TimelineElementProps> = ({
 		setLocalTrackY,
 		setLocalOffsetFrames,
 		setLocalTransitionDuration,
+		requestDropToCanvas,
 		stopAutoScroll,
 		updateAutoScrollFromPosition,
 		updateAutoScrollYFromPosition,

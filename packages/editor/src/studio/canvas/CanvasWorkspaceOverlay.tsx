@@ -15,13 +15,13 @@ import TimelineContextMenu, {
 } from "@/scene-editor/components/TimelineContextMenu";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
+import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import CanvasNodeDrawerShell from "@/studio/canvas/CanvasNodeDrawerShell";
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
 import type { CanvasNodeDrawerProps } from "@/studio/canvas/node-system/types";
 import CanvasSidebar, {
 	type CanvasSidebarTab,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
-import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
 import {

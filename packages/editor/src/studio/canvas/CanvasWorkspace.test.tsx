@@ -1782,7 +1782,6 @@ describe("CanvasWorkspace", () => {
 		});
 		expect(sceneRuntime.timelineStore.getState().currentTime).toBe(42);
 	});
-
 	it("scene drawer 回调投放 timeline payload 到画布会创建副本节点并写入 batch 历史", async () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const originalElementFromPoint = (
