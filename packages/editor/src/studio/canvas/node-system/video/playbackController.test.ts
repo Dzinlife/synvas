@@ -166,6 +166,22 @@ const createRuntimeManager = (pauseSpy: ReturnType<typeof vi.fn>) => {
 	} as unknown as StudioRuntimeManager;
 };
 
+const createRetainableFrame = (id: string) => {
+	const retained = {
+		id: `${id}:retained`,
+		dispose: vi.fn(),
+	};
+	const frame = {
+		id,
+		dispose: vi.fn(),
+		makeNonTextureImage: vi.fn(() => retained),
+	};
+	return {
+		frame,
+		retained,
+	};
+};
+
 describe("video playbackController", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -243,6 +259,116 @@ describe("video playbackController", () => {
 		expect(getVideoNodePlaybackController("node-readonly")).toBe(retained);
 		releaseVideoNodePlaybackController("node-readonly");
 		expect(getVideoNodePlaybackController("node-readonly")).toBeNull();
+	});
+
+	it("inactive bind 不会触发素材加载", async () => {
+		const controller = retainVideoNodePlaybackController("node-inactive-bind");
+		controller.bind({
+			assetUri: "file:///inactive-bind.mp4",
+			fps: 30,
+			runtimeManager: null,
+			active: false,
+		});
+
+		await Promise.resolve();
+		expect(mocks.acquireVideoAsset).not.toHaveBeenCalled();
+		expect(controller.getSnapshot().isReady).toBe(false);
+		expect(controller.getSnapshot().currentFrame).toBeNull();
+
+		releaseVideoNodePlaybackController("node-inactive-bind");
+	});
+
+	it("deactive 会 full unload 并保留当前播放头冻结帧", async () => {
+		const video = createVideoHandle(10);
+		const audio = createAudioHandle();
+		const { frame, retained } = createRetainableFrame("frame-2");
+		video.frameCache.set(2, frame);
+		mocks.acquireVideoAsset.mockResolvedValue(video.handle);
+		mocks.acquireAudioAsset.mockResolvedValue(audio);
+
+		const controller = retainVideoNodePlaybackController("node-deactive-unload");
+		controller.bind({
+			assetUri: "file:///deactive-unload.mp4",
+			fps: 30,
+			runtimeManager: null,
+		});
+		await waitFor(() => {
+			expect(controller.getSnapshot().isReady).toBe(true);
+		});
+
+		await controller.seekToTime(2);
+		expect(controller.getSnapshot().currentFrame).toBe(frame);
+		expect(controller.getSnapshot().currentTime).toBe(2);
+
+		controller.bind({
+			assetUri: "file:///deactive-unload.mp4",
+			fps: 30,
+			runtimeManager: null,
+			active: false,
+		});
+
+		expect(video.handle.release).toHaveBeenCalledTimes(1);
+		expect(controller.getSnapshot().isReady).toBe(false);
+		expect(controller.getSnapshot().currentTime).toBe(2);
+		expect(controller.getSnapshot().currentFrame).toBe(retained);
+
+		releaseVideoNodePlaybackController("node-deactive-unload");
+	});
+
+	it("reactive 后会按缓存播放头时间恢复加载与 seek", async () => {
+		const videoA = createVideoHandle(10);
+		const videoB = createVideoHandle(10);
+		const audioA = createAudioHandle();
+		const audioB = createAudioHandle();
+		const frameA = createRetainableFrame("frame-a");
+		const frameB = { id: "frame-b", dispose: vi.fn() } as never;
+		videoA.frameCache.set(2, frameA.frame);
+		videoB.frameCache.set(2, frameB);
+		mocks.acquireVideoAsset
+			.mockResolvedValueOnce(videoA.handle)
+			.mockResolvedValueOnce(videoB.handle);
+		mocks.acquireAudioAsset
+			.mockResolvedValueOnce(audioA)
+			.mockResolvedValueOnce(audioB);
+
+		const controller = retainVideoNodePlaybackController("node-reactive-resume");
+		controller.bind({
+			assetUri: "file:///reactive-resume.mp4",
+			fps: 30,
+			runtimeManager: null,
+		});
+		await waitFor(() => {
+			expect(controller.getSnapshot().isReady).toBe(true);
+		});
+		await controller.seekToTime(2);
+		expect(controller.getSnapshot().currentFrame).toBe(frameA.frame);
+
+		controller.bind({
+			assetUri: "file:///reactive-resume.mp4",
+			fps: 30,
+			runtimeManager: null,
+			active: false,
+		});
+		expect(controller.getSnapshot().currentTime).toBe(2);
+
+		controller.bind({
+			assetUri: "file:///reactive-resume.mp4",
+			fps: 30,
+			runtimeManager: null,
+			active: true,
+		});
+
+		await waitFor(() => {
+			expect(controller.getSnapshot().isReady).toBe(true);
+			expect(controller.getSnapshot().currentTime).toBe(2);
+			expect(controller.getSnapshot().currentFrame).toBe(frameB);
+		});
+		expect(mocks.acquireVideoAsset).toHaveBeenCalledTimes(2);
+
+		releaseVideoNodePlaybackController("node-reactive-resume");
+		await waitFor(() => {
+			expect(frameA.retained.dispose).toHaveBeenCalledTimes(1);
+		});
 	});
 
 	it("seek 会合并最新请求并做时间钳制", async () => {

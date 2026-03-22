@@ -1,10 +1,11 @@
 import type { TimelineAsset } from "core/element/types";
 import type { VideoCanvasNode } from "core/studio/types";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { ImageShader, Rect } from "react-skia-lite";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
 import type { CanvasNodeSkiaRenderProps } from "../types";
+import { useCanvasNodeThumbnailImage } from "../thumbnail/useCanvasNodeThumbnailImage";
 import { useVideoNodePlayback } from "./useVideoNodePlayback";
 
 const DEFAULT_FPS = 30;
@@ -39,23 +40,21 @@ export const VideoNodeSkiaRenderer: React.FC<
 		[asset, currentProjectId],
 	);
 	const fps = resolvePlaybackFps(runtimeManager);
-	const { snapshot, pause } = useVideoNodePlayback({
+	const { snapshot } = useVideoNodePlayback({
 		nodeId: node.id,
 		assetUri,
 		fps,
 		runtimeManager,
+		active: isActive,
 	});
-
-	useEffect(() => {
-		if (isActive) return;
-		pause();
-	}, [isActive, pause]);
+	const thumbnailImage = useCanvasNodeThumbnailImage(node.thumbnail);
+	const displayFrame = snapshot.currentFrame ?? thumbnailImage;
 
 	return (
 		<Rect x={0} y={0} width={width} height={height} color="#082f49">
-			{snapshot.currentFrame ? (
+			{displayFrame ? (
 				<ImageShader
-					image={snapshot.currentFrame}
+					image={displayFrame}
 					fit="contain"
 					x={0}
 					y={0}

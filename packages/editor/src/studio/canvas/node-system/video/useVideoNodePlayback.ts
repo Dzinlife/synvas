@@ -22,6 +22,7 @@ interface UseVideoNodePlaybackOptions {
 	assetUri: string | null;
 	fps: number;
 	runtimeManager: StudioRuntimeManager | null;
+	active?: boolean;
 }
 
 export const useVideoNodePlayback = ({
@@ -29,6 +30,7 @@ export const useVideoNodePlayback = ({
 	assetUri,
 	fps,
 	runtimeManager,
+	active = true,
 }: UseVideoNodePlaybackOptions) => {
 	const [controller, setController] =
 		useState<VideoNodePlaybackController | null>(null);
@@ -47,8 +49,9 @@ export const useVideoNodePlayback = ({
 			assetUri,
 			fps,
 			runtimeManager,
+			active,
 		});
-	}, [assetUri, controller, fps, runtimeManager]);
+	}, [active, assetUri, controller, fps, runtimeManager]);
 
 	const subscribe = useCallback(
 		(listener: () => void) => {

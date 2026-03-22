@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
 	Group,
+	ImageShader,
 	Picture,
 	Rect,
 	Skia,
@@ -23,6 +24,7 @@ import type {
 	TimelineRuntime,
 } from "@/scene-editor/runtime/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
+import { useCanvasNodeThumbnailImage } from "../thumbnail/useCanvasNodeThumbnailImage";
 import type { CanvasNodeSkiaRenderProps } from "../types";
 
 const PRECOMPILE_LOOKAHEAD_FRAMES = 2;
@@ -33,6 +35,11 @@ type ScenePreviewFrame = {
 	picture: NonNullable<SceneFrameSnapshot["picture"]>;
 	dispose?: (() => void) | undefined;
 };
+type ResolveCompositionTimeline = NonNullable<
+	NonNullable<
+		Parameters<typeof buildSkiaFrameSnapshot>[1]
+	>["resolveCompositionTimeline"]
+>;
 const preemptedBuildErrorSymbol = Symbol("scene-build-preempted");
 type PreemptedBuildError = Error & {
 	[preemptedBuildErrorSymbol]: true;
@@ -86,14 +93,10 @@ const createEmptyPicture = (): SkPicture => {
 
 export const SceneNodeSkiaRenderer: React.FC<
 	CanvasNodeSkiaRenderProps<SceneNode>
-> = ({ node, scene, runtimeManager }) => {
-	type ResolveCompositionTimeline = NonNullable<
-		NonNullable<
-			Parameters<typeof buildSkiaFrameSnapshot>[1]
-		>["resolveCompositionTimeline"]
-	>;
+> = ({ node, scene, runtimeManager, isActive }) => {
 	const sceneCanvasWidth = scene?.timeline.canvas.width ?? 1;
 	const sceneCanvasHeight = scene?.timeline.canvas.height ?? 1;
+	const thumbnailImage = useCanvasNodeThumbnailImage(node.thumbnail);
 	const runtime = useMemo(() => {
 		if (!scene) return null;
 		return runtimeManager.ensureTimelineRuntime(
@@ -129,6 +132,23 @@ export const SceneNodeSkiaRenderer: React.FC<
 				// scene 缩略渲染暂不需要输出缓存日志，避免噪音。
 			},
 		}),
+	);
+
+	const setPictureSharedValue = useCallback(
+		(nextPicture: SkPicture) => {
+			const modify = picture.modify as
+				| ((
+						modifier: (value: SkPicture) => SkPicture,
+						forceUpdate?: boolean,
+				  ) => void)
+				| undefined;
+			if (typeof modify === "function") {
+				modify(() => nextPicture, true);
+				return;
+			}
+			(picture as { value: SkPicture }).value = nextPicture;
+		},
+		[picture],
 	);
 
 	const flushDeferredDisposeQueue = useCallback(() => {
@@ -177,14 +197,19 @@ export const SceneNodeSkiaRenderer: React.FC<
 		(nextPicture: SkPicture, nextDispose: (() => void) | null = null) => {
 			const previousDispose = disposeRef.current;
 			// SkPicture 是 JSI 对象，直接走 shared value 赋值会触发深比较，代价很高。
-			picture.modify(() => nextPicture, true);
+			setPictureSharedValue(nextPicture);
 			pictureOpacity.value = 1;
 			fallbackOpacity.value = 0;
 			hasRenderedContentRef.current = true;
 			disposeRef.current = nextDispose;
 			scheduleDeferredDispose(previousDispose);
 		},
-		[fallbackOpacity, picture, pictureOpacity, scheduleDeferredDispose],
+		[
+			fallbackOpacity,
+			pictureOpacity,
+			scheduleDeferredDispose,
+			setPictureSharedValue,
+		],
 	);
 
 	const preemptBuildQueue = useCallback(() => {
@@ -219,7 +244,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 	const clearCommittedFrame = useCallback(() => {
 		disposeRef.current?.();
 		disposeRef.current = null;
-		hasRenderedContentRef.current = true;
+		hasRenderedContentRef.current = false;
 		fallbackOpacity.value = 1;
 		pictureOpacity.value = 0;
 	}, [fallbackOpacity, pictureOpacity]);
@@ -297,6 +322,8 @@ export const SceneNodeSkiaRenderer: React.FC<
 								awaitReady: true,
 								getModelStore: (id) => runtime.modelRegistry.get(id),
 								compositionPath: [node.sceneId],
+								compositionRenderTarget: "picture",
+								frameSnapshotRenderTarget: "picture",
 							},
 						},
 						{
@@ -434,9 +461,25 @@ export const SceneNodeSkiaRenderer: React.FC<
 			disposeRef.current?.();
 			disposeRef.current = null;
 			hasRenderedContentRef.current = false;
-			picture.modify(() => emptyPicture, true);
+			setPictureSharedValue(emptyPicture);
 			pictureOpacity.value = 0;
 			fallbackOpacity.value = 1;
+			return;
+		}
+
+		if (!isActive) {
+			// 非 active 节点只保留当前已提交画面，停止实时构帧与预编译。
+			preemptBuildQueue();
+			frameControllerRef.current.disposeAll();
+			lastRequestedFrameRef.current = null;
+			if (!hasRenderedContentRef.current) {
+				setPictureSharedValue(emptyPicture);
+				pictureOpacity.value = 0;
+				fallbackOpacity.value = 1;
+			} else {
+				pictureOpacity.value = 1;
+				fallbackOpacity.value = 0;
+			}
 			return;
 		}
 
@@ -506,10 +549,13 @@ export const SceneNodeSkiaRenderer: React.FC<
 		fallbackOpacity,
 		flushDeferredDisposeQueue,
 		invalidateBuffer,
+		isActive,
 		picture,
 		pictureOpacity,
+		preemptBuildQueue,
 		runRender,
 		runtime,
+		setPictureSharedValue,
 	]);
 
 	useEffect(() => {
@@ -552,7 +598,18 @@ export const SceneNodeSkiaRenderer: React.FC<
 				height={sourceHeight}
 				color="#171717"
 				opacity={fallbackOpacity}
-			/>
+			>
+				{thumbnailImage ? (
+					<ImageShader
+						image={thumbnailImage}
+						fit="contain"
+						x={0}
+						y={0}
+						width={sourceWidth}
+						height={sourceHeight}
+					/>
+				) : null}
+			</Rect>
 			<Picture picture={picture} opacity={pictureOpacity} />
 		</Group>
 	);

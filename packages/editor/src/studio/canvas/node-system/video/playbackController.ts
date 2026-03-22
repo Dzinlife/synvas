@@ -90,6 +90,7 @@ export interface VideoNodePlaybackBinding {
 	assetUri: string | null;
 	fps: number;
 	runtimeManager: StudioRuntimeManager | null;
+	active?: boolean;
 }
 
 interface SeekOptions {
@@ -140,6 +141,7 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		assetUri: null,
 		fps: DEFAULT_FPS,
 		runtimeManager: null,
+		active: true,
 	};
 	private loadEpoch = 0;
 	private videoHandle: AssetHandle<VideoAsset> | null = null;
@@ -158,6 +160,8 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 	private lastCommittedFrameIndex: number | null = null;
 	private pinnedFrame: SkImage | null = null;
 	private pinnedFrameAsset: VideoAsset | null = null;
+	private detachedSnapshotFrame: SkImage | null = null;
+	private detachedDisposeTimer: ReturnType<typeof setTimeout> | null = null;
 	private readonly frameController =
 		createFramePrecompileController<ControllerFrameState>({
 			lookaheadFrames: LOOKAHEAD_FRAMES,
@@ -204,21 +208,70 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 				: null;
 		const nextFps = normalizeFps(binding.fps);
 		const nextRuntimeManager = binding.runtimeManager ?? null;
+		const nextActive = binding.active !== false;
 		const previousAssetUri = this.binding.assetUri;
+		const previousActive = this.binding.active !== false;
+		const assetChanged = previousAssetUri !== nextAssetUri;
 
 		this.binding = {
 			assetUri: nextAssetUri,
 			fps: nextFps,
 			runtimeManager: nextRuntimeManager,
+			active: nextActive,
 		};
 
-		if (previousAssetUri !== nextAssetUri) {
-			void this.loadAsset(nextAssetUri);
+		if (!nextActive) {
+			if (previousActive || assetChanged) {
+				this.deactivateAndUnload({
+					preserveFrame: !assetChanged,
+				});
+			}
+			return;
+		}
+
+		if (!nextAssetUri) {
+			this.clearDetachedSnapshotFrame();
+			this.loadEpoch += 1;
+			this.pauseInternal({
+				releaseOwnerFlag: true,
+				invalidateLookahead: true,
+			});
+			this.frameController.disposeAll();
+			this.lastCommittedFrameIndex = null;
+			this.resetPinnedFrame();
+			this.disposeAssetHandles();
+			if (this.retainedVideoSession) {
+				releaseVideoPlaybackSession(this.videoSessionKey);
+				this.retainedVideoSession = false;
+			}
+			this.patchSnapshot({
+				isLoading: false,
+				isReady: false,
+				isPlaying: false,
+				currentFrame: null,
+				currentTime: 0,
+				duration: 0,
+				errorMessage: "未绑定视频素材",
+			});
+			return;
+		}
+
+		const shouldReload =
+			assetChanged ||
+			!previousActive ||
+			!this.videoSink ||
+			!this.videoHandle;
+		if (shouldReload) {
+			void this.loadAsset(nextAssetUri, {
+				initialSeekTime: !assetChanged ? this.snapshot.currentTime : 0,
+				preserveCurrentFrame: !assetChanged,
+			});
 		}
 	}
 
 	async play(): Promise<void> {
 		if (this.disposed) return;
+		if (this.binding.active === false) return;
 		if (this.snapshot.isLoading) return;
 		if (!this.videoSampleSink) return;
 
@@ -280,6 +333,7 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		this.frameController.disposeAll();
 		this.lastCommittedFrameIndex = null;
 		this.resetPinnedFrame();
+		this.clearDetachedSnapshotFrame({ immediate: true });
 		this.disposeAssetHandles();
 		this.unsubscribeOwnerChange();
 		this.listeners.clear();
@@ -297,10 +351,11 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 
 	private patchSnapshot(next: Partial<VideoNodePlaybackSnapshot>) {
 		const previousFrame = this.snapshot.currentFrame;
-		this.snapshot = {
+		const nextSnapshot = {
 			...this.snapshot,
 			...next,
 		};
+		this.snapshot = nextSnapshot;
 		if (previousFrame !== this.snapshot.currentFrame) {
 			this.updatePinnedFrame(this.snapshot.currentFrame);
 		}
@@ -309,8 +364,94 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		}
 	}
 
+	private scheduleImageDispose(image: SkImage | null) {
+		if (!image) return;
+		if (this.detachedDisposeTimer) {
+			clearTimeout(this.detachedDisposeTimer);
+			this.detachedDisposeTimer = null;
+		}
+		// 延后释放，避免渲染树仍持有旧帧时访问到已销毁对象。
+		this.detachedDisposeTimer = setTimeout(() => {
+			this.detachedDisposeTimer = null;
+			image.dispose?.();
+		}, 0);
+	}
+
+	private clearDetachedSnapshotFrame(options: { immediate?: boolean } = {}) {
+		if (!this.detachedSnapshotFrame) return;
+		const detached = this.detachedSnapshotFrame;
+		this.detachedSnapshotFrame = null;
+		if (options.immediate) {
+			if (this.detachedDisposeTimer) {
+				clearTimeout(this.detachedDisposeTimer);
+				this.detachedDisposeTimer = null;
+			}
+			detached.dispose?.();
+			return;
+		}
+		this.scheduleImageDispose(detached);
+	}
+
+	private cloneFrameForRetention(frame: SkImage | null): SkImage | null {
+		if (!frame) return null;
+		const cloneFrame = (
+			frame as {
+				makeNonTextureImage?: () => SkImage;
+			}
+		).makeNonTextureImage;
+		if (typeof cloneFrame !== "function") return null;
+		try {
+			return cloneFrame.call(frame);
+		} catch (error) {
+			console.warn("Retain video frame snapshot failed:", error);
+			return null;
+		}
+	}
+
+	private deactivateAndUnload(options: {
+		preserveFrame: boolean;
+	}) {
+		const retainedTime = options.preserveFrame ? this.snapshot.currentTime : 0;
+		const retainedDuration = options.preserveFrame ? this.snapshot.duration : 0;
+		const retainedFrame = options.preserveFrame
+			? this.cloneFrameForRetention(this.snapshot.currentFrame)
+			: null;
+		const previousDetached = this.detachedSnapshotFrame;
+		this.detachedSnapshotFrame = retainedFrame;
+		if (previousDetached && previousDetached !== retainedFrame) {
+			this.scheduleImageDispose(previousDetached);
+		}
+		// 先切为保留帧，再释放资产，避免 UI 命中已释放的旧帧。
+		this.patchSnapshot({
+			isLoading: false,
+			isReady: false,
+			isPlaying: false,
+			currentFrame: retainedFrame,
+			currentTime: retainedTime,
+			duration: retainedDuration,
+			errorMessage: this.binding.assetUri ? null : "未绑定视频素材",
+		});
+		this.loadEpoch += 1;
+		this.queuedSeek = null;
+		this.pauseInternal({
+			releaseOwnerFlag: true,
+			invalidateLookahead: true,
+		});
+		this.frameController.disposeAll();
+		this.lastCommittedFrameIndex = null;
+		this.resetPinnedFrame();
+		this.disposeAssetHandles();
+		if (this.retainedVideoSession) {
+			releaseVideoPlaybackSession(this.videoSessionKey);
+			this.retainedVideoSession = false;
+		}
+	}
+
 	private updatePinnedFrame(nextFrame: SkImage | null) {
-		const nextAsset = nextFrame ? (this.videoHandle?.asset ?? null) : null;
+		const nextAsset =
+			nextFrame && nextFrame !== this.detachedSnapshotFrame
+				? (this.videoHandle?.asset ?? null)
+				: null;
 		if (this.pinnedFrame === nextFrame && this.pinnedFrameAsset === nextAsset) {
 			return;
 		}
@@ -328,7 +469,15 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		this.updatePinnedFrame(null);
 	}
 
-	private async loadAsset(uri: string | null): Promise<void> {
+	private async loadAsset(
+		uri: string | null,
+		options: {
+			initialSeekTime?: number;
+			preserveCurrentFrame?: boolean;
+		} = {},
+	): Promise<void> {
+		const preserveCurrentFrame = options.preserveCurrentFrame === true;
+		const pendingSeekTime = options.initialSeekTime ?? this.snapshot.currentTime;
 		this.loadEpoch += 1;
 		const loadEpoch = this.loadEpoch;
 		this.pauseInternal({
@@ -337,6 +486,9 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		});
 		this.resetPinnedFrame();
 		this.disposeAssetHandles();
+		if (!preserveCurrentFrame) {
+			this.clearDetachedSnapshotFrame();
+		}
 		this.lastCommittedFrameIndex = null;
 
 		if (!uri) {
@@ -344,21 +496,24 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 				isLoading: false,
 				isReady: false,
 				isPlaying: false,
-				currentFrame: null,
-				currentTime: 0,
+				currentFrame: preserveCurrentFrame ? this.snapshot.currentFrame : null,
+				currentTime: preserveCurrentFrame ? this.snapshot.currentTime : 0,
 				duration: 0,
 				errorMessage: "未绑定视频素材",
 			});
 			return;
 		}
 
+		const preparedSeekTime = preserveCurrentFrame
+			? clampTime(pendingSeekTime, this.snapshot.duration)
+			: 0;
 		this.patchSnapshot({
 			isLoading: true,
 			isReady: false,
 			isPlaying: false,
-			currentFrame: null,
-			currentTime: 0,
-			duration: 0,
+			currentFrame: preserveCurrentFrame ? this.snapshot.currentFrame : null,
+			currentTime: preparedSeekTime,
+			duration: preserveCurrentFrame ? this.snapshot.duration : 0,
 			errorMessage: null,
 		});
 
@@ -386,17 +541,18 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 			this.recreateAudioPlayback(uri);
 
 			const duration = Math.max(0, nextVideoHandle.asset.duration);
+			const initialSeekTime = clampTime(pendingSeekTime, duration);
 			this.patchSnapshot({
 				isLoading: false,
 				isReady: true,
 				isPlaying: false,
-				currentFrame: null,
-				currentTime: 0,
+				currentFrame: preserveCurrentFrame ? this.snapshot.currentFrame : null,
+				currentTime: initialSeekTime,
 				duration,
 				errorMessage: null,
 			});
 
-			await this.seekToTime(0);
+			await this.seekToTime(initialSeekTime);
 		} catch (error) {
 			nextVideoHandle?.release();
 			nextAudioHandle?.release();
@@ -405,9 +561,9 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 				isLoading: false,
 				isReady: false,
 				isPlaying: false,
-				currentFrame: null,
-				currentTime: 0,
-				duration: 0,
+				currentFrame: preserveCurrentFrame ? this.snapshot.currentFrame : null,
+				currentTime: preserveCurrentFrame ? this.snapshot.currentTime : 0,
+				duration: preserveCurrentFrame ? this.snapshot.duration : 0,
 				errorMessage:
 					error instanceof Error ? error.message : "加载视频素材失败",
 			});
@@ -549,7 +705,9 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 
 	private async seekOnce(seconds: number, options: SeekOptions): Promise<void> {
 		if (!this.videoSampleSink || !this.videoHandle) {
-			this.patchSnapshot({ currentFrame: null, currentTime: 0 });
+			this.patchSnapshot({
+				currentTime: clampTime(seconds, this.snapshot.duration),
+			});
 			return;
 		}
 

@@ -8,11 +8,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
 	useVideoNodePlayback: vi.fn(),
-	pause: vi.fn(),
+	useCanvasNodeThumbnailImage: vi.fn(),
 }));
 
 vi.mock("./useVideoNodePlayback", () => ({
 	useVideoNodePlayback: mocks.useVideoNodePlayback,
+}));
+
+vi.mock("../thumbnail/useCanvasNodeThumbnailImage", () => ({
+	useCanvasNodeThumbnailImage: mocks.useCanvasNodeThumbnailImage,
 }));
 
 vi.mock("@/projects/projectStore", () => ({
@@ -78,7 +82,7 @@ const runtimeManager = {
 describe("VideoNodeSkiaRenderer", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.pause.mockReset();
+		mocks.useCanvasNodeThumbnailImage.mockReturnValue(null);
 	});
 
 	afterEach(() => {
@@ -96,7 +100,6 @@ describe("VideoNodeSkiaRenderer", () => {
 				duration: 10,
 				errorMessage: null,
 			},
-			pause: mocks.pause,
 		});
 
 		render(
@@ -125,7 +128,6 @@ describe("VideoNodeSkiaRenderer", () => {
 				duration: 10,
 				errorMessage: null,
 			},
-			pause: mocks.pause,
 		});
 
 		render(
@@ -144,18 +146,80 @@ describe("VideoNodeSkiaRenderer", () => {
 		expect(screen.queryByTestId("image-shader")).toBeNull();
 	});
 
-	it("切为非 active 时会自动暂停并保留进度", () => {
+	it("无实时帧时回退 thumbnail 画面", () => {
 		mocks.useVideoNodePlayback.mockReturnValue({
 			snapshot: {
 				isLoading: false,
 				isReady: true,
 				isPlaying: true,
-				currentFrame: { id: "frame-1" },
-				currentTime: 3,
+				currentFrame: null,
+				currentTime: 0,
 				duration: 10,
 				errorMessage: null,
 			},
-			pause: mocks.pause,
+		});
+		mocks.useCanvasNodeThumbnailImage.mockReturnValue({ id: "thumb-1" });
+
+		render(
+			<VideoNodeSkiaRenderer
+				node={createNode()}
+				scene={null}
+				asset={createAsset()}
+				isActive={true}
+				isFocused={false}
+				isDimmed={false}
+				runtimeManager={runtimeManager}
+			/>,
+		);
+
+		expect(screen.getByTestId("image-shader")).toBeTruthy();
+	});
+
+	it("实时帧优先于 thumbnail", () => {
+		mocks.useVideoNodePlayback.mockReturnValue({
+			snapshot: {
+				isLoading: false,
+				isReady: true,
+				isPlaying: false,
+				currentFrame: { id: "frame-1" },
+				currentTime: 2,
+				duration: 10,
+				errorMessage: null,
+			},
+		});
+		mocks.useCanvasNodeThumbnailImage.mockReturnValue({ id: "thumb-1" });
+
+		render(
+			<VideoNodeSkiaRenderer
+				node={createNode()}
+				scene={null}
+				asset={createAsset()}
+				isActive={true}
+				isFocused={false}
+				isDimmed={false}
+				runtimeManager={runtimeManager}
+			/>,
+		);
+
+		const shader = screen.getByTestId("image-shader");
+		expect(shader).toBeTruthy();
+		const props = JSON.parse(shader.getAttribute("data-props") ?? "{}") as {
+			image?: { id?: string };
+		};
+		expect(props.image?.id).toBe("frame-1");
+	});
+
+	it("切换为 inactive 时会透传 active=false 到播放 hook", () => {
+		mocks.useVideoNodePlayback.mockReturnValue({
+			snapshot: {
+				isLoading: false,
+				isReady: true,
+				isPlaying: false,
+				currentFrame: { id: "frame-1" },
+				currentTime: 1,
+				duration: 10,
+				errorMessage: null,
+			},
 		});
 
 		const { rerender } = render(
@@ -182,6 +246,13 @@ describe("VideoNodeSkiaRenderer", () => {
 			/>,
 		);
 
-		expect(mocks.pause).toHaveBeenCalledTimes(1);
+		const lastCall =
+			mocks.useVideoNodePlayback.mock.calls[
+				mocks.useVideoNodePlayback.mock.calls.length - 1
+			]?.[0] ?? null;
+		expect(lastCall).toMatchObject({
+			nodeId: "video-node-1",
+			active: false,
+		});
 	});
 });

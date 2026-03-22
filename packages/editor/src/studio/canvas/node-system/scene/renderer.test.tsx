@@ -1,35 +1,125 @@
 // @vitest-environment jsdom
 
-import { act, render } from "@testing-library/react";
-import type { SceneDocument, SceneNode } from "core/studio/types";
-import React from "react";
+import { act, render, waitFor } from "@testing-library/react";
+import type { TimelineElement } from "core/element/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTimelineStore } from "@/scene-editor/contexts/TimelineContext";
-import type {
-	StudioRuntimeManager,
-	TimelineRuntime,
-} from "@/scene-editor/runtime/types";
-import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
-import { SceneNodeSkiaRenderer } from "./renderer";
 
-const { buildSkiaFrameSnapshotMock } = vi.hoisted(() => ({
-	buildSkiaFrameSnapshotMock: vi.fn(),
-}));
+const { buildSkiaFrameSnapshotMock, timelineStoreState, thumbnailImageMock } =
+	vi.hoisted(() => {
+	type StoreState = {
+		fps: number;
+		isPlaying: boolean;
+		currentTime: number;
+		previewTime: number | null;
+		elements: TimelineElement[];
+		tracks: Array<{
+			id: string;
+			role: "clip" | "effect" | "audio";
+			hidden: boolean;
+			locked: boolean;
+			muted: boolean;
+			solo: boolean;
+		}>;
+		canvasSize: { width: number; height: number };
+		getRenderTime: () => number;
+	};
+	type StoreSubscriber = {
+		selector: (state: StoreState) => unknown;
+		listener: (selected: unknown) => void;
+		lastSelected: unknown;
+	};
 
-vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
-	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
-}));
+	let state: StoreState = {
+		fps: 30,
+		isPlaying: false,
+		currentTime: 0,
+		previewTime: null,
+		elements: [],
+		tracks: [],
+		canvasSize: { width: 1920, height: 1080 },
+		getRenderTime: () => state.currentTime,
+	};
+	const subscribers: StoreSubscriber[] = [];
 
-vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", () => ({
-	EditorRuntimeProvider: ({ children }: { children: React.ReactNode }) => {
-		return children;
-	},
-}));
+	const subscribe = (
+		selector: (storeState: StoreState) => unknown,
+		listener: (selected: unknown) => void,
+		options?: { fireImmediately?: boolean },
+	): (() => void) => {
+		const subscriber: StoreSubscriber = {
+			selector,
+			listener,
+			lastSelected: selector(state),
+		};
+		subscribers.push(subscriber);
+		if (options?.fireImmediately) {
+			listener(subscriber.lastSelected);
+		}
+		return () => {
+			const index = subscribers.indexOf(subscriber);
+			if (index >= 0) subscribers.splice(index, 1);
+		};
+	};
+
+	const setState = (patch: Partial<StoreState>) => {
+		state = { ...state, ...patch };
+		for (const subscriber of [...subscribers]) {
+			const nextSelected = subscriber.selector(state);
+			if (nextSelected === subscriber.lastSelected) continue;
+			subscriber.lastSelected = nextSelected;
+			subscriber.listener(nextSelected);
+		}
+	};
+
+	const reset = () => {
+		state = {
+			fps: 30,
+			isPlaying: false,
+			currentTime: 0,
+			previewTime: null,
+			elements: [],
+			tracks: [
+				{
+					id: "main",
+					role: "clip",
+					hidden: false,
+					locked: false,
+					muted: false,
+					solo: false,
+				},
+			],
+			canvasSize: { width: 1920, height: 1080 },
+			getRenderTime: () => state.currentTime,
+		};
+		subscribers.length = 0;
+	};
+
+	return {
+		buildSkiaFrameSnapshotMock: vi.fn(),
+		thumbnailImageMock: vi.fn(),
+		timelineStoreState: {
+			getState: () => state,
+			subscribe,
+			setState,
+			reset,
+		},
+	};
+});
 
 vi.mock("react-skia-lite", async () => {
 	const ReactModule = await import("react");
 	let nextPictureId = 0;
-	const createSharedValue = <T,>(value: T) => {
+	let listenerId = 0;
+
+	type SharedValue<T> = {
+		value: T;
+		_isSharedValue: true;
+		addListener: (listenerId: number, listener: (nextValue: T) => void) => void;
+		removeListener: (listenerId: number) => void;
+		modify: (modifier?: (value: T) => T, forceUpdate?: boolean) => void;
+	};
+
+	const createSharedValue = <T,>(value: T): SharedValue<T> => {
 		const listeners = new Map<number, (nextValue: T) => void>();
 		let currentValue = value;
 		return {
@@ -42,14 +132,14 @@ vi.mock("react-skia-lite", async () => {
 					listener(nextValue);
 				}
 			},
-			_isSharedValue: true as const,
-			addListener: (listenerId: number, listener: (nextValue: T) => void) => {
-				listeners.set(listenerId, listener);
+			_isSharedValue: true,
+			addListener: (nextListenerId, listener) => {
+				listeners.set(nextListenerId, listener);
 			},
-			removeListener: (listenerId: number) => {
-				listeners.delete(listenerId);
+			removeListener: (nextListenerId) => {
+				listeners.delete(nextListenerId);
 			},
-			modify: (modifier?: (value: T) => T, _forceUpdate?: boolean) => {
+			modify: (modifier) => {
 				const nextValue = modifier ? modifier(currentValue) : currentValue;
 				currentValue = nextValue;
 				for (const listener of listeners.values()) {
@@ -59,10 +149,74 @@ vi.mock("react-skia-lite", async () => {
 		};
 	};
 
+	const isSharedValue = <T,>(value: unknown): value is SharedValue<T> => {
+		return Boolean(
+			value &&
+				typeof value === "object" &&
+				"_isSharedValue" in (value as Record<string, unknown>) &&
+				(value as { _isSharedValue?: unknown })._isSharedValue === true,
+		);
+	};
+
+	const useSharedValueSnapshot = (value: unknown) => {
+		const [snapshot, setSnapshot] = ReactModule.useState(() => {
+			return isSharedValue(value) ? value.value : value;
+		});
+		ReactModule.useEffect(() => {
+			if (!isSharedValue(value)) {
+				setSnapshot(value);
+				return;
+			}
+			const nextListenerId = listenerId++;
+			value.addListener(nextListenerId, setSnapshot);
+			setSnapshot(value.value);
+			return () => {
+				value.removeListener(nextListenerId);
+			};
+		}, [value]);
+		return snapshot;
+	};
+
+	const Group = ({ children }: { children?: React.ReactNode }) => {
+		return ReactModule.createElement("div", { "data-skia": "group" }, children);
+	};
+	const Picture = ({
+		children,
+		opacity,
+	}: {
+		children?: React.ReactNode;
+		opacity?: unknown;
+	}) => {
+		const resolvedOpacity = useSharedValueSnapshot(opacity ?? 1);
+		return ReactModule.createElement(
+			"div",
+			{ "data-skia": "picture", "data-opacity": String(resolvedOpacity) },
+			children,
+		);
+	};
+	const Rect = ({
+		children,
+		opacity,
+	}: {
+		children?: React.ReactNode;
+		opacity?: unknown;
+	}) => {
+		const resolvedOpacity = useSharedValueSnapshot(opacity ?? 1);
+		return ReactModule.createElement(
+			"div",
+			{ "data-skia": "rect", "data-opacity": String(resolvedOpacity) },
+			children,
+		);
+	};
+	const ImageShader = () =>
+		ReactModule.createElement("div", {
+			"data-skia": "image-shader",
+		});
 	return {
-		Group: ({ children }: { children?: React.ReactNode }) => children ?? null,
-		Picture: () => null,
-		Rect: () => null,
+		Group,
+		ImageShader,
+		Picture,
+		Rect,
 		useSharedValue: <T,>(initialValue: T) => {
 			const ref = ReactModule.useRef(createSharedValue(initialValue));
 			return ref.current;
@@ -79,167 +233,238 @@ vi.mock("react-skia-lite", async () => {
 	};
 });
 
-const flushMicrotasks = async () => {
-	await act(async () => {
-		await Promise.resolve();
-		await Promise.resolve();
-	});
+vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
+	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
+}));
+
+vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", async () => {
+	const ReactModule = await import("react");
+	return {
+		EditorRuntimeProvider: ({ children }: { children: React.ReactNode }) =>
+			ReactModule.createElement(ReactModule.Fragment, null, children),
+	};
+});
+
+vi.mock("../thumbnail/useCanvasNodeThumbnailImage", () => ({
+	useCanvasNodeThumbnailImage: thumbnailImageMock,
+}));
+
+import { SceneNodeSkiaRenderer } from "./renderer";
+
+const createElement = (id: string): TimelineElement => ({
+	id,
+	type: "Image",
+	component: "image",
+	name: id,
+	timeline: {
+		start: 0,
+		end: 60,
+		startTimecode: "00:00:00:00",
+		endTimecode: "00:00:02:00",
+		trackIndex: 0,
+	},
+	props: {},
+});
+
+const createFrameSnapshot = (label: string) => ({
+	picture: { label, dispose: vi.fn() },
+	children: [],
+	orderedElements: [],
+	visibleElements: [],
+	transitionFrameState: {
+		activeTransitions: [],
+		hiddenElementIds: [],
+	},
+	ready: Promise.resolve(),
+	dispose: vi.fn(),
+});
+
+const createRuntimeManager = () => {
+	const runtime = {
+		id: "runtime:scene-1",
+		ref: {
+			kind: "scene",
+			sceneId: "scene-1",
+		},
+		timelineStore: {
+			getState: timelineStoreState.getState,
+			subscribe: timelineStoreState.subscribe,
+		},
+		modelRegistry: {
+			get: vi.fn(() => undefined),
+		},
+	};
+	return {
+		ensureTimelineRuntime: vi.fn(() => runtime),
+		getTimelineRuntime: vi.fn(() => runtime),
+	};
 };
+
+const createRendererProps = (
+	isActive: boolean,
+	runtimeManager: any = createRuntimeManager() as any,
+) => ({
+	node: {
+		id: "node-scene-1",
+		type: "scene",
+		name: "Scene 1",
+		sceneId: "scene-1",
+		x: 0,
+		y: 0,
+		width: 960,
+		height: 540,
+		zIndex: 1,
+		locked: false,
+		hidden: false,
+		createdAt: 0,
+		updatedAt: 0,
+	} as any,
+	scene: {
+		id: "scene-1",
+		name: "Scene 1",
+		timeline: {
+			canvas: { width: 1920, height: 1080 },
+		},
+		posterFrame: 0,
+		createdAt: 0,
+		updatedAt: 0,
+	} as any,
+	asset: null,
+	isActive,
+	isFocused: false,
+	isDimmed: false,
+	runtimeManager,
+});
 
 describe("SceneNodeSkiaRenderer", () => {
 	beforeEach(() => {
 		buildSkiaFrameSnapshotMock.mockReset();
+		thumbnailImageMock.mockReset();
+		thumbnailImageMock.mockReturnValue(null);
+		timelineStoreState.reset();
+		timelineStoreState.setState({
+			elements: [createElement("clip-1")],
+		});
 	});
 
-	it("切换 scene render state 时会延后一帧释放旧资源", async () => {
-		const rafQueue: FrameRequestCallback[] = [];
-		vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-			rafQueue.push(callback);
-			return rafQueue.length;
-		});
-		vi.spyOn(window, "cancelAnimationFrame").mockImplementation((requestId) => {
-			const index = Number(requestId) - 1;
-			if (index < 0 || index >= rafQueue.length) return;
-			rafQueue[index] = () => undefined;
-		});
-
-		const timelineStore = createTimelineStore();
-		const timelineRef = toSceneTimelineRef("scene-1");
-		const runtime: TimelineRuntime = {
-			id: "scene:scene-1",
-			ref: timelineRef,
-			timelineStore,
-			modelRegistry: {
-				get: () => null,
-			} as unknown as TimelineRuntime["modelRegistry"],
-		};
-		const runtimeManager: StudioRuntimeManager = {
-			ensureTimelineRuntime: () => runtime,
-			removeTimelineRuntime: () => {},
-			getTimelineRuntime: (ref) => {
-				return ref.sceneId === timelineRef.sceneId ? runtime : null;
-			},
-			listTimelineRuntimes: () => [runtime],
-			setActiveEditTimeline: () => {},
-			getActiveEditTimelineRef: () => timelineRef,
-			getActiveEditTimelineRuntime: () => runtime,
-		};
-		const node = {
-			id: "node-scene-1",
-			type: "scene",
-			sceneId: "scene-1",
-			name: "Scene 1",
-			x: 0,
-			y: 0,
-			width: 960,
-			height: 540,
-			zIndex: 0,
-			locked: false,
-			hidden: false,
-			createdAt: 1,
-			updatedAt: 1,
-		} satisfies SceneNode;
-		const scene = {
-			id: "scene-1",
-			name: "Scene 1",
-			timeline: {
-				fps: 30,
-				canvas: { width: 1920, height: 1080 },
-				settings: {
-					snapEnabled: true,
-					autoAttach: true,
-					rippleEditingEnabled: false,
-					previewAxisEnabled: true,
-					audio: {
-						exportSampleRate: 48000,
-						exportBlockSize: 512,
-						masterGainDb: 0,
-						compressor: {
-							enabled: true,
-							thresholdDb: -12,
-							ratio: 4,
-							kneeDb: 6,
-							attackMs: 10,
-							releaseMs: 80,
-							makeupGainDb: 0,
-						},
-					},
-				},
-				tracks: [],
-				elements: [],
-			},
-			posterFrame: 0,
-			createdAt: 1,
-			updatedAt: 1,
-		} satisfies SceneDocument;
-		const disposeFirst = vi.fn();
-		const disposeSecond = vi.fn();
-
-		buildSkiaFrameSnapshotMock
-			.mockResolvedValueOnce({
-				children: [],
-				orderedElements: [],
-				visibleElements: [],
-				transitionFrameState: {
-					activeTransitions: [],
-					hiddenElementIds: [],
-				},
-				picture: { id: "frame-1" },
-				ready: Promise.resolve(),
-				dispose: disposeFirst,
-			})
-			.mockResolvedValueOnce({
-				children: [],
-				orderedElements: [],
-				visibleElements: [],
-				transitionFrameState: {
-					activeTransitions: [],
-					hiddenElementIds: [],
-				},
-				picture: { id: "frame-2" },
-				ready: Promise.resolve(),
-				dispose: disposeSecond,
-			});
-
-		const profileSpy = vi.fn();
-		const profilerId = `scene-node-renderer-${Date.now()}`;
-
-		render(
-			<React.Profiler id={profilerId} onRender={profileSpy}>
-				<SceneNodeSkiaRenderer
-					node={node}
-					scene={scene}
-					asset={null}
-					isActive={false}
-					isFocused={false}
-					isDimmed={false}
-					runtimeManager={runtimeManager}
-				/>
-			</React.Profiler>,
+	it("会为整帧快照透传 picture render target", async () => {
+		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) =>
+			createFrameSnapshot(`frame-${displayTime}`),
 		);
 
-		await flushMicrotasks();
+		render(<SceneNodeSkiaRenderer {...createRendererProps(true)} />);
 
-		expect(profileSpy).toHaveBeenCalled();
-		expect(disposeFirst).not.toHaveBeenCalled();
-
-		act(() => {
-			timelineStore.setState({ currentTime: 1 });
+		await waitFor(() => {
+			expect(buildSkiaFrameSnapshotMock).toHaveBeenCalled();
 		});
+		const firstBuildArgs = buildSkiaFrameSnapshotMock.mock.calls[0]?.[0] as
+			| {
+					prepare?: {
+						compositionRenderTarget?: string;
+						frameSnapshotRenderTarget?: string;
+					};
+			  }
+			| undefined;
+		expect(firstBuildArgs?.prepare?.frameSnapshotRenderTarget).toBe(
+			"picture",
+		);
+		expect(firstBuildArgs?.prepare?.compositionRenderTarget).toBe("picture");
+	});
 
-		await flushMicrotasks();
+	it("inactive 首屏无已提交画面时展示 thumbnail 且不触发构帧", async () => {
+		thumbnailImageMock.mockReturnValue({ id: "scene-thumb" });
 
-		expect(disposeFirst).not.toHaveBeenCalled();
-		expect(disposeSecond).not.toHaveBeenCalled();
+		const view = render(<SceneNodeSkiaRenderer {...createRendererProps(false)} />);
 
-		await act(async () => {
-			const callbacks = rafQueue.splice(0);
-			for (const callback of callbacks) {
-				callback(performance.now());
+		expect(buildSkiaFrameSnapshotMock).not.toHaveBeenCalled();
+		expect(
+			view.container.querySelector('[data-skia="image-shader"]'),
+		).toBeTruthy();
+	});
+
+	it("构帧失败时会清空为占位块并释放上一帧", async () => {
+		const firstFrame = createFrameSnapshot("frame-0");
+		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) => {
+			if (displayTime === 10) {
+				throw new Error("frame failed");
 			}
+			if (displayTime === 0) {
+				return firstFrame;
+			}
+			return createFrameSnapshot(`frame-${displayTime}`);
 		});
 
-		expect(disposeFirst).toHaveBeenCalledTimes(1);
-		expect(disposeSecond).not.toHaveBeenCalled();
+		const view = render(
+			<div data-testid="root">
+				<SceneNodeSkiaRenderer {...createRendererProps(true)} />
+			</div>,
+		);
+
+		await waitFor(() => {
+			expect(
+				view.container
+					.querySelector('[data-skia="picture"]')
+					?.getAttribute("data-opacity"),
+			).toBe("1");
+			expect(
+				view.container
+					.querySelector('[data-skia="rect"]')
+					?.getAttribute("data-opacity"),
+			).toBe("0");
+		});
+
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		act(() => {
+			timelineStoreState.setState({ currentTime: 10 });
+		});
+
+		await waitFor(() => {
+			expect(
+				view.container
+					.querySelector('[data-skia="rect"]')
+					?.getAttribute("data-opacity"),
+			).toBe("1");
+			expect(
+				view.container
+					.querySelector('[data-skia="picture"]')
+					?.getAttribute("data-opacity"),
+			).toBe("0");
+		});
+		expect(firstFrame.dispose).toHaveBeenCalledTimes(1);
+		errorSpy.mockRestore();
+	});
+
+	it("active -> inactive 后停止构帧并保留最后画面", async () => {
+		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) =>
+			createFrameSnapshot(`frame-${displayTime}`),
+		);
+		const runtimeManager = createRuntimeManager() as any;
+
+		const { rerender, container } = render(
+			<SceneNodeSkiaRenderer {...createRendererProps(true, runtimeManager)} />,
+		);
+
+		await waitFor(() => {
+			expect(
+				container
+					.querySelector('[data-skia="picture"]')
+					?.getAttribute("data-opacity"),
+			).toBe("1");
+		});
+		const buildCallCount = buildSkiaFrameSnapshotMock.mock.calls.length;
+
+		rerender(
+			<SceneNodeSkiaRenderer {...createRendererProps(false, runtimeManager)} />,
+		);
+		act(() => {
+			timelineStoreState.setState({ currentTime: 5 });
+		});
+
+		expect(
+			container
+				.querySelector('[data-skia="picture"]')
+				?.getAttribute("data-opacity"),
+		).toBe("1");
+		expect(buildSkiaFrameSnapshotMock.mock.calls.length).toBe(buildCallCount);
 	});
 });
