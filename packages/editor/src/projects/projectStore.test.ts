@@ -31,9 +31,16 @@ const createProject = (): StudioProject => ({
 	assets: [
 		{
 			id: "asset-1",
-			uri: "file:///asset-1.png",
 			kind: "image",
 			name: "asset-1",
+			locator: {
+				type: "linked-file",
+				filePath: "/asset-1.png",
+			},
+			meta: {
+				fileName: "asset-1.png",
+				hash: "hash-asset-1",
+			},
 		},
 	],
 	canvas: {
@@ -155,25 +162,113 @@ describe("projectStore", () => {
 		expect(project?.ui.focusedNodeId).toBeNull();
 	});
 
-	it("ensureProjectAssetByUri 会按 uri+kind 去重", () => {
-		const firstId = useProjectStore.getState().ensureProjectAssetByUri({
-			uri: "file:///same.wav",
+	it("ensureProjectAsset 按 kind+hash 去重", () => {
+		const firstId = useProjectStore.getState().ensureProjectAsset({
 			kind: "audio",
 			name: "same.wav",
+			locator: {
+				type: "linked-file",
+				filePath: "/same-a.wav",
+			},
+			meta: {
+				hash: "same-hash",
+				fileName: "same.wav",
+			},
 		});
-		const secondId = useProjectStore.getState().ensureProjectAssetByUri({
-			uri: "file:///same.wav",
+		const secondId = useProjectStore.getState().ensureProjectAsset({
 			kind: "audio",
-			name: "same.wav",
+			name: "same-duplicate.wav",
+			locator: {
+				type: "linked-file",
+				filePath: "/same-b.wav",
+			},
+			meta: {
+				hash: "same-hash",
+				fileName: "same-duplicate.wav",
+			},
 		});
 		expect(firstId).toBe(secondId);
+		const assets = useProjectStore.getState().currentProject?.assets ?? [];
 		expect(
-			useProjectStore
-				.getState()
-				.currentProject?.assets.filter(
-					(asset) => asset.uri === "file:///same.wav",
-				).length,
+			assets.filter(
+				(asset) => asset.kind === "audio" && asset.meta?.hash === "same-hash",
+			).length,
 		).toBe(1);
+	});
+
+	it("ensureProjectAsset 在无 hash 时按 kind+locator 去重", () => {
+		const firstId = useProjectStore.getState().ensureProjectAsset({
+			kind: "audio",
+			name: "same.wav",
+			locator: {
+				type: "linked-file",
+				filePath: "/same.wav",
+			},
+		});
+		const secondId = useProjectStore.getState().ensureProjectAsset({
+			kind: "audio",
+			name: "same.wav",
+			locator: {
+				type: "linked-file",
+				filePath: "/same.wav",
+			},
+		});
+		expect(firstId).toBe(secondId);
+		const assets = useProjectStore.getState().currentProject?.assets ?? [];
+		expect(
+			assets.filter(
+				(asset) =>
+					asset.kind === "audio" &&
+					asset.locator.type === "linked-file" &&
+					asset.locator.filePath === "/same.wav",
+			).length,
+		).toBe(1);
+	});
+
+	it("ensureProjectAsset 合并 meta 时不覆盖已有 asr", () => {
+		useProjectStore.getState().updateProjectAssetMeta("asset-1", (prev) => ({
+			...(prev ?? {}),
+			asr: {
+				id: "asr-1",
+				source: {
+					type: "asset",
+					assetId: "asset-1",
+					kind: "image",
+					uri: "https://example.com/asset-1.png",
+					fileName: "asset-1.png",
+					duration: 1,
+				},
+				language: "zh",
+				model: "tiny",
+				createdAt: 1,
+				updatedAt: 1,
+				segments: [],
+			},
+		}));
+
+		useProjectStore.getState().ensureProjectAsset({
+			kind: "image",
+			name: "asset-1.png",
+			locator: {
+				type: "linked-file",
+				filePath: "/asset-1.png",
+			},
+			meta: {
+				hash: "hash-asset-1",
+				fileName: "asset-1.png",
+				sourceSize: {
+					width: 100,
+					height: 50,
+				},
+			},
+		});
+
+		const asset = useProjectStore.getState().getProjectAssetById("asset-1");
+		expect(asset?.meta?.asr?.id).toBe("asr-1");
+		expect(asset?.meta?.sourceSize).toEqual({
+			width: 100,
+			height: 50,
+		});
 	});
 
 	it("updateProjectAssetMeta 可写入 asr 元数据", () => {

@@ -1,4 +1,4 @@
-const OPFS_PREFIX = "opfs://";
+export const OPFS_PREFIX = "opfs://";
 const PROJECTS_ROOT = "projects";
 
 const VALID_KINDS = new Set(["audios", "videos", "images"]);
@@ -60,7 +60,7 @@ const hashFile = async (file: File): Promise<string> => {
 	return toHex(new Uint8Array(digest));
 };
 
-const buildProjectOpfsUri = (
+export const buildProjectOpfsUri = (
 	projectId: string,
 	kind: ProjectOpfsKind,
 	fileName: string,
@@ -84,12 +84,6 @@ const resolveProjectKindDir = async (
 	});
 };
 
-const hasHashSuffix = (fileName: string, hash: string): boolean => {
-	if (!fileName.includes(`-${hash}`)) return false;
-	const withoutExt = fileName.replace(/\.[^./\\]+$/, "");
-	return withoutExt.endsWith(`-${hash}`);
-};
-
 const findExistingFileByHash = async (
 	kindDir: FileSystemDirectoryHandle,
 	hash: string,
@@ -99,11 +93,46 @@ const findExistingFileByHash = async (
 	};
 	for await (const [entryName, handle] of iterator.entries()) {
 		if (handle.kind !== "file") continue;
-		if (hasHashSuffix(entryName, hash)) {
+		const fileHandle = handle as unknown as FileSystemFileHandle;
+		const file = await fileHandle.getFile();
+		const currentHash = await hashFile(file);
+		if (currentHash === hash) {
 			return entryName;
 		}
 	}
 	return null;
+};
+
+const hasFile = async (
+	kindDir: FileSystemDirectoryHandle,
+	fileName: string,
+): Promise<boolean> => {
+	try {
+		await kindDir.getFileHandle(fileName);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+const resolveUniqueFileName = async (
+	kindDir: FileSystemDirectoryHandle,
+	baseName: string,
+	ext: string,
+): Promise<string> => {
+	const baseFileName = `${baseName}${ext}`;
+	if (!(await hasFile(kindDir, baseFileName))) {
+		return baseFileName;
+	}
+	let index = 1;
+	while (index < Number.MAX_SAFE_INTEGER) {
+		const candidate = `${baseName} (${index})${ext}`;
+		if (!(await hasFile(kindDir, candidate))) {
+			return candidate;
+		}
+		index += 1;
+	}
+	throw new Error("无法分配 OPFS 文件名");
 };
 
 const writeFile = async (
@@ -143,7 +172,7 @@ export async function writeProjectFileToOpfs(
 	}
 	const { baseName, ext } = splitNameAndExt(file.name);
 	const safeBaseName = sanitizeSegment(baseName, "file");
-	const fileName = `${safeBaseName}-${hash}${ext}`;
+	const fileName = await resolveUniqueFileName(kindDir, safeBaseName, ext);
 	await writeFile(kindDir, fileName, file);
 	return {
 		uri: buildProjectOpfsUri(normalizedProjectId, kind, fileName),

@@ -1,4 +1,5 @@
 import type { TimelineAsset } from "core/element/types";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { readVideoMetadata } from "@/scene-editor/utils/externalVideo";
 import type { AsrClient } from "./AsrContext";
 import { resolveAssetMediaFile } from "./assetMediaFile";
@@ -61,6 +62,7 @@ const resolveDuration = async (options: {
 
 export interface TranscribeAssetByIdOptions {
 	assetId: string;
+	projectId: string;
 	asrClient: AsrClient;
 	language?: string;
 	force?: boolean;
@@ -94,6 +96,7 @@ export const transcribeAssetById = async (
 		assetId,
 		asrClient,
 		signal,
+		projectId,
 		getProjectAssetById,
 		updateProjectAssetMeta,
 		onStatus,
@@ -119,7 +122,11 @@ export const transcribeAssetById = async (
 		};
 	}
 
-	const { file, fileName } = await resolveAssetMediaFile(asset);
+	const sourceUri = resolveAssetPlayableUri(asset, { projectId });
+	if (!sourceUri) {
+		throw new Error("当前素材无法解析为可转写的地址");
+	}
+	const { file, fileName } = await resolveAssetMediaFile(asset, { projectId });
 	const duration = await resolveDuration({ assetKind, file });
 	const now = Date.now();
 	const transcriptId = createId("transcript");
@@ -129,7 +136,7 @@ export const transcribeAssetById = async (
 			type: "asset",
 			assetId: asset.id,
 			kind: assetKind,
-			uri: asset.uri,
+			uri: sourceUri,
 			fileName,
 			duration,
 		},

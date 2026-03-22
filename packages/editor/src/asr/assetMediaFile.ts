@@ -1,5 +1,9 @@
 import type { TimelineAsset } from "core/element/types";
 import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
+import {
+	resolveAssetPlayableUri,
+	resolveFileNameFromLocator,
+} from "@/projects/assetLocator";
 
 const OPFS_PREFIX = "opfs://";
 const FILE_PREFIX = "file://";
@@ -64,26 +68,13 @@ const inferMimeType = (kind: TimelineAsset["kind"]): string => {
 	return "application/octet-stream";
 };
 
-const extractFileNameFromUri = (uri: string): string | null => {
-	try {
-		const url = new URL(uri);
-		const pathname = decodeURIComponent(url.pathname);
-		const parts = pathname.split("/").filter(Boolean);
-		const last = parts[parts.length - 1];
-		if (!last) return null;
-		return last;
-	} catch {
-		const cleaned = uri.split("?")[0]?.split("#")[0] ?? "";
-		const parts = cleaned.split("/").filter(Boolean);
-		return parts[parts.length - 1] ?? null;
-	}
-};
-
 const resolveFileName = (asset: TimelineAsset): string => {
+	const fromMeta = asset.meta?.fileName?.trim();
+	if (fromMeta) return fromMeta;
 	const preferred = asset.name?.trim();
 	if (preferred) return preferred;
-	const fromUri = extractFileNameFromUri(asset.uri);
-	if (fromUri) return fromUri;
+	const fromLocator = resolveFileNameFromLocator(asset.locator);
+	if (fromLocator) return fromLocator;
 	if (asset.kind === "audio") return "audio-asset";
 	if (asset.kind === "video") return "video-asset";
 	return "asset";
@@ -94,16 +85,28 @@ export interface ResolvedAssetMediaFile {
 	fileName: string;
 }
 
+export interface ResolveAssetMediaFileOptions {
+	projectId?: string | null;
+}
+
 export const resolveAssetMediaFile = async (
 	asset: TimelineAsset,
+	options: ResolveAssetMediaFileOptions = {},
 ): Promise<ResolvedAssetMediaFile> => {
 	if (asset.kind !== "audio" && asset.kind !== "video") {
 		throw new Error(`当前 asset kind 不支持转写: ${asset.kind}`);
 	}
 
 	const fileName = resolveFileName(asset);
-	if (asset.uri.startsWith(OPFS_PREFIX)) {
-		const file = await resolveProjectOpfsFile(asset.uri);
+	const resolvedUri = resolveAssetPlayableUri(asset, {
+		projectId: options.projectId,
+	});
+	if (!resolvedUri) {
+		throw new Error(`当前 asset 无法解析为可读取地址: ${asset.id}`);
+	}
+
+	if (resolvedUri.startsWith(OPFS_PREFIX)) {
+		const file = await resolveProjectOpfsFile(resolvedUri);
 		if (file.name === fileName) {
 			return { file, fileName };
 		}
@@ -115,8 +118,8 @@ export const resolveAssetMediaFile = async (
 		};
 	}
 
-	if (asset.uri.startsWith(FILE_PREFIX)) {
-		const filePath = resolveFilePathFromUri(asset.uri);
+	if (resolvedUri.startsWith(FILE_PREFIX)) {
+		const filePath = resolveFilePathFromUri(resolvedUri);
 		const bridge = getElectronFileBridge();
 		if (!filePath || !bridge) {
 			throw new Error("当前环境无法读取 file:// 资源");
@@ -136,11 +139,11 @@ export const resolveAssetMediaFile = async (
 	}
 
 	const isWebFetchUri =
-		asset.uri.startsWith("http://") ||
-		asset.uri.startsWith("https://") ||
-		asset.uri.startsWith("blob:");
+		resolvedUri.startsWith("http://") ||
+		resolvedUri.startsWith("https://") ||
+		resolvedUri.startsWith("blob:");
 	if (isWebFetchUri) {
-		const response = await fetch(asset.uri);
+		const response = await fetch(resolvedUri);
 		if (!response.ok) {
 			throw new Error(`下载 asset 失败: ${response.status}`);
 		}
@@ -153,5 +156,5 @@ export const resolveAssetMediaFile = async (
 		};
 	}
 
-	throw new Error(`当前 asset URI 不支持转写: ${asset.uri}`);
+	throw new Error(`当前 asset URI 不支持转写: ${resolvedUri}`);
 };

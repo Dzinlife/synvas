@@ -15,6 +15,7 @@ import type React from "react";
 import { useCallback } from "react";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
+import { ingestUriAsset } from "@/projects/assetIngest";
 import { useProjectAssets } from "@/projects/useProjectAssets";
 import {
 	useAttachments,
@@ -417,7 +418,7 @@ const CanvasElementLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
 	const currentTime = useTimelineStore((state) => state.currentTime);
-	const { ensureProjectAssetByUri } = useProjectAssets();
+	const { ensureProjectAsset } = useProjectAssets();
 	const { fps } = useFps();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
@@ -502,14 +503,28 @@ const CanvasElementLibrary: React.FC = () => {
 				const sourceUri =
 					typeof nextProps.uri === "string" ? nextProps.uri : null;
 				const sourceKind = resolveSourceKindByElementType(item.elementType);
-				const assetId =
-					isAssetBackedElementType(item.elementType) && sourceUri && sourceKind
-						? ensureProjectAssetByUri({
-								uri: sourceUri,
-								kind: sourceKind,
-								name: item.name,
-							})
-						: undefined;
+				let assetId: string | undefined;
+				if (
+					isAssetBackedElementType(item.elementType) &&
+					sourceUri &&
+					sourceKind
+				) {
+					try {
+						const ingested = ingestUriAsset({
+							uri: sourceUri,
+							kind: sourceKind,
+							name: item.name,
+						});
+						assetId = ensureProjectAsset({
+							kind: sourceKind,
+							name: ingested.name,
+							locator: ingested.locator,
+							meta: ingested.meta,
+						});
+					} catch (error) {
+						console.warn("素材 URI 解析失败:", error);
+					}
+				}
 				if (assetId) {
 					delete nextProps.uri;
 				}
@@ -596,7 +611,7 @@ const CanvasElementLibrary: React.FC = () => {
 		},
 		[
 			setElements,
-			ensureProjectAssetByUri,
+			ensureProjectAsset,
 			rippleEditingEnabled,
 			attachments,
 			autoAttach,
@@ -635,14 +650,28 @@ const CanvasElementLibrary: React.FC = () => {
 				const sourceUri =
 					typeof nextProps.uri === "string" ? nextProps.uri : null;
 				const sourceKind = resolveSourceKindByElementType(item.elementType);
-				const assetId =
-					isAssetBackedElementType(item.elementType) && sourceUri && sourceKind
-						? ensureProjectAssetByUri({
-								uri: sourceUri,
-								kind: sourceKind,
-								name: item.name,
-							})
-						: undefined;
+				let assetId: string | undefined;
+				if (
+					isAssetBackedElementType(item.elementType) &&
+					sourceUri &&
+					sourceKind
+				) {
+					try {
+						const ingested = ingestUriAsset({
+							uri: sourceUri,
+							kind: sourceKind,
+							name: item.name,
+						});
+						assetId = ensureProjectAsset({
+							kind: sourceKind,
+							name: ingested.name,
+							locator: ingested.locator,
+							meta: ingested.meta,
+						});
+					} catch (error) {
+						console.warn("素材 URI 解析失败:", error);
+					}
+				}
 				if (assetId) {
 					delete nextProps.uri;
 				}
@@ -678,7 +707,7 @@ const CanvasElementLibrary: React.FC = () => {
 				return [...prev, newElement];
 			});
 		},
-		[setElements, currentTime, ensureProjectAssetByUri, fps],
+		[setElements, currentTime, ensureProjectAsset, fps],
 	);
 
 	return (

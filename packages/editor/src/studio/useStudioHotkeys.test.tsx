@@ -48,22 +48,40 @@ const createProject = (
 					{
 						id: "asset-video-1",
 						kind: "video" as const,
-						uri: "file:///video-1.mp4",
 						name: "video-1.mp4",
+						locator: {
+							type: "linked-remote" as const,
+							uri: "https://example.com/video-1.mp4",
+						},
+						meta: {
+							fileName: "video-1.mp4",
+						},
 					},
 				]
 			: []),
 		{
 			id: "asset-audio-1",
 			kind: "audio" as const,
-			uri: "file:///audio-1.wav",
 			name: "audio-1.wav",
+			locator: {
+				type: "linked-remote" as const,
+				uri: "https://example.com/audio-1.wav",
+			},
+			meta: {
+				fileName: "audio-1.wav",
+			},
 		},
 		{
 			id: "asset-image-1",
 			kind: "image" as const,
-			uri: "file:///image-1.png",
 			name: "image-1.png",
+			locator: {
+				type: "linked-remote" as const,
+				uri: "https://example.com/image-1.png",
+			},
+			meta: {
+				fileName: "image-1.png",
+			},
 		},
 	];
 	return {
@@ -260,7 +278,7 @@ describe("useStudioHotkeys", () => {
 		expect(mocks.getVideoController).toHaveBeenCalledWith("node-video-1");
 		expect(mocks.videoBind).toHaveBeenCalledWith(
 			expect.objectContaining({
-				assetUri: "file:///video-1.mp4",
+				assetUri: "https://example.com/video-1.mp4",
 				fps: 30,
 				runtimeManager: expect.any(Object),
 			}),

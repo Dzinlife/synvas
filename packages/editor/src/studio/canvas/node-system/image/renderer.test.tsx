@@ -15,6 +15,13 @@ vi.mock("@/assets/imageAsset", () => ({
 	acquireImageAsset: mocks.acquireImageAsset,
 }));
 
+vi.mock("@/projects/projectStore", () => ({
+	useProjectStore: (selector: (state: { currentProjectId: string | null }) => unknown) =>
+		selector({
+			currentProjectId: "project-1",
+		}),
+}));
+
 vi.mock("react-skia-lite", () => ({
 	Rect: ({
 		children,
@@ -50,9 +57,12 @@ const createNode = (id = "node-1"): ImageCanvasNode => ({
 
 const createImageAsset = (uri: string): TimelineAsset => ({
 	id: "asset-1",
-	uri,
 	kind: "image",
 	name: "image",
+	locator: {
+		type: "linked-remote",
+		uri,
+	},
 });
 
 const createMockHandle = (image: object) => {

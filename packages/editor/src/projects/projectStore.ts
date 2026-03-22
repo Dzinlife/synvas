@@ -28,6 +28,7 @@ import {
 	putProject,
 	setCurrentProjectId,
 } from "./projectDb";
+import { isSameAssetLocator, normalizeAssetLocator } from "./assetLocator";
 
 const DEFAULT_SCENE_NODE_WIDTH = 960;
 const DEFAULT_SCENE_NODE_HEIGHT = 540;
@@ -86,10 +87,11 @@ export type CanvasNodeCreateInput =
 			fontSize?: number;
 	  };
 
-interface EnsureProjectAssetInput {
-	uri: string;
+export interface EnsureProjectAssetInput {
 	kind: TimelineAsset["kind"];
-	name?: string;
+	name: string;
+	locator: TimelineAsset["locator"];
+	meta?: TimelineAsset["meta"];
 }
 
 interface ProjectStoreState {
@@ -113,9 +115,8 @@ interface ProjectStoreState {
 	setActiveNode: (nodeId: string | null) => void;
 	createSceneNode: (input?: SceneCreateInput) => string;
 	updateSceneNodeLayout: (nodeId: string, patch: CanvasNodeLayoutPatch) => void;
-	ensureProjectAssetByUri: (input: EnsureProjectAssetInput) => string;
+	ensureProjectAsset: (input: EnsureProjectAssetInput) => string;
 	getProjectAssetById: (assetId: string) => TimelineAsset | null;
-	findProjectAssetByUri: (uri: string) => TimelineAsset | null;
 	updateProjectAssetMeta: (
 		assetId: string,
 		updater: (
@@ -191,6 +192,61 @@ const createEntityId = (prefix: string): string => {
 };
 
 const createAssetId = (): string => createEntityId("asset");
+
+const normalizeAssetName = (name: string): string => {
+	const trimmed = name.trim();
+	if (!trimmed) {
+		throw new Error("Asset name is required.");
+	}
+	return trimmed;
+};
+
+const normalizeAssetHash = (hash: unknown): string | null => {
+	if (typeof hash !== "string") return null;
+	const trimmed = hash.trim().toLowerCase();
+	return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeAssetMeta = (
+	meta: TimelineAsset["meta"] | undefined,
+): TimelineAsset["meta"] | undefined => {
+	if (!meta) return undefined;
+	const normalized: TimelineAsset["meta"] = { ...meta };
+	const hash = normalizeAssetHash(normalized.hash);
+	if (hash) {
+		normalized.hash = hash;
+	} else {
+		delete normalized.hash;
+	}
+	if (typeof normalized.fileName === "string") {
+		const trimmed = normalized.fileName.trim();
+		if (trimmed) {
+			normalized.fileName = trimmed;
+		} else {
+			delete normalized.fileName;
+		}
+	}
+	return Object.keys(normalized).length > 0 ? normalized : undefined;
+};
+
+const mergeAssetMeta = (
+	existed: TimelineAsset["meta"] | undefined,
+	input: TimelineAsset["meta"] | undefined,
+): TimelineAsset["meta"] | undefined => {
+	if (!input) return existed;
+	if (!existed) return input;
+	return {
+		...existed,
+		...input,
+	};
+};
+
+const isSameAssetMeta = (
+	left: TimelineAsset["meta"] | undefined,
+	right: TimelineAsset["meta"] | undefined,
+): boolean => {
+	return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+};
 
 const DEFAULT_IMAGE_NODE_WIDTH = 640;
 const DEFAULT_IMAGE_NODE_HEIGHT = 360;
@@ -711,26 +767,52 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	updateSceneNodeLayout: (nodeId, patch) => {
 		get().updateCanvasNodeLayout(nodeId, patch);
 	},
-	ensureProjectAssetByUri: (input) => {
-		const uri = input.uri.trim();
-		if (!uri) {
-			throw new Error("Asset uri is required.");
-		}
+	ensureProjectAsset: (input) => {
+		const name = normalizeAssetName(input.name);
+		const locator = normalizeAssetLocator(input.locator);
+		const meta = normalizeAssetMeta(input.meta);
+		const hash = normalizeAssetHash(meta?.hash);
 		let resolvedId = "";
 		set((state) => {
 			if (!state.currentProject) return state;
-			const existed = state.currentProject.assets.find(
-				(asset) => asset.uri === uri && asset.kind === input.kind,
+			const existedByHash = hash
+				? state.currentProject.assets.find(
+						(asset) =>
+							asset.kind === input.kind &&
+							normalizeAssetHash(asset.meta?.hash) === hash,
+					)
+				: undefined;
+			const existedByLocator = state.currentProject.assets.find(
+				(asset) =>
+					asset.kind === input.kind && isSameAssetLocator(asset.locator, locator),
 			);
+			const existed = existedByHash ?? existedByLocator;
 			if (existed) {
 				resolvedId = existed.id;
-				return state;
+				const mergedMeta = mergeAssetMeta(existed.meta, meta);
+				if (isSameAssetMeta(existed.meta, mergedMeta)) {
+					return state;
+				}
+				const nextProject = withProjectRevision({
+					...state.currentProject,
+					assets: state.currentProject.assets.map((asset) => {
+						if (asset.id !== existed.id) return asset;
+						return {
+							...asset,
+							meta: mergedMeta,
+						};
+					}),
+				});
+				return {
+					currentProject: nextProject,
+				};
 			}
 			const nextAsset: TimelineAsset = {
 				id: createAssetId(),
-				uri,
 				kind: input.kind,
-				...(input.name ? { name: input.name } : {}),
+				name,
+				locator,
+				...(meta ? { meta } : {}),
 			};
 			resolvedId = nextAsset.id;
 			const nextProject = withProjectRevision({
@@ -750,11 +832,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 		const project = get().currentProject;
 		if (!project) return null;
 		return project.assets.find((asset) => asset.id === assetId) ?? null;
-	},
-	findProjectAssetByUri: (uri) => {
-		const project = get().currentProject;
-		if (!project) return null;
-		return project.assets.find((asset) => asset.uri === uri) ?? null;
 	},
 	updateProjectAssetMeta: (assetId, updater) => {
 		set((state) => {

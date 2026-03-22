@@ -81,8 +81,14 @@ const createProject = (): StudioProject => ({
 		{
 			id: "asset-1",
 			kind: "image",
-			uri: "file:///tmp/image.png",
 			name: "image",
+			locator: {
+				type: "linked-file",
+				filePath: "/tmp/image.png",
+			},
+			meta: {
+				fileName: "image.png",
+			},
 		},
 	],
 	ui: {

@@ -19,6 +19,8 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
+import { useProjectStore } from "@/projects/projectStore";
 import { useProjectAssets } from "@/projects/useProjectAssets";
 
 interface SmartSpeechCutDialogProps {
@@ -131,10 +133,15 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 		getProjectAssetById,
 		updateProjectAssetMeta,
 	} = useProjectAssets();
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const source = useMemo(
 		() => resolveSourceById(assets, assetId),
 		[assets, assetId],
 	);
+	const sourceUri = useMemo(() => {
+		if (!source) return null;
+		return resolveAssetPlayableUri(source, { projectId: currentProjectId });
+	}, [source, currentProjectId]);
 	const asrRecord = source?.meta?.asr ?? null;
 	const [language, setLanguage] = useState("auto");
 	const [status, setStatus] = useState<AsrJobStatus>("idle");
@@ -159,7 +166,7 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 
 	const handleTranscribe = useCallback(
 		async (force: boolean) => {
-			if (!assetId || isRunning) return;
+			if (!assetId || isRunning || !currentProjectId) return;
 			setError(null);
 			setMessage(null);
 			setProgress(0);
@@ -168,6 +175,7 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 			try {
 				const result = await transcribeAssetById({
 					assetId,
+					projectId: currentProjectId,
 					asrClient,
 					language,
 					force,
@@ -205,6 +213,7 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 			isRunning,
 			language,
 			assetId,
+			currentProjectId,
 			getProjectAssetById,
 			updateProjectAssetMeta,
 		],
@@ -214,12 +223,12 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 		console.log("[SmartSpeechCutDialog][asr]", {
 			elementId,
 			assetId,
-			sourceUri: source?.uri ?? null,
+			sourceUri: sourceUri ?? null,
 			asr: source?.meta?.asr ?? null,
 		});
-	}, [elementId, source, assetId]);
+	}, [elementId, source, sourceUri, assetId]);
 
-	const canRun = Boolean(assetId && source);
+	const canRun = Boolean(assetId && source && currentProjectId);
 	const hasAsr = Boolean(asrRecord);
 
 	return (
@@ -236,7 +245,7 @@ const SmartSpeechCutDialog: React.FC<SmartSpeechCutDialogProps> = ({
 					</div>
 					<div className="min-w-0 flex items-center justify-between gap-2 rounded-md border border-white/10 bg-neutral-950/60 px-3 py-2 text-xs text-neutral-300">
 						<span className="truncate inline-block">
-							source: {source?.uri ?? "未选中可转写素材"}
+							source: {sourceUri ?? "未选中可转写素材"}
 						</span>
 						<Button className="h-7 px-2 text-xs" onClick={handleDebugLog}>
 							调试 ASR

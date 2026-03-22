@@ -20,6 +20,7 @@ import {
 	buildTimelineRuntimeIdFromRef,
 	listTimelineRefs,
 } from "@/studio/scene/timelineRefAdapter";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { componentRegistry } from "./componentRegistry";
 
 const buildSourceById = (
@@ -32,15 +33,19 @@ const EMPTY_ASSETS: TimelineAsset[] = [];
 const resolveModelProps = (
 	element: TimelineElement,
 	sourceById: ReadonlyMap<string, TimelineAsset>,
+	projectId: string | null,
 ): Record<string, unknown> => {
 	const props = (element.props ?? {}) as Record<string, unknown>;
 	if (!isAssetBackedElementType(element.type)) return props;
 	if (!element.assetId) return props;
+	if (!projectId) return props;
 	const source = sourceById.get(element.assetId);
 	if (!source) return props;
+	const uri = resolveAssetPlayableUri(source, { projectId });
+	if (!uri) return props;
 	return {
 		...props,
-		uri: source.uri,
+		uri,
 	};
 };
 
@@ -67,6 +72,7 @@ const syncRuntimeModels = (
 	runtime: TimelineRuntime,
 	prevElements: TimelineElement[],
 	sourceById: ReadonlyMap<string, TimelineAsset>,
+	projectId: string | null,
 ): TimelineElement[] => {
 	const timelineState = runtime.timelineStore.getState();
 	const elements = timelineState.elements;
@@ -92,7 +98,7 @@ const syncRuntimeModels = (
 		}
 		const store = definition.createModel(
 			id,
-			resolveModelProps(element, sourceById),
+			resolveModelProps(element, sourceById, projectId),
 			scopedRuntime,
 		);
 		modelRegistry.register(id, store);
@@ -109,7 +115,7 @@ const syncRuntimeModels = (
 		if (!store) continue;
 		const state = store.getState();
 		const currentProps = state.props as Record<string, unknown>;
-		const nextProps = resolveModelProps(element, sourceById);
+		const nextProps = resolveModelProps(element, sourceById, projectId);
 		if (arePropsShallowEqual(currentProps, nextProps)) continue;
 		state.setProps(nextProps);
 	}
@@ -135,6 +141,7 @@ export const ModelLifecycleManager: React.FC = () => {
 		const runtimeSync = runtimeSyncRef.current;
 		const expectedRuntimeIds = new Set<string>();
 		const sourceById = buildSourceById(projectAssets);
+		const projectId = currentProject?.id ?? null;
 
 		for (const ref of timelineRefs) {
 			const runtime = runtimeManager.ensureTimelineRuntime(ref);
@@ -148,6 +155,7 @@ export const ModelLifecycleManager: React.FC = () => {
 					runtime,
 					existed.prevElements,
 					sourceById,
+					projectId,
 				);
 				continue;
 			}
@@ -165,6 +173,7 @@ export const ModelLifecycleManager: React.FC = () => {
 					runtime,
 					syncState.prevElements,
 					runtimeSourceById,
+					useProjectStore.getState().currentProject?.id ?? null,
 				);
 			};
 
@@ -182,7 +191,7 @@ export const ModelLifecycleManager: React.FC = () => {
 			}
 			runtimeSync.delete(runtimeId);
 		}
-	}, [rootRuntime, runtimeManager, projectAssets, timelineRefs]);
+	}, [rootRuntime, runtimeManager, projectAssets, timelineRefs, currentProject]);
 
 	useEffect(() => {
 		return () => {

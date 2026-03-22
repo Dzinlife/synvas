@@ -156,6 +156,8 @@ export const SOURCE_KIND_VALUES = [
 export type SourceKind = (typeof SOURCE_KIND_VALUES)[number];
 
 export interface AssetMetaSet {
+	hash?: string;
+	fileName?: string;
 	asr?: TranscriptRecord;
 	sourceSize?: {
 		width: number;
@@ -164,11 +166,31 @@ export interface AssetMetaSet {
 	[key: string]: unknown;
 }
 
+export interface TimelineAssetLocatorLinkedFile {
+	type: "linked-file";
+	filePath: string;
+}
+
+export interface TimelineAssetLocatorLinkedRemote {
+	type: "linked-remote";
+	uri: string;
+}
+
+export interface TimelineAssetLocatorManaged {
+	type: "managed";
+	fileName: string;
+}
+
+export type TimelineAssetLocator =
+	| TimelineAssetLocatorLinkedFile
+	| TimelineAssetLocatorLinkedRemote
+	| TimelineAssetLocatorManaged;
+
 export interface TimelineAsset {
 	id: string;
-	uri: string;
 	kind: SourceKind;
-	name?: string;
+	name: string;
+	locator: TimelineAssetLocator;
 	meta?: AssetMetaSet;
 }
 

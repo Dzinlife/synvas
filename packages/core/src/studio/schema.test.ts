@@ -7,21 +7,39 @@ const createValidProject = () => ({
 	assets: [
 		{
 			id: "asset-video-1",
-			uri: "file:///video.mp4",
 			kind: "video",
 			name: "video.mp4",
+			locator: {
+				type: "linked-file",
+				filePath: "/video.mp4",
+			},
+			meta: {
+				fileName: "video.mp4",
+			},
 		},
 		{
 			id: "asset-audio-1",
-			uri: "file:///audio.mp3",
 			kind: "audio",
 			name: "audio.mp3",
+			locator: {
+				type: "linked-file",
+				filePath: "/audio.mp3",
+			},
+			meta: {
+				fileName: "audio.mp3",
+			},
 		},
 		{
 			id: "asset-image-1",
-			uri: "file:///image.png",
 			kind: "image",
 			name: "image.png",
+			locator: {
+				type: "linked-file",
+				filePath: "/image.png",
+			},
+			meta: {
+				fileName: "image.png",
+			},
 		},
 	],
 	canvas: {
@@ -188,5 +206,12 @@ describe("studio schema", () => {
 			updatedAt: 1,
 		};
 		expect(() => parseStudioProject(legacy)).toThrow();
+	});
+
+	it("旧的扁平 uri 资产结构应被拒绝", () => {
+		const invalid = createValidProject();
+		(invalid.assets[0] as unknown as { uri?: string }).uri = "file:///legacy.mp4";
+		delete (invalid.assets[0] as unknown as { locator?: unknown }).locator;
+		expect(() => parseStudioProject(invalid)).toThrow();
 	});
 });

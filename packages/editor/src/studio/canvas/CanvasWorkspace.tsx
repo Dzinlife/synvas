@@ -12,10 +12,9 @@ import {
 	useState,
 } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import { writeAudioToOpfs } from "@/asr/opfsAudio";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
-import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
+import { ingestExternalFileAsset } from "@/projects/assetIngest";
 import { useProjectStore } from "@/projects/projectStore";
 import {
 	getCanvasCamera,
@@ -34,7 +33,6 @@ import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { DEFAULT_TRACK_HEIGHT } from "@/scene-editor/timeline/trackConfig";
 import { getAudioTrackControlState } from "@/scene-editor/utils/audioTrackState";
 import { findAttachments } from "@/scene-editor/utils/attachments";
-import { resolveExternalVideoUri } from "@/scene-editor/utils/externalVideo";
 import {
 	finalizeTimelineElements,
 	insertElementIntoMainTrack,
@@ -120,7 +118,6 @@ import {
 	type ResolvedCanvasDrawerOptions,
 	resolveDrawerOptions,
 	resolveDroppedFiles,
-	resolveExternalFileUri,
 	SIDEBAR_VIEW_PADDING_PX,
 	toTimelineContextMenuActions,
 } from "./canvasWorkspaceUtils";
@@ -579,9 +576,7 @@ const CanvasWorkspace = () => {
 	const updateCanvasNodeLayout = useProjectStore(
 		(state) => state.updateCanvasNodeLayout,
 	);
-	const ensureProjectAssetByUri = useProjectStore(
-		(state) => state.ensureProjectAssetByUri,
-	);
+	const ensureProjectAsset = useProjectStore((state) => state.ensureProjectAsset);
 	const updateProjectAssetMeta = useProjectStore(
 		(state) => state.updateProjectAssetMeta,
 	);
@@ -3953,18 +3948,15 @@ const CanvasWorkspace = () => {
 					: undefined) ?? Object.values(currentProject.scenes)[0]?.timeline;
 			const fps = activeSceneTimeline?.fps ?? 30;
 
-			const resolveExternalFile = (
+			const ingestExternalFile = (
 				file: File,
 				kind: "video" | "audio" | "image",
 			) => {
-				return resolveExternalFileUri(
+				return ingestExternalFileAsset({
 					file,
 					kind,
-					currentProjectId,
-					resolveExternalVideoUri,
-					writeAudioToOpfs,
-					writeProjectFileToOpfs,
-				);
+					projectId: currentProjectId,
+				});
 			};
 
 			const nodeInputs: Array<{
@@ -3979,9 +3971,9 @@ const CanvasWorkspace = () => {
 					const matched = await definition.fromExternalFile(file, {
 						projectId: currentProjectId,
 						fps,
-						ensureProjectAssetByUri,
+						ensureProjectAsset,
 						updateProjectAssetMeta,
-						resolveExternalFileUri: resolveExternalFile,
+						ingestExternalFileAsset: ingestExternalFile,
 					});
 					if (!matched) continue;
 					resolvedInput = matched;
@@ -4018,7 +4010,7 @@ const CanvasWorkspace = () => {
 			createCanvasNode,
 			currentProject,
 			currentProjectId,
-			ensureProjectAssetByUri,
+			ensureProjectAsset,
 			updateProjectAssetMeta,
 			pushHistory,
 			resolveWorldPoint,

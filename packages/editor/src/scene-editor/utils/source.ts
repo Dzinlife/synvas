@@ -1,4 +1,8 @@
 import type { TimelineElement, TimelineAsset } from "core/element/types";
+import {
+	resolveAssetPlayableUri,
+	type ResolveAssetPlayableUriContext,
+} from "@/projects/assetLocator";
 
 export const getAssetById = (
 	assets: TimelineAsset[],
@@ -19,8 +23,9 @@ export const resolveElementSource = (
 export const resolveElementSourceUri = (
 	element: TimelineElement | null | undefined,
 	assets: TimelineAsset[],
+	context: ResolveAssetPlayableUriContext = {},
 ): string | null => {
 	const source = resolveElementSource(element, assets);
 	if (!source) return null;
-	return source.uri;
+	return resolveAssetPlayableUri(source, context);
 };

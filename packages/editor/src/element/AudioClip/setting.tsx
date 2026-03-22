@@ -1,3 +1,5 @@
+import { resolveAssetDisplayLabel } from "@/projects/assetLocator";
+import { useProjectStore } from "@/projects/projectStore";
 import { useProjectAssets } from "@/projects/useProjectAssets";
 import type { ElementComponentSettingProps } from "../model/componentRegistry";
 import type { AudioClipProps } from "./model";
@@ -8,7 +10,11 @@ export const AudioClipSetting = ({
 }: ElementComponentSettingProps<AudioClipProps>) => {
 	const reversed = Boolean(element.props.reversed);
 	const { getProjectAssetById } = useProjectAssets();
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const source = getProjectAssetById(element.assetId ?? "");
+	const sourceLabel = resolveAssetDisplayLabel(source, {
+		projectId: currentProjectId,
+	});
 
 	return (
 		<div className="space-y-3 pt-2 border-t border-white/10">
@@ -17,7 +23,7 @@ export const AudioClipSetting = ({
 			<div className="space-y-1.5">
 				<div className="text-xs text-neutral-400">Source</div>
 				<div className="text-xs text-neutral-200 break-all">
-					{source?.uri ?? "未绑定素材"}
+					{sourceLabel ?? "未绑定素材"}
 				</div>
 			</div>
 

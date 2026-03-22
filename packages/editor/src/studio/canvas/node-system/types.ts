@@ -5,8 +5,12 @@ import type {
 	StudioProject,
 } from "core/studio/types";
 import type React from "react";
+import type { IngestExternalFileAssetResult } from "@/projects/assetIngest";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
-import type { CanvasNodeCreateInput } from "@/projects/projectStore";
+import type {
+	CanvasNodeCreateInput,
+	EnsureProjectAssetInput,
+} from "@/projects/projectStore";
 import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 
 export interface CanvasNodeSkiaRenderProps<
@@ -108,21 +112,17 @@ export interface CanvasNodeToTimelineElementContext<
 export interface CanvasExternalFileContext {
 	projectId: string;
 	fps: number;
-	ensureProjectAssetByUri: (input: {
-		uri: string;
-		kind: TimelineAsset["kind"];
-		name?: string;
-	}) => string;
+	ensureProjectAsset: (input: EnsureProjectAssetInput) => string;
 	updateProjectAssetMeta: (
 		assetId: string,
 		updater: (
 			prev: TimelineAsset["meta"] | undefined,
 		) => TimelineAsset["meta"] | undefined,
 	) => void;
-	resolveExternalFileUri: (
+	ingestExternalFileAsset: (
 		file: File,
 		kind: "video" | "audio" | "image",
-	) => Promise<string>;
+	) => Promise<IngestExternalFileAssetResult>;
 }
 
 export type CanvasExternalFileResult = CanvasNodeCreateInput | null;

@@ -5,14 +5,11 @@ import type {
 } from "core/element/types";
 import type React from "react";
 import { useCallback, useRef } from "react";
-import {
-	isAudioFile,
-	readAudioMetadata,
-	writeAudioToOpfs,
-} from "@/asr/opfsAudio";
+import { isAudioFile, readAudioMetadata } from "@/asr/opfsAudio";
 import { createTransformMeta } from "@/element/transform";
-import { writeProjectFileToOpfs } from "@/lib/projectOpfsStorage";
 import { toast } from "@/lib/toast";
+import { ingestExternalFileAsset as ingestProjectExternalFile } from "@/projects/assetIngest";
+import { isElectronEnv, resolveExternalFilePath } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
 import { useProjectAssets } from "@/projects/useProjectAssets";
 import { clampFrame } from "@/utils/timecode";
@@ -37,7 +34,6 @@ import {
 	getFallbackVideoMetadata,
 	isVideoFile,
 	readVideoMetadata,
-	resolveExternalVideoUri,
 } from "../utils/externalVideo";
 import { finalizeTimelineElements } from "../utils/mainTrackMagnet";
 import { buildTimelineMeta } from "../utils/timelineTime";
@@ -67,9 +63,6 @@ const IMAGE_EXTENSIONS = new Set([
 
 const DEFAULT_IMAGE_WIDTH = 1920;
 const DEFAULT_IMAGE_HEIGHT = 1080;
-const FILE_PREFIX = "file://";
-
-type FileWithPath = File & { path?: string };
 
 const isImageFile = (file: File): boolean => {
 	if (file.type.startsWith("image/")) return true;
@@ -77,65 +70,6 @@ const isImageFile = (file: File): boolean => {
 	if (parts.length < 2) return false;
 	const ext = parts[parts.length - 1];
 	return IMAGE_EXTENSIONS.has(ext);
-};
-
-const getFilePath = (file: File): string | null => {
-	const rawPath = (file as FileWithPath).path;
-	if (typeof rawPath !== "string") return null;
-	const trimmed = rawPath.trim();
-	return trimmed ? trimmed : null;
-};
-
-const getElectronFilePath = (file: File): string | null => {
-	if (typeof window === "undefined") return null;
-	const bridge = (
-		window as Window & {
-			aiNleElectron?: {
-				webUtils?: {
-					getPathForFile?: (file: File) => string | null | undefined;
-				};
-			};
-		}
-	).aiNleElectron;
-	const resolved = bridge?.webUtils?.getPathForFile?.(file);
-	if (typeof resolved !== "string") return null;
-	const trimmed = resolved.trim();
-	return trimmed ? trimmed : null;
-};
-
-const buildFileUrlFromPath = (rawPath: string): string => {
-	if (rawPath.startsWith(FILE_PREFIX)) return rawPath;
-	const normalized = rawPath.replace(/\\/g, "/");
-	let pathPart = normalized;
-	let isUnc = false;
-
-	if (pathPart.startsWith("//")) {
-		isUnc = true;
-		pathPart = pathPart.slice(2);
-	} else if (/^[a-zA-Z]:\//.test(pathPart)) {
-		pathPart = `/${pathPart}`;
-	} else if (!pathPart.startsWith("/")) {
-		pathPart = `/${pathPart}`;
-	}
-
-	const encoded = pathPart
-		.split("/")
-		.map((segment) => {
-			if (!segment) return "";
-			if (!isUnc && /^[a-zA-Z]:$/.test(segment)) return segment;
-			return encodeURIComponent(segment);
-		})
-		.join("/");
-
-	return `${FILE_PREFIX}${encoded}`;
-};
-
-const resolveExternalFileUrl = (file: File): string | null => {
-	if (typeof window === "undefined" || !("aiNleElectron" in window)) {
-		return null;
-	}
-	const filePath = getFilePath(file) ?? getElectronFilePath(file);
-	return filePath ? buildFileUrlFromPath(filePath) : null;
 };
 
 const readImageMetadata = async (
@@ -184,7 +118,7 @@ export function useExternalMaterialDnd({
 	const { fps } = useFps();
 	const { currentTime } = useCurrentTime();
 	const { setElements } = useElements();
-	const { ensureProjectAssetByUri } = useProjectAssets();
+	const { ensureProjectAsset } = useProjectAssets();
 	const { attachments, autoAttach } = useAttachments();
 	const { rippleEditingEnabled } = useRippleEditing();
 	const materialDndContext = useMaterialDndContext();
@@ -249,7 +183,7 @@ export function useExternalMaterialDnd({
 		[],
 	);
 
-	const isElectron = typeof window !== "undefined" && "aiNleElectron" in window;
+	const isElectron = isElectronEnv();
 
 	const getExternalVideoFiles = useCallback(
 		(dataTransfer: DataTransfer | null) => {
@@ -260,10 +194,8 @@ export function useExternalMaterialDnd({
 				.filter((file): file is File => Boolean(file));
 			const itemVideoFiles = itemFiles.filter((file) => isVideoFile(file));
 			if (isElectron) {
-				const hasFilePath = (file: File): boolean => {
-					const rawPath = (file as File & { path?: string }).path;
-					return typeof rawPath === "string" && rawPath.trim().length > 0;
-				};
+				const hasFilePath = (file: File): boolean =>
+					resolveExternalFilePath(file) !== null;
 				const itemWithPath = itemVideoFiles.filter((file) => hasFilePath(file));
 				if (itemWithPath.length > 0) return itemWithPath;
 			}
@@ -285,10 +217,8 @@ export function useExternalMaterialDnd({
 				.filter((file): file is File => Boolean(file));
 			const itemImageFiles = itemFiles.filter((file) => isImageFile(file));
 			if (isElectron) {
-				const hasFilePath = (file: File): boolean => {
-					const rawPath = (file as File & { path?: string }).path;
-					return typeof rawPath === "string" && rawPath.trim().length > 0;
-				};
+				const hasFilePath = (file: File): boolean =>
+					resolveExternalFilePath(file) !== null;
 				const itemWithPath = itemImageFiles.filter((file) => hasFilePath(file));
 				if (itemWithPath.length > 0) return itemWithPath;
 			}
@@ -299,46 +229,6 @@ export function useExternalMaterialDnd({
 			return itemImageFiles;
 		},
 		[isElectron],
-	);
-
-	const resolveExternalAudioUri = useCallback(
-		async (file: File) => {
-			if (isElectron) {
-				const fileUrl = resolveExternalFileUrl(file);
-				if (!fileUrl) {
-					throw new Error("无法读取本地音频文件路径");
-				}
-				return fileUrl;
-			}
-			if (!currentProjectId) {
-				throw new Error("当前项目不存在，无法写入 OPFS");
-			}
-			const { uri } = await writeAudioToOpfs(file, currentProjectId);
-			return uri;
-		},
-		[isElectron, currentProjectId],
-	);
-
-	const resolveExternalImageUri = useCallback(
-		async (file: File) => {
-			if (isElectron) {
-				const fileUrl = resolveExternalFileUrl(file);
-				if (!fileUrl) {
-					throw new Error("无法读取本地图片文件路径");
-				}
-				return fileUrl;
-			}
-			if (!currentProjectId) {
-				throw new Error("当前项目不存在，无法写入 OPFS");
-			}
-			const { uri } = await writeProjectFileToOpfs(
-				file,
-				currentProjectId,
-				"images",
-			);
-			return uri;
-		},
-		[isElectron, currentProjectId],
 	);
 
 	const resolveExternalDropTarget = useCallback(
@@ -366,10 +256,8 @@ export function useExternalMaterialDnd({
 				.filter((file): file is File => Boolean(file));
 			const itemAudioFiles = itemFiles.filter((file) => isAudioFile(file));
 			if (isElectron) {
-				const hasFilePath = (file: File): boolean => {
-					const rawPath = (file as File & { path?: string }).path;
-					return typeof rawPath === "string" && rawPath.trim().length > 0;
-				};
+				const hasFilePath = (file: File): boolean =>
+					resolveExternalFilePath(file) !== null;
 				const itemWithPath = itemAudioFiles.filter((file) => hasFilePath(file));
 				if (itemWithPath.length > 0) return itemWithPath;
 			}
@@ -607,18 +495,25 @@ export function useExternalMaterialDnd({
 			if (hasAudio) {
 				const prepared: {
 					file: File;
-					uri: string;
+					asset: Awaited<ReturnType<typeof ingestProjectExternalFile>>;
 					duration: number;
 				}[] = [];
 				for (const file of audioFiles) {
 					try {
-						const uri = await resolveExternalAudioUri(file);
+						if (!currentProjectId) {
+							throw new Error("当前项目不存在，无法写入素材");
+						}
+						const asset = await ingestProjectExternalFile({
+							file,
+							kind: "audio",
+							projectId: currentProjectId,
+						});
 						const metadata = await readAudioMetadata(file).catch(() => ({
 							duration: 1,
 						}));
 						prepared.push({
 							file,
-							uri,
+							asset,
 							duration: metadata.duration,
 						});
 					} catch (error) {
@@ -630,10 +525,11 @@ export function useExternalMaterialDnd({
 				if (prepared.length === 0) return;
 				const preparedWithAssetIds = prepared.map((item) => ({
 					...item,
-					assetId: ensureProjectAssetByUri({
-						uri: item.uri,
+					assetId: ensureProjectAsset({
 						kind: "audio",
-						name: item.file.name,
+						name: item.asset.name,
+						locator: item.asset.locator,
+						meta: item.asset.meta,
 					}),
 				}));
 
@@ -759,20 +655,27 @@ export function useExternalMaterialDnd({
 			if (hasImage) {
 				const prepared: {
 					file: File;
-					uri: string;
+					asset: Awaited<ReturnType<typeof ingestProjectExternalFile>>;
 					width: number;
 					height: number;
 				}[] = [];
 				for (const file of imageFiles) {
 					try {
-						const uri = await resolveExternalImageUri(file);
+						if (!currentProjectId) {
+							throw new Error("当前项目不存在，无法写入素材");
+						}
+						const asset = await ingestProjectExternalFile({
+							file,
+							kind: "image",
+							projectId: currentProjectId,
+						});
 						const metadata = await readImageMetadata(file).catch(() => ({
 							width: DEFAULT_IMAGE_WIDTH,
 							height: DEFAULT_IMAGE_HEIGHT,
 						}));
 						prepared.push({
 							file,
-							uri,
+							asset,
 							width: metadata.width,
 							height: metadata.height,
 						});
@@ -785,10 +688,17 @@ export function useExternalMaterialDnd({
 				if (prepared.length === 0) return;
 				const preparedWithAssetIds = prepared.map((item) => ({
 					...item,
-					assetId: ensureProjectAssetByUri({
-						uri: item.uri,
+					assetId: ensureProjectAsset({
 						kind: "image",
-						name: item.file.name,
+						name: item.asset.name,
+						locator: item.asset.locator,
+						meta: {
+							...(item.asset.meta ?? {}),
+							sourceSize: {
+								width: item.width,
+								height: item.height,
+							},
+						},
 					}),
 				}));
 
@@ -984,21 +894,25 @@ export function useExternalMaterialDnd({
 
 			const prepared: {
 				file: File;
-				uri: string;
+				asset: Awaited<ReturnType<typeof ingestProjectExternalFile>>;
 				metadata: ExternalVideoMetadata;
 			}[] = [];
 			for (const file of videoFiles) {
 				try {
 					if (!currentProjectId) {
-						throw new Error("当前项目不存在，无法写入 OPFS");
+						throw new Error("当前项目不存在，无法写入素材");
 					}
-					const uri = await resolveExternalVideoUri(file, currentProjectId);
+					const asset = await ingestProjectExternalFile({
+						file,
+						kind: "video",
+						projectId: currentProjectId,
+					});
 					const metadata = await readVideoMetadata(file).catch(() =>
 						getFallbackVideoMetadata(),
 					);
 					prepared.push({
 						file,
-						uri,
+						asset,
 						metadata,
 					});
 				} catch (error) {
@@ -1010,10 +924,17 @@ export function useExternalMaterialDnd({
 			if (prepared.length === 0) return;
 			const preparedWithAssetIds = prepared.map((item) => ({
 				...item,
-				assetId: ensureProjectAssetByUri({
-					uri: item.uri,
+				assetId: ensureProjectAsset({
 					kind: "video",
-					name: item.file.name,
+					name: item.asset.name,
+					locator: item.asset.locator,
+					meta: {
+						...(item.asset.meta ?? {}),
+						sourceSize: {
+							width: item.metadata.width,
+							height: item.metadata.height,
+						},
+					},
 				}),
 			}));
 
@@ -1218,9 +1139,7 @@ export function useExternalMaterialDnd({
 			attachments,
 			autoAttach,
 			trackLockedMap,
-			ensureProjectAssetByUri,
-			resolveExternalAudioUri,
-			resolveExternalImageUri,
+			ensureProjectAsset,
 			currentProjectId,
 		],
 	);

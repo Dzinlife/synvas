@@ -3,11 +3,14 @@ import { useEffect, useState } from "react";
 import { ImageShader, Rect, type SkImage } from "react-skia-lite";
 import type { AssetHandle } from "@/assets/AssetStore";
 import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
+import { useProjectStore } from "@/projects/projectStore";
 import type { CanvasNodeSkiaRenderProps } from "../types";
 
 export const ImageNodeSkiaRenderer: React.FC<
 	CanvasNodeSkiaRenderProps<ImageCanvasNode>
 > = ({ node, asset }) => {
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const [image, setImage] = useState<SkImage | null>(null);
 
 	useEffect(() => {
@@ -15,7 +18,14 @@ export const ImageNodeSkiaRenderer: React.FC<
 			setImage(null);
 			return;
 		}
-		if (!asset || asset.kind !== "image" || !asset.uri) {
+		if (!asset || asset.kind !== "image") {
+			setImage(null);
+			return;
+		}
+		const assetUri = resolveAssetPlayableUri(asset, {
+			projectId: currentProjectId,
+		});
+		if (!assetUri) {
 			setImage(null);
 			return;
 		}
@@ -25,7 +35,7 @@ export const ImageNodeSkiaRenderer: React.FC<
 		setImage(null);
 		void (async () => {
 			try {
-				localHandle = await acquireImageAsset(asset.uri);
+				localHandle = await acquireImageAsset(assetUri);
 				if (disposed) {
 					localHandle.release();
 					return;
@@ -42,7 +52,7 @@ export const ImageNodeSkiaRenderer: React.FC<
 			disposed = true;
 			localHandle?.release();
 		};
-	}, [node.type, asset?.kind, asset?.uri]);
+	}, [node.type, asset, currentProjectId]);
 
 	if (node.type !== "image") return null;
 	const width = Math.max(1, node.width);

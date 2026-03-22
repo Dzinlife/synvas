@@ -170,9 +170,9 @@ describe("projectOpfsStorage", () => {
 			"project-a",
 			"audios",
 		);
-		expect(result.uri).toMatch(
-			/^opfs:\/\/projects\/project-a\/audios\/voice-[0-9a-f]{64}\.mp3$/,
-		);
+		expect(result.uri).toBe("opfs://projects/project-a/audios/voice.mp3");
+		expect(result.fileName).toBe("voice.mp3");
+		expect(result.hash).toMatch(/^[0-9a-f]{64}$/);
 		const kindDir = await getKindDir(root, "project-a", "audios");
 		await expect(listFiles(kindDir)).resolves.toHaveLength(1);
 	});
@@ -210,6 +210,26 @@ describe("projectOpfsStorage", () => {
 		const dirB = await getKindDir(root, "project-b", "audios");
 		await expect(listFiles(dirA)).resolves.toHaveLength(1);
 		await expect(listFiles(dirB)).resolves.toHaveLength(1);
+	});
+
+	it("同名不同内容会追加 (n) 后缀", async () => {
+		const first = await writeProjectFileToOpfs(
+			makeTestFile("voice.wav", "content-a"),
+			"project-a",
+			"audios",
+		);
+		const second = await writeProjectFileToOpfs(
+			makeTestFile("voice.wav", "content-b"),
+			"project-a",
+			"audios",
+		);
+		expect(first.fileName).toBe("voice.wav");
+		expect(second.fileName).toBe("voice (1).wav");
+		const kindDir = await getKindDir(root, "project-a", "audios");
+		await expect(listFiles(kindDir)).resolves.toEqual([
+			"voice (1).wav",
+			"voice.wav",
+		]);
 	});
 
 	it("同项目不同类型目录不会互相复用", async () => {

@@ -18,11 +18,12 @@ const audioDefinition: CanvasNodeDefinition<AudioCanvasNode> = {
 		const metadata = await readAudioMetadata(file).catch(() => ({
 			duration: 1,
 		}));
-		const uri = await context.resolveExternalFileUri(file, "audio");
-		const assetId = context.ensureProjectAssetByUri({
-			uri,
+		const ingested = await context.ingestExternalFileAsset(file, "audio");
+		const assetId = context.ensureProjectAsset({
 			kind: "audio",
-			name: file.name,
+			name: ingested.name,
+			locator: ingested.locator,
+			meta: ingested.meta,
 		});
 		return {
 			type: "audio",

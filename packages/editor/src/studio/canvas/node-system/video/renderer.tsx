@@ -2,15 +2,19 @@ import type { TimelineAsset } from "core/element/types";
 import type { VideoCanvasNode } from "core/studio/types";
 import { useEffect, useMemo } from "react";
 import { ImageShader, Rect } from "react-skia-lite";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
+import { useProjectStore } from "@/projects/projectStore";
 import type { CanvasNodeSkiaRenderProps } from "../types";
 import { useVideoNodePlayback } from "./useVideoNodePlayback";
 
 const DEFAULT_FPS = 30;
 
-const resolveVideoAssetUri = (asset: TimelineAsset | null): string | null => {
+const resolveVideoAssetUri = (
+	asset: TimelineAsset | null,
+	projectId: string | null,
+): string | null => {
 	if (!asset || asset.kind !== "video") return null;
-	if (typeof asset.uri !== "string" || asset.uri.trim().length === 0) return null;
-	return asset.uri;
+	return resolveAssetPlayableUri(asset, { projectId });
 };
 
 const resolvePlaybackFps = (
@@ -27,9 +31,13 @@ const resolvePlaybackFps = (
 export const VideoNodeSkiaRenderer: React.FC<
 	CanvasNodeSkiaRenderProps<VideoCanvasNode>
 > = ({ node, asset, isActive, runtimeManager }) => {
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const width = Math.max(1, node.width);
 	const height = Math.max(1, node.height);
-	const assetUri = useMemo(() => resolveVideoAssetUri(asset), [asset]);
+	const assetUri = useMemo(
+		() => resolveVideoAssetUri(asset, currentProjectId),
+		[asset, currentProjectId],
+	);
 	const fps = resolvePlaybackFps(runtimeManager);
 	const { snapshot, pause } = useVideoNodePlayback({
 		nodeId: node.id,

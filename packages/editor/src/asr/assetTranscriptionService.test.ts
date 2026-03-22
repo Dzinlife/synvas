@@ -73,18 +73,25 @@ const createSource = (options?: {
 }): TimelineAsset => ({
 	id: "source-1",
 	kind: "video",
-	uri: "file:///clip.mp4",
 	name: "clip.mp4",
+	locator: {
+		type: "linked-remote",
+		uri: "https://example.com/clip.mp4",
+	},
+	meta: {
+		fileName: "clip.mp4",
+	},
 	...(options?.withAsr
 		? {
 				meta: {
+					fileName: "clip.mp4",
 					asr: {
 						id: "old-asr",
 						source: {
 							type: "asset" as const,
 							assetId: "source-1",
 							kind: "video" as const,
-							uri: "file:///clip.mp4",
+							uri: "https://example.com/clip.mp4",
 							fileName: "clip.mp4",
 							duration: 2,
 						},
@@ -128,6 +135,7 @@ describe("assetTranscriptionService", () => {
 		const controller = new AbortController();
 		const result = await transcribeAssetById({
 			assetId: "source-1",
+			projectId: "project-1",
 			asrClient,
 			signal: controller.signal,
 			language: "zh",
@@ -170,6 +178,7 @@ describe("assetTranscriptionService", () => {
 		controller.abort();
 		const result = await transcribeAssetById({
 			assetId: "source-1",
+			projectId: "project-1",
 			asrClient,
 			signal: controller.signal,
 			language: "zh",
@@ -212,6 +221,7 @@ describe("assetTranscriptionService", () => {
 		const controller = new AbortController();
 		const result = await transcribeAssetById({
 			assetId: "source-1",
+			projectId: "project-1",
 			asrClient,
 			signal: controller.signal,
 			language: "zh",

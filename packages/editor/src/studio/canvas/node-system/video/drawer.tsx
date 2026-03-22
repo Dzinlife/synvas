@@ -1,6 +1,8 @@
 import type { VideoCanvasNode } from "core/studio/types";
 import { useCallback, useContext, useMemo } from "react";
 import { Slider } from "@/components/ui/slider";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
+import { useProjectStore } from "@/projects/projectStore";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { framesToTimecode, secondsToFrames } from "@/utils/timecode";
@@ -35,10 +37,10 @@ const resolvePlaybackFps = (runtimeManager: StudioRuntimeManager | null): number
 
 const resolveAssetUri = (
 	asset: CanvasNodeDrawerProps<VideoCanvasNode>["asset"],
+	projectId: string | null,
 ): string | null => {
 	if (!asset || asset.kind !== "video") return null;
-	if (typeof asset.uri !== "string" || asset.uri.trim().length === 0) return null;
-	return asset.uri;
+	return resolveAssetPlayableUri(asset, { projectId });
 };
 
 const clampProgress = (value: number): number => {
@@ -54,13 +56,14 @@ export const VideoNodeDrawer = ({
 	node,
 	asset,
 }: CanvasNodeDrawerProps<VideoCanvasNode>) => {
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const runtime = useContext(EditorRuntimeContext);
 	const runtimeManager = useMemo(() => {
 		if (!isStudioRuntimeManager(runtime)) return null;
 		return runtime;
 	}, [runtime]);
 	const fps = resolvePlaybackFps(runtimeManager);
-	const assetUri = resolveAssetUri(asset);
+	const assetUri = resolveAssetUri(asset, currentProjectId);
 	const { snapshot, togglePlayback, seekToTime } = useVideoNodePlayback({
 		nodeId: node.id,
 		assetUri,

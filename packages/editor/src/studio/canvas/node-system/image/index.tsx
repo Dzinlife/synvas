@@ -107,26 +107,18 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 			width: 1920,
 			height: 1080,
 		}));
-		const uri = await context.resolveExternalFileUri(file, "image");
-		const assetId = context.ensureProjectAssetByUri({
-			uri,
+		const ingested = await context.ingestExternalFileAsset(file, "image");
+		const assetId = context.ensureProjectAsset({
 			kind: "image",
-			name: file.name,
-		});
-		context.updateProjectAssetMeta(assetId, (prev) => {
-			if (
-				prev?.sourceSize?.width === metadata.width &&
-				prev?.sourceSize?.height === metadata.height
-			) {
-				return prev;
-			}
-			return {
-				...prev,
+			name: ingested.name,
+			locator: ingested.locator,
+			meta: {
+				...(ingested.meta ?? {}),
 				sourceSize: {
 					width: metadata.width,
 					height: metadata.height,
 				},
-			};
+			},
 		});
 		return {
 			type: "image",

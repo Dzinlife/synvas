@@ -2,6 +2,8 @@ import type { TimelineAsset } from "core/element/types";
 import type { CanvasNode, SceneDocument } from "core/studio/types";
 import type React from "react";
 import { useMemo } from "react";
+import { resolveAssetDisplayLabel } from "@/projects/assetLocator";
+import { useProjectStore } from "@/projects/projectStore";
 
 interface CanvasActiveNodeMetaPanelProps {
 	node: CanvasNode;
@@ -23,6 +25,10 @@ const CanvasActiveNodeMetaPanel: React.FC<CanvasActiveNodeMetaPanelProps> = ({
 	scene,
 	asset,
 }) => {
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
+	const sourceUri = resolveAssetDisplayLabel(asset, {
+		projectId: currentProjectId,
+	});
 	const metaJson = useMemo(() => {
 		return JSON.stringify(
 			{
@@ -38,14 +44,15 @@ const CanvasActiveNodeMetaPanel: React.FC<CanvasActiveNodeMetaPanelProps> = ({
 							id: asset.id,
 							kind: asset.kind,
 							name: asset.name,
-							uri: asset.uri,
+							locator: asset.locator,
+							sourceUri,
 						}
 					: null,
 			},
 			null,
 			2,
 		);
-	}, [asset, node, scene]);
+	}, [asset, node, scene, sourceUri]);
 
 	return (
 		<div

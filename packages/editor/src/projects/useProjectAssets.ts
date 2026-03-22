@@ -7,14 +7,11 @@ export const useProjectAssets = () => {
 	const assets = useProjectStore(
 		(state) => state.currentProject?.assets ?? EMPTY_ASSETS,
 	);
-	const ensureProjectAssetByUri = useProjectStore(
-		(state) => state.ensureProjectAssetByUri,
+	const ensureProjectAsset = useProjectStore(
+		(state) => state.ensureProjectAsset,
 	);
 	const getProjectAssetById = useProjectStore(
 		(state) => state.getProjectAssetById,
-	);
-	const findProjectAssetByUri = useProjectStore(
-		(state) => state.findProjectAssetByUri,
 	);
 	const updateProjectAssetMeta = useProjectStore(
 		(state) => state.updateProjectAssetMeta,
@@ -22,9 +19,8 @@ export const useProjectAssets = () => {
 
 	return {
 		assets,
-		ensureProjectAssetByUri,
+		ensureProjectAsset,
 		getProjectAssetById,
-		findProjectAssetByUri,
 		updateProjectAssetMeta,
 	};
 };

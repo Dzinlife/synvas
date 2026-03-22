@@ -15,6 +15,13 @@ vi.mock("./useVideoNodePlayback", () => ({
 	useVideoNodePlayback: mocks.useVideoNodePlayback,
 }));
 
+vi.mock("@/projects/projectStore", () => ({
+	useProjectStore: (selector: (state: { currentProjectId: string | null }) => unknown) =>
+		selector({
+			currentProjectId: "project-1",
+		}),
+}));
+
 vi.mock("@/components/ui/slider", () => ({
 	Slider: ({
 		value,
@@ -67,8 +74,11 @@ const createNode = (): VideoCanvasNode => ({
 const createAsset = (): TimelineAsset => ({
 	id: "asset-video-1",
 	kind: "video",
-	uri: "file:///video.mp4",
 	name: "video.mp4",
+	locator: {
+		type: "linked-remote",
+		uri: "https://example.com/video.mp4",
+	},
 });
 
 describe("VideoNodeDrawer", () => {

@@ -1715,7 +1715,9 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 				runtimeManager,
 				targetElement,
 			);
-			const videoUri = resolveElementSourceUri(targetElement, assets);
+			const videoUri = resolveElementSourceUri(targetElement, assets, {
+				projectId: currentProject?.id ?? null,
+			});
 			if (isSingleVideo && hasSourceAudioTrack) {
 				const isActionDisabled = !videoUri;
 				actions.splice(2, 0, {
@@ -1812,6 +1814,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 		postProcessOptions,
 		setElements,
 		assets,
+		currentProject,
 		trackLockedMap,
 	]);
 

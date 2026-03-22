@@ -7,6 +7,7 @@ import {
 	screen,
 	waitFor,
 } from "@testing-library/react";
+import type { TimelineAsset } from "core/element/types";
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetAudioOwnerForTests, getOwner, requestOwner } from "@/audio/owner";
@@ -358,31 +359,38 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			fromExternalFile: async (
 				file: File,
 				context: {
-					ensureProjectAssetByUri: (input: {
-						uri: string;
+					ensureProjectAsset: (input: {
 						kind: "video" | "audio" | "image";
-						name?: string;
+						name: string;
+						locator: TimelineAsset["locator"];
+						meta?: TimelineAsset["meta"];
 					}) => string;
-					updateProjectAssetMeta: (
-						assetId: string,
-						updater: (prev: Record<string, unknown> | undefined) => unknown,
-					) => void;
+					ingestExternalFileAsset: (
+						file: File,
+						kind: "video" | "audio" | "image",
+					) => Promise<{
+						name: string;
+						locator: TimelineAsset["locator"];
+						meta?: TimelineAsset["meta"];
+					}>;
 				},
 			) => {
 				if (!file.type.startsWith("video/")) return null;
-				const uri = `file://${file.name}`;
-				const assetId = context.ensureProjectAssetByUri({
-					uri,
+				const assetId = context.ensureProjectAsset({
 					kind: "video",
 					name: file.name,
-				});
-				context.updateProjectAssetMeta(assetId, (prev) => ({
-					...(prev ?? {}),
-					sourceSize: {
-						width: 200,
-						height: 120,
+					locator: {
+						type: "linked-remote",
+						uri: `https://example.com/${file.name}`,
 					},
-				}));
+					meta: {
+						fileName: file.name,
+						sourceSize: {
+							width: 200,
+							height: 120,
+						},
+					},
+				});
 				return {
 					type: "video",
 					assetId,
@@ -451,19 +459,33 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			fromExternalFile: async (
 				file: File,
 				context: {
-					ensureProjectAssetByUri: (input: {
-						uri: string;
+					ensureProjectAsset: (input: {
 						kind: "video" | "audio" | "image";
-						name?: string;
+						name: string;
+						locator: TimelineAsset["locator"];
+						meta?: TimelineAsset["meta"];
 					}) => string;
+					ingestExternalFileAsset: (
+						file: File,
+						kind: "video" | "audio" | "image",
+					) => Promise<{
+						name: string;
+						locator: TimelineAsset["locator"];
+						meta?: TimelineAsset["meta"];
+					}>;
 				},
 			) => {
 				if (!file.type.startsWith("audio/")) return null;
-				const uri = `file://${file.name}`;
-				const assetId = context.ensureProjectAssetByUri({
-					uri,
+				const assetId = context.ensureProjectAsset({
 					kind: "audio",
 					name: file.name,
+					locator: {
+						type: "linked-remote",
+						uri: `https://example.com/${file.name}`,
+					},
+					meta: {
+						fileName: file.name,
+					},
 				});
 				return {
 					type: "audio",
@@ -573,31 +595,38 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			fromExternalFile: async (
 				file: File,
 				context: {
-					ensureProjectAssetByUri: (input: {
-						uri: string;
+					ensureProjectAsset: (input: {
 						kind: "video" | "audio" | "image";
-						name?: string;
+						name: string;
+						locator: TimelineAsset["locator"];
+						meta?: TimelineAsset["meta"];
 					}) => string;
-					updateProjectAssetMeta: (
-						assetId: string,
-						updater: (prev: Record<string, unknown> | undefined) => unknown,
-					) => void;
+					ingestExternalFileAsset: (
+						file: File,
+						kind: "video" | "audio" | "image",
+					) => Promise<{
+						name: string;
+						locator: TimelineAsset["locator"];
+						meta?: TimelineAsset["meta"];
+					}>;
 				},
 			) => {
 				if (!file.type.startsWith("image/")) return null;
-				const uri = `file://${file.name}`;
-				const assetId = context.ensureProjectAssetByUri({
-					uri,
+				const assetId = context.ensureProjectAsset({
 					kind: "image",
 					name: file.name,
-				});
-				context.updateProjectAssetMeta(assetId, (prev) => ({
-					...(prev ?? {}),
-					sourceSize: {
-						width: 240,
-						height: 140,
+					locator: {
+						type: "linked-remote",
+						uri: `https://example.com/${file.name}`,
 					},
-				}));
+					meta: {
+						fileName: file.name,
+						sourceSize: {
+							width: 240,
+							height: 140,
+						},
+					},
+				});
 				return {
 					type: "image",
 					assetId,
@@ -687,9 +716,15 @@ const createProject = (): StudioProject => ({
 	assets: [
 		{
 			id: "asset-scene",
-			uri: "file:///scene.png",
 			kind: "image",
 			name: "scene.png",
+			locator: {
+				type: "linked-file",
+				filePath: "/scene.png",
+			},
+			meta: {
+				fileName: "scene.png",
+			},
 		},
 	],
 	canvas: {

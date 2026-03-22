@@ -40,6 +40,13 @@ vi.mock("@/projects/useProjectAssets", () => ({
 	}),
 }));
 
+vi.mock("@/projects/projectStore", () => ({
+	useProjectStore: (selector: (state: { currentProjectId: string | null }) => unknown) =>
+		selector({
+			currentProjectId: "project-1",
+		}),
+}));
+
 const mockedTranscribeAssetById = vi.mocked(transcribeAssetById);
 
 afterEach(() => {
@@ -57,18 +64,25 @@ const asrClient: AsrClient = {
 const createSource = (withAsr: boolean): TimelineAsset => ({
 	id: "source-1",
 	kind: "video",
-	uri: "file:///clip.mp4",
 	name: "clip.mp4",
+	locator: {
+		type: "linked-remote",
+		uri: "https://example.com/clip.mp4",
+	},
+	meta: {
+		fileName: "clip.mp4",
+	},
 	...(withAsr
 		? {
 				meta: {
+					fileName: "clip.mp4",
 					asr: {
 						id: "asr-1",
 						source: {
 							type: "asset" as const,
 							assetId: "source-1",
 							kind: "video" as const,
-							uri: "file:///clip.mp4",
+							uri: "https://example.com/clip.mp4",
 							fileName: "clip.mp4",
 							duration: 3,
 						},
@@ -159,6 +173,7 @@ describe("SmartSpeechCutDialog", () => {
 			expect(mockedTranscribeAssetById).toHaveBeenCalledWith(
 				expect.objectContaining({
 					assetId: "source-1",
+					projectId: "project-1",
 					force: true,
 				}),
 			);
@@ -177,7 +192,7 @@ describe("SmartSpeechCutDialog", () => {
 			expect.objectContaining({
 				elementId: "clip-1",
 				assetId: "source-1",
-				sourceUri: "file:///clip.mp4",
+				sourceUri: "https://example.com/clip.mp4",
 			}),
 		);
 	});

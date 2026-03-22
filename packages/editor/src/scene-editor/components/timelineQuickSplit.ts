@@ -5,6 +5,7 @@ import {
 	closeVideoSample,
 	getVideoSampleAfterTime,
 } from "@/lib/videoFrameUtils";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { framesToSeconds } from "@/utils/timecode";
 import { isTransitionElement, reconcileTransitions } from "../utils/transitions";
 
@@ -561,6 +562,7 @@ const calculateQuickSplitVideoTime = (options: {
 export const analyzeVideoChangeForElement = async (options: {
 	element: QuickSplitCandidate;
 	fps: number;
+	projectId: string;
 	getProjectAssetById: (assetId: string) => TimelineAsset | null;
 	sensitivity?: number;
 	minSegmentSeconds?: number;
@@ -638,10 +640,16 @@ export const analyzeVideoChangeForElement = async (options: {
 	}
 
 	const source = options.getProjectAssetById(element.assetId ?? "");
-	if (!source?.uri) {
+	if (!source) {
 		throw new Error("视频源不存在或无效");
 	}
-	const handle = await acquireVideoAsset(source.uri);
+	const sourceUri = resolveAssetPlayableUri(source, {
+		projectId: options.projectId,
+	});
+	if (!sourceUri) {
+		throw new Error("视频源不存在或无效");
+	}
+	const handle = await acquireVideoAsset(sourceUri);
 	try {
 		const videoSampleSink = handle.asset.createVideoSampleSink();
 		const sampledFrames: number[] = [];

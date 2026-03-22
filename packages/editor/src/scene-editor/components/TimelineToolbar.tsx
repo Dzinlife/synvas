@@ -35,6 +35,8 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
+import { useProjectStore } from "@/projects/projectStore";
 import { useProjectAssets } from "@/projects/useProjectAssets";
 import { clampFrame } from "@/utils/timecode";
 import {
@@ -119,6 +121,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	const { elements, setElements } = useElements();
 	const { selectedIds, primaryId } = useMultiSelect();
 	const { assets, getProjectAssetById } = useProjectAssets();
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const { fps } = useFps();
 	const { tracks, audioTrackStates } = useTracks();
 	const currentTime = useTimelineStore((state) => state.currentTime);
@@ -229,12 +232,15 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		const asset = assets.find((item) => item.id === target.assetId);
 		if (!asset) return null;
 		if (asset.kind !== "video" && asset.kind !== "audio") return null;
-		if (!isSupportedAssetMediaUri(asset.uri)) return null;
+		const playableUri = resolveAssetPlayableUri(asset, {
+			projectId: currentProjectId,
+		});
+		if (!playableUri || !isSupportedAssetMediaUri(playableUri)) return null;
 		return {
 			elementId: target.id,
 			assetId: asset.id,
 		};
-	}, [primarySelectedElement, selectedIds, assets]);
+	}, [primarySelectedElement, selectedIds, assets, currentProjectId]);
 
 	useEffect(() => {
 		if (speechCutCandidate) return;
@@ -253,7 +259,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 	}, []);
 
 	const handleRunQuickSplit = useCallback(async () => {
-		if (!quickSplitCandidate || quickSplitRunning) return;
+		if (!quickSplitCandidate || quickSplitRunning || !currentProjectId) return;
 		const controller = new AbortController();
 		quickSplitAbortRef.current = controller;
 		setQuickSplitRunning(true);
@@ -263,6 +269,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 			const analysis = await analyzeVideoChangeForElement({
 				element: quickSplitCandidate,
 				fps,
+				projectId: currentProjectId,
 				getProjectAssetById,
 				sensitivity: quickSplitSensitivity,
 				minSegmentSeconds: quickSplitMinSegmentSeconds,
@@ -314,6 +321,7 @@ const TimelineToolbar: React.FC<{ className?: string }> = ({ className }) => {
 		quickSplitMode,
 		setElements,
 		getProjectAssetById,
+		currentProjectId,
 	]);
 
 	const handleSplit = useCallback(() => {

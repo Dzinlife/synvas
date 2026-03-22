@@ -29,9 +29,15 @@ const createProject = (): StudioProject => ({
 	assets: [
 		{
 			id: "asset-1",
-			uri: "file:///asset-1.png",
 			kind: "image",
 			name: "asset-1",
+			locator: {
+				type: "linked-file",
+				filePath: "/asset-1.png",
+			},
+			meta: {
+				fileName: "asset-1.png",
+			},
 		},
 	],
 	canvas: { nodes: [] },

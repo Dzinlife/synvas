@@ -13,6 +13,7 @@ import {
 	type VideoNodePlaybackController,
 } from "@/studio/canvas/node-system/video/playbackController";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 
 const DEFAULT_FPS = 30;
 
@@ -43,21 +44,23 @@ const resolveAssetUri = (
 	assets: TimelineAsset[],
 	assetId: string,
 	kind: "video" | "audio",
+	projectId: string,
 ): string | null => {
 	const asset = assets.find(
 		(item) => item.id === assetId && item.kind === kind,
 	);
 	if (!asset) return null;
-	if (typeof asset.uri !== "string") return null;
-	const uri = asset.uri.trim();
+	const uri = resolveAssetPlayableUri(asset, { projectId });
+	if (typeof uri !== "string") return null;
 	return uri.length > 0 ? uri : null;
 };
 
 const resolveVideoTarget = (
 	node: VideoCanvasNode,
 	assets: TimelineAsset[],
+	projectId: string,
 ): ActivePlaybackTarget => {
-	const assetUri = resolveAssetUri(assets, node.assetId, "video");
+	const assetUri = resolveAssetUri(assets, node.assetId, "video", projectId);
 	if (!assetUri) return null;
 	return {
 		type: "video",
@@ -69,8 +72,9 @@ const resolveVideoTarget = (
 const resolveAudioTarget = (
 	node: AudioCanvasNode,
 	assets: TimelineAsset[],
+	projectId: string,
 ): ActivePlaybackTarget => {
-	const assetUri = resolveAssetUri(assets, node.assetId, "audio");
+	const assetUri = resolveAssetUri(assets, node.assetId, "audio", projectId);
 	if (!assetUri) return null;
 	return {
 		type: "audio",
@@ -97,10 +101,10 @@ export const resolveActivePlaybackTarget = ({
 		};
 	}
 	if (activeNode.type === "video") {
-		return resolveVideoTarget(activeNode, assets);
+		return resolveVideoTarget(activeNode, assets, currentProject.id);
 	}
 	if (activeNode.type === "audio") {
-		return resolveAudioTarget(activeNode, assets);
+		return resolveAudioTarget(activeNode, assets, currentProject.id);
 	}
 	return null;
 };

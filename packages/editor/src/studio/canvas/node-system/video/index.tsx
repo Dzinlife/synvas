@@ -45,26 +45,18 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 		const metadata = await readVideoMetadata(file).catch(() =>
 			getFallbackVideoMetadata(),
 		);
-		const uri = await context.resolveExternalFileUri(file, "video");
-		const assetId = context.ensureProjectAssetByUri({
-			uri,
+		const ingested = await context.ingestExternalFileAsset(file, "video");
+		const assetId = context.ensureProjectAsset({
 			kind: "video",
-			name: file.name,
-		});
-		context.updateProjectAssetMeta(assetId, (prev) => {
-			if (
-				prev?.sourceSize?.width === metadata.width &&
-				prev?.sourceSize?.height === metadata.height
-			) {
-				return prev;
-			}
-			return {
-				...prev,
+			name: ingested.name,
+			locator: ingested.locator,
+			meta: {
+				...(ingested.meta ?? {}),
 				sourceSize: {
 					width: metadata.width,
 					height: metadata.height,
 				},
-			};
+			},
 		});
 		return {
 			type: "video",

@@ -75,6 +75,53 @@ const timelineSchema = z.object({
 	elements: z.array(z.unknown()),
 });
 
+const assetKindSchema = z.enum(["video", "audio", "image", "lottie", "unknown"]);
+const linkedRemoteUriSchema = nonEmptyStringSchema.refine(
+	(value) =>
+		value.startsWith("http://") ||
+		value.startsWith("https://") ||
+		value.startsWith("blob:"),
+	{
+		message: "must be http(s):// or blob: uri",
+	},
+);
+
+const timelineAssetLocatorSchema = z.discriminatedUnion("type", [
+	z.object({
+		type: z.literal("linked-file"),
+		filePath: nonEmptyStringSchema,
+	}),
+	z.object({
+		type: z.literal("linked-remote"),
+		uri: linkedRemoteUriSchema,
+	}),
+	z.object({
+		type: z.literal("managed"),
+		fileName: nonEmptyStringSchema,
+	}),
+]);
+
+const timelineAssetMetaSchema = z
+	.object({
+		hash: nonEmptyStringSchema.optional(),
+		fileName: nonEmptyStringSchema.optional(),
+		sourceSize: z
+			.object({
+				width: z.number().positive(),
+				height: z.number().positive(),
+			})
+			.optional(),
+	})
+	.catchall(z.unknown());
+
+const timelineAssetSchema = z.object({
+	id: nonEmptyStringSchema,
+	kind: assetKindSchema,
+	name: nonEmptyStringSchema,
+	locator: timelineAssetLocatorSchema,
+	meta: timelineAssetMetaSchema.optional(),
+});
+
 const sceneDocumentSchema = z.object({
 	id: nonEmptyStringSchema,
 	name: nonEmptyStringSchema,
@@ -139,7 +186,7 @@ const studioProjectSchema = z.object({
 	revision: z.number().int().nonnegative(),
 	canvas: canvasDocumentSchema,
 	scenes: z.record(nonEmptyStringSchema, sceneDocumentSchema),
-	assets: z.array(z.unknown()),
+	assets: z.array(timelineAssetSchema),
 	ot: studioOtSchema.optional(),
 	ui: z.object({
 		activeSceneId: nonEmptyStringSchema.nullable(),
