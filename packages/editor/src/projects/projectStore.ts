@@ -58,6 +58,11 @@ export interface CanvasNodeLayoutPatch {
 	locked?: boolean;
 }
 
+export interface CanvasNodeLayoutBatchEntry {
+	nodeId: string;
+	patch: CanvasNodeLayoutPatch;
+}
+
 export interface SceneCreateInput {
 	x?: number;
 	y?: number;
@@ -112,6 +117,7 @@ interface ProjectStoreState {
 		nodeId: string,
 		patch: CanvasNodeLayoutPatch,
 	) => void;
+	updateCanvasNodeLayoutBatch: (entries: CanvasNodeLayoutBatchEntry[]) => void;
 	setActiveNode: (nodeId: string | null) => void;
 	createSceneNode: (input?: SceneCreateInput) => string;
 	updateSceneNodeLayout: (nodeId: string, patch: CanvasNodeLayoutPatch) => void;
@@ -731,6 +737,56 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 	},
 	updateCanvasNodeLayout: (nodeId, patch) => {
 		get().updateCanvasNode(nodeId, patch);
+	},
+	updateCanvasNodeLayoutBatch: (entries) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			if (entries.length === 0) return state;
+			const mergedPatches = new Map<string, CanvasNodeLayoutPatch>();
+			for (const entry of entries) {
+				if (!entry.nodeId) continue;
+				const prevPatch = mergedPatches.get(entry.nodeId) ?? {};
+				mergedPatches.set(entry.nodeId, {
+					...prevPatch,
+					...entry.patch,
+				});
+			}
+			if (mergedPatches.size === 0) return state;
+			let didUpdate = false;
+			const now = Date.now();
+			const nextNodes = state.currentProject.canvas.nodes.map((node) => {
+				const patch = mergedPatches.get(node.id);
+				if (!patch) return node;
+				const nextNode = {
+					...node,
+					...patch,
+					id: node.id,
+					createdAt: node.createdAt,
+					updatedAt: now,
+				};
+				const didLayoutChange =
+					nextNode.x !== node.x ||
+					nextNode.y !== node.y ||
+					nextNode.width !== node.width ||
+					nextNode.height !== node.height ||
+					nextNode.zIndex !== node.zIndex ||
+					nextNode.hidden !== node.hidden ||
+					nextNode.locked !== node.locked;
+				if (!didLayoutChange) return node;
+				didUpdate = true;
+				return nextNode;
+			});
+			if (!didUpdate) return state;
+			const nextProject = withProjectRevision({
+				...state.currentProject,
+				canvas: {
+					nodes: nextNodes,
+				},
+			});
+			return {
+				currentProject: nextProject,
+			};
+		});
 	},
 	setActiveNode: (nodeId) => {
 		set((state) => {

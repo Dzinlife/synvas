@@ -35,6 +35,7 @@ import {
 	resolveDynamicMinZoom,
 	type CameraState,
 } from "./canvasWorkspaceUtils";
+import * as canvasSnapUtils from "./canvasSnapUtils";
 import CanvasWorkspace from "./CanvasWorkspace";
 
 const togglePlaybackMock = vi.fn();
@@ -77,6 +78,7 @@ interface MockCanvasNodeDragEvent extends MockCanvasNodePointerEvent {
 interface MockInfiniteSkiaCanvasProps {
 	width: number;
 	height: number;
+	nodes?: CanvasNode[];
 	camera?: { value: CameraState; _isSharedValue?: boolean };
 	focusedNodeId?: string | null;
 	selectedNodeIds?: string[];
@@ -1021,6 +1023,10 @@ const getLatestInfiniteSkiaCanvasProps = (): MockInfiniteSkiaCanvasProps => {
 		throw new Error("InfiniteSkiaCanvas props 未捕获");
 	}
 	return props;
+};
+
+const getLatestRenderNodeIds = (): string[] => {
+	return (getLatestInfiniteSkiaCanvasProps().nodes ?? []).map((node) => node.id);
 };
 
 const createCanvasWorkspaceRuntime = () => {
@@ -2257,27 +2263,131 @@ describe("CanvasWorkspace", () => {
 		expect(afterCamera.y).not.toBe(beforeCamera.y);
 	});
 
-	it("连续 wheel pan 不会触发 InfiniteSkiaCanvas React 重渲染", () => {
+	it("smooth 动画会一次切到起终并集可见集并在动画中保持稳定", async () => {
 		render(<CanvasWorkspace />);
+		clickCanvasAt(1120, 700);
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-1",
+			"node-video-1",
+			"node-image-1",
+		]);
+		clickSidebarNode("node-video-offscreen");
+		const unionNodeIds = [
+			"node-scene-1",
+			"node-video-1",
+			"node-scene-2",
+			"node-video-offscreen",
+			"node-image-1",
+		];
+		expect(getLatestRenderNodeIds()).toEqual(unionNodeIds);
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 96);
+			});
+		});
+		expect(getLatestRenderNodeIds()).toEqual(unionNodeIds);
+	});
+
+	it("连续 wheel pan 会降频更新可见裁切并在空闲后补算", async () => {
+		render(<CanvasWorkspace />);
+		clickCanvasAt(1120, 700);
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-1",
+			"node-video-1",
+			"node-image-1",
+		]);
 		const workspace = screen.getByTestId("canvas-workspace");
 		const initialRenderCount = infiniteSkiaCanvasPropsMock.mock.calls.length;
-		const beforeCamera = useCanvasCameraStore.getState().camera;
-		fireEvent.wheel(workspace, {
-			deltaX: 64,
-			deltaY: 32,
+		for (let i = 0; i < 6; i += 1) {
+			fireEvent.wheel(workspace, {
+				deltaX: 200,
+				deltaY: 0,
+			});
+		}
+		const afterBurstRenderCount = infiniteSkiaCanvasPropsMock.mock.calls.length;
+		expect(afterBurstRenderCount - initialRenderCount).toBeLessThan(6);
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-1",
+			"node-video-1",
+			"node-image-1",
+		]);
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 170);
+			});
 		});
-		fireEvent.wheel(workspace, {
-			deltaX: -48,
-			deltaY: 20,
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-2",
+			"node-video-offscreen",
+		]);
+		expect(infiniteSkiaCanvasPropsMock.mock.calls.length).toBeGreaterThan(
+			afterBurstRenderCount,
+		);
+	});
+
+	it("ctrl+wheel zoom 会降频更新可见裁切并在空闲后补算", async () => {
+		render(<CanvasWorkspace />);
+		clickCanvasAt(1120, 700);
+		const workspace = screen.getByTestId("canvas-workspace");
+		const initialRenderCount = infiniteSkiaCanvasPropsMock.mock.calls.length;
+		for (let i = 0; i < 6; i += 1) {
+			fireEvent.wheel(workspace, {
+				deltaY: 80,
+				ctrlKey: true,
+				clientX: 600,
+				clientY: 400,
+			});
+		}
+		const afterBurstRenderCount = infiniteSkiaCanvasPropsMock.mock.calls.length;
+		expect(afterBurstRenderCount - initialRenderCount).toBeLessThan(6);
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 170);
+			});
 		});
-		const afterCamera = useCanvasCameraStore.getState().camera;
-		expect(beforeCamera).toBeTruthy();
-		expect(afterCamera).toBeTruthy();
-		if (!beforeCamera || !afterCamera) return;
-		expect(
-			afterCamera.x !== beforeCamera.x || afterCamera.y !== beforeCamera.y,
-		).toBe(true);
-		expect(infiniteSkiaCanvasPropsMock.mock.calls.length).toBe(initialRenderCount);
+		expect(infiniteSkiaCanvasPropsMock.mock.calls.length).toBeGreaterThan(
+			afterBurstRenderCount,
+		);
+	});
+
+	it("渲染节点会按相机视口进行 AABB 裁切", () => {
+		render(<CanvasWorkspace />);
+		clickCanvasAt(1120, 700);
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-1",
+			"node-video-1",
+			"node-image-1",
+		]);
+		const workspace = screen.getByTestId("canvas-workspace");
+		fireEvent.wheel(workspace, {
+			deltaX: 2000,
+			deltaY: 0,
+		});
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-2",
+			"node-video-offscreen",
+		]);
+	});
+
+	it("外部 setCamera 会立即更新可见裁切", () => {
+		render(<CanvasWorkspace />);
+		clickCanvasAt(1120, 700);
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-1",
+			"node-video-1",
+			"node-image-1",
+		]);
+		act(() => {
+			useCanvasCameraStore.getState().setCamera({
+				x: -2000,
+				y: 0,
+				zoom: 1,
+			});
+		});
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-2",
+			"node-video-offscreen",
+		]);
 	});
 
 	it("wheel pan 不会改写 projectStore.currentProject 引用", () => {
@@ -3429,6 +3539,56 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
+	it("同一拖拽手势会复用吸附 guide 值缓存", () => {
+		const collectSpy = vi.spyOn(canvasSnapUtils, "collectCanvasSnapGuideValues");
+		try {
+			render(<CanvasWorkspace />);
+			clickNodeAt(300, 160);
+			clickNodeAt(720, 360, { shiftKey: true });
+			const node = getTopVisibleNodeAt(720, 360);
+			const beforeCalls = collectSpy.mock.calls.length;
+			act(() => {
+				const startEvent: MockCanvasNodeDragEvent = {
+					...createPointerMeta(720, 360),
+					movementX: 0,
+					movementY: 0,
+					first: true,
+					last: false,
+					tap: false,
+				};
+				getLatestInfiniteSkiaCanvasProps().onNodeDragStart?.(node, startEvent);
+				getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, startEvent);
+				const moveEvent1: MockCanvasNodeDragEvent = {
+					...createPointerMeta(800, 420),
+					movementX: 80,
+					movementY: 60,
+					first: false,
+					last: false,
+					tap: false,
+				};
+				getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, moveEvent1);
+				const moveEvent2: MockCanvasNodeDragEvent = {
+					...createPointerMeta(880, 480),
+					movementX: 160,
+					movementY: 120,
+					first: false,
+					last: false,
+					tap: false,
+				};
+				getLatestInfiniteSkiaCanvasProps().onNodeDrag?.(node, moveEvent2);
+				const endEvent: MockCanvasNodeDragEvent = {
+					...moveEvent2,
+					last: true,
+					buttons: 0,
+				};
+				getLatestInfiniteSkiaCanvasProps().onNodeDragEnd?.(node, endEvent);
+			});
+			expect(collectSpy.mock.calls.length - beforeCalls).toBe(1);
+		} finally {
+			collectSpy.mockRestore();
+		}
+	});
+
 	it("拖入 timeline 区域后会复位画布节点并创建 timeline element", () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const removeDropZone = mountMainTimelineDropZone();
@@ -3618,6 +3778,30 @@ describe("CanvasWorkspace", () => {
 		const past = useStudioHistoryStore.getState().past;
 		expect(past).toHaveLength(1);
 		expect(past[0]?.kind).toBe("canvas.node-layout.batch");
+	});
+
+	it("多选拖拽一次 move 仅触发一次 project revision 递增", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		const beforeRevision =
+			useProjectStore.getState().currentProject?.revision ?? 0;
+		dragNodeAt(720, 360, 820, 420);
+		const afterRevision =
+			useProjectStore.getState().currentProject?.revision ?? 0;
+		expect(afterRevision).toBe(beforeRevision + 1);
+	});
+
+	it("多选 resize 一次 move 仅触发一次 project revision 递增", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		const beforeRevision =
+			useProjectStore.getState().currentProject?.revision ?? 0;
+		resizeSelectionBoundsAt(940, 480, 1080, 480, "bottom-right");
+		const afterRevision =
+			useProjectStore.getState().currentProject?.revision ?? 0;
+		expect(afterRevision).toBe(beforeRevision + 1);
 	});
 
 	it("多选组拖拽会按 bbox 吸附到其他节点边线", () => {

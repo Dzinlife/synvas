@@ -25,6 +25,7 @@ const LABEL_FONT_FAMILY =
 const LABEL_TEXT_COLOR = "rgba(255,255,255,0.92)";
 const LABEL_GAP_PX = 6;
 const LABEL_DIMMED_OPACITY = 0.45;
+const LABEL_MIN_VISIBLE_WIDTH_PX = 24;
 const LABEL_TEXT_STYLE = {
 	fontFamily: LABEL_FONT_FAMILY,
 	fontSizePx: LABEL_FONT_SIZE_PX,
@@ -69,7 +70,8 @@ const CanvasNodeLabelSprite = ({
 			layout?.value ?? candidate.node,
 			camera.value,
 		);
-		return Math.max(0, Math.floor(frame.width));
+		const frameWidthPx = Math.max(0, Math.floor(frame.width));
+		return frameWidthPx >= LABEL_MIN_VISIBLE_WIDTH_PX ? frameWidthPx : 0;
 	});
 	const labelRequests = useMemo(() => {
 		return [
@@ -104,7 +106,8 @@ const CanvasNodeLabelSprite = ({
 			layout?.value ?? candidate.node,
 			camera.value,
 		);
-		if (!isCanvasScreenRectVisible(frame, viewport)) {
+		const isVisibleByWidth = frame.width >= LABEL_MIN_VISIBLE_WIDTH_PX;
+		if (!isCanvasScreenRectVisible(frame, viewport) || !isVisibleByWidth) {
 			return {
 				x: 0,
 				y: 0,
@@ -124,7 +127,10 @@ const CanvasNodeLabelSprite = ({
 			layout?.value ?? candidate.node,
 			camera.value,
 		);
-		return isCanvasScreenRectVisible(frame, viewport) ? candidate.opacity : 0;
+		const isVisibleByWidth = frame.width >= LABEL_MIN_VISIBLE_WIDTH_PX;
+		return isCanvasScreenRectVisible(frame, viewport) && isVisibleByWidth
+			? candidate.opacity
+			: 0;
 	});
 	if (!hasRenderableSprite || !renderableImage) return null;
 

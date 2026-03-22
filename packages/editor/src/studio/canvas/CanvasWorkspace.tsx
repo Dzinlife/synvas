@@ -177,6 +177,10 @@ interface NodeDragSession {
 	timelineDropMode: boolean;
 	timelineDropTarget: DropTargetInfo | null;
 	globalDragStarted: boolean;
+	guideValuesCache: {
+		key: string;
+		values: CanvasSnapGuideValues;
+	} | null;
 }
 
 interface CanvasMarqueeRect {
@@ -216,6 +220,7 @@ interface NodeResizeSession {
 	before: CanvasNodeLayoutSnapshot;
 	moved: boolean;
 	constraints: ResolvedCanvasNodeResizeConstraints;
+	guideValues: CanvasSnapGuideValues | null;
 }
 
 interface SelectionResizeSnapshot {
@@ -238,6 +243,7 @@ interface SelectionResizeSession {
 	fixedCornerY: number;
 	snapshots: Record<string, SelectionResizeSnapshot>;
 	moved: boolean;
+	guideValues: CanvasSnapGuideValues | null;
 }
 
 interface PendingCanvasClickSuppression {
@@ -246,9 +252,27 @@ interface PendingCanvasClickSuppression {
 }
 
 type CanvasGraphHistoryEntry = ClipboardCanvasGraphHistoryEntry;
+type PendingCameraCullUpdateKind = "pan" | "immediate" | "smooth";
+
+interface CanvasViewportWorldRect {
+	left: number;
+	right: number;
+	top: number;
+	bottom: number;
+}
+
+interface CanvasRenderCullState {
+	mode: "live" | "locked";
+	camera: CameraState;
+	lockedViewportRect: CanvasViewportWorldRect | null;
+	version: number;
+}
 
 const CANVAS_MARQUEE_ACTIVATION_PX = 3;
 const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
+const CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX = 160;
+const PAN_CULL_INTERVAL_MS = 120;
+const PAN_CULL_IDLE_FLUSH_MS = 120;
 
 const createCanvasEntityId = (prefix: string): string => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -352,6 +376,56 @@ const isNodeIntersectRect = (
 		rect.top < nodeBottom &&
 		rect.bottom > nodeTop
 	);
+};
+
+const resolveCameraViewportWorldRect = (
+	camera: CameraState,
+	stageWidth: number,
+	stageHeight: number,
+	overscanScreenPx: number,
+): CanvasViewportWorldRect | null => {
+	if (stageWidth <= 0 || stageHeight <= 0) return null;
+	const safeZoom = Math.max(camera.zoom, CAMERA_ZOOM_EPSILON);
+	const overscanWorld = Math.max(0, overscanScreenPx) / safeZoom;
+	return {
+		left: -camera.x - overscanWorld,
+		right: stageWidth / safeZoom - camera.x + overscanWorld,
+		top: -camera.y - overscanWorld,
+		bottom: stageHeight / safeZoom - camera.y + overscanWorld,
+	};
+};
+
+const isCameraStateEqual = (left: CameraState, right: CameraState): boolean => {
+	return left.x === right.x && left.y === right.y && left.zoom === right.zoom;
+};
+
+const isViewportWorldRectEqual = (
+	left: CanvasViewportWorldRect | null,
+	right: CanvasViewportWorldRect | null,
+): boolean => {
+	if (!left && !right) return true;
+	if (!left || !right) return false;
+	return (
+		left.left === right.left &&
+		left.right === right.right &&
+		left.top === right.top &&
+		left.bottom === right.bottom
+	);
+};
+
+const resolveViewportUnionRect = (
+	left: CanvasViewportWorldRect | null,
+	right: CanvasViewportWorldRect | null,
+): CanvasViewportWorldRect | null => {
+	if (!left && !right) return null;
+	if (!left) return right;
+	if (!right) return left;
+	return {
+		left: Math.min(left.left, right.left),
+		right: Math.max(left.right, right.right),
+		top: Math.min(left.top, right.top),
+		bottom: Math.max(left.bottom, right.bottom),
+	};
 };
 
 const resolvePositiveNumber = (value: unknown): number | null => {
@@ -577,6 +651,9 @@ const CanvasWorkspace = () => {
 	const updateCanvasNodeLayout = useProjectStore(
 		(state) => state.updateCanvasNodeLayout,
 	);
+	const updateCanvasNodeLayoutBatch = useProjectStore(
+		(state) => state.updateCanvasNodeLayoutBatch,
+	);
 	const ensureProjectAsset = useProjectStore((state) => state.ensureProjectAsset);
 	const updateProjectAssetMeta = useProjectStore(
 		(state) => state.updateProjectAssetMeta,
@@ -676,6 +753,24 @@ const CanvasWorkspace = () => {
 	const lastCanvasPointerWorldRef = useRef<{ x: number; y: number } | null>(
 		null,
 	);
+	const [renderCullState, setRenderCullState] = useState<CanvasRenderCullState>(
+		() => ({
+			mode: "live",
+			camera: initialCameraRef.current,
+			lockedViewportRect: null,
+			version: 0,
+		}),
+	);
+	const renderCullModeRef = useRef<CanvasRenderCullState["mode"]>(
+		renderCullState.mode,
+	);
+	const observedCameraStateRef = useRef<CameraState>(initialCameraRef.current);
+	const observedStageSizeRef = useRef(stageSize);
+	const pendingCameraCullUpdateKindRef =
+		useRef<PendingCameraCullUpdateKind | null>(null);
+	const panCullLastCommitAtRef = useRef(0);
+	const panCullPendingCameraRef = useRef<CameraState | null>(null);
+	const panCullIdleTimerRef = useRef<number | null>(null);
 	const {
 		cameraSharedValue,
 		getCamera,
@@ -684,17 +779,183 @@ const CanvasWorkspace = () => {
 	} = useCanvasCameraController({
 		camera: initialCameraRef.current,
 		onChange: setCanvasCamera,
-		onAnimationStateChange: setIsCameraAnimating,
+		onAnimationStateChange: (isAnimating) => {
+			setIsCameraAnimating(isAnimating);
+			if (!isAnimating) {
+				pendingCameraCullUpdateKindRef.current = null;
+			}
+		},
 	});
+	const clearPanCullIdleTimer = useEffectEvent(() => {
+		const timerId = panCullIdleTimerRef.current;
+		if (timerId === null) return;
+		panCullIdleTimerRef.current = null;
+		if (typeof window !== "undefined") {
+			window.clearTimeout(timerId);
+		}
+	});
+	const commitLiveCullCamera = useEffectEvent((camera: CameraState) => {
+		clearPanCullIdleTimer();
+		panCullPendingCameraRef.current = null;
+		panCullLastCommitAtRef.current = Date.now();
+		setRenderCullState((prev) => {
+			if (
+				prev.mode === "live" &&
+				prev.lockedViewportRect === null &&
+				isCameraStateEqual(prev.camera, camera)
+			) {
+				return prev;
+			}
+			return {
+				mode: "live",
+				camera,
+				lockedViewportRect: null,
+				version: prev.version + 1,
+			};
+		});
+	});
+	const flushPendingPanCullCommit = useEffectEvent(() => {
+		const pendingCamera = panCullPendingCameraRef.current;
+		if (!pendingCamera) return;
+		panCullPendingCameraRef.current = null;
+		panCullLastCommitAtRef.current = Date.now();
+		setRenderCullState((prev) => {
+			if (
+				prev.mode === "live" &&
+				prev.lockedViewportRect === null &&
+				isCameraStateEqual(prev.camera, pendingCamera)
+			) {
+				return prev;
+			}
+			return {
+				mode: "live",
+				camera: pendingCamera,
+				lockedViewportRect: null,
+				version: prev.version + 1,
+			};
+		});
+	});
+	const schedulePanCullCommit = useEffectEvent((camera: CameraState) => {
+		panCullPendingCameraRef.current = camera;
+		const now = Date.now();
+		const elapsed = now - panCullLastCommitAtRef.current;
+		if (panCullLastCommitAtRef.current === 0 || elapsed >= PAN_CULL_INTERVAL_MS) {
+			flushPendingPanCullCommit();
+		}
+		clearPanCullIdleTimer();
+		if (typeof window === "undefined") return;
+		panCullIdleTimerRef.current = window.setTimeout(() => {
+			panCullIdleTimerRef.current = null;
+			flushPendingPanCullCommit();
+		}, PAN_CULL_IDLE_FLUSH_MS);
+	});
+	const lockRenderCullToViewportRect = useEffectEvent(
+		(viewportRect: CanvasViewportWorldRect | null, camera: CameraState) => {
+			clearPanCullIdleTimer();
+			panCullPendingCameraRef.current = null;
+			setRenderCullState((prev) => {
+				if (
+					prev.mode === "locked" &&
+					isCameraStateEqual(prev.camera, camera) &&
+					isViewportWorldRectEqual(prev.lockedViewportRect, viewportRect)
+				) {
+					return prev;
+				}
+				return {
+					mode: "locked",
+					camera,
+					lockedViewportRect: viewportRect,
+					version: prev.version + 1,
+				};
+			});
+		},
+	);
+	const applyInstantCameraWithCullIntent = useEffectEvent(
+		(nextCamera: CameraState, kind: Exclude<PendingCameraCullUpdateKind, "smooth">) => {
+			const currentCamera = getCamera();
+			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+			pendingCameraCullUpdateKindRef.current = kind;
+			applyCamera(nextCamera, {
+				transition: "instant",
+			});
+		},
+	);
+	const applySmoothCameraWithCullLock = useEffectEvent((nextCamera: CameraState) => {
+		const currentCamera = getCamera();
+		if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+		const startRect = resolveCameraViewportWorldRect(
+			currentCamera,
+			stageSize.width,
+			stageSize.height,
+			CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX,
+		);
+		const endRect = resolveCameraViewportWorldRect(
+			nextCamera,
+			stageSize.width,
+			stageSize.height,
+			CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX,
+		);
+		lockRenderCullToViewportRect(
+			resolveViewportUnionRect(startRect, endRect),
+			nextCamera,
+		);
+		pendingCameraCullUpdateKindRef.current = "smooth";
+		applyCamera(nextCamera);
+	});
+	const handleCameraStoreCameraChange = useEffectEvent(
+		(nextCamera: CameraState, previousCamera: CameraState) => {
+			const pendingKind = pendingCameraCullUpdateKindRef.current;
+			pendingCameraCullUpdateKindRef.current = null;
+			if (isCameraAnimating || pendingKind === "smooth") return;
+			const shouldThrottleCullUpdate =
+				pendingKind === "pan" &&
+				!isCameraStateEqual(previousCamera, nextCamera);
+			if (shouldThrottleCullUpdate) {
+				schedulePanCullCommit(nextCamera);
+				return;
+			}
+			commitLiveCullCamera(nextCamera);
+		},
+	);
 	const syncCameraFromStore = useEffectEvent(() => {
 		stopCameraAnimation();
-		applyCamera(getCanvasCamera(), {
-			transition: "instant",
-		});
+		applyInstantCameraWithCullIntent(getCanvasCamera(), "immediate");
 	});
 	useEffect(() => {
 		syncCameraFromStore();
 	}, [currentProjectId]);
+	useEffect(() => {
+		renderCullModeRef.current = renderCullState.mode;
+	}, [renderCullState.mode]);
+	useEffect(() => {
+		observedCameraStateRef.current = getCanvasCamera();
+		return useCanvasCameraStore.subscribe((state) => {
+			const nextCamera = state.camera;
+			const previousCamera = observedCameraStateRef.current;
+			if (isCameraStateEqual(previousCamera, nextCamera)) return;
+			observedCameraStateRef.current = nextCamera;
+			handleCameraStoreCameraChange(nextCamera, previousCamera);
+		});
+	}, [handleCameraStoreCameraChange]);
+	useEffect(() => {
+		const previousStageSize = observedStageSizeRef.current;
+		if (
+			previousStageSize.width === stageSize.width &&
+			previousStageSize.height === stageSize.height
+		) {
+			return;
+		}
+		observedStageSizeRef.current = stageSize;
+		if (renderCullModeRef.current !== "locked") return;
+		commitLiveCullCamera(getCamera());
+	}, [commitLiveCullCamera, getCamera, stageSize.height, stageSize.width]);
+	useEffect(() => {
+		return () => {
+			clearPanCullIdleTimer();
+			panCullPendingCameraRef.current = null;
+			pendingCameraCullUpdateKindRef.current = null;
+		};
+	}, [clearPanCullIdleTimer]);
 	useEffect(() => {
 		const handleWindowMouseMove = (event: MouseEvent) => {
 			lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
@@ -738,6 +999,38 @@ const CanvasWorkspace = () => {
 			null
 		);
 	}, [activeNodeId, currentProject]);
+	const renderNodes = useMemo(() => {
+		if (sortedNodes.length === 0) return [];
+		const viewportRect =
+			renderCullState.mode === "locked"
+				? renderCullState.lockedViewportRect
+				: resolveCameraViewportWorldRect(
+						renderCullState.camera,
+						stageSize.width,
+						stageSize.height,
+						CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX,
+					);
+		if (!viewportRect) return sortedNodes;
+		const forcedNodeIds = new Set(normalizedSelectedNodeIds);
+		if (activeNodeId) {
+			forcedNodeIds.add(activeNodeId);
+		}
+		if (focusedNodeId) {
+			forcedNodeIds.add(focusedNodeId);
+		}
+		return sortedNodes.filter((node) => {
+			if (forcedNodeIds.has(node.id)) return true;
+			return isNodeIntersectRect(node, viewportRect);
+		});
+	}, [
+		activeNodeId,
+		focusedNodeId,
+		normalizedSelectedNodeIds,
+		renderCullState.version,
+		sortedNodes,
+		stageSize.height,
+		stageSize.width,
+	]);
 	useEffect(() => {
 		if (!runtimeManager) {
 			setSelectedTimelineElement(null);
@@ -1381,8 +1674,8 @@ const CanvasWorkspace = () => {
 			const previous = preFocusCameraRef.current;
 			preFocusCameraRef.current = null;
 			// 退出 focus 时总是尝试恢复，避免在首帧前退出导致旧 focus 动画继续到终点。
-			if (previous) {
-				applyCamera(previous);
+			if (previous && !isCameraAlmostEqual(currentCamera, previous)) {
+				applySmoothCameraWithCullLock(previous);
 			}
 		}
 		prevFocusedNodeIdRef.current = focusedNodeId;
@@ -1400,8 +1693,9 @@ const CanvasWorkspace = () => {
 		});
 		const currentCamera = getCamera();
 		if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
-		applyCamera(nextCamera);
+		applySmoothCameraWithCullLock(nextCamera);
 	}, [
+		applySmoothCameraWithCullLock,
 		cameraSafeInsets,
 		focusedNode,
 		focusedNodeId,
@@ -1433,25 +1727,31 @@ const CanvasWorkspace = () => {
 			if (nextZoom === currentCamera.zoom) return;
 			const safeCurrentZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
 			const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
-			const anchorX = stageSize.width > 0 ? stageSize.width / 2 : 0;
-			const anchorY = stageSize.height > 0 ? stageSize.height / 2 : 0;
-			const anchorWorldX = anchorX / safeCurrentZoom - currentCamera.x;
-			const anchorWorldY = anchorY / safeCurrentZoom - currentCamera.y;
-			applyCamera(
-				{
-					x: anchorX / safeNextZoom - anchorWorldX,
-					y: anchorY / safeNextZoom - anchorWorldY,
-					zoom: nextZoom,
-				},
-				{ transition: "instant" },
-			);
-		},
-		[applyCamera, dynamicMinZoom, getCamera, stageSize.height, stageSize.width],
-	);
+				const anchorX = stageSize.width > 0 ? stageSize.width / 2 : 0;
+				const anchorY = stageSize.height > 0 ? stageSize.height / 2 : 0;
+				const anchorWorldX = anchorX / safeCurrentZoom - currentCamera.x;
+				const anchorWorldY = anchorY / safeCurrentZoom - currentCamera.y;
+				applyInstantCameraWithCullIntent(
+					{
+						x: anchorX / safeNextZoom - anchorWorldX,
+						y: anchorY / safeNextZoom - anchorWorldY,
+						zoom: nextZoom,
+					},
+					"immediate",
+				);
+			},
+			[
+				applyInstantCameraWithCullIntent,
+				dynamicMinZoom,
+				getCamera,
+				stageSize.height,
+				stageSize.width,
+			],
+		);
 
-	const handleResetView = useCallback(() => {
-		applyCamera(DEFAULT_CAMERA);
-	}, [applyCamera]);
+		const handleResetView = useCallback(() => {
+			applySmoothCameraWithCullLock(DEFAULT_CAMERA);
+		}, [applySmoothCameraWithCullLock]);
 
 	const handleContainerWheel = useCallback(
 		(event: WheelEvent) => {
@@ -1475,28 +1775,33 @@ const CanvasWorkspace = () => {
 					x: pointerX / oldZoom - currentCamera.x,
 					y: pointerY / oldZoom - currentCamera.y,
 				};
-				applyCamera(
+				applyInstantCameraWithCullIntent(
 					{
 						x: pointerX / safeNextZoom - worldPoint.x,
 						y: pointerY / safeNextZoom - worldPoint.y,
 						zoom: nextZoom,
 					},
-					{ transition: "instant" },
+					"pan",
 				);
 				return;
 			}
 			const safeZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
-			applyCamera(
+			applyInstantCameraWithCullIntent(
 				{
 					x: currentCamera.x - event.deltaX / safeZoom,
 					y: currentCamera.y - event.deltaY / safeZoom,
 					zoom: currentCamera.zoom,
 				},
-				{ transition: "instant" },
-				);
-			},
-			[applyCamera, dynamicMinZoom, focusedNodeId, getCamera],
-		);
+				"pan",
+			);
+		},
+		[
+			applyInstantCameraWithCullIntent,
+			dynamicMinZoom,
+			focusedNodeId,
+			getCamera,
+		],
+	);
 
 	useEffect(() => {
 		const container = containerRef.current;
@@ -1898,20 +2203,31 @@ const CanvasWorkspace = () => {
 				dragSession.copyEntries = [];
 				dragSession.copyMode = false;
 			}
-			for (const nodeId of dragSession.dragNodeIds) {
-				const snapshot = dragSession.snapshots[nodeId];
-				if (!snapshot) continue;
-				updateCanvasNodeLayout(nodeId, {
-					x: snapshot.startNodeX,
-					y: snapshot.startNodeY,
-				});
+			const rollbackEntries = dragSession.dragNodeIds
+				.map((nodeId) => {
+					const snapshot = dragSession.snapshots[nodeId];
+					if (!snapshot) return null;
+					return {
+						nodeId,
+						patch: {
+							x: snapshot.startNodeX,
+							y: snapshot.startNodeY,
+						},
+					};
+				})
+				.filter((entry): entry is { nodeId: string; patch: { x: number; y: number } } =>
+					Boolean(entry),
+				);
+			if (rollbackEntries.length > 0) {
+				updateCanvasNodeLayoutBatch(rollbackEntries);
 			}
 			dragSession.activated = false;
 			dragSession.moved = false;
 			dragSession.axisLock = null;
+			dragSession.guideValuesCache = null;
 			clearCanvasSnapGuides();
 		},
-		[clearCanvasSnapGuides, removeCanvasGraphBatch, updateCanvasNodeLayout],
+		[clearCanvasSnapGuides, removeCanvasGraphBatch, updateCanvasNodeLayoutBatch],
 	);
 
 	const buildTimelinePayloadFromCanvasDragSession = useCallback(
@@ -2393,6 +2709,7 @@ const CanvasWorkspace = () => {
 				before: pickLayout(node),
 				moved: false,
 				constraints: resolveNodeResizeConstraints(node),
+				guideValues: null,
 			};
 		},
 		[
@@ -2446,7 +2763,12 @@ const CanvasWorkspace = () => {
 				globalMinSize,
 			});
 			if (canvasSnapEnabled) {
-				const guideValues = resolveCanvasGuideValues([resizeSession.nodeId]);
+				if (!resizeSession.guideValues) {
+					resizeSession.guideValues = resolveCanvasGuideValues([
+						resizeSession.nodeId,
+					]);
+				}
+				const guideValues = resizeSession.guideValues;
 				const snapThreshold = resolveCanvasSnapThresholdWorld(currentZoom);
 				const candidateBox = {
 					x: nextLayout.x,
@@ -2630,6 +2952,7 @@ const CanvasWorkspace = () => {
 				timelineDropMode: false,
 				timelineDropTarget: null,
 				globalDragStarted: false,
+				guideValuesCache: null,
 			};
 			return true;
 		},
@@ -2748,7 +3071,17 @@ const CanvasWorkspace = () => {
 				deltaX = 0;
 			}
 			if (canvasSnapEnabled) {
-				const guideValues = resolveCanvasGuideValues(targetNodeIds);
+				const guideCacheKey = [...targetNodeIds].sort().join(",");
+				if (
+					!dragSession.guideValuesCache ||
+					dragSession.guideValuesCache.key !== guideCacheKey
+				) {
+					dragSession.guideValuesCache = {
+						key: guideCacheKey,
+						values: resolveCanvasGuideValues(targetNodeIds),
+					};
+				}
+				const guideValues = dragSession.guideValuesCache.values;
 				const snapThreshold = resolveCanvasSnapThresholdWorld(currentZoom);
 				const movingBox = {
 					x: dragSession.initialBounds.x + deltaX,
@@ -2783,6 +3116,13 @@ const CanvasWorkspace = () => {
 				clearCanvasSnapGuides();
 			}
 			let didMove = false;
+			const nextLayoutEntries: Array<{
+				nodeId: string;
+				patch: {
+					x: number;
+					y: number;
+				};
+			}> = [];
 			for (const targetNodeId of targetNodeIds) {
 				const snapshot = dragSession.snapshots[targetNodeId];
 				if (!snapshot) continue;
@@ -2791,10 +3131,16 @@ const CanvasWorkspace = () => {
 				if (nextX !== snapshot.startNodeX || nextY !== snapshot.startNodeY) {
 					didMove = true;
 				}
-				updateCanvasNodeLayout(targetNodeId, {
-					x: nextX,
-					y: nextY,
+				nextLayoutEntries.push({
+					nodeId: targetNodeId,
+					patch: {
+						x: nextX,
+						y: nextY,
+					},
 				});
+			}
+			if (nextLayoutEntries.length > 0) {
+				updateCanvasNodeLayoutBatch(nextLayoutEntries);
 			}
 			dragSession.moved = dragSession.moved || didMove;
 		},
@@ -2810,7 +3156,7 @@ const CanvasWorkspace = () => {
 			startCanvasTimelineDropPreview,
 			stopCanvasTimelineDropPreview,
 			setCanvasSnapGuides,
-			updateCanvasNodeLayout,
+			updateCanvasNodeLayoutBatch,
 			updateCanvasTimelineDropPreview,
 		],
 	);
@@ -3102,6 +3448,7 @@ const CanvasWorkspace = () => {
 					]),
 				),
 				moved: false,
+				guideValues: null,
 			};
 		},
 		[
@@ -3165,9 +3512,12 @@ const CanvasWorkspace = () => {
 				globalMinSize,
 			});
 			if (canvasSnapEnabled) {
-				const guideValues = resolveCanvasGuideValues(
-					Object.keys(resizeSession.snapshots),
-				);
+				if (!resizeSession.guideValues) {
+					resizeSession.guideValues = resolveCanvasGuideValues(
+						Object.keys(resizeSession.snapshots),
+					);
+				}
+				const guideValues = resizeSession.guideValues;
 				const snapThreshold = resolveCanvasSnapThresholdWorld(currentZoom);
 				const snapResult = resolveCanvasRectSnap({
 					guideValues,
@@ -3234,6 +3584,15 @@ const CanvasWorkspace = () => {
 			const scaleX = nextBoundsBox.width / safeStartWidth;
 			const scaleY = nextBoundsBox.height / safeStartHeight;
 			let didMove = false;
+			const nextLayoutEntries: Array<{
+				nodeId: string;
+				patch: {
+					x: number;
+					y: number;
+					width: number;
+					height: number;
+				};
+			}> = [];
 			for (const snapshot of Object.values(resizeSession.snapshots)) {
 				const candidateNodeX =
 					nextLeft +
@@ -3274,7 +3633,13 @@ const CanvasWorkspace = () => {
 				) {
 					didMove = true;
 				}
-				updateCanvasNodeLayout(snapshot.nodeId, nextLayout);
+				nextLayoutEntries.push({
+					nodeId: snapshot.nodeId,
+					patch: nextLayout,
+				});
+			}
+			if (nextLayoutEntries.length > 0) {
+				updateCanvasNodeLayoutBatch(nextLayoutEntries);
 			}
 			resizeSession.moved = resizeSession.moved || didMove;
 		},
@@ -3284,7 +3649,7 @@ const CanvasWorkspace = () => {
 			getCamera,
 			resolveCanvasGuideValues,
 			setCanvasSnapGuides,
-			updateCanvasNodeLayout,
+			updateCanvasNodeLayoutBatch,
 		],
 	);
 
@@ -3410,17 +3775,17 @@ const CanvasWorkspace = () => {
 				stageWidth,
 				stageHeight,
 				safeInsets: cameraSafeInsets,
-			});
-			const currentCamera = getCamera();
-			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
-			applyCamera(nextCamera);
-		},
-		[
-			applyCamera,
-			cameraSafeInsets,
-			commitSelectedNodeIds,
-			focusedNodeId,
-			getCamera,
+				});
+				const currentCamera = getCamera();
+				if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+				applySmoothCameraWithCullLock(nextCamera);
+			},
+			[
+				applySmoothCameraWithCullLock,
+				cameraSafeInsets,
+				commitSelectedNodeIds,
+				focusedNodeId,
+				getCamera,
 			isCanvasInteractionLocked,
 			setFocusedNode,
 			stageSize.height,
@@ -3439,17 +3804,17 @@ const CanvasWorkspace = () => {
 				camera: currentCamera,
 				stageWidth: stageSize.width,
 				stageHeight: stageSize.height,
-				safeInsets: cameraSafeInsets,
-				paddingPx: SIDEBAR_VIEW_PADDING_PX,
-			});
-			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
-			applyCamera(nextCamera);
-		},
-		[
-			applyCamera,
-			cameraSafeInsets,
-			getCamera,
-			handleNodeActivate,
+					safeInsets: cameraSafeInsets,
+					paddingPx: SIDEBAR_VIEW_PADDING_PX,
+				});
+				if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+				applySmoothCameraWithCullLock(nextCamera);
+			},
+			[
+				applySmoothCameraWithCullLock,
+				cameraSafeInsets,
+				getCamera,
+				handleNodeActivate,
 			isSidebarFocusMode,
 			stageSize.height,
 			stageSize.width,
@@ -4118,14 +4483,14 @@ const CanvasWorkspace = () => {
 			}}
 			onDrop={handleCanvasDrop}
 		>
-			<InfiniteSkiaCanvas
-				width={stageSize.width}
-				height={stageSize.height}
-				camera={cameraSharedValue}
-				nodes={sortedNodes}
-				scenes={currentProject.scenes}
-				assets={currentProject.assets}
-				activeNodeId={activeNodeId}
+				<InfiniteSkiaCanvas
+					width={stageSize.width}
+					height={stageSize.height}
+					camera={cameraSharedValue}
+					nodes={renderNodes}
+					scenes={currentProject.scenes}
+					assets={currentProject.assets}
+					activeNodeId={activeNodeId}
 				selectedNodeIds={normalizedSelectedNodeIds}
 				focusedNodeId={focusedNodeId}
 				snapGuidesScreen={snapGuidesScreen}

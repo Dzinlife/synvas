@@ -99,4 +99,35 @@ describe("CanvasNodeLabelLayer", () => {
 			_isSharedValue: true,
 		});
 	});
+
+	it("节点屏幕宽度小于 24px 时会把 maxWidthPx 置为 0", () => {
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={createSharedValue({ x: 0, y: 0, zoom: 1 })}
+				getNodeLayout={() =>
+					createSharedValue({ x: 0, y: 0, width: 20, height: 60 })
+				}
+				nodes={[createVideoNode({ width: 20 })]}
+				focusedNodeId={null}
+			/>,
+		);
+		const labelRequests = mockUseSkiaUiTextSprites.mock.calls
+			.map(
+				(call) =>
+					call[0] as Array<{
+						slotKey?: string;
+						maxWidthPx?: { value?: number; _isSharedValue?: boolean };
+					}>,
+			)
+			.find((requests) =>
+				requests.some((request) => request.slotKey === "node-a"),
+			);
+		expect(labelRequests).toBeTruthy();
+		expect(labelRequests?.[0]?.maxWidthPx).toMatchObject({
+			_isSharedValue: true,
+			value: 0,
+		});
+	});
 });

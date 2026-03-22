@@ -162,6 +162,74 @@ describe("projectStore", () => {
 		expect(project?.ui.focusedNodeId).toBeNull();
 	});
 
+	it("updateCanvasNodeLayoutBatch 会在一次写入中更新多个节点", () => {
+		const extraNodeId = useProjectStore.getState().createCanvasNode({
+			type: "video",
+			assetId: "asset-1",
+		});
+		const beforeRevision =
+			useProjectStore.getState().currentProject?.revision ?? 0;
+		useProjectStore.getState().updateCanvasNodeLayoutBatch([
+			{
+				nodeId: "node-1",
+				patch: {
+					x: 120,
+					y: 80,
+				},
+			},
+			{
+				nodeId: extraNodeId,
+				patch: {
+					x: 360,
+					y: 240,
+					width: 520,
+				},
+			},
+		]);
+		const project = useProjectStore.getState().currentProject;
+		const node1 = project?.canvas.nodes.find((node) => node.id === "node-1");
+		const extraNode =
+			project?.canvas.nodes.find((node) => node.id === extraNodeId) ?? null;
+		expect(node1?.x).toBe(120);
+		expect(node1?.y).toBe(80);
+		expect(extraNode?.x).toBe(360);
+		expect(extraNode?.y).toBe(240);
+		expect(extraNode?.width).toBe(520);
+		expect(project?.revision).toBe(beforeRevision + 1);
+	});
+
+	it("updateCanvasNodeLayoutBatch 会忽略无效节点与 no-op patch", () => {
+		const beforeProject = useProjectStore.getState().currentProject;
+		const beforeRevision = beforeProject?.revision ?? 0;
+		useProjectStore.getState().updateCanvasNodeLayoutBatch([
+			{
+				nodeId: "node-missing",
+				patch: {
+					x: 999,
+				},
+			},
+			{
+				nodeId: "node-1",
+				patch: {
+					x: 0,
+					y: 0,
+					width: 960,
+					height: 540,
+					zIndex: 0,
+					hidden: false,
+					locked: false,
+				},
+			},
+			{
+				nodeId: "node-1",
+				patch: {},
+			},
+		]);
+		const afterProject = useProjectStore.getState().currentProject;
+		expect(afterProject).toBe(beforeProject);
+		expect(afterProject?.revision).toBe(beforeRevision);
+	});
+
 	it("ensureProjectAsset 按 kind+hash 去重", () => {
 		const firstId = useProjectStore.getState().ensureProjectAsset({
 			kind: "audio",
