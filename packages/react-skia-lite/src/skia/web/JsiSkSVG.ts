@@ -2,7 +2,7 @@ import type { CanvasKit } from "canvaskit-wasm";
 
 import type { SkSVG } from "../types";
 
-import { HostObject } from "./Host";
+import { HostObject, SKIA_DISPOSE_SYMBOL } from "./Host";
 
 export class JsiSkSVG
   extends HostObject<HTMLImageElement, "SVG">
@@ -19,7 +19,7 @@ export class JsiSkSVG
     return this.ref.height;
   }
 
-  [Symbol.dispose]() {
+  [SKIA_DISPOSE_SYMBOL]() {
     if (this.ref.parentNode) {
       this.ref.parentNode.removeChild(this.ref);
     }

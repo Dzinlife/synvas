@@ -8,6 +8,14 @@ const disposeCleanupSymbol = Symbol("skia-dispose-cleanup");
 type DisposeCleanupCarrier = {
 	[disposeCleanupSymbol]?: Array<() => void>;
 };
+const symbolCtor = Symbol as SymbolConstructor & {
+	dispose?: typeof Symbol.dispose;
+};
+
+export const SKIA_DISPOSE_SYMBOL: typeof Symbol.dispose =
+	typeof symbolCtor.dispose === "symbol"
+		? symbolCtor.dispose
+		: (Symbol.for("Symbol.dispose") as typeof Symbol.dispose);
 
 export const throwNotImplementedOnRNWeb = <T>(): T => {
 	const jestFn = (globalThis as { jest?: { fn: () => unknown } }).jest?.fn;
@@ -52,14 +60,14 @@ export abstract class BaseHostObject<T, N extends string>
 	}
 
 	dispose() {
-		this[Symbol.dispose]();
+		this[SKIA_DISPOSE_SYMBOL]();
 	}
 
 	private setCurrentContextIfNeeded(currentRef: unknown) {
 		setCurrentCanvasKitContextIfNeeded(this.CanvasKit, currentRef);
 	}
 
-	[Symbol.dispose](): void {
+	[SKIA_DISPOSE_SYMBOL](): void {
 		const currentRef = this.ref as unknown;
 		if (!currentRef || typeof currentRef !== "object") {
 			runAttachedDisposeCleanups(this);

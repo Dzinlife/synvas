@@ -2,14 +2,14 @@ import type { CanvasKit, RRect } from "canvaskit-wasm";
 
 import type { InputRRect, SkRect, SkRRect } from "../types";
 
-import { BaseHostObject } from "./Host";
+import { BaseHostObject, SKIA_DISPOSE_SYMBOL } from "./Host";
 import { JsiSkRect } from "./JsiSkRect";
 
 export class JsiSkRRect
   extends BaseHostObject<RRect, "RRect">
   implements SkRRect
 {
-  [Symbol.dispose]() {
+  [SKIA_DISPOSE_SYMBOL]() {
     // nothing to do here, RRect is a Float32Array
   }
 

@@ -4,7 +4,7 @@ import type { CanvasKitWebGLBuffer, Video, ImageFactory } from "../types";
 
 import { CanvasKitWebGLBufferImpl } from "./CanvasKitWebGLBufferImpl";
 import { JsiSkImageFactory } from "./JsiSkImageFactory";
-import { throwNotImplementedOnRNWeb } from "./Host";
+import { SKIA_DISPOSE_SYMBOL, throwNotImplementedOnRNWeb } from "./Host";
 import { getSkiaRenderBackend } from "./renderBackend";
 
 export const createVideo = async (
@@ -92,13 +92,13 @@ export class JsiVideo implements Video {
     this.videoElement.volume = volume;
   }
 
-  [Symbol.dispose]() {
+  [SKIA_DISPOSE_SYMBOL]() {
     if (this.videoElement.parentNode) {
       this.videoElement.parentNode.removeChild(this.videoElement);
     }
   }
 
   dispose() {
-    this[Symbol.dispose]();
+    this[SKIA_DISPOSE_SYMBOL]();
   }
 }

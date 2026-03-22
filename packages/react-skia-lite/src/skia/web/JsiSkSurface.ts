@@ -2,7 +2,11 @@ import type { CanvasKit, Surface } from "canvaskit-wasm";
 
 import type { SkCanvas, SkImage, SkRect, SkSurface } from "../types";
 
-import { HostObject, runAttachedDisposeCleanups } from "./Host";
+import {
+  HostObject,
+  runAttachedDisposeCleanups,
+  SKIA_DISPOSE_SYMBOL,
+} from "./Host";
 import { JsiSkCanvas } from "./JsiSkCanvas";
 import { JsiSkImage } from "./JsiSkImage";
 import { JsiSkRect } from "./JsiSkRect";
@@ -37,7 +41,7 @@ export class JsiSkSurface
     this.cleanup = cleanup;
   }
 
-  [Symbol.dispose]() {
+  [SKIA_DISPOSE_SYMBOL]() {
     const ref = this.ref;
     this.ref = null as unknown as Surface;
     try {
