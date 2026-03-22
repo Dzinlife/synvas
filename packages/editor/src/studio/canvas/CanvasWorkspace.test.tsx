@@ -2369,6 +2369,20 @@ describe("CanvasWorkspace", () => {
 		]);
 	});
 
+	it("viewport 外 active 节点会被强制保留在渲染列表", () => {
+		render(<CanvasWorkspace />);
+		clickCanvasAt(1120, 700);
+		expect(getLatestRenderNodeIds()).toEqual([
+			"node-scene-1",
+			"node-video-1",
+			"node-image-1",
+		]);
+		act(() => {
+			useProjectStore.getState().setActiveNode("node-video-offscreen");
+		});
+		expect(getLatestRenderNodeIds()).toContain("node-video-offscreen");
+	});
+
 	it("外部 setCamera 会立即更新可见裁切", () => {
 		render(<CanvasWorkspace />);
 		clickCanvasAt(1120, 700);

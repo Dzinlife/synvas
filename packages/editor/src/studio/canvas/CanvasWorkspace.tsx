@@ -79,6 +79,11 @@ import CanvasWorkspaceOverlay, {
 	type DrawerViewData,
 } from "./CanvasWorkspaceOverlay";
 import {
+	CanvasSpatialIndex,
+	compareCanvasSpatialHitPriority,
+	compareCanvasSpatialPaintOrder,
+} from "./canvasSpatialIndex";
+import {
 	collectCanvasSnapGuideValues,
 	EMPTY_CANVAS_SNAP_GUIDES_SCREEN,
 	projectCanvasSnapGuidesToScreen,
@@ -273,6 +278,10 @@ const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
 const CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX = 160;
 const PAN_CULL_INTERVAL_MS = 120;
 const PAN_CULL_IDLE_FLUSH_MS = 120;
+const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
+	import.meta.env.DEV &&
+	(import.meta.env as Record<string, unknown>)
+		.VITE_CANVAS_SPATIAL_INDEX_VALIDATE === "1";
 
 const createCanvasEntityId = (prefix: string): string => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -376,6 +385,62 @@ const isNodeIntersectRect = (
 		rect.top < nodeBottom &&
 		rect.bottom > nodeTop
 	);
+};
+
+const compareCanvasNodePaintOrder = (
+	left: CanvasNode,
+	right: CanvasNode,
+): number => {
+	if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
+	return left.createdAt - right.createdAt;
+};
+
+const compareCanvasNodeHitPriority = (
+	left: CanvasNode,
+	right: CanvasNode,
+): number => {
+	if (left.zIndex !== right.zIndex) return right.zIndex - left.zIndex;
+	return right.createdAt - left.createdAt;
+};
+
+const resolveTopHitNodeByLinearScan = (
+	nodes: CanvasNode[],
+	worldX: number,
+	worldY: number,
+	isCanvasInteractionLocked: boolean,
+	focusedNodeId: string | null,
+): CanvasNode | null => {
+	for (let index = nodes.length - 1; index >= 0; index -= 1) {
+		const node = nodes[index];
+		if (!node) continue;
+		const canInteractNode =
+			!isCanvasInteractionLocked || node.id === focusedNodeId;
+		if (!canInteractNode) continue;
+		if (!isWorldPointInNode(node, worldX, worldY)) continue;
+		return node;
+	}
+	return null;
+};
+
+const areNodeIdsEqual = (left: string[], right: string[]): boolean => {
+	if (left.length !== right.length) return false;
+	for (let index = 0; index < left.length; index += 1) {
+		if (left[index] !== right[index]) return false;
+	}
+	return true;
+};
+
+const warnCanvasSpatialIndexMismatch = (
+	scope: "render-cull" | "point-hit" | "marquee",
+	legacyNodeIds: string[],
+	indexedNodeIds: string[],
+) => {
+	if (areNodeIdsEqual(legacyNodeIds, indexedNodeIds)) return;
+	// 仅在调试开关打开时提示差异，便于索引替换阶段校验一致性。
+	console.warn(`[CanvasSpatialIndex] ${scope} mismatch`, {
+		legacyNodeIds,
+		indexedNodeIds,
+	});
 };
 
 const resolveCameraViewportWorldRect = (
@@ -968,18 +1033,28 @@ const CanvasWorkspace = () => {
 		};
 	}, []);
 
+	const allCanvasNodes = useMemo(() => {
+		return currentProject?.canvas.nodes ?? [];
+	}, [currentProject]);
 	const sortedNodes = useMemo(() => {
-		if (!currentProject) return [];
-		return [...currentProject.canvas.nodes]
+		return [...allCanvasNodes]
 			.filter((node) => !node.hidden)
-			.sort((a, b) => {
-				if (a.zIndex !== b.zIndex) return a.zIndex - b.zIndex;
-				return a.createdAt - b.createdAt;
-			});
-	}, [currentProject]);
+			.sort(compareCanvasNodePaintOrder);
+	}, [allCanvasNodes]);
+	const nodeById = useMemo(() => {
+		return new Map(allCanvasNodes.map((node) => [node.id, node]));
+	}, [allCanvasNodes]);
+	const spatialIndexRef = useRef<CanvasSpatialIndex | null>(null);
+	const spatialIndex = useMemo(() => {
+		if (!spatialIndexRef.current) {
+			spatialIndexRef.current = new CanvasSpatialIndex();
+		}
+		spatialIndexRef.current.sync(allCanvasNodes);
+		return spatialIndexRef.current;
+	}, [allCanvasNodes]);
 	const currentNodeIdSet = useMemo(() => {
-		return new Set(currentProject?.canvas.nodes.map((node) => node.id) ?? []);
-	}, [currentProject]);
+		return new Set(allCanvasNodes.map((node) => node.id));
+	}, [allCanvasNodes]);
 	const normalizedSelectedNodeIds = useMemo(() => {
 		return normalizeSelectedNodeIds(selectedNodeIds, currentNodeIdSet);
 	}, [currentNodeIdSet, selectedNodeIds]);
@@ -1018,15 +1093,45 @@ const CanvasWorkspace = () => {
 		if (focusedNodeId) {
 			forcedNodeIds.add(focusedNodeId);
 		}
-		return sortedNodes.filter((node) => {
-			if (forcedNodeIds.has(node.id)) return true;
-			return isNodeIntersectRect(node, viewportRect);
-		});
+		const indexedVisibleNodeById = new Map<string, CanvasNode>();
+		const indexedItems = [...spatialIndex.queryRect(viewportRect)].sort(
+			compareCanvasSpatialPaintOrder,
+		);
+		for (const item of indexedItems) {
+			const node = nodeById.get(item.nodeId);
+			if (!node || node.hidden) continue;
+			if (!isNodeIntersectRect(node, viewportRect)) continue;
+			indexedVisibleNodeById.set(node.id, node);
+		}
+		for (const forcedNodeId of forcedNodeIds) {
+			const node = nodeById.get(forcedNodeId);
+			if (!node || node.hidden) continue;
+			indexedVisibleNodeById.set(node.id, node);
+		}
+		const nextRenderNodes = [...indexedVisibleNodeById.values()].sort(
+			compareCanvasNodePaintOrder,
+		);
+		if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
+			const legacyRenderNodeIds = sortedNodes
+				.filter((node) => {
+					if (forcedNodeIds.has(node.id)) return true;
+					return isNodeIntersectRect(node, viewportRect);
+				})
+				.map((node) => node.id);
+			warnCanvasSpatialIndexMismatch(
+				"render-cull",
+				legacyRenderNodeIds,
+				nextRenderNodes.map((node) => node.id),
+			);
+		}
+		return nextRenderNodes;
 	}, [
 		activeNodeId,
 		focusedNodeId,
+		nodeById,
 		normalizedSelectedNodeIds,
 		renderCullState.version,
+		spatialIndex,
 		sortedNodes,
 		stageSize.height,
 		stageSize.width,
@@ -1817,18 +1922,42 @@ const CanvasWorkspace = () => {
 
 	const getTopHitNode = useCallback(
 		(worldX: number, worldY: number): CanvasNode | null => {
-			for (let index = sortedNodes.length - 1; index >= 0; index -= 1) {
-				const node = sortedNodes[index];
-				if (!node) continue;
-				const canInteractNode =
-					!isCanvasInteractionLocked || node.id === focusedNodeId;
-				if (!canInteractNode) continue;
-				if (!isWorldPointInNode(node, worldX, worldY)) continue;
-				return node;
+			const indexedHitNodes = [...spatialIndex.queryPoint(worldX, worldY)]
+				.sort(compareCanvasSpatialHitPriority)
+				.map((item) => nodeById.get(item.nodeId) ?? null)
+				.filter((node): node is CanvasNode => Boolean(node))
+				.filter((node) => {
+					if (node.hidden) return false;
+					const canInteractNode =
+						!isCanvasInteractionLocked || node.id === focusedNodeId;
+					if (!canInteractNode) return false;
+					return isWorldPointInNode(node, worldX, worldY);
+				})
+				.sort(compareCanvasNodeHitPriority);
+			const indexedTopHit = indexedHitNodes[0] ?? null;
+			if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
+				const legacyTopHit = resolveTopHitNodeByLinearScan(
+					sortedNodes,
+					worldX,
+					worldY,
+					isCanvasInteractionLocked,
+					focusedNodeId,
+				);
+				warnCanvasSpatialIndexMismatch(
+					"point-hit",
+					legacyTopHit ? [legacyTopHit.id] : [],
+					indexedTopHit ? [indexedTopHit.id] : [],
+				);
 			}
-			return null;
+			return indexedTopHit;
 		},
-		[focusedNodeId, isCanvasInteractionLocked, sortedNodes],
+		[
+			focusedNodeId,
+			isCanvasInteractionLocked,
+			nodeById,
+			sortedNodes,
+			spatialIndex,
+		],
 	);
 
 	const handleNodeActivate = useCallback(
@@ -1866,7 +1995,26 @@ const CanvasWorkspace = () => {
 			const right = Math.max(rect.x1, rect.x2) / safeZoom - currentCamera.x;
 			const top = Math.min(rect.y1, rect.y2) / safeZoom - currentCamera.y;
 			const bottom = Math.max(rect.y1, rect.y2) / safeZoom - currentCamera.y;
-			return sortedNodes
+			const queryRect = {
+				left,
+				right,
+				top,
+				bottom,
+			};
+			const indexedNodeIds: string[] = [];
+			const seen = new Set<string>();
+			const indexedItems = [...spatialIndex.queryRect(queryRect)].sort(
+				compareCanvasSpatialPaintOrder,
+			);
+			for (const item of indexedItems) {
+				const node = nodeById.get(item.nodeId);
+				if (!node || node.hidden || seen.has(node.id)) continue;
+				if (!isNodeIntersectRect(node, queryRect)) continue;
+				seen.add(node.id);
+				indexedNodeIds.push(node.id);
+			}
+			if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
+				const legacyNodeIds = sortedNodes
 				.filter((node) =>
 					isNodeIntersectRect(node, {
 						left,
@@ -1875,9 +2023,16 @@ const CanvasWorkspace = () => {
 						bottom,
 					}),
 				)
-				.map((node) => node.id);
+					.map((node) => node.id);
+				warnCanvasSpatialIndexMismatch(
+					"marquee",
+					legacyNodeIds,
+					indexedNodeIds,
+				);
+			}
+			return indexedNodeIds;
 		},
-		[getCamera, sortedNodes],
+		[getCamera, nodeById, sortedNodes, spatialIndex],
 	);
 
 	const applyMarqueeSelection = useCallback(
