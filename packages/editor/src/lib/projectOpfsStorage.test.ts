@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	resolveProjectOpfsFile,
+	writeProjectFileToOpfsAtPath,
 	writeProjectFileToOpfs,
 } from "./projectOpfsStorage";
 
@@ -140,6 +141,11 @@ const listFiles = async (dir: MemoryDirectoryHandle): Promise<string[]> => {
 	return names.sort();
 };
 
+const readFileText = async (file: File): Promise<string> => {
+	const content = await file.arrayBuffer();
+	return new TextDecoder().decode(content);
+};
+
 describe("projectOpfsStorage", () => {
 	let root: MemoryDirectoryHandle;
 
@@ -256,5 +262,43 @@ describe("projectOpfsStorage", () => {
 		await expect(
 			resolveProjectOpfsFile("opfs://ai-nle/audios/a.mp3"),
 		).rejects.toThrow("projects/{projectId}");
+	});
+
+	it("支持 managed 子路径写入与读取", async () => {
+		const write = await writeProjectFileToOpfsAtPath(
+			makeTestFile("poster.webp", "thumb-v1"),
+			"project-a",
+			"images",
+			".thumbs/node-1.webp",
+		);
+		expect(write.fileName).toBe(".thumbs/node-1.webp");
+		expect(write.uri).toBe(
+			"opfs://projects/project-a/images/.thumbs/node-1.webp",
+		);
+		const resolved = await resolveProjectOpfsFile(write.uri);
+		await expect(readFileText(resolved)).resolves.toBe("thumb-v1");
+	});
+
+	it("定向覆盖写入同一路径会覆盖文件内容", async () => {
+		const first = await writeProjectFileToOpfsAtPath(
+			makeTestFile("poster.webp", "thumb-a"),
+			"project-a",
+			"images",
+			".thumbs/node-2.webp",
+		);
+		const second = await writeProjectFileToOpfsAtPath(
+			makeTestFile("poster.webp", "thumb-b"),
+			"project-a",
+			"images",
+			".thumbs/node-2.webp",
+		);
+		expect(second.uri).toBe(first.uri);
+		expect(second.fileName).toBe(first.fileName);
+		expect(second.hash).not.toBe(first.hash);
+		const resolved = await resolveProjectOpfsFile(second.uri);
+		await expect(readFileText(resolved)).resolves.toBe("thumb-b");
+		const imagesDir = await getKindDir(root, "project-a", "images");
+		const thumbsDir = await imagesDir.getDirectoryHandle(".thumbs");
+		await expect(listFiles(thumbsDir)).resolves.toEqual(["node-2.webp"]);
 	});
 });

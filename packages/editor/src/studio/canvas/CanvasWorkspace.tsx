@@ -134,6 +134,7 @@ import {
 	resolveCanvasResizeAnchorAtWorldPoint,
 } from "./canvasResizeAnchor";
 import { useCanvasCameraController } from "./useCanvasCameraController";
+import { useNodeThumbnailGeneration } from "./useNodeThumbnailGeneration";
 
 type CanvasContextMenuState =
 	| { open: false }
@@ -608,6 +609,11 @@ const CanvasWorkspace = () => {
 		}
 		return manager as StudioRuntimeManager;
 	}, [runtime]);
+	useNodeThumbnailGeneration({
+		project: currentProject,
+		projectId: currentProjectId,
+		runtimeManager,
+	});
 	const setStudioClipboardPayload = useStudioClipboardStore(
 		(state) => state.setPayload,
 	);

@@ -11,6 +11,12 @@ type ParsedProjectOpfsUri = {
 	fileName: string;
 };
 
+type ResolvedRelativeFilePath = {
+	directories: string[];
+	fileName: string;
+	relativePath: string;
+};
+
 const assertOpfsAvailable = (): void => {
 	if (!("storage" in navigator) || !("getDirectory" in navigator.storage)) {
 		throw new Error("OPFS 不可用");
@@ -29,6 +35,36 @@ const sanitizeSegment = (value: string, fallback: string): string => {
 		.replace(/[\\/:*?"<>|]/g, "-")
 		.replace(/\s+/g, " ");
 	return sanitized || fallback;
+};
+
+const parseRelativeFilePath = (
+	value: string,
+): ResolvedRelativeFilePath => {
+	const normalized = value.trim().replace(/\\/g, "/");
+	if (!normalized) {
+		throw new Error("OPFS 路径缺少文件名");
+	}
+	const parts = normalized.split("/").filter(Boolean);
+	if (parts.length === 0) {
+		throw new Error("OPFS 路径缺少文件名");
+	}
+	const sanitizedParts = parts.map((part) => {
+		const sanitized = sanitizeSegment(part, "");
+		if (!sanitized || sanitized === "." || sanitized === "..") {
+			throw new Error("OPFS 路径包含非法片段");
+		}
+		return sanitized;
+	});
+	const fileName = sanitizedParts[sanitizedParts.length - 1];
+	if (!fileName) {
+		throw new Error("OPFS 路径缺少文件名");
+	}
+	const directories = sanitizedParts.slice(0, -1);
+	return {
+		directories,
+		fileName,
+		relativePath: sanitizedParts.join("/"),
+	};
 };
 
 const splitNameAndExt = (
@@ -82,6 +118,20 @@ const resolveProjectKindDir = async (
 	return projectDir.getDirectoryHandle(kind, {
 		create: true,
 	});
+};
+
+const resolveNestedDirectory = async (
+	baseDir: FileSystemDirectoryHandle,
+	directories: string[],
+	options?: { create?: boolean },
+): Promise<FileSystemDirectoryHandle> => {
+	let current = baseDir;
+	for (const directoryName of directories) {
+		current = await current.getDirectoryHandle(directoryName, {
+			create: options?.create,
+		});
+	}
+	return current;
 };
 
 const findExistingFileByHash = async (
@@ -149,6 +199,21 @@ const writeFile = async (
 	}
 };
 
+const writeFileAtRelativePath = async (
+	kindDir: FileSystemDirectoryHandle,
+	filePath: string,
+	file: File,
+): Promise<{ fileName: string }> => {
+	const resolved = parseRelativeFilePath(filePath);
+	const targetDir = await resolveNestedDirectory(kindDir, resolved.directories, {
+		create: true,
+	});
+	await writeFile(targetDir, resolved.fileName, file);
+	return {
+		fileName: resolved.relativePath,
+	};
+};
+
 export async function writeProjectFileToOpfs(
 	file: File,
 	projectId: string,
@@ -181,18 +246,40 @@ export async function writeProjectFileToOpfs(
 	};
 }
 
+export async function writeProjectFileToOpfsAtPath(
+	file: File,
+	projectId: string,
+	kind: ProjectOpfsKind,
+	filePath: string,
+): Promise<{ uri: string; fileName: string; hash: string }> {
+	assertOpfsAvailable();
+	assertProjectId(projectId);
+	if (!VALID_KINDS.has(kind)) {
+		throw new Error(`不支持的 OPFS 类型: ${kind}`);
+	}
+	const normalizedProjectId = sanitizeSegment(projectId, "project");
+	const kindDir = await resolveProjectKindDir(normalizedProjectId, kind);
+	const { fileName } = await writeFileAtRelativePath(kindDir, filePath, file);
+	const hash = await hashFile(file);
+	return {
+		uri: buildProjectOpfsUri(normalizedProjectId, kind, fileName),
+		fileName,
+		hash,
+	};
+}
+
 export const parseProjectOpfsUri = (uri: string): ParsedProjectOpfsUri => {
 	if (!uri.startsWith(OPFS_PREFIX)) {
 		throw new Error("无效的 OPFS URI");
 	}
 	const rawPath = uri.slice(OPFS_PREFIX.length);
 	const parts = rawPath.split("/").filter(Boolean);
-	if (parts.length !== 4) {
+	if (parts.length < 4) {
 		throw new Error(
 			"OPFS 路径格式不正确，必须为 projects/{projectId}/{kind}/{fileName}",
 		);
 	}
-	const [rootName, projectId, kindName, fileName] = parts;
+	const [rootName, projectId, kindName, ...fileParts] = parts;
 	if (rootName !== PROJECTS_ROOT) {
 		throw new Error("仅支持 projects/{projectId}/** 格式的 OPFS 路径");
 	}
@@ -202,13 +289,11 @@ export const parseProjectOpfsUri = (uri: string): ParsedProjectOpfsUri => {
 	if (!VALID_KINDS.has(kindName)) {
 		throw new Error("OPFS 路径中的资源类型不合法");
 	}
-	if (!fileName) {
-		throw new Error("OPFS 路径缺少文件名");
-	}
+	const { relativePath } = parseRelativeFilePath(fileParts.join("/"));
 	return {
 		projectId,
 		kind: kindName as ProjectOpfsKind,
-		fileName,
+		fileName: relativePath,
 	};
 };
 
@@ -219,6 +304,8 @@ export async function resolveProjectOpfsFile(uri: string): Promise<File> {
 	const projectsDir = await root.getDirectoryHandle(PROJECTS_ROOT);
 	const projectDir = await projectsDir.getDirectoryHandle(parsed.projectId);
 	const kindDir = await projectDir.getDirectoryHandle(parsed.kind);
-	const fileHandle = await kindDir.getFileHandle(parsed.fileName);
+	const resolved = parseRelativeFilePath(parsed.fileName);
+	const parentDir = await resolveNestedDirectory(kindDir, resolved.directories);
+	const fileHandle = await parentDir.getFileHandle(resolved.fileName);
 	return fileHandle.getFile();
 }

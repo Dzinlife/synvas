@@ -9,6 +9,14 @@ import type { TimelineJSON } from "../editor/timelineLoader";
 
 export type CanvasNodeType = "scene" | "video" | "audio" | "text" | "image";
 
+export interface CanvasNodeThumbnail {
+	assetId: string;
+	sourceSignature: string;
+	frame: number;
+	generatedAt: number;
+	version: 1;
+}
+
 export interface CanvasNodeBase {
 	id: string;
 	type: CanvasNodeType;
@@ -22,6 +30,7 @@ export interface CanvasNodeBase {
 	hidden: boolean;
 	createdAt: number;
 	updatedAt: number;
+	thumbnail?: CanvasNodeThumbnail;
 }
 
 export interface SceneCanvasNode extends CanvasNodeBase {

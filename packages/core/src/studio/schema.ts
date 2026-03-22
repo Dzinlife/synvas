@@ -22,6 +22,15 @@ const canvasNodeBaseSchema = z.object({
 	hidden: z.boolean(),
 	createdAt: z.number(),
 	updatedAt: z.number(),
+	thumbnail: z
+		.object({
+			assetId: nonEmptyStringSchema,
+			sourceSignature: nonEmptyStringSchema,
+			frame: z.number().int().nonnegative(),
+			generatedAt: z.number(),
+			version: z.literal(1),
+		})
+		.optional(),
 });
 
 const sceneNodeSchema = canvasNodeBaseSchema.extend({

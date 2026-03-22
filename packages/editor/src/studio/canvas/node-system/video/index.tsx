@@ -10,6 +10,7 @@ import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
 import { VideoNodeDrawer } from "./drawer";
 import { VideoNodeSkiaRenderer } from "./renderer";
+import { videoNodeThumbnailCapability } from "./thumbnail";
 import { VideoNodeToolbar } from "./toolbar";
 
 const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
@@ -17,6 +18,7 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 	title: "Video",
 	create: () => ({ type: "video" }),
 	skiaRenderer: VideoNodeSkiaRenderer,
+	thumbnail: videoNodeThumbnailCapability,
 	toolbar: VideoNodeToolbar,
 	drawer: VideoNodeDrawer,
 	drawerOptions: {

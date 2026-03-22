@@ -11,6 +11,7 @@ import type {
 import { convertSceneNodeToTimelineElement } from "./clipboard";
 import { SceneNodeDrawer } from "./drawer";
 import { SceneNodeSkiaRenderer } from "./renderer";
+import { sceneNodeThumbnailCapability } from "./thumbnail";
 import { SceneNodeToolbar } from "./toolbar";
 
 const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
@@ -18,6 +19,7 @@ const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
 	title: "Scene",
 	create: () => ({ type: "scene" }),
 	skiaRenderer: SceneNodeSkiaRenderer,
+	thumbnail: sceneNodeThumbnailCapability,
 	focusEditorLayer: FocusSceneSkiaLayer as unknown as React.ComponentType<unknown>,
 	focusEditorBridge:
 		SceneFocusEditorBridge as unknown as React.FC<

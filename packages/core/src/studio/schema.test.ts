@@ -176,6 +176,40 @@ describe("studio schema", () => {
 		expect(parsed.ui.canvasSnapEnabled).toBe(true);
 	});
 
+	it("包含 node thumbnail 字段时应校验通过并保留字段", () => {
+		const project = createValidProject();
+		const target = project.canvas.nodes.find((node) => node.id === "node-2");
+		if (!target) {
+			throw new Error("node-2 not found");
+		}
+		(
+			target as {
+				thumbnail?: {
+					assetId: string;
+					sourceSignature: string;
+					frame: number;
+					generatedAt: number;
+					version: 1;
+				};
+			}
+		).thumbnail = {
+			assetId: "asset-thumbnail-node-2",
+			sourceSignature: "asset-video-1:hash-1",
+			frame: 0,
+			generatedAt: 99,
+			version: 1,
+		};
+		const parsed = parseStudioProject(project);
+		const parsedNode = parsed.canvas.nodes.find((node) => node.id === "node-2");
+		expect(parsedNode?.thumbnail).toEqual({
+			assetId: "asset-thumbnail-node-2",
+			sourceSignature: "asset-video-1:hash-1",
+			frame: 0,
+			generatedAt: 99,
+			version: 1,
+		});
+	});
+
 	it("使用 focusedSceneId 旧字段时应报错", () => {
 		const invalid = createValidProject() as {
 			ui: Record<string, unknown>;

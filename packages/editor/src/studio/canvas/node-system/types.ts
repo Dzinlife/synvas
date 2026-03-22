@@ -109,6 +109,37 @@ export interface CanvasNodeToTimelineElementContext<
 	createElementId: () => string;
 }
 
+export interface CanvasNodeThumbnailCapabilityContext<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	node: TNode;
+	project: StudioProject;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+	runtimeManager: StudioRuntimeManager | null;
+}
+
+export interface CanvasNodeThumbnailGenerationResult {
+	blob: Blob;
+	sourceSignature: string;
+	frame: number;
+	sourceSize?: {
+		width: number;
+		height: number;
+	};
+}
+
+export interface CanvasNodeThumbnailCapability<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	getSourceSignature: (
+		context: CanvasNodeThumbnailCapabilityContext<TNode>,
+	) => string | null;
+	generate: (
+		context: CanvasNodeThumbnailCapabilityContext<TNode>,
+	) => Promise<CanvasNodeThumbnailGenerationResult | null>;
+}
+
 export interface CanvasExternalFileContext {
 	projectId: string;
 	fps: number;
@@ -153,6 +184,7 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	title: string;
 	create: (input?: Record<string, unknown>) => CanvasNodeCreateInput;
 	skiaRenderer: React.FC<CanvasNodeSkiaRenderProps<TNode>>;
+	thumbnail?: CanvasNodeThumbnailCapability<TNode>;
 	focusEditorLayer?: React.ComponentType<unknown>;
 	focusEditorBridge?: React.FC<CanvasNodeFocusEditorBridgeProps<TNode>>;
 	toolbar: React.FC<CanvasNodeToolbarProps<TNode>>;
