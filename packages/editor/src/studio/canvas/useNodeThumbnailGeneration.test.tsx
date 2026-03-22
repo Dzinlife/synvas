@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-import { act, render, waitFor } from "@testing-library/react";
-import { cleanup } from "@testing-library/react";
-import type { CanvasNodeThumbnailCapability } from "@/studio/canvas/node-system/types";
-import type { VideoCanvasNode } from "core/studio/types";
-import type { StudioProject } from "core/studio/types";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
+import type {
+	SceneCanvasNode,
+	StudioProject,
+	VideoCanvasNode,
+} from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useProjectStore } from "@/projects/projectStore";
-import { useNodeThumbnailGeneration } from "./useNodeThumbnailGeneration";
 import { writeProjectFileToOpfsAtPath } from "@/lib/projectOpfsStorage";
+import { useProjectStore } from "@/projects/projectStore";
+import type { CanvasNodeThumbnailCapability } from "@/studio/canvas/node-system/types";
+import { useNodeThumbnailGeneration } from "./useNodeThumbnailGeneration";
 
 const getCanvasNodeDefinitionMock = vi.fn();
 
@@ -71,24 +73,102 @@ const createProject = (hash = "hash-a"): StudioProject => ({
 	updatedAt: 1,
 });
 
-const createVideoThumbnailCapability = (): CanvasNodeThumbnailCapability<VideoCanvasNode> => {
-	return {
-		getSourceSignature: ({ node, asset }) => {
-			return `${node.assetId}:${typeof asset?.meta?.hash === "string" ? asset.meta.hash : ""}`;
+const createVideoThumbnailCapability =
+	(): CanvasNodeThumbnailCapability<VideoCanvasNode> => {
+		return {
+			getSourceSignature: ({ node, asset }) => {
+				return `${node.assetId}:${typeof asset?.meta?.hash === "string" ? asset.meta.hash : ""}`;
+			},
+			generate: vi.fn(async ({ node, asset }) => {
+				return {
+					blob: new Blob([`thumb-${node.id}`], { type: "image/webp" }),
+					sourceSignature: `${node.assetId}:${typeof asset?.meta?.hash === "string" ? asset.meta.hash : ""}`,
+					frame: 0,
+					sourceSize: {
+						width: 1920,
+						height: 1080,
+					},
+				};
+			}),
+		};
+	};
+
+const createSceneProject = (): StudioProject => ({
+	id: "project-scene-1",
+	revision: 0,
+	assets: [
+		{
+			id: "asset-thumb-1",
+			kind: "image",
+			name: "thumb.webp",
+			locator: {
+				type: "managed",
+				fileName: ".thumbs/node-scene-1.webp",
+			},
+			meta: {
+				hash: "thumb-hash",
+			},
 		},
-		generate: vi.fn(async ({ node, asset }) => {
-			return {
-				blob: new Blob([`thumb-${node.id}`], { type: "image/webp" }),
-				sourceSignature: `${node.assetId}:${typeof asset?.meta?.hash === "string" ? asset.meta.hash : ""}`,
-				frame: 0,
-				sourceSize: {
+	],
+	canvas: {
+		nodes: [
+			{
+				id: "node-scene-1",
+				type: "scene",
+				sceneId: "scene-1",
+				name: "Scene 1",
+				x: 0,
+				y: 0,
+				width: 1920,
+				height: 1080,
+				zIndex: 0,
+				locked: false,
+				hidden: false,
+				createdAt: 1,
+				updatedAt: 1,
+				thumbnail: {
+					assetId: "asset-thumb-1",
+					sourceSignature: "scene-1:1",
+					frame: 0,
+					generatedAt: 1,
+					version: 1,
+				},
+			} satisfies SceneCanvasNode,
+		],
+	},
+	scenes: {
+		"scene-1": {
+			id: "scene-1",
+			name: "Scene 1",
+			timeline: {
+				version: "3",
+				fps: 30,
+				canvas: {
 					width: 1920,
 					height: 1080,
 				},
-			};
-		}),
-	};
-};
+				elements: [],
+				tracks: [],
+			},
+			posterFrame: 0,
+			createdAt: 1,
+			updatedAt: 2,
+		},
+	},
+	ui: {
+		activeSceneId: "scene-1",
+		focusedNodeId: null,
+		activeNodeId: "node-scene-1",
+		canvasSnapEnabled: true,
+		camera: {
+			x: 0,
+			y: 0,
+			zoom: 1,
+		},
+	},
+	createdAt: 1,
+	updatedAt: 1,
+});
 
 const HookHarness = ({
 	project,
@@ -111,11 +191,7 @@ describe("useNodeThumbnailGeneration", () => {
 		vi.mocked(writeProjectFileToOpfsAtPath).mockReset();
 		vi.stubGlobal(
 			"requestIdleCallback",
-			(
-				callback: (
-					deadline: IdleDeadline,
-				) => void,
-			) =>
+			(callback: (deadline: IdleDeadline) => void) =>
 				window.setTimeout(
 					() =>
 						callback({
@@ -213,4 +289,41 @@ describe("useNodeThumbnailGeneration", () => {
 		});
 	});
 
+	it("scene 节点已有可用 thumb 时不会后台重生", async () => {
+		const capability: CanvasNodeThumbnailCapability<SceneCanvasNode> = {
+			getSourceSignature: vi.fn(() => "scene-1:2"),
+			generate: vi.fn(async () => {
+				return {
+					blob: new Blob(["thumb-scene-1"], { type: "image/webp" }),
+					sourceSignature: "scene-1:2",
+					frame: 0,
+					sourceSize: {
+						width: 1920,
+						height: 1080,
+					},
+				};
+			}),
+		};
+		getCanvasNodeDefinitionMock.mockReturnValue({
+			thumbnail: capability,
+		});
+		useProjectStore.setState((state) => ({
+			...state,
+			currentProjectId: "project-scene-1",
+			currentProject: createSceneProject(),
+		}));
+
+		render(
+			<HookHarness
+				project={useProjectStore.getState().currentProject}
+				projectId={useProjectStore.getState().currentProjectId}
+			/>,
+		);
+
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+		expect(getCanvasNodeDefinitionMock).not.toHaveBeenCalled();
+		expect(capability.getSourceSignature).not.toHaveBeenCalled();
+		expect(capability.generate).not.toHaveBeenCalled();
+		expect(writeProjectFileToOpfsAtPath).not.toHaveBeenCalled();
+	});
 });

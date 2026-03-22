@@ -1,5 +1,9 @@
 import type { TimelineAsset } from "core/element/types";
-import type { CanvasNode, SceneDocument, StudioProject } from "core/studio/types";
+import type {
+	CanvasNode,
+	SceneDocument,
+	StudioProject,
+} from "core/studio/types";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { writeProjectFileToOpfsAtPath } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
@@ -79,6 +83,17 @@ const isThumbnailFresh = (
 	return project.assets.some((asset) => asset.id === thumbnail.assetId);
 };
 
+const hasReusableThumbnailAsset = (
+	project: StudioProject,
+	node: CanvasNode,
+): boolean => {
+	const thumbnail = node.thumbnail;
+	if (!thumbnail) return false;
+	return project.assets.some(
+		(asset) => asset.id === thumbnail.assetId && asset.kind === "image",
+	);
+};
+
 const buildTaskKey = (nodeId: string, sourceSignature: string): string => {
 	return `${nodeId}:${sourceSignature}`;
 };
@@ -91,7 +106,9 @@ export const useNodeThumbnailGeneration = (
 	options: UseNodeThumbnailGenerationOptions,
 ): void => {
 	const { project, projectId, runtimeManager } = options;
-	const ensureProjectAsset = useProjectStore((state) => state.ensureProjectAsset);
+	const ensureProjectAsset = useProjectStore(
+		(state) => state.ensureProjectAsset,
+	);
 	const updateCanvasNode = useProjectStore((state) => state.updateCanvasNode);
 	const queueRef = useRef<ThumbnailTask[]>([]);
 	const queuedTaskKeySetRef = useRef(new Set<string>());
@@ -173,7 +190,9 @@ export const useNodeThumbnailGeneration = (
 		if (!latestSourceSignature || latestSourceSignature !== sourceSignature) {
 			return;
 		}
-		if (isThumbnailFresh(projectAfterGenerate, nodeAfterGenerate, sourceSignature)) {
+		if (
+			isThumbnailFresh(projectAfterGenerate, nodeAfterGenerate, sourceSignature)
+		) {
 			return;
 		}
 
@@ -285,10 +304,18 @@ export const useNodeThumbnailGeneration = (
 	useEffect(() => {
 		if (!project || !projectId) return;
 		for (const node of project.canvas.nodes) {
+			// scene 节点首帧优先使用已有缩略图，避免后台批量触发首帧解码。
+			if (node.type === "scene" && hasReusableThumbnailAsset(project, node)) {
+				continue;
+			}
 			const definition = getCanvasNodeDefinition(node.type);
 			const capability = definition.thumbnail;
 			if (!capability) continue;
-			const context = buildThumbnailCapabilityContext(project, node, runtimeManager);
+			const context = buildThumbnailCapabilityContext(
+				project,
+				node,
+				runtimeManager,
+			);
 			const sourceSignature = capability.getSourceSignature(context);
 			if (!sourceSignature) continue;
 			if (isThumbnailFresh(project, node, sourceSignature)) continue;

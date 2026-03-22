@@ -274,14 +274,6 @@ export function createVideoClipModel(
 		return normalizeOffsetFrames(timelineOffset);
 	};
 
-	const getTimelineClipDurationSeconds = (): number | undefined => {
-		const timeline = getTimeline();
-		if (!timeline) return undefined;
-		const durationFrames = timeline.end - timeline.start;
-		if (!Number.isFinite(durationFrames)) return undefined;
-		return framesToSeconds(durationFrames, getTimelineFps());
-	};
-
 	const resolveVideoPlaybackSessionKey = (
 		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
 	): string => {
@@ -1102,7 +1094,8 @@ export function createVideoClipModel(
 			targetTime: alignedVideoTime,
 			renderedTime,
 			timelineFrameInterval: frameInterval,
-			observedFrameInterval: observedPlaybackFrameIntervalByChannel[frameChannel],
+			observedFrameInterval:
+				observedPlaybackFrameIntervalByChannel[frameChannel],
 			stalledDurationSeconds,
 			driftFloorSeconds: PLAYBACK_DRIFT_FLOOR_SECONDS,
 			adaptiveMultiplier: PLAYBACK_DRIFT_ADAPTIVE_MULTIPLIER,
@@ -1297,30 +1290,17 @@ export function createVideoClipModel(
 							isLoading: false,
 							maxDuration: availableDuration ?? durationFrames,
 						},
-						internal: {
-							...state.internal,
-							videoSampleSink: clipSink,
-							input: asset.input,
-							videoDuration: asset.duration,
-							videoRotation: asset.videoRotation,
-							frameCache: asset.frameCache,
-						},
-					}));
-
-					// 初始化完成后，seek 到初始位置
-					const { reversed } = get().props;
-					const offsetSeconds = framesToSeconds(getTimelineOffsetFrames(), fps);
-					const clipDurationSeconds = getTimelineClipDurationSeconds();
-					const videoTime = calculateVideoTime({
-						start: 0,
-						timelineTime: 0,
-						offset: offsetSeconds,
-						clipDuration: clipDurationSeconds,
-						videoDuration: asset.duration,
-						reversed,
-					});
-
-					await seekToTime(videoTime);
+							internal: {
+								...state.internal,
+								videoSampleSink: clipSink,
+								input: asset.input,
+								videoDuration: asset.duration,
+								videoRotation: asset.videoRotation,
+								// 模型就绪只表示素材已加载，首帧解码延后到 prepare/renderer 触发。
+								isReady: true,
+								frameCache: asset.frameCache,
+							},
+						}));
 
 					if (currentInitEpoch !== initEpoch) return;
 
