@@ -6,6 +6,7 @@ import { getCompositionThumbnail } from "./thumbnailCache";
 const {
 	buildSkiaFrameSnapshotMock,
 	buildSkiaRenderStateMock,
+	createSkiaCanvasSurfaceMock,
 	makeSurfaceMock,
 	makeOffscreenMock,
 	drawPictureMock,
@@ -23,6 +24,7 @@ const {
 } = vi.hoisted(() => ({
 	buildSkiaFrameSnapshotMock: vi.fn(),
 	buildSkiaRenderStateMock: vi.fn(),
+	createSkiaCanvasSurfaceMock: vi.fn(),
 	makeSurfaceMock: vi.fn(),
 	makeOffscreenMock: vi.fn(),
 	drawPictureMock: vi.fn(),
@@ -45,6 +47,7 @@ vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
 }));
 
 vi.mock("react-skia-lite", () => ({
+	createSkiaCanvasSurface: createSkiaCanvasSurfaceMock,
 	getSkiaRenderBackend: getSkiaRenderBackendMock,
 	ColorType: {
 		RGBA_8888: 4,
@@ -75,6 +78,7 @@ describe("Composition thumbnailCache", () => {
 	beforeEach(() => {
 		buildSkiaFrameSnapshotMock.mockReset();
 		buildSkiaRenderStateMock.mockReset();
+		createSkiaCanvasSurfaceMock.mockReset();
 		makeSurfaceMock.mockReset();
 		makeOffscreenMock.mockReset();
 		drawPictureMock.mockReset();
@@ -111,6 +115,7 @@ describe("Composition thumbnailCache", () => {
 		};
 		makeSurfaceMock.mockReturnValue(surfaceMock);
 		makeOffscreenMock.mockReturnValue(surfaceMock);
+		createSkiaCanvasSurfaceMock.mockReturnValue(surfaceMock);
 		buildSkiaFrameSnapshotMock.mockResolvedValue({
 			picture: { id: "picture-1" },
 			dispose: vi.fn(),
@@ -130,10 +135,13 @@ describe("Composition thumbnailCache", () => {
 				) {}
 			},
 		);
+		vi.stubGlobal("CanvasKit", {});
 		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
 			() =>
 				({
 					putImageData: vi.fn(),
+					drawImage: vi.fn(),
+					clearRect: vi.fn(),
 				}) as never,
 		);
 	});
@@ -274,7 +282,9 @@ describe("Composition thumbnailCache", () => {
 		expect(skiaRootRenderMock).toHaveBeenCalledTimes(1);
 		expect(skiaRootDrawOnCanvasMock).toHaveBeenCalledTimes(1);
 		expect(drawPictureMock).not.toHaveBeenCalled();
-		expect(readPixelsMock).toHaveBeenCalledTimes(1);
+		expect(readPixelsMock).not.toHaveBeenCalled();
+		expect(createSkiaCanvasSurfaceMock).toHaveBeenCalledTimes(1);
+		expect(surfaceDisposeMock).toHaveBeenCalledTimes(1);
 		expect(skiaRootUnmountMock).toHaveBeenCalledTimes(1);
 	});
 });
