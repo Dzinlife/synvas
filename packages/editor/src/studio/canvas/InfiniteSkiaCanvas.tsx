@@ -3,6 +3,7 @@ import type React from "react";
 import {
 	memo,
 	useCallback,
+	useEffect,
 	useLayoutEffect,
 	useMemo,
 	useRef,
@@ -700,7 +701,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		[getLatestNodeById, onNodeResize],
 	);
 
-	useLayoutEffect(() => {
+	useEffect(() => {
 		const root = canvasRef.current?.getRoot();
 		if (!root) return;
 		root.render(
@@ -736,7 +737,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 						return (
 							<CanvasNodeSkiaItem
-								key={`canvas-node-skia-${node.id}`}
+								key={node.id}
 								node={node}
 								layout={layout}
 								scene={scene}

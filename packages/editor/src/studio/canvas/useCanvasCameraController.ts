@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { SharedValue } from "react-skia-lite";
 import { useSharedValue } from "react-skia-lite";
 import {
@@ -39,69 +39,80 @@ export const useCanvasCameraController = ({
 	const animationFrameRef = useRef<number | null>(null);
 	const animationStateRef = useRef<CameraAnimationState | null>(null);
 	const isAnimatingRef = useRef(false);
-	const setCameraAnimating = useEffectEvent((isAnimating: boolean) => {
+	const onChangeRef = useRef(onChange);
+	const onAnimationStateChangeRef = useRef(onAnimationStateChange);
+	onChangeRef.current = onChange;
+	onAnimationStateChangeRef.current = onAnimationStateChange;
+
+	const setCameraAnimating = useCallback((isAnimating: boolean) => {
 		if (isAnimatingRef.current === isAnimating) return;
 		isAnimatingRef.current = isAnimating;
-		onAnimationStateChange?.(isAnimating);
-	});
-	const writeCamera = useEffectEvent((nextCamera: CameraState) => {
-		cameraRef.current = nextCamera;
-		cameraSharedValue.value = nextCamera;
-		onChange(nextCamera);
-	});
-	const stopAnimationFrame = useEffectEvent(() => {
+		onAnimationStateChangeRef.current?.(isAnimating);
+	}, []);
+	const writeCamera = useCallback(
+		(nextCamera: CameraState) => {
+			cameraRef.current = nextCamera;
+			cameraSharedValue.value = nextCamera;
+			onChangeRef.current(nextCamera);
+		},
+		[cameraSharedValue],
+	);
+	const stopAnimationFrame = useCallback(() => {
 		const frameId = animationFrameRef.current;
 		if (frameId === null) return;
 		if (typeof window !== "undefined") {
 			window.cancelAnimationFrame(frameId);
 		}
 		animationFrameRef.current = null;
-	});
-	const stopCameraAnimation = useEffectEvent(() => {
+	}, []);
+	const stopCameraAnimation = useCallback(() => {
 		const hadAnimation = animationStateRef.current !== null;
 		stopAnimationFrame();
 		animationStateRef.current = null;
 		if (hadAnimation) {
 			setCameraAnimating(false);
 		}
-	});
+	}, [setCameraAnimating, stopAnimationFrame]);
 
-	const runAnimationFrame = useEffectEvent((timestamp: number) => {
-		const animationState = animationStateRef.current;
-		if (!animationState) return;
-		const startTime = animationState.startTime ?? timestamp;
-		if (animationState.startTime === null) {
-			animationState.startTime = startTime;
-		}
-		const elapsed = Math.max(0, timestamp - startTime);
-		const rawProgress = Math.min(
-			1,
-			elapsed / Math.max(1, CAMERA_SMOOTH_DURATION_MS),
-		);
-		const easedProgress = easeOutCubic(rawProgress);
-		const nextCamera = lerpCamera(
-			animationState.from,
-			animationState.to,
-			easedProgress,
-		);
-		writeCamera(nextCamera);
-		if (rawProgress >= 1) {
-			animationStateRef.current = null;
-			animationFrameRef.current = null;
-			setCameraAnimating(false);
-			return;
-		}
-		if (typeof window === "undefined") {
-			return;
-		}
-		animationFrameRef.current = window.requestAnimationFrame(runAnimationFrame);
-	});
+	const runAnimationFrame = useCallback(
+		(timestamp: number) => {
+			const animationState = animationStateRef.current;
+			if (!animationState) return;
+			const startTime = animationState.startTime ?? timestamp;
+			if (animationState.startTime === null) {
+				animationState.startTime = startTime;
+			}
+			const elapsed = Math.max(0, timestamp - startTime);
+			const rawProgress = Math.min(
+				1,
+				elapsed / Math.max(1, CAMERA_SMOOTH_DURATION_MS),
+			);
+			const easedProgress = easeOutCubic(rawProgress);
+			const nextCamera = lerpCamera(
+				animationState.from,
+				animationState.to,
+				easedProgress,
+			);
+			writeCamera(nextCamera);
+			if (rawProgress >= 1) {
+				animationStateRef.current = null;
+				animationFrameRef.current = null;
+				setCameraAnimating(false);
+				return;
+			}
+			if (typeof window === "undefined") {
+				return;
+			}
+			animationFrameRef.current = window.requestAnimationFrame(runAnimationFrame);
+		},
+		[setCameraAnimating, writeCamera],
+	);
 
-	const getCamera = useEffectEvent((): CameraState => {
+	const getCamera = useCallback((): CameraState => {
 		return cameraRef.current;
-	});
+	}, []);
 
-	const applyCamera = useEffectEvent(
+	const applyCamera = useCallback(
 		(nextCamera: CameraState, options?: ApplyCameraOptions) => {
 			const transition = options?.transition ?? "smooth";
 			const currentCamera = getCamera();
@@ -136,6 +147,14 @@ export const useCanvasCameraController = ({
 			setCameraAnimating(true);
 			animationFrameRef.current = window.requestAnimationFrame(runAnimationFrame);
 		},
+		[
+			getCamera,
+			runAnimationFrame,
+			setCameraAnimating,
+			stopAnimationFrame,
+			stopCameraAnimation,
+			writeCamera,
+		],
 	);
 
 	useEffect(() => {
