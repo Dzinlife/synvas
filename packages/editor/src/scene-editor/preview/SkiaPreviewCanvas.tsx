@@ -12,8 +12,6 @@ import {
 	type CanvasRef,
 	Fill,
 	Picture,
-	RenderTarget,
-	getSkiaRenderBackend,
 	useContextBridge,
 } from "react-skia-lite";
 import { useTimelineStore } from "@/scene-editor/contexts/TimelineContext";
@@ -26,7 +24,7 @@ import {
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { TimelineTrack } from "@/scene-editor/timeline/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
-import { buildSkiaFrameSnapshot, buildSkiaRenderState } from "./buildSkiaTree";
+import { buildSkiaFrameSnapshot } from "./buildSkiaTree";
 
 interface SkiaPreviewCanvasProps {
 	canvasWidth: number;
@@ -42,17 +40,11 @@ interface SkiaPreviewCanvasProps {
 const PRECOMPILE_LOOKAHEAD_FRAMES = 2;
 
 type SkiaFrameSnapshot = Awaited<ReturnType<typeof buildSkiaFrameSnapshot>>;
-type PreviewFrameState =
-	| {
-			kind: "picture";
-			picture: NonNullable<SkiaFrameSnapshot["picture"]>;
-			dispose?: (() => void) | undefined;
-	  }
-	| {
-			kind: "render-target";
-			node: React.ReactNode;
-			dispose?: (() => void) | undefined;
-	  };
+type PreviewFrameState = {
+	kind: "picture";
+	picture: NonNullable<SkiaFrameSnapshot["picture"]>;
+	dispose?: (() => void) | undefined;
+};
 const preemptedBuildErrorSymbol = Symbol("preview-build-preempted");
 type PreemptedBuildError = Error & {
 	[preemptedBuildErrorSymbol]: true;
@@ -85,7 +77,9 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	canvasRef,
 }) => {
 	type ResolveCompositionTimeline = NonNullable<
-		NonNullable<Parameters<typeof buildSkiaRenderState>[1]>["resolveCompositionTimeline"]
+		NonNullable<
+			Parameters<typeof buildSkiaFrameSnapshot>[1]
+		>["resolveCompositionTimeline"]
 	>;
 	const RuntimeContextBridge = useContextBridge(EditorRuntimeContext);
 	const runtime = useEditorRuntime();
@@ -105,9 +99,6 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	const rootSceneId = useMemo(() => {
 		return runtimeManager?.getActiveEditTimelineRuntime()?.ref.sceneId ?? null;
 	}, [runtimeManager]);
-	const useLiveRenderTarget = useMemo(() => {
-		return getSkiaRenderBackend().kind === "webgpu";
-	}, []);
 	const internalCanvasRef = useRef<CanvasRef>(null);
 	const targetCanvasRef = canvasRef ?? internalCanvasRef;
 	const renderTokenRef = useRef(0);
@@ -235,78 +226,39 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 							),
 						};
 					};
-					let frameState: PreviewFrameState;
-					if (useLiveRenderTarget) {
-						const renderState = await buildSkiaRenderState(
-							{
-								elements,
-								displayTime: targetDisplayTime,
-								tracks,
-								getTrackIndexForElement,
-								sortByTrackIndex,
-								prepare: {
-									isExporting: false,
-									// 预览态也要带上 fps，保证帧时间换算一致
-									fps: normalizedFps,
-									canvasSize: { width: canvasWidth, height: canvasHeight },
-									prepareTransitionPictures: true,
-									forcePrepareFrames: true,
-									awaitReady: true,
-									// 提供模型索引，供预览态准备帧使用
-									getModelStore: (id) => modelRegistry.get(id),
-									compositionPath: rootSceneId ? [rootSceneId] : [],
-								},
+					const frameSnapshot = await buildSkiaFrameSnapshot(
+						{
+							elements,
+							displayTime: targetDisplayTime,
+							tracks,
+							getTrackIndexForElement,
+							sortByTrackIndex,
+							prepare: {
+								isExporting: false,
+								fps: normalizedFps,
+								canvasSize: { width: canvasWidth, height: canvasHeight },
+								prepareTransitionPictures: true,
+								forcePrepareFrames: true,
+								awaitReady: true,
+								getModelStore: (id) => modelRegistry.get(id),
+								compositionPath: rootSceneId ? [rootSceneId] : [],
 							},
-							{
-								wrapRenderNode: (node) => (
-									<RuntimeContextBridge>{node}</RuntimeContextBridge>
-								),
-								resolveCompositionTimeline,
-							},
-						);
-						await renderState.ready;
-						frameState = {
-							kind: "render-target",
-							node: (
-								<RuntimeContextBridge>{renderState.children}</RuntimeContextBridge>
+						},
+						{
+							wrapRenderNode: (node) => (
+								<RuntimeContextBridge>{node}</RuntimeContextBridge>
 							),
-							dispose: renderState.dispose,
-						};
-					} else {
-						const frameSnapshot = await buildSkiaFrameSnapshot(
-							{
-								elements,
-								displayTime: targetDisplayTime,
-								tracks,
-								getTrackIndexForElement,
-								sortByTrackIndex,
-								prepare: {
-									isExporting: false,
-									fps: normalizedFps,
-									canvasSize: { width: canvasWidth, height: canvasHeight },
-									prepareTransitionPictures: true,
-									forcePrepareFrames: true,
-									awaitReady: true,
-									getModelStore: (id) => modelRegistry.get(id),
-									compositionPath: rootSceneId ? [rootSceneId] : [],
-								},
-							},
-							{
-								wrapRenderNode: (node) => (
-									<RuntimeContextBridge>{node}</RuntimeContextBridge>
-								),
-								resolveCompositionTimeline,
-							},
-						);
-						if (!frameSnapshot.picture) {
-							throw new Error("Preview frame picture is null");
-						}
-						frameState = {
-							kind: "picture",
-							picture: frameSnapshot.picture,
-							dispose: frameSnapshot.dispose,
-						};
+							resolveCompositionTimeline,
+						},
+					);
+					if (!frameSnapshot.picture) {
+						throw new Error("Preview frame picture is null");
 					}
+					const frameState: PreviewFrameState = {
+						kind: "picture",
+						picture: frameSnapshot.picture,
+						dispose: frameSnapshot.dispose,
+					};
 					if (renderTokenRef.current !== renderToken) {
 						frameState.dispose?.();
 						throw createPreemptedBuildError();
@@ -328,20 +280,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 				}
 				const root = targetCanvasRef.current?.getRoot();
 				if (!root) return false;
-				if (frameState.kind === "render-target") {
-					root.render(
-						<RenderTarget
-							width={canvasWidth}
-							height={canvasHeight}
-							clearColor="transparent"
-							debugLabel="scene-preview"
-						>
-							{frameState.node}
-						</RenderTarget>,
-					);
-				} else {
-					root.render(<Picture picture={frameState.picture} />);
-				}
+				root.render(<Picture picture={frameState.picture} />);
 				hasRenderedContentRef.current = true;
 				return true;
 			};
@@ -470,7 +409,6 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			sortByTrackIndex,
 			targetCanvasRef,
 			tracks,
-			useLiveRenderTarget,
 		],
 	);
 
@@ -481,7 +419,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	useEffect(() => {
 		// 构建输入（fps/轨道/尺寸等）变化时保守失效，避免复用旧条件下的缓存。
 		invalidateBuffer();
-	}, [invalidateBuffer, runRender]);
+	}, [invalidateBuffer]);
 
 	useEffect(() => {
 		const unsub1 = timelineStore.subscribe(

@@ -12,13 +12,8 @@ import {
 	Group,
 	Picture,
 	Rect,
-	RenderTarget,
-	getSkiaRenderBackend,
 } from "react-skia-lite";
-import {
-	buildSkiaFrameSnapshot,
-	buildSkiaRenderState,
-} from "@/scene-editor/preview/buildSkiaTree";
+import { buildSkiaFrameSnapshot } from "@/scene-editor/preview/buildSkiaTree";
 import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type {
 	EditorRuntime,
@@ -30,17 +25,11 @@ import type { CanvasNodeSkiaRenderProps } from "../types";
 const PRECOMPILE_LOOKAHEAD_FRAMES = 2;
 
 type SceneFrameSnapshot = Awaited<ReturnType<typeof buildSkiaFrameSnapshot>>;
-type ScenePreviewFrame =
-	| {
-			kind: "picture";
-			picture: NonNullable<SceneFrameSnapshot["picture"]>;
-			dispose?: (() => void) | undefined;
-	  }
-	| {
-			kind: "render-target";
-			node: ReactNode;
-			dispose?: (() => void) | undefined;
-	  };
+type ScenePreviewFrame = {
+	kind: "picture";
+	picture: NonNullable<SceneFrameSnapshot["picture"]>;
+	dispose?: (() => void) | undefined;
+};
 const preemptedBuildErrorSymbol = Symbol("scene-build-preempted");
 type PreemptedBuildError = Error & {
 	[preemptedBuildErrorSymbol]: true;
@@ -90,7 +79,9 @@ export const SceneNodeSkiaRenderer: React.FC<
 	CanvasNodeSkiaRenderProps<SceneNode>
 > = ({ node, scene, runtimeManager }) => {
 	type ResolveCompositionTimeline = NonNullable<
-		NonNullable<Parameters<typeof buildSkiaRenderState>[1]>["resolveCompositionTimeline"]
+		NonNullable<
+			Parameters<typeof buildSkiaFrameSnapshot>[1]
+		>["resolveCompositionTimeline"]
 	>;
 	const sceneCanvasWidth = scene?.timeline.canvas.width ?? 1;
 	const sceneCanvasHeight = scene?.timeline.canvas.height ?? 1;
@@ -100,9 +91,6 @@ export const SceneNodeSkiaRenderer: React.FC<
 			toSceneTimelineRef(node.sceneId),
 		);
 	}, [node.sceneId, runtimeManager, scene]);
-	const useLiveRenderTarget = useMemo(() => {
-		return getSkiaRenderBackend().kind === "webgpu";
-	}, []);
 	const [currentFrame, setCurrentFrame] = useState<ScenePreviewFrame | null>(
 		null,
 	);
@@ -276,45 +264,6 @@ export const SceneNodeSkiaRenderer: React.FC<
 					};
 				};
 				const build = async (): Promise<ScenePreviewFrame> => {
-					if (useLiveRenderTarget) {
-						const renderState = await buildSkiaRenderState(
-							{
-								elements,
-								displayTime: targetDisplayTime,
-								tracks: state.tracks,
-								getTrackIndexForElement,
-								sortByTrackIndex,
-								prepare: {
-									isExporting: false,
-									fps: normalizedFps,
-									canvasSize: safeCanvasSize,
-									prepareTransitionPictures: true,
-									forcePrepareFrames: true,
-									awaitReady: true,
-									getModelStore: (id) => runtime.modelRegistry.get(id),
-									compositionPath: [node.sceneId],
-								},
-							},
-							{
-								wrapRenderNode: (renderNode) => (
-									<EditorRuntimeProvider runtime={createScopedRuntime(runtime)}>
-										{renderNode}
-									</EditorRuntimeProvider>
-								),
-								resolveCompositionTimeline,
-							},
-						);
-						await renderState.ready;
-						return {
-							kind: "render-target",
-							node: (
-								<EditorRuntimeProvider runtime={createScopedRuntime(runtime)}>
-									{renderState.children}
-								</EditorRuntimeProvider>
-							),
-							dispose: renderState.dispose,
-						};
-					}
 					const frameSnapshot = await buildSkiaFrameSnapshot(
 						{
 							elements,
@@ -450,7 +399,6 @@ export const SceneNodeSkiaRenderer: React.FC<
 			runtimeManager,
 			sceneCanvasHeight,
 			sceneCanvasWidth,
-			useLiveRenderTarget,
 		],
 	);
 
@@ -577,16 +525,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 				height={sourceHeight}
 				color="#171717"
 			/>
-			{currentFrame?.kind === "render-target" ? (
-				<RenderTarget
-					width={sourceWidth}
-					height={sourceHeight}
-					clearColor="transparent"
-					debugLabel={`scene-preview:${node.sceneId}`}
-				>
-					{currentFrame.node}
-				</RenderTarget>
-			) : currentFrame?.kind === "picture" ? (
+			{currentFrame?.kind === "picture" ? (
 				<Picture picture={currentFrame.picture} />
 			) : null}
 		</Group>

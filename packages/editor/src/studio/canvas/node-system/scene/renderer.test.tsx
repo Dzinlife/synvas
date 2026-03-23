@@ -12,13 +12,11 @@ import type {
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { SceneNodeSkiaRenderer } from "./renderer";
 
-const { buildSkiaRenderStateMock, buildSkiaFrameSnapshotMock } = vi.hoisted(() => ({
-	buildSkiaRenderStateMock: vi.fn(),
+const { buildSkiaFrameSnapshotMock } = vi.hoisted(() => ({
 	buildSkiaFrameSnapshotMock: vi.fn(),
 }));
 
 vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
-	buildSkiaRenderState: buildSkiaRenderStateMock,
 	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
 }));
 
@@ -32,15 +30,7 @@ vi.mock("react-skia-lite", async () => {
 	return {
 		Group: ({ children }: { children?: React.ReactNode }) => children ?? null,
 		Picture: () => null,
-		RenderTarget: ({ children }: { children?: React.ReactNode }) =>
-			children ?? null,
 		Rect: () => null,
-		getSkiaRenderBackend: () => ({
-			bundle: "webgpu",
-			kind: "webgpu",
-			device: {} as GPUDevice,
-			deviceContext: {} as never,
-		}),
 	};
 });
 
@@ -53,7 +43,6 @@ const flushMicrotasks = async () => {
 
 describe("SceneNodeSkiaRenderer", () => {
 	beforeEach(() => {
-		buildSkiaRenderStateMock.mockReset();
 		buildSkiaFrameSnapshotMock.mockReset();
 	});
 
@@ -141,26 +130,28 @@ describe("SceneNodeSkiaRenderer", () => {
 		const disposeFirst = vi.fn();
 		const disposeSecond = vi.fn();
 
-		buildSkiaRenderStateMock
+		buildSkiaFrameSnapshotMock
 			.mockResolvedValueOnce({
-				children: React.createElement("mock-frame", { id: "frame-1" }),
+				children: [],
 				orderedElements: [],
 				visibleElements: [],
 				transitionFrameState: {
 					activeTransitions: [],
 					hiddenElementIds: [],
 				},
+				picture: { id: "frame-1" },
 				ready: Promise.resolve(),
 				dispose: disposeFirst,
 			})
 			.mockResolvedValueOnce({
-				children: React.createElement("mock-frame", { id: "frame-2" }),
+				children: [],
 				orderedElements: [],
 				visibleElements: [],
 				transitionFrameState: {
 					activeTransitions: [],
 					hiddenElementIds: [],
 				},
+				picture: { id: "frame-2" },
 				ready: Promise.resolve(),
 				dispose: disposeSecond,
 			});

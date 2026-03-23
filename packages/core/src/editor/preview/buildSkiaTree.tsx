@@ -3,9 +3,7 @@ import {
 	Fill,
 	Group,
 	Picture,
-	RenderTarget,
 	Skia,
-	getSkiaRenderBackend,
 	type SkImage,
 	type SkPicture,
 } from "react-skia-lite";
@@ -308,8 +306,6 @@ const buildSkiaRenderStateWithScopeCore = async (
 	);
 	const shouldAwaitReady = isExporting || (prepare?.awaitReady ?? false);
 	const frameChannel = resolveRenderFrameChannel(prepare?.frameChannel);
-	const renderBackend = getSkiaRenderBackend();
-	const shouldUseLiveComposition = renderBackend.kind === "webgpu";
 	const shouldPrepareTransitionPictures =
 		(prepare?.prepareTransitionPictures ?? false) || isExporting;
 	const transitionPictureSize =
@@ -507,75 +503,32 @@ const buildSkiaRenderStateWithScopeCore = async (
 					maxCompositionDepth,
 					frameChannel: "offscreen" as const,
 				};
-				let compositionNode: React.ReactNode;
-				let compositionReady: Promise<void>;
-				if (shouldUseLiveComposition) {
-					const childRenderState = await buildSkiaRenderStateWithScopeCore(
-						{
-							elements: compositionTimeline.elements,
-							displayTime: childDisplayTime,
-							tracks: compositionTimeline.tracks,
-							getTrackIndexForElement,
-							sortByTrackIndex,
-							prepare: childPrepare,
-						},
-						compositionDeps,
-						scope,
-					);
-					const childNode = compositionTimeline.wrapRenderNode
-						? compositionTimeline.wrapRenderNode(childRenderState.children)
-						: childRenderState.children;
-					compositionNode = (
-						<Group matrix={matrix} key={element.id}>
-							<RenderTarget
-								width={childCanvasWidth}
-								height={childCanvasHeight}
-								clearColor="transparent"
-								debugLabel={`composition:${element.id}`}
-							>
-								<Group
-									clip={{
-										x: 0,
-										y: 0,
-										width: childCanvasWidth,
-										height: childCanvasHeight,
-									}}
-								>
-									{childNode}
-								</Group>
-							</RenderTarget>
+				const childSnapshot = await buildSkiaFrameSnapshotCore(
+					{
+						elements: compositionTimeline.elements,
+						displayTime: childDisplayTime,
+						tracks: compositionTimeline.tracks,
+						getTrackIndexForElement,
+						sortByTrackIndex,
+						prepare: childPrepare,
+					},
+					compositionDeps,
+				);
+				scope.add(() => childSnapshot.dispose?.());
+				const compositionNode = (
+					<Group matrix={matrix} key={element.id}>
+						<Group
+							clip={{
+								x: 0,
+								y: 0,
+								width: childCanvasWidth,
+								height: childCanvasHeight,
+							}}
+						>
+							<Picture picture={childSnapshot.picture} />
 						</Group>
-					);
-					compositionReady = childRenderState.ready;
-				} else {
-					const childSnapshot = await buildSkiaFrameSnapshotCore(
-						{
-							elements: compositionTimeline.elements,
-							displayTime: childDisplayTime,
-							tracks: compositionTimeline.tracks,
-							getTrackIndexForElement,
-							sortByTrackIndex,
-							prepare: childPrepare,
-						},
-						compositionDeps,
-					);
-					scope.add(() => childSnapshot.dispose?.());
-					compositionNode = (
-						<Group matrix={matrix} key={element.id}>
-							<Group
-								clip={{
-									x: 0,
-									y: 0,
-									width: childCanvasWidth,
-									height: childCanvasHeight,
-								}}
-							>
-								<Picture picture={childSnapshot.picture} />
-							</Group>
-						</Group>
-					);
-					compositionReady = childSnapshot.ready;
-				}
+					</Group>
+				);
 				const node = wrapElementNode({
 					target: element,
 					node: compositionNode,
@@ -584,7 +537,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 				});
 				return {
 					node,
-					ready: compositionReady,
+					ready: childSnapshot.ready,
 				};
 			} catch (error) {
 				console.warn(
@@ -633,37 +586,20 @@ const buildSkiaRenderStateWithScopeCore = async (
 		const elementReady = Promise.all([fromPlan.ready, toPlan.ready]);
 		let fromPicture: SkPicture | null = null;
 		let toPicture: SkPicture | null = null;
-		let fromImage: SkImage | null = null;
-		let toImage: SkImage | null = null;
 		if (transitionInputMode === "texture" && transitionPictureSize) {
 			await elementReady;
-			if (renderBackend.kind === "webgpu" && deps.renderNodeToImage) {
-				const [fromRendered, toRendered] = await Promise.all([
-					fromPlan.node
-						? deps.renderNodeToImage(fromPlan.node, transitionPictureSize)
-						: Promise.resolve(null),
-					toPlan.node
-						? deps.renderNodeToImage(toPlan.node, transitionPictureSize)
-						: Promise.resolve(null),
-				]);
-				fromImage = fromRendered;
-				toImage = toRendered;
-				scope.addDisposable(fromRendered);
-				scope.addDisposable(toRendered);
-			} else {
-				const [fromRendered, toRendered] = await Promise.all([
-					fromPlan.node
-						? deps.renderNodeToPicture(fromPlan.node, transitionPictureSize)
-						: Promise.resolve(null),
-					toPlan.node
-						? deps.renderNodeToPicture(toPlan.node, transitionPictureSize)
-						: Promise.resolve(null),
-				]);
-				fromPicture = fromRendered;
-				toPicture = toRendered;
-				scope.addDisposable(fromRendered);
-				scope.addDisposable(toRendered);
-			}
+			const [fromRendered, toRendered] = await Promise.all([
+				fromPlan.node
+					? deps.renderNodeToPicture(fromPlan.node, transitionPictureSize)
+					: Promise.resolve(null),
+				toPlan.node
+					? deps.renderNodeToPicture(toPlan.node, transitionPictureSize)
+					: Promise.resolve(null),
+			]);
+			fromPicture = fromRendered;
+			toPicture = toRendered;
+			scope.addDisposable(fromRendered);
+			scope.addDisposable(toRendered);
 		}
 		const TransitionRenderer = transitionDef.Renderer;
 		const activeTransition = activeTransitionById.get(element.id);
@@ -674,8 +610,6 @@ const buildSkiaRenderStateWithScopeCore = async (
 				{...element.props}
 				fromNode={fromPlan.node}
 				toNode={toPlan.node}
-				fromImage={fromImage}
-				toImage={toImage}
 				fromPicture={fromPicture}
 				toPicture={toPicture}
 				progress={activeTransition?.progress}

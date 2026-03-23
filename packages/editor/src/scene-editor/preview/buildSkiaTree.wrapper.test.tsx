@@ -527,7 +527,7 @@ describe("buildSkiaTree transform wrapper", () => {
 		renderState.dispose?.();
 	});
 
-	it("WebGPU texture transition 会优先复用 image snapshot，不再回退到 picture 录制", async () => {
+	it("WebGPU texture transition 也会走 picture 录制", async () => {
 		getSkiaRenderBackendMock.mockReturnValue({
 			bundle: "webgpu",
 			kind: "webgpu",
@@ -577,7 +577,10 @@ describe("buildSkiaTree transform wrapper", () => {
 			.fn()
 			.mockResolvedValueOnce({ id: "from-image", dispose: vi.fn() } as any)
 			.mockResolvedValueOnce({ id: "to-image", dispose: vi.fn() } as any);
-		const renderNodeToPicture = vi.fn();
+		const renderNodeToPicture = vi
+			.fn()
+			.mockResolvedValueOnce({ id: "from-picture", dispose: vi.fn() } as any)
+			.mockResolvedValueOnce({ id: "to-picture", dispose: vi.fn() } as any);
 		const localDeps: BuildSkiaDeps = {
 			...deps,
 			renderNodeToImage,
@@ -606,14 +609,14 @@ describe("buildSkiaTree transform wrapper", () => {
 			(node) => isElement(node) && node.type === TransitionRenderer,
 		);
 
-		expect(renderNodeToImage).toHaveBeenCalledTimes(2);
-		expect(renderNodeToPicture).not.toHaveBeenCalled();
+		expect(renderNodeToImage).not.toHaveBeenCalled();
+		expect(renderNodeToPicture).toHaveBeenCalledTimes(2);
 		expect(transitionNode).toBeTruthy();
 		if (!isElement(transitionNode)) return;
-		expect(transitionNode.props.fromImage).toBeTruthy();
-		expect(transitionNode.props.toImage).toBeTruthy();
-		expect(transitionNode.props.fromPicture).toBeNull();
-		expect(transitionNode.props.toPicture).toBeNull();
+		expect(transitionNode.props.fromImage).toBeUndefined();
+		expect(transitionNode.props.toImage).toBeUndefined();
+		expect(transitionNode.props.fromPicture).toBeTruthy();
+		expect(transitionNode.props.toPicture).toBeTruthy();
 
 		renderState.dispose?.();
 	});
@@ -926,7 +929,7 @@ describe("buildSkiaTree transform wrapper", () => {
 		expect(childPictureDispose).toHaveBeenCalledTimes(1);
 	});
 
-	it("开启 live composition 时会递归构建子 scene RenderTarget", async () => {
+	it("WebGPU Composition 也会递归构建子 scene picture", async () => {
 		getSkiaRenderBackendMock.mockReturnValue({
 			bundle: "webgpu",
 			kind: "webgpu",
@@ -982,18 +985,12 @@ describe("buildSkiaTree transform wrapper", () => {
 			localDeps,
 		);
 
-		const renderTargetNodes = collectElements(
-			renderState.children,
-			(node) => node.props.debugLabel === "composition:composition-live",
-		);
 		const pictureNodes = collectElements(
 			renderState.children,
 			(node) => "picture" in node.props,
 		);
-		expect(renderTargetNodes.length).toBeGreaterThan(0);
-		expect(renderTargetNodes[0]?.props.debugLabel).toBe("composition:composition-live");
-		expect(pictureNodes.length).toBe(0);
-		expect(renderNodeToPicture).not.toHaveBeenCalled();
+		expect(pictureNodes.length).toBeGreaterThan(0);
+		expect(renderNodeToPicture).toHaveBeenCalled();
 		expect(childWrapSpy).toHaveBeenCalled();
 
 		renderState.dispose?.();
