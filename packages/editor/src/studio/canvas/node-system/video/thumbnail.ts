@@ -1,6 +1,6 @@
 import type { VideoCanvasNode } from "core/studio/types";
-import type { CanvasSink } from "mediabunny";
 import { acquireVideoAsset } from "@/assets/videoAsset";
+import { getThumbnail, getVideoSize } from "@/element/VideoClip/thumbnailCache";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import type { CanvasNodeThumbnailCapability } from "../types";
 import {
@@ -9,59 +9,12 @@ import {
 	resolveThumbnailSize,
 } from "../thumbnail/utils";
 
-const readFirstFrameCanvas = async (
-	videoSink: Pick<CanvasSink, "canvases">,
-): Promise<HTMLCanvasElement | OffscreenCanvas | null> => {
-	const iterator = videoSink.canvases(NODE_THUMBNAIL_FRAME);
-	try {
-		const frame = (await iterator.next()).value;
-		return frame?.canvas ?? null;
-	} finally {
-		await iterator.return();
-	}
-};
-
 const buildVideoSourceSignature = (
 	node: VideoCanvasNode,
 	hash: unknown,
 ): string => {
 	const normalizedHash = typeof hash === "string" ? hash : "";
 	return `${node.assetId}:${normalizedHash}`;
-};
-
-const drawFrameToThumbnailCanvas = (
-	frameCanvas: HTMLCanvasElement | OffscreenCanvas,
-	targetSize: { width: number; height: number },
-): HTMLCanvasElement | null => {
-	const sourceWidth = frameCanvas.width;
-	const sourceHeight = frameCanvas.height;
-	if (sourceWidth <= 0 || sourceHeight <= 0) return null;
-	const resultCanvas = document.createElement("canvas");
-	resultCanvas.width = targetSize.width;
-	resultCanvas.height = targetSize.height;
-	const ctx = resultCanvas.getContext("2d");
-	if (!ctx) return null;
-	const scale = Math.min(
-		targetSize.width / sourceWidth,
-		targetSize.height / sourceHeight,
-	);
-	const drawWidth = sourceWidth * scale;
-	const drawHeight = sourceHeight * scale;
-	const offsetX = (targetSize.width - drawWidth) * 0.5;
-	const offsetY = (targetSize.height - drawHeight) * 0.5;
-	ctx.clearRect(0, 0, targetSize.width, targetSize.height);
-	ctx.drawImage(
-		frameCanvas,
-		0,
-		0,
-		sourceWidth,
-		sourceHeight,
-		offsetX,
-		offsetY,
-		drawWidth,
-		drawHeight,
-	);
-	return resultCanvas;
 };
 
 export const videoNodeThumbnailCapability: CanvasNodeThumbnailCapability<VideoCanvasNode> =
@@ -79,16 +32,27 @@ export const videoNodeThumbnailCapability: CanvasNodeThumbnailCapability<VideoCa
 			if (!assetUri) return null;
 			const handle = await acquireVideoAsset(assetUri);
 			try {
-				const frameCanvas = await readFirstFrameCanvas(handle.asset.videoSink);
-				if (!frameCanvas) return null;
-				const sourceSize = {
-					width: Math.max(1, Math.round(frameCanvas.width)),
-					height: Math.max(1, Math.round(frameCanvas.height)),
-				};
+				// 用独立 sample sink 取缩略图，避免与播放控制器共享游标相互干扰。
+				const thumbnailSink = handle.asset.createVideoSampleSink();
+				const sourceSize =
+					(await getVideoSize(assetUri, thumbnailSink)) ?? {
+						width: Math.max(1, Math.round(node.width)),
+						height: Math.max(1, Math.round(node.height)),
+					};
 				const targetSize = resolveThumbnailSize(sourceSize.width, sourceSize.height);
-				const resultCanvas = drawFrameToThumbnailCanvas(frameCanvas, targetSize);
-				if (!resultCanvas) return null;
-				const blob = await encodeCanvasThumbnailBlob(resultCanvas);
+				const frameCanvas = await getThumbnail({
+					uri: assetUri,
+					time: NODE_THUMBNAIL_FRAME,
+					timeKey: Math.max(0, Math.round(NODE_THUMBNAIL_FRAME * 1000)),
+					width: targetSize.width,
+					height: targetSize.height,
+					pixelRatio: 1,
+					videoSampleSink: thumbnailSink,
+					input: handle.asset.input,
+					preferKeyframes: true,
+				});
+				if (!frameCanvas) return null;
+				const blob = await encodeCanvasThumbnailBlob(frameCanvas);
 				if (!blob) return null;
 				return {
 					blob,
