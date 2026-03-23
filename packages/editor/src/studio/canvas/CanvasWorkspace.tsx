@@ -3,6 +3,7 @@ import type { TimelineElement, TrackRole } from "core/element/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import type React from "react";
 import {
+	startTransition,
 	useCallback,
 	useContext,
 	useEffect,
@@ -16,10 +17,6 @@ import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
 import { ingestExternalFileAsset } from "@/projects/assetIngest";
 import { useProjectStore } from "@/projects/projectStore";
-import {
-	getCanvasCamera,
-	useCanvasCameraStore,
-} from "@/studio/canvas/cameraStore";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
 import {
 	calculateAutoScrollSpeed,
@@ -31,21 +28,25 @@ import { findTimelineDropTargetFromScreenPosition } from "@/scene-editor/drag/ti
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { DEFAULT_TRACK_HEIGHT } from "@/scene-editor/timeline/trackConfig";
-import { getAudioTrackControlState } from "@/scene-editor/utils/audioTrackState";
 import { findAttachments } from "@/scene-editor/utils/attachments";
+import { getAudioTrackControlState } from "@/scene-editor/utils/audioTrackState";
 import {
 	finalizeTimelineElements,
 	insertElementIntoMainTrack,
 	insertElementsIntoMainTrackGroup,
 } from "@/scene-editor/utils/mainTrackMagnet";
-import { getPixelsPerFrame } from "@/scene-editor/utils/timelineScale";
 import { pasteTimelineClipboardPayload } from "@/scene-editor/utils/timelineClipboard";
+import { getPixelsPerFrame } from "@/scene-editor/utils/timelineScale";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import {
 	getStoredTrackAssignments,
 	getTrackRoleMapFromTracks,
 } from "@/scene-editor/utils/trackAssignment";
 import { CANVAS_NODE_DRAWER_DEFAULT_HEIGHT } from "@/studio/canvas/CanvasNodeDrawerShell";
+import {
+	getCanvasCamera,
+	useCanvasCameraStore,
+} from "@/studio/canvas/cameraStore";
 import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import {
 	canvasNodeDefinitionList,
@@ -56,9 +57,10 @@ import type {
 	CanvasNodeDrawerTrigger,
 	CanvasNodeResizeConstraints,
 } from "@/studio/canvas/node-system/types";
+import type { CanvasSidebarTab } from "@/studio/canvas/sidebar/CanvasSidebar";
 import {
-	type CanvasGraphHistoryEntry as ClipboardCanvasGraphHistoryEntry,
 	buildCanvasClipboardEntries,
+	type CanvasGraphHistoryEntry as ClipboardCanvasGraphHistoryEntry,
 	instantiateCanvasClipboardEntries,
 } from "@/studio/clipboard/canvasClipboard";
 import {
@@ -67,7 +69,6 @@ import {
 	type StudioTimelineClipboardPayload,
 	useStudioClipboardStore,
 } from "@/studio/clipboard/studioClipboardStore";
-import type { CanvasSidebarTab } from "@/studio/canvas/sidebar/CanvasSidebar";
 import {
 	type CanvasNodeLayoutSnapshot,
 	useStudioHistoryStore,
@@ -79,28 +80,32 @@ import CanvasWorkspaceOverlay, {
 	type DrawerViewData,
 } from "./CanvasWorkspaceOverlay";
 import {
-	CanvasSpatialIndex,
-	compareCanvasSpatialHitPriority,
-	compareCanvasSpatialPaintOrder,
-} from "./canvasSpatialIndex";
-import {
-	collectCanvasSnapGuideValues,
-	EMPTY_CANVAS_SNAP_GUIDES_SCREEN,
-	projectCanvasSnapGuidesToScreen,
-	resolveCanvasRectSnap,
-	resolveCanvasSnapThresholdWorld,
-	type CanvasSnapGuideValues,
-	type CanvasSnapGuidesScreen,
-	type CanvasSnapGuidesWorld,
-	type CanvasSnapRect,
-} from "./canvasSnapUtils";
-import {
 	CANVAS_OVERLAY_GAP_PX,
 	CANVAS_OVERLAY_OUTER_PADDING_PX,
 	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
 	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
 	resolveCanvasOverlayLayout,
 } from "./canvasOverlayLayout";
+import {
+	resolveCanvasResizeAnchorAtRectWorldPoint,
+	resolveCanvasResizeAnchorAtWorldPoint,
+} from "./canvasResizeAnchor";
+import {
+	type CanvasSnapGuidesScreen,
+	type CanvasSnapGuidesWorld,
+	type CanvasSnapGuideValues,
+	type CanvasSnapRect,
+	collectCanvasSnapGuideValues,
+	EMPTY_CANVAS_SNAP_GUIDES_SCREEN,
+	projectCanvasSnapGuidesToScreen,
+	resolveCanvasRectSnap,
+	resolveCanvasSnapThresholdWorld,
+} from "./canvasSnapUtils";
+import {
+	CanvasSpatialIndex,
+	compareCanvasSpatialHitPriority,
+	compareCanvasSpatialPaintOrder,
+} from "./canvasSpatialIndex";
 import {
 	buildNodeFitCamera,
 	buildNodePanCamera,
@@ -118,11 +123,11 @@ import {
 	isWorldPointInBounds,
 	isWorldPointInNode,
 	pickLayout,
-	resolveDynamicMinZoom,
-	resolveCanvasNodeBounds,
 	type ResolvedCanvasDrawerOptions,
+	resolveCanvasNodeBounds,
 	resolveDrawerOptions,
 	resolveDroppedFiles,
+	resolveDynamicMinZoom,
 	SIDEBAR_VIEW_PADDING_PX,
 	toTimelineContextMenuActions,
 } from "./canvasWorkspaceUtils";
@@ -134,10 +139,6 @@ import type {
 	CanvasSelectionResizeEvent,
 } from "./InfiniteSkiaCanvas";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
-import {
-	resolveCanvasResizeAnchorAtRectWorldPoint,
-	resolveCanvasResizeAnchorAtWorldPoint,
-} from "./canvasResizeAnchor";
 import { useCanvasCameraController } from "./useCanvasCameraController";
 import { useNodeThumbnailGeneration } from "./useNodeThumbnailGeneration";
 
@@ -276,8 +277,7 @@ interface CanvasRenderCullState {
 const CANVAS_MARQUEE_ACTIVATION_PX = 3;
 const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
 const CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX = 160;
-const PAN_CULL_INTERVAL_MS = 120;
-const PAN_CULL_IDLE_FLUSH_MS = 120;
+const PAN_CULL_IDLE_FLUSH_MS = 300;
 const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
 	import.meta.env.DEV &&
 	(import.meta.env as Record<string, unknown>)
@@ -833,8 +833,8 @@ const CanvasWorkspace = () => {
 	const observedStageSizeRef = useRef(stageSize);
 	const pendingCameraCullUpdateKindRef =
 		useRef<PendingCameraCullUpdateKind | null>(null);
-	const panCullLastCommitAtRef = useRef(0);
 	const panCullPendingCameraRef = useRef<CameraState | null>(null);
+	const panCullBurstActiveRef = useRef(false);
 	const panCullIdleTimerRef = useRef<number | null>(null);
 	const {
 		cameraSharedValue,
@@ -859,11 +859,22 @@ const CanvasWorkspace = () => {
 			window.clearTimeout(timerId);
 		}
 	});
+	const setRenderCullStateWithTransition = useEffectEvent(
+		(
+			updater: (
+				prev: CanvasRenderCullState,
+			) => CanvasRenderCullState,
+		) => {
+			startTransition(() => {
+				setRenderCullState(updater);
+			});
+		},
+	);
 	const commitLiveCullCamera = useEffectEvent((camera: CameraState) => {
 		clearPanCullIdleTimer();
 		panCullPendingCameraRef.current = null;
-		panCullLastCommitAtRef.current = Date.now();
-		setRenderCullState((prev) => {
+		panCullBurstActiveRef.current = false;
+		setRenderCullStateWithTransition((prev) => {
 			if (
 				prev.mode === "live" &&
 				prev.lockedViewportRect === null &&
@@ -883,8 +894,7 @@ const CanvasWorkspace = () => {
 		const pendingCamera = panCullPendingCameraRef.current;
 		if (!pendingCamera) return;
 		panCullPendingCameraRef.current = null;
-		panCullLastCommitAtRef.current = Date.now();
-		setRenderCullState((prev) => {
+		setRenderCullStateWithTransition((prev) => {
 			if (
 				prev.mode === "live" &&
 				prev.lockedViewportRect === null &&
@@ -902,15 +912,15 @@ const CanvasWorkspace = () => {
 	});
 	const schedulePanCullCommit = useEffectEvent((camera: CameraState) => {
 		panCullPendingCameraRef.current = camera;
-		const now = Date.now();
-		const elapsed = now - panCullLastCommitAtRef.current;
-		if (panCullLastCommitAtRef.current === 0 || elapsed >= PAN_CULL_INTERVAL_MS) {
+		if (!panCullBurstActiveRef.current) {
+			panCullBurstActiveRef.current = true;
 			flushPendingPanCullCommit();
 		}
 		clearPanCullIdleTimer();
 		if (typeof window === "undefined") return;
 		panCullIdleTimerRef.current = window.setTimeout(() => {
 			panCullIdleTimerRef.current = null;
+			panCullBurstActiveRef.current = false;
 			flushPendingPanCullCommit();
 		}, PAN_CULL_IDLE_FLUSH_MS);
 	});
@@ -918,7 +928,8 @@ const CanvasWorkspace = () => {
 		(viewportRect: CanvasViewportWorldRect | null, camera: CameraState) => {
 			clearPanCullIdleTimer();
 			panCullPendingCameraRef.current = null;
-			setRenderCullState((prev) => {
+			panCullBurstActiveRef.current = false;
+			setRenderCullStateWithTransition((prev) => {
 				if (
 					prev.mode === "locked" &&
 					isCameraStateEqual(prev.camera, camera) &&
@@ -1018,6 +1029,7 @@ const CanvasWorkspace = () => {
 		return () => {
 			clearPanCullIdleTimer();
 			panCullPendingCameraRef.current = null;
+			panCullBurstActiveRef.current = false;
 			pendingCameraCullUpdateKindRef.current = null;
 		};
 	}, [clearPanCullIdleTimer]);

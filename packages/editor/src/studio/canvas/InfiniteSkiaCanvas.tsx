@@ -1,6 +1,7 @@
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import type React from "react";
 import {
+	memo,
 	useCallback,
 	useLayoutEffect,
 	useMemo,
@@ -42,6 +43,7 @@ import { getCanvasNodeDefinition } from "./node-system/registry";
 import type {
 	CanvasNodeFocusEditorBridgeProps,
 	CanvasNodeFocusEditorLayerState,
+	CanvasNodeSkiaRenderProps,
 } from "./node-system/types";
 import {
 	type CameraState,
@@ -276,7 +278,7 @@ interface CanvasNodeSkiaItemProps {
 	onDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 }
 
-const CanvasNodeSkiaItem = ({
+const CanvasNodeSkiaItemComponent = ({
 	node,
 	layout,
 	scene,
@@ -298,7 +300,10 @@ const CanvasNodeSkiaItem = ({
 	onDoubleClick,
 }: CanvasNodeSkiaItemProps) => {
 	const definition = getCanvasNodeDefinition(node.type);
-	const Renderer = definition.skiaRenderer;
+	const Renderer =
+		definition.skiaRenderer as React.ComponentType<
+			CanvasNodeSkiaRenderProps<CanvasNode>
+		>;
 	const clip = useDerivedValue(() => {
 		const worldRect = resolveCanvasNodeLayoutWorldRect(layout.value);
 		return {
@@ -338,7 +343,8 @@ const CanvasNodeSkiaItem = ({
 				onDoubleClick={onDoubleClick}
 			>
 				<Group transform={contentTransform}>
-					<Renderer
+					<CanvasNodeRendererHost
+						renderer={Renderer}
 						node={node}
 						scene={scene}
 						asset={asset}
@@ -352,6 +358,45 @@ const CanvasNodeSkiaItem = ({
 		</Group>
 	);
 };
+const CanvasNodeSkiaItem = memo(CanvasNodeSkiaItemComponent);
+CanvasNodeSkiaItem.displayName = "CanvasNodeSkiaItem";
+
+interface CanvasNodeRendererHostProps {
+	renderer: React.ComponentType<CanvasNodeSkiaRenderProps<CanvasNode>>;
+	node: CanvasNode;
+	scene: StudioProject["scenes"][string] | null;
+	asset: StudioProject["assets"][number] | null;
+	isActive: boolean;
+	isFocused: boolean;
+	isDimmed: boolean;
+	runtimeManager: ReturnType<typeof useStudioRuntimeManager>;
+}
+
+const CanvasNodeRendererHostComponent = ({
+	renderer: Renderer,
+	node,
+	scene,
+	asset,
+	isActive,
+	isFocused,
+	isDimmed,
+	runtimeManager,
+}: CanvasNodeRendererHostProps) => {
+	return (
+		<Renderer
+			node={node}
+			scene={scene}
+			asset={asset}
+			isActive={isActive}
+			isFocused={isFocused}
+			isDimmed={isDimmed}
+			runtimeManager={runtimeManager}
+		/>
+	);
+};
+
+const CanvasNodeRendererHost = memo(CanvasNodeRendererHostComponent);
+CanvasNodeRendererHost.displayName = "CanvasNodeRendererHost";
 
 const isLayerValueEqual = (left: unknown, right: unknown): boolean => {
 	if (left === right) return true;
