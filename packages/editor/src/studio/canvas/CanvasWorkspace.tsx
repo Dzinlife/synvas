@@ -7,6 +7,7 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useEffectEvent,
 	useMemo,
 	useRef,
 	useState,
@@ -275,7 +276,7 @@ interface CanvasRenderCullState {
 const CANVAS_MARQUEE_ACTIVATION_PX = 3;
 const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
 const CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX = 160;
-const PAN_CULL_IDLE_FLUSH_MS = 16;
+const PAN_CULL_IDLE_FLUSH_MS = 300;
 const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
 	import.meta.env.DEV &&
 	(import.meta.env as Record<string, unknown>)
@@ -383,17 +384,6 @@ const isNodeIntersectRect = (
 		rect.top < nodeBottom &&
 		rect.bottom > nodeTop
 	);
-};
-
-const areRenderNodesIdentical = (
-	left: CanvasNode[],
-	right: CanvasNode[],
-): boolean => {
-	if (left.length !== right.length) return false;
-	for (let index = 0; index < left.length; index += 1) {
-		if (left[index] !== right[index]) return false;
-	}
-	return true;
 };
 
 const compareCanvasNodePaintOrder = (
@@ -860,15 +850,15 @@ const CanvasWorkspace = () => {
 			}
 		},
 	});
-	const clearPanCullIdleTimer = useCallback(() => {
+	const clearPanCullIdleTimer = useEffectEvent(() => {
 		const timerId = panCullIdleTimerRef.current;
 		if (timerId === null) return;
 		panCullIdleTimerRef.current = null;
 		if (typeof window !== "undefined") {
 			window.clearTimeout(timerId);
 		}
-	}, []);
-	const setRenderCullStateWithTransition = useCallback(
+	});
+	const setRenderCullStateWithTransition = useEffectEvent(
 		(
 			updater: (
 				prev: CanvasRenderCullState,
@@ -878,32 +868,28 @@ const CanvasWorkspace = () => {
 				setRenderCullState(updater);
 			});
 		},
-		[setRenderCullState],
 	);
-	const commitLiveCullCamera = useCallback(
-		(camera: CameraState) => {
-			clearPanCullIdleTimer();
-			panCullPendingCameraRef.current = null;
-			panCullBurstActiveRef.current = false;
-			setRenderCullStateWithTransition((prev) => {
-				if (
-					prev.mode === "live" &&
-					prev.lockedViewportRect === null &&
-					isCameraStateEqual(prev.camera, camera)
-				) {
-					return prev;
-				}
-				return {
-					mode: "live",
-					camera,
-					lockedViewportRect: null,
-					version: prev.version + 1,
-				};
-			});
-		},
-		[clearPanCullIdleTimer, setRenderCullStateWithTransition],
-	);
-	const flushPendingPanCullCommit = useCallback(() => {
+	const commitLiveCullCamera = useEffectEvent((camera: CameraState) => {
+		clearPanCullIdleTimer();
+		panCullPendingCameraRef.current = null;
+		panCullBurstActiveRef.current = false;
+		setRenderCullStateWithTransition((prev) => {
+			if (
+				prev.mode === "live" &&
+				prev.lockedViewportRect === null &&
+				isCameraStateEqual(prev.camera, camera)
+			) {
+				return prev;
+			}
+			return {
+				mode: "live",
+				camera,
+				lockedViewportRect: null,
+				version: prev.version + 1,
+			};
+		});
+	});
+	const flushPendingPanCullCommit = useEffectEvent(() => {
 		const pendingCamera = panCullPendingCameraRef.current;
 		if (!pendingCamera) return;
 		panCullPendingCameraRef.current = null;
@@ -922,25 +908,22 @@ const CanvasWorkspace = () => {
 				version: prev.version + 1,
 			};
 		});
-	}, [setRenderCullStateWithTransition]);
-	const schedulePanCullCommit = useCallback(
-		(camera: CameraState) => {
-			panCullPendingCameraRef.current = camera;
-			if (!panCullBurstActiveRef.current) {
-				panCullBurstActiveRef.current = true;
-				flushPendingPanCullCommit();
-			}
-			clearPanCullIdleTimer();
-			if (typeof window === "undefined") return;
-			panCullIdleTimerRef.current = window.setTimeout(() => {
-				panCullIdleTimerRef.current = null;
-				panCullBurstActiveRef.current = false;
-				flushPendingPanCullCommit();
-			}, PAN_CULL_IDLE_FLUSH_MS);
-		},
-		[clearPanCullIdleTimer, flushPendingPanCullCommit],
-	);
-	const lockRenderCullToViewportRect = useCallback(
+	});
+	const schedulePanCullCommit = useEffectEvent((camera: CameraState) => {
+		panCullPendingCameraRef.current = camera;
+		if (!panCullBurstActiveRef.current) {
+			panCullBurstActiveRef.current = true;
+			flushPendingPanCullCommit();
+		}
+		clearPanCullIdleTimer();
+		if (typeof window === "undefined") return;
+		panCullIdleTimerRef.current = window.setTimeout(() => {
+			panCullIdleTimerRef.current = null;
+			panCullBurstActiveRef.current = false;
+			flushPendingPanCullCommit();
+		}, PAN_CULL_IDLE_FLUSH_MS);
+	});
+	const lockRenderCullToViewportRect = useEffectEvent(
 		(viewportRect: CanvasViewportWorldRect | null, camera: CameraState) => {
 			clearPanCullIdleTimer();
 			panCullPendingCameraRef.current = null;
@@ -961,9 +944,8 @@ const CanvasWorkspace = () => {
 				};
 			});
 		},
-		[clearPanCullIdleTimer, setRenderCullStateWithTransition],
 	);
-	const applyInstantCameraWithCullIntent = useCallback(
+	const applyInstantCameraWithCullIntent = useEffectEvent(
 		(nextCamera: CameraState, kind: Exclude<PendingCameraCullUpdateKind, "smooth">) => {
 			const currentCamera = getCamera();
 			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
@@ -972,42 +954,30 @@ const CanvasWorkspace = () => {
 				transition: "instant",
 			});
 		},
-		[applyCamera, getCamera],
 	);
-	const applySmoothCameraWithCullLock = useCallback(
-		(nextCamera: CameraState) => {
-			const currentCamera = getCamera();
-			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
-			const startRect = resolveCameraViewportWorldRect(
-				currentCamera,
-				stageSize.width,
-				stageSize.height,
-				CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX,
-			);
-			const endRect = resolveCameraViewportWorldRect(
-				nextCamera,
-				stageSize.width,
-				stageSize.height,
-				CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX,
-			);
-			lockRenderCullToViewportRect(
-				resolveViewportUnionRect(startRect, endRect),
-				nextCamera,
-			);
-			pendingCameraCullUpdateKindRef.current = "smooth";
-			applyCamera(nextCamera);
-		},
-		[
-			applyCamera,
-			getCamera,
-			lockRenderCullToViewportRect,
-			stageSize.height,
+	const applySmoothCameraWithCullLock = useEffectEvent((nextCamera: CameraState) => {
+		const currentCamera = getCamera();
+		if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+		const startRect = resolveCameraViewportWorldRect(
+			currentCamera,
 			stageSize.width,
-		],
-	);
-	const applySmoothCameraWithCullLockRef = useRef(applySmoothCameraWithCullLock);
-	applySmoothCameraWithCullLockRef.current = applySmoothCameraWithCullLock;
-	const handleCameraStoreCameraChange = useCallback(
+			stageSize.height,
+			CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX,
+		);
+		const endRect = resolveCameraViewportWorldRect(
+			nextCamera,
+			stageSize.width,
+			stageSize.height,
+			CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX,
+		);
+		lockRenderCullToViewportRect(
+			resolveViewportUnionRect(startRect, endRect),
+			nextCamera,
+		);
+		pendingCameraCullUpdateKindRef.current = "smooth";
+		applyCamera(nextCamera);
+	});
+	const handleCameraStoreCameraChange = useEffectEvent(
 		(nextCamera: CameraState, previousCamera: CameraState) => {
 			const pendingKind = pendingCameraCullUpdateKindRef.current;
 			pendingCameraCullUpdateKindRef.current = null;
@@ -1021,15 +991,14 @@ const CanvasWorkspace = () => {
 			}
 			commitLiveCullCamera(nextCamera);
 		},
-		[commitLiveCullCamera, isCameraAnimating, schedulePanCullCommit],
 	);
-	const syncCameraFromStore = useCallback(() => {
+	const syncCameraFromStore = useEffectEvent(() => {
 		stopCameraAnimation();
 		applyInstantCameraWithCullIntent(getCanvasCamera(), "immediate");
-	}, [applyInstantCameraWithCullIntent, stopCameraAnimation]);
+	});
 	useEffect(() => {
 		syncCameraFromStore();
-	}, [currentProjectId, syncCameraFromStore]);
+	}, [currentProjectId]);
 	useEffect(() => {
 		renderCullModeRef.current = renderCullState.mode;
 	}, [renderCullState.mode]);
@@ -1057,16 +1026,12 @@ const CanvasWorkspace = () => {
 	}, [commitLiveCullCamera, getCamera, stageSize.height, stageSize.width]);
 	useEffect(() => {
 		return () => {
-			const timerId = panCullIdleTimerRef.current;
-			if (timerId !== null && typeof window !== "undefined") {
-				window.clearTimeout(timerId);
-			}
-			panCullIdleTimerRef.current = null;
+			clearPanCullIdleTimer();
 			panCullPendingCameraRef.current = null;
 			panCullBurstActiveRef.current = false;
 			pendingCameraCullUpdateKindRef.current = null;
 		};
-	}, []);
+	}, [clearPanCullIdleTimer]);
 	useEffect(() => {
 		const handleWindowMouseMove = (event: MouseEvent) => {
 			lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
@@ -1120,15 +1085,8 @@ const CanvasWorkspace = () => {
 			null
 		);
 	}, [activeNodeId, currentProject]);
-	const stableRenderNodesRef = useRef<CanvasNode[]>([]);
 	const renderNodes = useMemo(() => {
-		if (sortedNodes.length === 0) {
-			if (stableRenderNodesRef.current.length === 0) {
-				return stableRenderNodesRef.current;
-			}
-			stableRenderNodesRef.current = [];
-			return stableRenderNodesRef.current;
-		}
+		if (sortedNodes.length === 0) return [];
 		const viewportRect =
 			renderCullState.mode === "locked"
 				? renderCullState.lockedViewportRect
@@ -1138,13 +1096,7 @@ const CanvasWorkspace = () => {
 						stageSize.height,
 						CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX,
 					);
-		if (!viewportRect) {
-			if (areRenderNodesIdentical(stableRenderNodesRef.current, sortedNodes)) {
-				return stableRenderNodesRef.current;
-			}
-			stableRenderNodesRef.current = sortedNodes;
-			return stableRenderNodesRef.current;
-		}
+		if (!viewportRect) return sortedNodes;
 		const forcedNodeIds = new Set(normalizedSelectedNodeIds);
 		if (activeNodeId) {
 			forcedNodeIds.add(activeNodeId);
@@ -1183,13 +1135,7 @@ const CanvasWorkspace = () => {
 				nextRenderNodes.map((node) => node.id),
 			);
 		}
-		if (
-			areRenderNodesIdentical(stableRenderNodesRef.current, nextRenderNodes)
-		) {
-			return stableRenderNodesRef.current;
-		}
-		stableRenderNodesRef.current = nextRenderNodes;
-		return stableRenderNodesRef.current;
+		return nextRenderNodes;
 	}, [
 		activeNodeId,
 		focusedNodeId,
@@ -3995,16 +3941,17 @@ const CanvasWorkspace = () => {
 				stageWidth,
 				stageHeight,
 				safeInsets: cameraSafeInsets,
-			});
-			const currentCamera = getCamera();
-			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
-			applySmoothCameraWithCullLockRef.current(nextCamera);
-		},
-		[
-			cameraSafeInsets,
-			commitSelectedNodeIds,
-			focusedNodeId,
-			getCamera,
+				});
+				const currentCamera = getCamera();
+				if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+				applySmoothCameraWithCullLock(nextCamera);
+			},
+			[
+				applySmoothCameraWithCullLock,
+				cameraSafeInsets,
+				commitSelectedNodeIds,
+				focusedNodeId,
+				getCamera,
 			isCanvasInteractionLocked,
 			setFocusedNode,
 			stageSize.height,
