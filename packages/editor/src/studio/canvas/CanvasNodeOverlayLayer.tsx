@@ -33,10 +33,8 @@ import {
 } from "./canvasResizeAnchor";
 import type { CanvasSnapGuidesScreen } from "./canvasSnapUtils";
 import type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
-import {
-	resolveNodeInteractionBorderStyle,
-	resolvePointerEventMeta,
-} from "./NodeInteractionWrapper";
+import { resolvePointerEventMeta } from "./NodeInteractionWrapper";
+import { resolveNodeInteractionBorderStyle } from "./canvasNodeInteractionStyle";
 
 const CAMERA_ZOOM_EPSILON = 1e-6;
 const RESIZE_ANCHOR_ENTER_OFFSET_PX = 8;

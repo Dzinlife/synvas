@@ -194,9 +194,8 @@ describe("SceneNodeSkiaRenderer flicker fix", () => {
 					node={node}
 					scene={scene}
 					asset={null}
-					isActive={false}
+					isActive={true}
 					isFocused={false}
-					isDimmed={false}
 					runtimeManager={runtimeManager}
 				/>
 			</React.Profiler>,

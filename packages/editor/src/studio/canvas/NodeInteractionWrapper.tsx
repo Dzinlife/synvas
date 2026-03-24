@@ -31,26 +31,15 @@ export interface CanvasNodeDragEvent extends CanvasNodePointerEvent {
 interface NodeInteractionWrapperProps {
 	node: CanvasNode;
 	layout?: SharedValue<CanvasNodeLayoutState> | null;
-	isActive: boolean;
-	isSelected: boolean;
-	isDimmed: boolean;
-	isHovered: boolean;
-	cameraZoom: number | SharedValue<number>;
-	showBorder?: boolean;
 	disabled?: boolean;
-	onPointerEnter: (nodeId: string) => void;
-	onPointerLeave: (nodeId: string) => void;
+	onPointerEnter?: (nodeId: string) => void;
+	onPointerLeave?: (nodeId: string) => void;
 	onDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onDrag?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onDragEnd?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
 	onClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
-	children: React.ReactNode;
-}
-
-interface NodeInteractionBorderStyle {
-	color: string;
-	baseStrokeWidthPx: number;
+	children?: React.ReactNode;
 }
 
 const NODE_INTERACTION_SURFACE_COLOR = "rgba(255,255,255,0.001)";
@@ -105,56 +94,9 @@ export const resolvePointerEventMeta = (
 	};
 };
 
-export const resolveNodeInteractionBorderStyle = ({
-	isActive,
-	isSelected,
-	isHovered,
-}: {
-	isActive: boolean;
-	isSelected: boolean;
-	isHovered: boolean;
-}): NodeInteractionBorderStyle => {
-	if (isActive) {
-		return {
-			color: "rgba(251,146,60,1)",
-			baseStrokeWidthPx: 2,
-		};
-	}
-	if (isSelected) {
-		return {
-			color: "rgba(56,189,248,1)",
-			baseStrokeWidthPx: 2,
-		};
-	}
-	if (isHovered) {
-		return {
-			color: "rgba(56,189,248,0.95)",
-			baseStrokeWidthPx: 2,
-		};
-	}
-	return {
-		color: "rgba(255,255,255,0.2)",
-		baseStrokeWidthPx: 1,
-	};
-};
-
-export const resolveNodeInteractionStrokeWidth = (
-	baseStrokeWidthPx: number,
-	cameraZoom: number,
-): number => {
-	const safeZoom = Math.max(cameraZoom, 1e-6);
-	return baseStrokeWidthPx / safeZoom;
-};
-
 export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	node,
 	layout = null,
-	isActive,
-	isSelected,
-	isDimmed,
-	isHovered,
-	cameraZoom,
-	showBorder = true,
 	disabled = false,
 	onPointerEnter,
 	onPointerLeave,
@@ -165,23 +107,6 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	onDoubleClick,
 	children,
 }) => {
-	const borderStyle = resolveNodeInteractionBorderStyle({
-		isActive,
-		isSelected,
-		isHovered,
-	});
-	const borderWidth = useDerivedValue(() => {
-		const resolvedCameraZoom =
-			typeof cameraZoom === "object" &&
-			cameraZoom !== null &&
-			"value" in cameraZoom
-				? cameraZoom.value
-				: cameraZoom;
-		return resolveNodeInteractionStrokeWidth(
-			borderStyle.baseStrokeWidthPx,
-			resolvedCameraZoom,
-		);
-	});
 	const transform = useDerivedValue(() => {
 		const nextLayout = layout?.value ?? node;
 		return [
@@ -248,14 +173,13 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 	return (
 		<Group
 			transform={transform}
-			opacity={isDimmed ? 0.35 : 1}
 			pointerEvents={disabled ? "none" : "auto"}
 			hitRect={hitRect}
 			onPointerEnter={disabled ? undefined : () => {
-				onPointerEnter(node.id);
+				onPointerEnter?.(node.id);
 			}}
 			onPointerLeave={disabled ? undefined : () => {
-				onPointerLeave(node.id);
+				onPointerLeave?.(node.id);
 			}}
 			onPointerDown={disabled ? undefined : (event) => {
 				dragHandlers.onPointerDown?.(event);
@@ -275,17 +199,6 @@ export const NodeInteractionWrapper: React.FC<NodeInteractionWrapperProps> = ({
 				color={NODE_INTERACTION_SURFACE_COLOR}
 			/>
 			{children}
-			{showBorder && (
-				<Rect
-					x={0}
-					y={0}
-					width={borderRectWidth}
-					height={borderRectHeight}
-					style="stroke"
-					strokeWidth={borderWidth}
-					color={borderStyle.color}
-				/>
-			)}
 		</Group>
 	);
 };

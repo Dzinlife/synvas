@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { CanvasNode } from "core/studio/types";
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -119,7 +119,6 @@ vi.mock("react-skia-lite", () => ({
 			...props,
 			width: resolveSharedProp(props.width),
 			height: resolveSharedProp(props.height),
-			strokeWidth: resolveSharedProp(props.strokeWidth),
 		};
 		return (
 			<div data-testid="rect" data-props={JSON.stringify(normalizedProps)} />
@@ -153,14 +152,6 @@ const getRectPropsList = (): Array<Record<string, unknown>> => {
 	});
 };
 
-const parseBorderRectProps = (): Record<string, unknown> => {
-	const borderRect = getRectPropsList().find((rect) => rect.style === "stroke");
-	if (!borderRect) {
-		throw new Error("未找到描边 Rect");
-	}
-	return borderRect;
-};
-
 describe("NodeInteractionWrapper", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -169,121 +160,10 @@ describe("NodeInteractionWrapper", () => {
 		cleanup();
 	});
 
-	it("cameraZoom=2 时 default/hover/active 线宽按像素补偿", () => {
-		const node = createSceneNode();
-		const onPointerEnter = vi.fn();
-		const onPointerLeave = vi.fn();
-		const onClick = vi.fn();
-		const onDoubleClick = vi.fn();
-		const onDrag = vi.fn();
-
-		const { rerender } = render(
-			<NodeInteractionWrapper
-				node={node}
-				isActive={false}
-				isSelected={false}
-				isDimmed={false}
-				isHovered={false}
-				cameraZoom={2}
-				onPointerEnter={onPointerEnter}
-				onPointerLeave={onPointerLeave}
-				onClick={onClick}
-				onDoubleClick={onDoubleClick}
-				onDrag={onDrag}
-			>
-				<div data-testid="child" />
-			</NodeInteractionWrapper>,
-		);
-
-		expect(parseBorderRectProps().strokeWidth).toBe(0.5);
-
-		rerender(
-			<NodeInteractionWrapper
-				node={node}
-				isActive={false}
-				isSelected={false}
-				isDimmed={false}
-				isHovered={true}
-				cameraZoom={2}
-				onPointerEnter={onPointerEnter}
-				onPointerLeave={onPointerLeave}
-				onClick={onClick}
-				onDoubleClick={onDoubleClick}
-				onDrag={onDrag}
-			>
-				<div data-testid="child" />
-			</NodeInteractionWrapper>,
-		);
-		expect(parseBorderRectProps().strokeWidth).toBe(1);
-
-		rerender(
-			<NodeInteractionWrapper
-				node={node}
-				isActive={true}
-				isSelected={true}
-				isDimmed={false}
-				isHovered={false}
-				cameraZoom={2}
-				onPointerEnter={onPointerEnter}
-				onPointerLeave={onPointerLeave}
-				onClick={onClick}
-				onDoubleClick={onDoubleClick}
-				onDrag={onDrag}
-			>
-				<div data-testid="child" />
-			</NodeInteractionWrapper>,
-		);
-		expect(parseBorderRectProps().strokeWidth).toBe(1);
-	});
-
-	it("cameraZoom=0.5 时 default 与 active/hover 线宽放大", () => {
-		const node = createSceneNode();
-		const onPointerEnter = vi.fn();
-		const onPointerLeave = vi.fn();
-
-		const { rerender } = render(
-			<NodeInteractionWrapper
-				node={node}
-				isActive={false}
-				isSelected={false}
-				isDimmed={false}
-				isHovered={false}
-				cameraZoom={0.5}
-				onPointerEnter={onPointerEnter}
-				onPointerLeave={onPointerLeave}
-			>
-				<div data-testid="child" />
-			</NodeInteractionWrapper>,
-		);
-		expect(parseBorderRectProps().strokeWidth).toBe(2);
-
-		rerender(
-			<NodeInteractionWrapper
-				node={node}
-				isActive={true}
-				isSelected={true}
-				isDimmed={false}
-				isHovered={false}
-				cameraZoom={0.5}
-				onPointerEnter={onPointerEnter}
-				onPointerLeave={onPointerLeave}
-			>
-				<div data-testid="child" />
-			</NodeInteractionWrapper>,
-		);
-		expect(parseBorderRectProps().strokeWidth).toBe(4);
-	});
-
-	it("showBorder=false 时仍保留透明命中面且不渲染描边", () => {
+	it("会渲染透明命中面并保留 children", () => {
 		render(
 			<NodeInteractionWrapper
 				node={createSceneNode()}
-				isActive={false}
-				isSelected={false}
-				isDimmed={false}
-				isHovered={false}
-				cameraZoom={1}
-				showBorder={false}
 				onPointerEnter={vi.fn()}
 				onPointerLeave={vi.fn()}
 				onClick={vi.fn()}
@@ -300,6 +180,7 @@ describe("NodeInteractionWrapper", () => {
 				color: "rgba(255,255,255,0.001)",
 			}),
 		]);
+		expect(screen.getByTestId("child")).toBeTruthy();
 		const group = screen.getByTestId("group");
 		expect(group.getAttribute("data-has-on-pointer-down")).toBe("true");
 		expect(group.getAttribute("data-has-on-pointer-enter")).toBe("true");
@@ -308,26 +189,55 @@ describe("NodeInteractionWrapper", () => {
 		expect(group.getAttribute("data-has-on-double-click")).toBe("true");
 	});
 
-	it("拖拽事件会透传修饰键和指针坐标", async () => {
+	it("disabled=true 时不会绑定交互事件", () => {
+		const onPointerEnter = vi.fn();
+		const onPointerLeave = vi.fn();
+		const onClick = vi.fn();
+		const onDoubleClick = vi.fn();
+		const onDragStart = vi.fn();
+		render(
+			<NodeInteractionWrapper
+				node={createSceneNode()}
+				disabled
+				onPointerEnter={onPointerEnter}
+				onPointerLeave={onPointerLeave}
+				onClick={onClick}
+				onDoubleClick={onDoubleClick}
+				onDragStart={onDragStart}
+			/>,
+		);
+
+		const group = screen.getByTestId("group");
+		expect(group.getAttribute("data-has-on-pointer-down")).toBe("false");
+		expect(group.getAttribute("data-has-on-pointer-enter")).toBe("false");
+		expect(group.getAttribute("data-has-on-pointer-leave")).toBe("false");
+		expect(group.getAttribute("data-has-on-click")).toBe("false");
+		expect(group.getAttribute("data-has-on-double-click")).toBe("false");
+
+		fireEvent.pointerDown(group, {
+			button: 0,
+			buttons: 1,
+			clientX: 10,
+			clientY: 12,
+		});
+		expect(onDragStart).not.toHaveBeenCalled();
+		expect(onPointerEnter).not.toHaveBeenCalled();
+		expect(onPointerLeave).not.toHaveBeenCalled();
+		expect(onClick).not.toHaveBeenCalled();
+		expect(onDoubleClick).not.toHaveBeenCalled();
+	});
+
+	it("拖拽事件会透传修饰键和指针坐标", () => {
 		const onDragStart = vi.fn();
 		const onDrag = vi.fn();
 		const onDragEnd = vi.fn();
 		render(
 			<NodeInteractionWrapper
 				node={createSceneNode()}
-				isActive={false}
-				isSelected={true}
-				isDimmed={false}
-				isHovered={false}
-				cameraZoom={1}
-				onPointerEnter={vi.fn()}
-				onPointerLeave={vi.fn()}
 				onDragStart={onDragStart}
 				onDrag={onDrag}
 				onDragEnd={onDragEnd}
-			>
-				<div data-testid="child" />
-			</NodeInteractionWrapper>,
+			/>,
 		);
 
 		screen.getByTestId("group").dispatchEvent(
@@ -370,5 +280,63 @@ describe("NodeInteractionWrapper", () => {
 			movementY: 8,
 			last: true,
 		});
+	});
+
+	it("pointer/click 事件会透传 node 与事件元信息", () => {
+		const node = createSceneNode("node-click");
+		const onPointerEnter = vi.fn();
+		const onPointerLeave = vi.fn();
+		const onClick = vi.fn();
+		const onDoubleClick = vi.fn();
+		render(
+			<NodeInteractionWrapper
+				node={node}
+				onPointerEnter={onPointerEnter}
+				onPointerLeave={onPointerLeave}
+				onClick={onClick}
+				onDoubleClick={onDoubleClick}
+			/>,
+		);
+
+		const group = screen.getByTestId("group");
+		fireEvent.pointerEnter(group);
+		fireEvent.pointerLeave(group);
+		fireEvent.click(group, {
+			button: 0,
+			buttons: 1,
+			clientX: 120,
+			clientY: 80,
+			shiftKey: true,
+		});
+		fireEvent.doubleClick(group, {
+			button: 0,
+			buttons: 1,
+			clientX: 130,
+			clientY: 90,
+			altKey: true,
+		});
+
+		expect(onPointerEnter).toHaveBeenCalledWith("node-click");
+		expect(onPointerLeave).toHaveBeenCalledWith("node-click");
+		expect(onClick).toHaveBeenCalledWith(
+			node,
+			expect.objectContaining({
+				clientX: 120,
+				clientY: 80,
+				button: 0,
+				buttons: 1,
+				shiftKey: true,
+			}),
+		);
+		expect(onDoubleClick).toHaveBeenCalledWith(
+			node,
+			expect.objectContaining({
+				clientX: 130,
+				clientY: 90,
+				button: 0,
+				buttons: 1,
+				altKey: true,
+			}),
+		);
 	});
 });

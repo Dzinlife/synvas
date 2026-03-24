@@ -17,6 +17,7 @@ import {
 	Rect,
 	type SharedValue,
 	type SkiaPointerEvent,
+	type Matrix4,
 	useDerivedValue,
 } from "react-skia-lite";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
@@ -256,49 +257,25 @@ const SelectionBoundsInteractionLayer: React.FC<
 	);
 };
 
-interface CanvasNodeSkiaItemProps {
+interface CanvasNodeRenderItemProps {
 	node: CanvasNode;
 	layout: SharedValue<CanvasNodeLayoutState>;
 	scene: StudioProject["scenes"][string] | null;
 	asset: StudioProject["assets"][number] | null;
 	isActive: boolean;
-	isSelected: boolean;
 	isFocused: boolean;
-	isDimmed: boolean;
-	isHovered: boolean;
-	cameraZoom: SharedValue<number>;
-	disabled: boolean;
 	runtimeManager: ReturnType<typeof useStudioRuntimeManager>;
-	onPointerEnter: (nodeId: string) => void;
-	onPointerLeave: (nodeId: string) => void;
-	onDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
-	onDrag?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
-	onDragEnd?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
-	onClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
-	onDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 }
 
-const CanvasNodeSkiaItemComponent = ({
+const CanvasNodeRenderItemComponent = ({
 	node,
 	layout,
 	scene,
 	asset,
 	isActive,
-	isSelected,
 	isFocused,
-	isDimmed,
-	isHovered,
-	cameraZoom,
-	disabled,
 	runtimeManager,
-	onPointerEnter,
-	onPointerLeave,
-	onDragStart,
-	onDrag,
-	onDragEnd,
-	onClick,
-	onDoubleClick,
-}: CanvasNodeSkiaItemProps) => {
+}: CanvasNodeRenderItemProps) => {
 	const definition = getCanvasNodeDefinition(node.type);
 	const Renderer =
 		definition.skiaRenderer as React.ComponentType<
@@ -313,90 +290,97 @@ const CanvasNodeSkiaItemComponent = ({
 			height: worldRect.height,
 		};
 	});
-	const contentTransform = useDerivedValue(() => {
+	const renderTransform = useDerivedValue(() => {
 		const safeWidth = Math.max(Math.abs(node.width), LAYOUT_EPSILON);
 		const safeHeight = Math.max(Math.abs(node.height), LAYOUT_EPSILON);
+		const scaleX = layout.value.width / safeWidth;
+		const scaleY = layout.value.height / safeHeight;
+		const matrix: Matrix4 = [
+			scaleX,
+			0,
+			0,
+			layout.value.x,
+			0,
+			scaleY,
+			0,
+			layout.value.y,
+			0,
+			0,
+			1,
+			0,
+			0,
+			0,
+			0,
+			1,
+		];
 		return [
-			{ scaleX: layout.value.width / safeWidth },
-			{ scaleY: layout.value.height / safeHeight },
+			{
+				matrix,
+			},
 		];
 	});
 
 	return (
 		<Group clip={clip}>
-			<NodeInteractionWrapper
-				node={node}
-				layout={layout}
-				isActive={isActive}
-				isSelected={isSelected}
-				isDimmed={isDimmed}
-				isHovered={isHovered}
-				cameraZoom={cameraZoom}
-				showBorder={false}
-				disabled={disabled}
-				onPointerEnter={onPointerEnter}
-				onPointerLeave={onPointerLeave}
-				onDragStart={onDragStart}
-				onDrag={onDrag}
-				onDragEnd={onDragEnd}
-				onClick={onClick}
-				onDoubleClick={onDoubleClick}
-			>
-				<Group transform={contentTransform}>
-					<CanvasNodeRendererHost
-						renderer={Renderer}
-						node={node}
-						scene={scene}
-						asset={asset}
-						isActive={isActive}
-						isFocused={isFocused}
-						isDimmed={isDimmed}
-						runtimeManager={runtimeManager}
-					/>
-				</Group>
-			</NodeInteractionWrapper>
+			<Group transform={renderTransform}>
+				<Renderer
+					node={node}
+					scene={scene}
+					asset={asset}
+					isActive={isActive}
+					isFocused={isFocused}
+					runtimeManager={runtimeManager}
+				/>
+			</Group>
 		</Group>
 	);
 };
-const CanvasNodeSkiaItem = memo(CanvasNodeSkiaItemComponent);
-CanvasNodeSkiaItem.displayName = "CanvasNodeSkiaItem";
 
-interface CanvasNodeRendererHostProps {
-	renderer: React.ComponentType<CanvasNodeSkiaRenderProps<CanvasNode>>;
+const CanvasNodeRenderItem = memo(CanvasNodeRenderItemComponent);
+CanvasNodeRenderItem.displayName = "CanvasNodeRenderItem";
+
+interface CanvasNodeInteractionItemProps {
 	node: CanvasNode;
-	scene: StudioProject["scenes"][string] | null;
-	asset: StudioProject["assets"][number] | null;
-	isActive: boolean;
-	isFocused: boolean;
-	isDimmed: boolean;
-	runtimeManager: ReturnType<typeof useStudioRuntimeManager>;
+	layout: SharedValue<CanvasNodeLayoutState>;
+	disabled: boolean;
+	onPointerEnter: (nodeId: string) => void;
+	onPointerLeave: (nodeId: string) => void;
+	onDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
+	onDrag?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
+	onDragEnd?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
+	onClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
+	onDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 }
 
-const CanvasNodeRendererHostComponent = ({
-	renderer: Renderer,
+const CanvasNodeInteractionItemComponent = ({
 	node,
-	scene,
-	asset,
-	isActive,
-	isFocused,
-	isDimmed,
-	runtimeManager,
-}: CanvasNodeRendererHostProps) => {
+	layout,
+	disabled,
+	onPointerEnter,
+	onPointerLeave,
+	onDragStart,
+	onDrag,
+	onDragEnd,
+	onClick,
+	onDoubleClick,
+}: CanvasNodeInteractionItemProps) => {
 	return (
-		<Renderer
+		<NodeInteractionWrapper
 			node={node}
-			scene={scene}
-			asset={asset}
-			isActive={isActive}
-			isFocused={isFocused}
-			isDimmed={isDimmed}
-			runtimeManager={runtimeManager}
+			layout={layout}
+			disabled={disabled}
+			onPointerEnter={onPointerEnter}
+			onPointerLeave={onPointerLeave}
+			onDragStart={onDragStart}
+			onDrag={onDrag}
+			onDragEnd={onDragEnd}
+			onClick={onClick}
+			onDoubleClick={onDoubleClick}
 		/>
 	);
 };
-
-const CanvasNodeRendererHost = memo(CanvasNodeRendererHostComponent);
-CanvasNodeRendererHost.displayName = "CanvasNodeRendererHost";
+const CanvasNodeInteractionItem = memo(CanvasNodeInteractionItemComponent);
+CanvasNodeInteractionItem.displayName = "CanvasNodeInteractionItem";
 
 const isLayerValueEqual = (left: unknown, right: unknown): boolean => {
 	if (left === right) return true;
@@ -475,9 +459,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}
 	const renderNodes = renderNodesRef.current.nodes;
 	const animatedCamera = camera;
-	const animatedCameraZoom = useDerivedValue(() => {
-		return animatedCamera.value.zoom;
-	});
 	const animatedCameraTransform = useDerivedValue(() => {
 		// 使用显式矩阵，确保世界层与 overlay 的 world->screen 公式严格一致。
 		return resolveCanvasCameraTransformMatrix(animatedCamera.value);
@@ -710,56 +691,59 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					height={height}
 					uniforms={animatedGridUniforms}
 				/>
-				<Group transform={animatedCameraTransform}>
-					{selectedNodes.length > 1 && !disableBaseNodeInteraction && (
-						<SelectionBoundsInteractionLayer
-							selectedNodes={selectedNodes}
+					<Group transform={animatedCameraTransform}>
+						{selectedNodes.length > 1 && !disableBaseNodeInteraction && (
+							<SelectionBoundsInteractionLayer
+								selectedNodes={selectedNodes}
 							getNodeLayout={getNodeLayoutValue}
 							onDragStart={onSelectionDragStart}
 							onDrag={onSelectionDrag}
-							onDragEnd={onSelectionDragEnd}
-						/>
-					)}
-					{renderNodes.map((node) => {
-						const layout = getNodeLayoutValue(node.id);
-						if (!layout) return null;
-						const scene =
-							node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
-						const asset =
-							"assetId" in node ? (assetById.get(node.assetId) ?? null) : null;
-						const isFocused = node.id === focusedNodeId;
-						const isActive = node.id === activeNodeId;
-						const isSelected = selectedNodeIdSet.has(node.id);
-						const isDimmed = Boolean(focusedNodeId) && !isFocused;
-						const isHovered =
-							!disableBaseNodeInteraction && node.id === hoveredNodeId;
-
-						return (
-							<CanvasNodeSkiaItem
-								key={`canvas-node-skia-${node.id}`}
-								node={node}
-								layout={layout}
-								scene={scene}
-								asset={asset}
-								isActive={isActive}
-								isSelected={isSelected}
-								isFocused={isFocused}
-								isDimmed={isDimmed}
-								isHovered={isHovered}
-								cameraZoom={animatedCameraZoom}
-								disabled={disableBaseNodeInteraction}
-								runtimeManager={runtimeManager}
-								onPointerEnter={handlePointerEnter}
-								onPointerLeave={handlePointerLeave}
-								onDragStart={handleNodeDragStart}
-								onDrag={handleNodeDrag}
-								onDragEnd={handleNodeDragEnd}
-								onClick={handleNodeClick}
-								onDoubleClick={handleNodeDoubleClick}
+								onDragEnd={onSelectionDragEnd}
 							/>
-						);
-					})}
-				</Group>
+						)}
+						{renderNodes.map((node) => {
+							const layout = getNodeLayoutValue(node.id);
+							if (!layout) return null;
+							const scene =
+								node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
+							const asset =
+								"assetId" in node ? (assetById.get(node.assetId) ?? null) : null;
+							const isFocused = node.id === focusedNodeId;
+							const isActive = node.id === activeNodeId;
+
+							return (
+								<CanvasNodeRenderItem
+									key={`canvas-node-render-${node.id}`}
+									node={node}
+									layout={layout}
+									scene={scene}
+									asset={asset}
+									isActive={isActive}
+									isFocused={isFocused}
+									runtimeManager={runtimeManager}
+								/>
+							);
+						})}
+						{renderNodes.map((node) => {
+							const layout = getNodeLayoutValue(node.id);
+							if (!layout) return null;
+							return (
+								<CanvasNodeInteractionItem
+									key={`canvas-node-interaction-${node.id}`}
+									node={node}
+									layout={layout}
+									disabled={disableBaseNodeInteraction}
+									onPointerEnter={handlePointerEnter}
+									onPointerLeave={handlePointerLeave}
+									onDragStart={handleNodeDragStart}
+									onDrag={handleNodeDrag}
+									onDragEnd={handleNodeDragEnd}
+									onClick={handleNodeClick}
+									onDoubleClick={handleNodeDoubleClick}
+								/>
+							);
+						})}
+					</Group>
 				<CanvasNodeLabelLayer
 					width={width}
 					height={height}
@@ -818,14 +802,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		runtimeManager,
 		scenes,
 		selectedNodeIdSet,
-		selectedNodes,
-		FocusEditorLayer,
-		width,
-		animatedCamera,
-		animatedCameraTransform,
-		animatedCameraZoom,
-		animatedGridUniforms,
-	]);
+			selectedNodes,
+			FocusEditorLayer,
+			width,
+			animatedCamera,
+			animatedCameraTransform,
+			animatedGridUniforms,
+		]);
 
 	if (width <= 0 || height <= 0) return null;
 

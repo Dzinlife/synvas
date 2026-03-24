@@ -332,7 +332,6 @@ const createRendererProps = (
 	asset: null,
 	isActive,
 	isFocused: false,
-	isDimmed: false,
 	runtimeManager,
 });
 

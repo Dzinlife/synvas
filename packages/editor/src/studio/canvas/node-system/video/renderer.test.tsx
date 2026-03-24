@@ -109,7 +109,6 @@ describe("VideoNodeSkiaRenderer", () => {
 				asset={createAsset()}
 				isActive={true}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={runtimeManager}
 			/>,
 		);
@@ -137,7 +136,6 @@ describe("VideoNodeSkiaRenderer", () => {
 				asset={createAsset()}
 				isActive={true}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={runtimeManager}
 			/>,
 		);
@@ -167,7 +165,6 @@ describe("VideoNodeSkiaRenderer", () => {
 				asset={createAsset()}
 				isActive={true}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={runtimeManager}
 			/>,
 		);
@@ -196,7 +193,6 @@ describe("VideoNodeSkiaRenderer", () => {
 				asset={createAsset()}
 				isActive={true}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={runtimeManager}
 			/>,
 		);
@@ -229,7 +225,6 @@ describe("VideoNodeSkiaRenderer", () => {
 				asset={createAsset()}
 				isActive={true}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={runtimeManager}
 			/>,
 		);
@@ -241,7 +236,6 @@ describe("VideoNodeSkiaRenderer", () => {
 				asset={createAsset()}
 				isActive={false}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={runtimeManager}
 			/>,
 		);

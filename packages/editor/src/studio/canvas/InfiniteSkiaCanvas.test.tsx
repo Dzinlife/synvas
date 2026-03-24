@@ -309,16 +309,45 @@ const getLabelLayerElement = (tree: React.ReactNode): AnyElement | null => {
 	);
 };
 
-const getCanvasNodeSkiaItems = (tree: React.ReactNode): AnyElement[] => {
-	return collectElements(tree, (element) => {
-		if (typeof element.type !== "function") return false;
-		const componentType = element.type as {
-			name?: string;
+const resolveComponentNames = (type: React.ElementType): string[] => {
+	if (typeof type === "function") {
+		return [type.displayName, type.name].filter(Boolean) as string[];
+	}
+	if (typeof type === "object" && type !== null) {
+		const componentType = type as {
 			displayName?: string;
+			name?: string;
+			type?: {
+				displayName?: string;
+				name?: string;
+			};
+			render?: {
+				displayName?: string;
+				name?: string;
+			};
 		};
-		return (
-			componentType.displayName === "CanvasNodeSkiaItem" ||
-			componentType.name === "CanvasNodeSkiaItem"
+		return [
+			componentType.displayName,
+			componentType.name,
+			componentType.type?.displayName,
+			componentType.type?.name,
+			componentType.render?.displayName,
+			componentType.render?.name,
+		].filter(Boolean) as string[];
+	}
+	return [];
+};
+
+const getCanvasNodeRenderItems = (tree: React.ReactNode): AnyElement[] => {
+	return collectElements(tree, (element) => {
+		return resolveComponentNames(element.type).includes("CanvasNodeRenderItem");
+	});
+};
+
+const getCanvasNodeInteractionItems = (tree: React.ReactNode): AnyElement[] => {
+	return collectElements(tree, (element) => {
+		return resolveComponentNames(element.type).includes(
+			"CanvasNodeInteractionItem",
 		);
 	});
 };
@@ -486,7 +515,7 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 		const initialRenderCount = rootRenderSpy.mock.calls.length;
 		const tree = getLatestRenderTree();
-		const nodeItems = getCanvasNodeSkiaItems(tree);
+			const nodeItems = getCanvasNodeInteractionItems(tree);
 		const targetNodeItem = nodeItems.find(
 			(nodeItem) =>
 				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
@@ -518,7 +547,7 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(overlayProps?.hoverNode?.id).toBe("node-b");
 	});
 
-	it("多选状态会透传到 wrapper 与 overlay", async () => {
+	it("多选状态会透传到交互层与 overlay", async () => {
 		render(
 			<InfiniteSkiaCanvas
 				width={800}
@@ -542,21 +571,12 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const nodeItems = getCanvasNodeSkiaItems(tree);
-		const selectedById = Object.fromEntries(
-			nodeItems.map((nodeItem) => {
-				const props = getElementProps<{
-					node?: { id: string };
-					isSelected?: boolean;
-				}>(nodeItem);
-				return [props?.node?.id ?? "", props?.isSelected ?? false];
-			}),
-		);
-		expect(selectedById).toMatchObject({
-			"node-a": true,
-			"node-b": true,
-			"node-c": false,
-		});
+			const interactionNodeIds = getCanvasNodeInteractionItems(tree).map(
+				(nodeItem) => {
+					return getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id;
+				},
+			);
+			expect(interactionNodeIds).toEqual(["node-a", "node-b", "node-c"]);
 
 		const overlayProps = getElementProps<{
 			selectedNodes?: Array<{ id: string }>;
@@ -842,7 +862,7 @@ describe("InfiniteSkiaCanvas", () => {
 		const labelLayerElement = getLabelLayerElement(tree);
 		expect(typeof labelLayerElement?.props.getNodeLayout).toBe("function");
 
-		const nodeItems = getCanvasNodeSkiaItems(tree);
+			const nodeItems = getCanvasNodeRenderItems(tree);
 		const targetNodeItem = nodeItems.find((nodeItem) => {
 			return (
 				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
@@ -892,7 +912,7 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const nodeItems = getCanvasNodeSkiaItems(tree);
+			const nodeItems = getCanvasNodeInteractionItems(tree);
 		expect(nodeItems).toHaveLength(2);
 		expect(
 			nodeItems.every((nodeItem) => {

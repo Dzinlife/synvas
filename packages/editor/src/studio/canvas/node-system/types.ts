@@ -21,7 +21,6 @@ export interface CanvasNodeSkiaRenderProps<
 	asset: TimelineAsset | null;
 	isActive: boolean;
 	isFocused: boolean;
-	isDimmed: boolean;
 	runtimeManager: StudioRuntimeManager;
 }
 

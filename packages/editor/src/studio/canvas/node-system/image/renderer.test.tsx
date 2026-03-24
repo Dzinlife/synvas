@@ -98,7 +98,6 @@ describe("ImageNodeSkiaRenderer", () => {
 				asset={createImageAsset("https://example.com/image.png")}
 				isActive={false}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={{} as never}
 			/>,
 		);
@@ -125,7 +124,6 @@ describe("ImageNodeSkiaRenderer", () => {
 				asset={createImageAsset("https://example.com/a.png")}
 				isActive={false}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={{} as never}
 			/>,
 		);
@@ -143,7 +141,6 @@ describe("ImageNodeSkiaRenderer", () => {
 				asset={createImageAsset("https://example.com/b.png")}
 				isActive={false}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={{} as never}
 			/>,
 		);
@@ -167,7 +164,6 @@ describe("ImageNodeSkiaRenderer", () => {
 				asset={null}
 				isActive={false}
 				isFocused={false}
-				isDimmed={false}
 				runtimeManager={{} as never}
 			/>,
 		);
