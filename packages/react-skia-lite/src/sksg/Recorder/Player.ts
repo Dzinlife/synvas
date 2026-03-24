@@ -370,7 +370,9 @@ const playRenderTarget = (
     if (metrics) {
       metrics.offscreenFlushCount += 1;
     }
-    const snapshot = makeSurfaceSnapshotImage(surface);
+    const snapshot = makeSurfaceSnapshotImage(surface, {
+      preference: ctx.retainResources ? "copy-first" : "alias-first",
+    });
     if (metrics) {
       metrics.snapshotCount += 1;
       metrics.snapshotBySource[snapshot.source] += 1;

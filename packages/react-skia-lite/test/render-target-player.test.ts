@@ -306,7 +306,47 @@ describe("RenderTarget player", () => {
 		expect(rootCanvas.drawImage).toHaveBeenCalledTimes(2);
 	});
 
-	it("asImageCopy 快照下 retainResources 也可立即复用 surface", () => {
+	it("retainResources=false 时优先使用 asImage", () => {
+		vi.mocked(getSkiaRenderBackend).mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+
+		const rootCanvas = createCanvas();
+		const targetCanvas = createCanvas();
+		const targetSurface = createSurface(targetCanvas, "alias", {
+			asImage: true,
+			asImageCopy: true,
+		});
+		const makeOffscreenMock = vi.fn(() => targetSurface);
+		const skia = {
+			Paint: vi.fn(() => createPaint()),
+			Color: vi.fn((color: string) => color),
+			Surface: {
+				MakeOffscreen: makeOffscreenMock,
+			},
+			ImageFilter: {
+				MakeColorFilter: vi.fn(),
+			},
+		} as never;
+		const commands = [
+			{
+				type: CommandType.RenderTarget,
+				props: { width: 64, height: 32 },
+				children: [{ type: CommandType.DrawPaint }],
+			},
+		];
+
+		replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
+
+		expect(targetSurface.asImage).toHaveBeenCalledTimes(1);
+		expect(targetSurface.asImageCopy).toHaveBeenCalledTimes(0);
+		expect(makeOffscreenMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("retainResources=true 时优先使用 asImageCopy 并可立即复用 surface", () => {
 		vi.mocked(getSkiaRenderBackend).mockReturnValue({
 			bundle: "webgpu",
 			kind: "webgpu",
@@ -318,6 +358,7 @@ describe("RenderTarget player", () => {
 		const targetCanvas = createCanvas();
 		const targetSurface = createSurface(targetCanvas, "copy", {
 			asImageCopy: true,
+			asImage: true,
 		});
 		const makeOffscreenMock = vi.fn(() => targetSurface);
 		const skia = {
@@ -353,6 +394,7 @@ describe("RenderTarget player", () => {
 
 		expect(makeOffscreenMock).toHaveBeenCalledTimes(1);
 		expect(targetSurface.asImageCopy).toHaveBeenCalledTimes(2);
+		expect(targetSurface.asImage).toHaveBeenCalledTimes(0);
 	});
 
 	it("支持上报 RenderTarget replay 指标", () => {

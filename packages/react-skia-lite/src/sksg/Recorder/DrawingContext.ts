@@ -50,6 +50,7 @@ const isCanvasMatrixIdentity = (canvas: SkCanvas) => {
 };
 
 export type SurfaceSnapshotSource = "asImageCopy" | "asImage" | "makeImageSnapshot";
+export type SurfaceSnapshotPreference = "alias-first" | "copy-first";
 
 export type SurfaceSnapshotImage = {
   image: SkImage;
@@ -58,23 +59,46 @@ export type SurfaceSnapshotImage = {
 };
 
 export const makeSurfaceSnapshotImage = (
-  surface: SkSurface
-): SurfaceSnapshotImage => {
-  const asImageCopy = surface.asImageCopy?.();
-  if (asImageCopy) {
-    return {
-      image: asImageCopy,
-      source: "asImageCopy",
-      requiresSurfaceRetention: false,
-    };
+  surface: SkSurface,
+  options?: {
+    preference?: SurfaceSnapshotPreference;
   }
-  const asImage = surface.asImage?.();
-  if (asImage) {
-    return {
-      image: asImage,
-      source: "asImage",
-      requiresSurfaceRetention: true,
-    };
+): SurfaceSnapshotImage => {
+  const preference = options?.preference ?? "copy-first";
+  if (preference === "alias-first") {
+    const asImage = surface.asImage?.();
+    if (asImage) {
+      return {
+        image: asImage,
+        source: "asImage",
+        requiresSurfaceRetention: true,
+      };
+    }
+    const asImageCopy = surface.asImageCopy?.();
+    if (asImageCopy) {
+      return {
+        image: asImageCopy,
+        source: "asImageCopy",
+        requiresSurfaceRetention: false,
+      };
+    }
+  } else {
+    const asImageCopy = surface.asImageCopy?.();
+    if (asImageCopy) {
+      return {
+        image: asImageCopy,
+        source: "asImageCopy",
+        requiresSurfaceRetention: false,
+      };
+    }
+    const asImage = surface.asImage?.();
+    if (asImage) {
+      return {
+        image: asImage,
+        source: "asImage",
+        requiresSurfaceRetention: true,
+      };
+    }
   }
   return {
     image: surface.makeImageSnapshot(),
@@ -205,7 +229,9 @@ export const createDrawingContext = (
           scratchCanvas.clear(Skia.Color("transparent"));
           scratchCanvas.drawImage(sourceImage, 0, 0, filteredPaint);
           scratchSurface.flush();
-          const filteredSnapshot = makeSurfaceSnapshotImage(scratchSurface);
+          const filteredSnapshot = makeSurfaceSnapshotImage(scratchSurface, {
+            preference: retainResources ? "copy-first" : "alias-first",
+          });
           const filteredImage = filteredSnapshot.image;
           retainScratchSurface =
             retainResources && filteredSnapshot.requiresSurfaceRetention;
