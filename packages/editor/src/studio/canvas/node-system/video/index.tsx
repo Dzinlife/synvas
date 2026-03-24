@@ -20,6 +20,7 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 	skiaRenderer: VideoNodeSkiaRenderer,
 	thumbnail: videoNodeThumbnailCapability,
 	toolbar: VideoNodeToolbar,
+	focusable: true,
 	drawer: VideoNodeDrawer,
 	drawerOptions: {
 		trigger: "active",

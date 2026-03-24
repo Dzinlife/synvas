@@ -259,7 +259,7 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		const shouldReload =
 			assetChanged ||
 			!previousActive ||
-			!this.videoSink ||
+			!this.videoSampleSink ||
 			!this.videoHandle;
 		if (shouldReload) {
 			void this.loadAsset(nextAssetUri, {

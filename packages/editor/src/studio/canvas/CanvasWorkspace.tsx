@@ -46,7 +46,6 @@ import {
 	getCanvasCamera,
 	useCanvasCameraStore,
 } from "@/studio/canvas/cameraStore";
-import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import {
 	canvasNodeDefinitionList,
 	getCanvasNodeDefinition,
@@ -3977,7 +3976,7 @@ const CanvasWorkspace = () => {
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
 			if (!canInteractNode) return;
 			commitSelectedNodeIds([node.id]);
-			if (isCanvasNodeFocusable(node, getCanvasNodeDefinition)) {
+			if (getCanvasNodeDefinition(node.type).focusable ?? false) {
 				setFocusedNode(node.id);
 				return;
 			}

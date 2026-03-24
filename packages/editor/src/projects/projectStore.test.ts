@@ -467,16 +467,16 @@ describe("projectStore", () => {
 		).toBe(true);
 	});
 
-	it("setFocusedNode(non-focusable) 会忽略 focus 写入", () => {
-		const videoId = useProjectStore.getState().createCanvasNode({
-			type: "video",
-			assetId: "asset-1",
+	it("setFocusedNode 会写入 focusedNodeId", () => {
+		const textId = useProjectStore.getState().createCanvasNode({
+			type: "text",
+			text: "Demo",
 		});
 		useProjectStore.getState().setActiveNode("node-1");
-		useProjectStore.getState().setFocusedNode(videoId);
+		useProjectStore.getState().setFocusedNode(textId);
 		const ui = useProjectStore.getState().currentProject?.ui;
-		expect(ui?.focusedNodeId).toBeNull();
-		expect(ui?.activeNodeId).toBe("node-1");
+		expect(ui?.focusedNodeId).toBe(textId);
+		expect(ui?.activeNodeId).toBe(textId);
 		expect(ui?.activeSceneId).toBe("scene-1");
 	});
 
@@ -488,7 +488,7 @@ describe("projectStore", () => {
 		).toBeNull();
 	});
 
-	it("initialize 会清理 non-focusable 节点的 focusedNodeId", async () => {
+	it("initialize 会清理 focusedNodeId", async () => {
 		const project = createProjectWithFocusedVideo();
 		project.ui.camera = { x: 12, y: -18, zoom: 1.2 };
 		const record: ProjectRecord = {
@@ -529,7 +529,7 @@ describe("projectStore", () => {
 		expect(useCanvasCameraStore.getState().camera).toEqual(project.ui.camera);
 	});
 
-	it("switchProject 会清理 non-focusable 节点的 focusedNodeId", async () => {
+	it("switchProject 会清理 focusedNodeId", async () => {
 		const project = createProjectWithFocusedVideo();
 		project.ui.camera = { x: -45, y: 30, zoom: 0.85 };
 		const record: ProjectRecord = {

@@ -17,7 +17,6 @@ import {
 	getCanvasCamera,
 	setCanvasCameraFromProject,
 } from "@/studio/canvas/cameraStore";
-import { isCanvasNodeFocusable } from "@/studio/canvas/node-system/focus";
 import {
 	buildAutoProjectName,
 	buildEmptyProject,
@@ -329,20 +328,23 @@ const withProjectRevision = (project: StudioProject): StudioProject => {
 const stripProjectOtForPersistence = (project: StudioProject): StudioProject => {
 	// 当前阶段 OT 仅用于本地调试，不持久化到项目数据。
 	const { ot: _ot, ...rest } = project;
-	return rest;
+	// focus 属于编辑期瞬时状态，不持久化到项目数据。
+	if (!rest.ui.focusedNodeId) {
+		return rest;
+	}
+	return {
+		...rest,
+		ui: {
+			...rest.ui,
+			focusedNodeId: null,
+		},
+	};
 };
 
-const normalizeProjectFocusState = (project: StudioProject): StudioProject => {
+const normalizeProjectRuntimeState = (project: StudioProject): StudioProject => {
 	const projectWithOt =
 		project.ot ? project : { ...project, ot: ensureStudioProjectOt(project) };
-	const focusedNodeId = project.ui.focusedNodeId;
-	if (!focusedNodeId) return projectWithOt;
-	const focusedNode = projectWithOt.canvas.nodes.find(
-		(node) => node.id === focusedNodeId,
-	);
-	if (focusedNode && isCanvasNodeFocusable(focusedNode)) {
-		return projectWithOt;
-	}
+	if (!projectWithOt.ui.focusedNodeId) return projectWithOt;
 	return {
 		...projectWithOt,
 		ui: {
@@ -406,7 +408,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				currentId = currentRecord.id;
 				await setCurrentProjectId(currentId);
 			}
-			const currentProject = normalizeProjectFocusState(currentRecord.data);
+			const currentProject = normalizeProjectRuntimeState(currentRecord.data);
 			set({
 				status: "ready",
 				projects: sortedRecords.map(toSummary),
@@ -535,7 +537,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				throw new Error("Project is invalid with current schema.");
 			}
 			await setCurrentProjectId(id);
-			const currentProject = normalizeProjectFocusState(validRecord.data);
+			const currentProject = normalizeProjectRuntimeState(validRecord.data);
 			set({
 				currentProjectId: id,
 				currentProject,
@@ -932,7 +934,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				(node) => node.id === nodeId,
 			);
 			if (!focusedNode) return state;
-			if (!isCanvasNodeFocusable(focusedNode)) return state;
 			const nextProject = {
 				...state.currentProject,
 				ui: {
