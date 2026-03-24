@@ -1,5 +1,6 @@
 import { processColor } from "../../dom/nodes";
 import type { DrawingNodeProps } from "../../dom/types";
+import type { SkSurface } from "../../skia/types";
 
 import {
   drawCircle,
@@ -60,10 +61,151 @@ import {
   createDrawingContext,
   makeSurfaceSnapshotImage,
   type DrawingContext,
+  type SurfaceSnapshotSource,
 } from "./DrawingContext";
 import { getSkiaRenderBackend } from "../../skia/web/renderBackend";
 
 const renderTargetFallbackWarnings = new Set<string>();
+const MAX_RENDER_TARGET_POOL_KEYS = 16;
+const MAX_RENDER_TARGET_SURFACES_PER_KEY = 2;
+const renderTargetSurfacePool = new Map<string, SkSurface[]>();
+
+const resolveRenderTargetSurfacePoolKey = (
+  backendKind: string,
+  width: number,
+  height: number
+) => {
+  return `${backendKind}:${width}x${height}`;
+};
+
+const disposeSurfaceList = (surfaces: SkSurface[]) => {
+  surfaces.forEach((surface) => {
+    surface.dispose?.();
+  });
+};
+
+const evictRenderTargetSurfacePoolEntry = () => {
+  const oldestEntry = renderTargetSurfacePool.entries().next().value as
+    | [string, SkSurface[]]
+    | undefined;
+  if (!oldestEntry) {
+    return;
+  }
+  const [key, surfaces] = oldestEntry;
+  disposeSurfaceList(surfaces);
+  renderTargetSurfacePool.delete(key);
+};
+
+const acquireRenderTargetSurface = (
+  Skia: DrawingContext["Skia"],
+  width: number,
+  height: number,
+  backendKind: string
+) => {
+  const key = resolveRenderTargetSurfacePoolKey(backendKind, width, height);
+  const pooled = renderTargetSurfacePool.get(key);
+  if (pooled && pooled.length > 0) {
+    const pooledSurface = pooled.pop();
+    if (pooledSurface) {
+      if (pooled.length === 0) {
+        renderTargetSurfacePool.delete(key);
+      }
+      return {
+        surface: pooledSurface,
+        reused: true,
+      };
+    }
+  }
+  const created = Skia.Surface.MakeOffscreen(width, height);
+  if (!created) {
+    return null;
+  }
+  return {
+    surface: created,
+    reused: false,
+  };
+};
+
+const releaseRenderTargetSurface = (
+  surface: SkSurface,
+  width: number,
+  height: number,
+  backendKind: string
+) => {
+  const key = resolveRenderTargetSurfacePoolKey(backendKind, width, height);
+  let pooled = renderTargetSurfacePool.get(key);
+  if (!pooled) {
+    if (renderTargetSurfacePool.size >= MAX_RENDER_TARGET_POOL_KEYS) {
+      evictRenderTargetSurfacePoolEntry();
+    }
+    pooled = [];
+    renderTargetSurfacePool.set(key, pooled);
+  }
+  if (pooled.length >= MAX_RENDER_TARGET_SURFACES_PER_KEY) {
+    surface.dispose?.();
+    return;
+  }
+  pooled.push(surface);
+};
+
+export const clearRenderTargetSurfacePoolForTest = () => {
+  for (const surfaces of renderTargetSurfacePool.values()) {
+    disposeSurfaceList(surfaces);
+  }
+  renderTargetSurfacePool.clear();
+};
+
+export type RenderTargetReplayMetrics = {
+  commandCount: number;
+  renderTargetCount: number;
+  offscreenPixelCount: number;
+  offscreenAllocCount: number;
+  offscreenReuseCount: number;
+  offscreenAllocFailureCount: number;
+  offscreenFlushCount: number;
+  snapshotCount: number;
+  snapshotBySource: Record<SurfaceSnapshotSource, number>;
+  compositeDrawImageCount: number;
+  durationMs: number;
+};
+
+type RenderTargetReplayMetricsListener = (
+  metrics: RenderTargetReplayMetrics
+) => void;
+
+const createReplayMetrics = (): RenderTargetReplayMetrics => ({
+  commandCount: 0,
+  renderTargetCount: 0,
+  offscreenPixelCount: 0,
+  offscreenAllocCount: 0,
+  offscreenReuseCount: 0,
+  offscreenAllocFailureCount: 0,
+  offscreenFlushCount: 0,
+  snapshotCount: 0,
+  snapshotBySource: {
+    asImageCopy: 0,
+    asImage: 0,
+    makeImageSnapshot: 0,
+  },
+  compositeDrawImageCount: 0,
+  durationMs: 0,
+});
+
+const resolveNow = () => {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+};
+
+let replayMetricsListener: RenderTargetReplayMetricsListener | null = null;
+let activeReplayMetrics: RenderTargetReplayMetrics | null = null;
+
+export const setRenderTargetReplayMetricsListener = (
+  listener: RenderTargetReplayMetricsListener | null
+) => {
+  replayMetricsListener = listener;
+};
 
 const warnRenderTargetFallback = (debugLabel?: string) => {
   const warningKey = debugLabel?.trim() || "__default__";
@@ -161,11 +303,25 @@ const playRenderTarget = (
   command: RenderTargetCommand,
   playFn: (ctx: DrawingContext, cmd: Command) => void
 ) => {
+  const metrics = activeReplayMetrics;
   const renderBackend = getSkiaRenderBackend();
   const width = Math.max(1, Math.ceil(command.props.width));
   const height = Math.max(1, Math.ceil(command.props.height));
-  const surface = ctx.Skia.Surface.MakeOffscreen(width, height);
-  if (!surface) {
+  if (metrics) {
+    metrics.renderTargetCount += 1;
+    metrics.offscreenPixelCount += width * height;
+  }
+
+  const acquiredSurface = acquireRenderTargetSurface(
+    ctx.Skia,
+    width,
+    height,
+    renderBackend.kind
+  );
+  if (!acquiredSurface) {
+    if (metrics) {
+      metrics.offscreenAllocFailureCount += 1;
+    }
     const hasBackdropFilterCommand = hasBackdropFilterInCommands(command.children);
     if (renderBackend.kind === "webgpu" && hasBackdropFilterCommand) {
       throw new Error(
@@ -179,6 +335,16 @@ const playRenderTarget = (
       playFn(ctx, child);
     });
     return;
+  }
+  const { surface, reused } = acquiredSurface;
+  if (reused) {
+    if (metrics) {
+      metrics.offscreenReuseCount += 1;
+    }
+  } else {
+    if (metrics) {
+      metrics.offscreenAllocCount += 1;
+    }
   }
 
   const childPaintPool: DrawingContext["paintPool"] = [];
@@ -194,24 +360,41 @@ const playRenderTarget = (
     retainResources: ctx.retainResources,
   });
 
-  let retainedSurfaceImage = false;
+  let retainedSnapshotImage = false;
+  let retainedSurfaceInCleanup = false;
   try {
     command.children.forEach((child) => {
       playFn(childCtx, child);
     });
     surface.flush();
-    const image = makeSurfaceSnapshotImage(surface);
+    if (metrics) {
+      metrics.offscreenFlushCount += 1;
+    }
+    const snapshot = makeSurfaceSnapshotImage(surface);
+    if (metrics) {
+      metrics.snapshotCount += 1;
+      metrics.snapshotBySource[snapshot.source] += 1;
+    }
+    const image = snapshot.image;
+    const retainSurfaceForSnapshot =
+      ctx.retainResources && snapshot.requiresSurfaceRetention;
     try {
       ctx.canvas.drawImage(image, 0, 0, ctx.paint);
+      if (metrics) {
+        metrics.compositeDrawImageCount += 1;
+      }
       if (ctx.retainResources) {
-        retainedSurfaceImage = true;
+        retainedSnapshotImage = true;
+        retainedSurfaceInCleanup = retainSurfaceForSnapshot;
         ctx.retainResource(() => {
           image.dispose?.();
-          surface.dispose?.();
+          if (retainSurfaceForSnapshot) {
+            releaseRenderTargetSurface(surface, width, height, renderBackend.kind);
+          }
         });
       }
     } finally {
-      if (!retainedSurfaceImage) {
+      if (!retainedSnapshotImage) {
         image.dispose?.();
       }
     }
@@ -220,8 +403,8 @@ const playRenderTarget = (
     childCtx.takeRetainedResources().forEach((cleanup) => {
       ctx.retainResource(cleanup);
     });
-    if (!retainedSurfaceImage) {
-      surface.dispose?.();
+    if (!retainedSurfaceInCleanup) {
+      releaseRenderTargetSurface(surface, width, height, renderBackend.kind);
     }
   }
 };
@@ -359,7 +542,23 @@ const play = (ctx: DrawingContext, _command: Command) => {
 export function replay(ctx: DrawingContext, commands: Command[]) {
   "worklet";
   //console.log(debugTree(commands));
-  commands.forEach((command) => {
-    play(ctx, command);
-  });
+  const previousMetrics = activeReplayMetrics;
+  const ownsMetrics = previousMetrics === null && replayMetricsListener !== null;
+  const metrics = ownsMetrics ? createReplayMetrics() : previousMetrics;
+  const startedAt = metrics ? resolveNow() : 0;
+  if (metrics) {
+    metrics.commandCount += commands.length;
+  }
+  activeReplayMetrics = metrics;
+  try {
+    commands.forEach((command) => {
+      play(ctx, command);
+    });
+  } finally {
+    activeReplayMetrics = previousMetrics;
+    if (ownsMetrics && metrics && replayMetricsListener) {
+      metrics.durationMs = Math.max(0, resolveNow() - startedAt);
+      replayMetricsListener(metrics);
+    }
+  }
 }

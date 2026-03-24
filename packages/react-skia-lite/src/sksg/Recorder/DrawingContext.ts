@@ -1,6 +1,7 @@
 import type {
   Skia,
   SkCanvas,
+  SkImage,
   SkColorFilter,
   SkSurface,
   SkPaint,
@@ -48,8 +49,38 @@ const isCanvasMatrixIdentity = (canvas: SkCanvas) => {
   }
 };
 
-export const makeSurfaceSnapshotImage = (surface: SkSurface) => {
-  return surface.makeImageSnapshot();
+export type SurfaceSnapshotSource = "asImageCopy" | "asImage" | "makeImageSnapshot";
+
+export type SurfaceSnapshotImage = {
+  image: SkImage;
+  source: SurfaceSnapshotSource;
+  requiresSurfaceRetention: boolean;
+};
+
+export const makeSurfaceSnapshotImage = (
+  surface: SkSurface
+): SurfaceSnapshotImage => {
+  const asImageCopy = surface.asImageCopy?.();
+  if (asImageCopy) {
+    return {
+      image: asImageCopy,
+      source: "asImageCopy",
+      requiresSurfaceRetention: false,
+    };
+  }
+  const asImage = surface.asImage?.();
+  if (asImage) {
+    return {
+      image: asImage,
+      source: "asImage",
+      requiresSurfaceRetention: true,
+    };
+  }
+  return {
+    image: surface.makeImageSnapshot(),
+    source: "makeImageSnapshot",
+    requiresSurfaceRetention: true,
+  };
 };
 
 export const createDrawingContext = (
@@ -167,20 +198,26 @@ export const createDrawingContext = (
         const filteredPaint = Skia.Paint();
         const backdropPaint = createBackdropPaint();
         let retainedFilteredImage = false;
+        let retainScratchSurface = false;
         try {
           const scratchCanvas = scratchSurface.getCanvas();
           filteredPaint.setImageFilter(imageFilter);
           scratchCanvas.clear(Skia.Color("transparent"));
           scratchCanvas.drawImage(sourceImage, 0, 0, filteredPaint);
           scratchSurface.flush();
-          const filteredImage = makeSurfaceSnapshotImage(scratchSurface);
+          const filteredSnapshot = makeSurfaceSnapshotImage(scratchSurface);
+          const filteredImage = filteredSnapshot.image;
+          retainScratchSurface =
+            retainResources && filteredSnapshot.requiresSurfaceRetention;
           try {
             canvas.drawImage(filteredImage, 0, 0, backdropPaint);
             if (retainResources) {
               retainedFilteredImage = true;
               retainResource(() => {
                 filteredImage.dispose?.();
-                scratchSurface.dispose?.();
+                if (retainScratchSurface) {
+                  scratchSurface.dispose?.();
+                }
               });
             }
             backdropExecutions.push({ mode: "explicit" });
@@ -194,7 +231,7 @@ export const createDrawingContext = (
           backdropPaint.dispose?.();
           filteredPaint.dispose?.();
           sourceImage.dispose?.();
-          if (!retainedFilteredImage) {
+          if (!retainedFilteredImage || !retainScratchSurface) {
             scratchSurface.dispose?.();
           }
         }

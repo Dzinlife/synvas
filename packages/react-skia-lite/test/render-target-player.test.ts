@@ -7,7 +7,11 @@ vi.mock("../src/skia/web/renderBackend", () => ({
 import { NodeType } from "../src/dom/types";
 import { CommandType } from "../src/sksg/Recorder/Core";
 import { createDrawingContext } from "../src/sksg/Recorder/DrawingContext";
-import { replay } from "../src/sksg/Recorder/Player";
+import {
+	clearRenderTargetSurfacePoolForTest,
+	replay,
+	setRenderTargetReplayMetricsListener,
+} from "../src/sksg/Recorder/Player";
 import { getSkiaRenderBackend } from "../src/skia/web/renderBackend";
 
 const createMatrix = () => ({
@@ -59,9 +63,24 @@ const createSnapshotImage = (label: string) => ({
 	dispose: vi.fn(),
 });
 
-const createSurface = (canvas: ReturnType<typeof createCanvas>, label: string) => ({
+const createSurface = (
+	canvas: ReturnType<typeof createCanvas>,
+	label: string,
+	options?: {
+		asImageCopy?: boolean;
+		asImage?: boolean;
+	},
+) => ({
 	getCanvas: vi.fn(() => canvas),
 	makeImageSnapshot: vi.fn(() => createSnapshotImage(label)),
+	asImageCopy: vi.fn(() => {
+		if (!options?.asImageCopy) return null;
+		return createSnapshotImage(`${label}:asImageCopy`);
+	}),
+	asImage: vi.fn(() => {
+		if (!options?.asImage) return null;
+		return createSnapshotImage(`${label}:asImage`);
+	}),
 	flush: vi.fn(),
 	dispose: vi.fn(),
 });
@@ -69,6 +88,8 @@ const createSurface = (canvas: ReturnType<typeof createCanvas>, label: string) =
 describe("RenderTarget player", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		clearRenderTargetSurfacePoolForTest();
+		setRenderTargetReplayMetricsListener(null);
 	});
 
 	it("WebGPU 下在 RenderTarget 内执行 BackdropFilter 时不会走 saveLayer", () => {
@@ -248,5 +269,150 @@ describe("RenderTarget player", () => {
 		expect(makeOffscreenMock).toHaveBeenCalledTimes(1);
 		expect(targetCanvas.saveLayer).toHaveBeenCalledTimes(1);
 		expect(rootCanvas.drawImage).toHaveBeenCalledTimes(1);
+	});
+
+	it("RenderTarget surface 在回放之间会复用", () => {
+		vi.mocked(getSkiaRenderBackend).mockReturnValue({
+			bundle: "webgl",
+			kind: "webgl",
+		});
+
+		const rootCanvas = createCanvas();
+		const targetCanvas = createCanvas();
+		const targetSurface = createSurface(targetCanvas, "pooled");
+		const makeOffscreenMock = vi.fn(() => targetSurface);
+		const skia = {
+			Paint: vi.fn(() => createPaint()),
+			Color: vi.fn((color: string) => color),
+			Surface: {
+				MakeOffscreen: makeOffscreenMock,
+			},
+			ImageFilter: {
+				MakeColorFilter: vi.fn(),
+			},
+		} as never;
+		const commands = [
+			{
+				type: CommandType.RenderTarget,
+				props: { width: 64, height: 32 },
+				children: [{ type: CommandType.DrawPaint }],
+			},
+		];
+
+		replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
+		replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
+
+		expect(makeOffscreenMock).toHaveBeenCalledTimes(1);
+		expect(rootCanvas.drawImage).toHaveBeenCalledTimes(2);
+	});
+
+	it("asImageCopy 快照下 retainResources 也可立即复用 surface", () => {
+		vi.mocked(getSkiaRenderBackend).mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+
+		const rootCanvas = createCanvas();
+		const targetCanvas = createCanvas();
+		const targetSurface = createSurface(targetCanvas, "copy", {
+			asImageCopy: true,
+		});
+		const makeOffscreenMock = vi.fn(() => targetSurface);
+		const skia = {
+			Paint: vi.fn(() => createPaint()),
+			Color: vi.fn((color: string) => color),
+			Surface: {
+				MakeOffscreen: makeOffscreenMock,
+			},
+			ImageFilter: {
+				MakeColorFilter: vi.fn(),
+			},
+		} as never;
+		const commands = [
+			{
+				type: CommandType.RenderTarget,
+				props: { width: 64, height: 32 },
+				children: [{ type: CommandType.DrawPaint }],
+			},
+		];
+
+		replay(
+			createDrawingContext(skia, [], rootCanvas as never, {
+				retainResources: true,
+			}),
+			commands as never,
+		);
+		replay(
+			createDrawingContext(skia, [], rootCanvas as never, {
+				retainResources: true,
+			}),
+			commands as never,
+		);
+
+		expect(makeOffscreenMock).toHaveBeenCalledTimes(1);
+		expect(targetSurface.asImageCopy).toHaveBeenCalledTimes(2);
+	});
+
+	it("支持上报 RenderTarget replay 指标", () => {
+		vi.mocked(getSkiaRenderBackend).mockReturnValue({
+			bundle: "webgl",
+			kind: "webgl",
+		});
+
+		const listener = vi.fn();
+		setRenderTargetReplayMetricsListener(listener);
+
+		const rootCanvas = createCanvas();
+		const targetCanvas = createCanvas();
+		const targetSurface = createSurface(targetCanvas, "metrics");
+		const skia = {
+			Paint: vi.fn(() => createPaint()),
+			Color: vi.fn((color: string) => color),
+			Surface: {
+				MakeOffscreen: vi.fn(() => targetSurface),
+			},
+			ImageFilter: {
+				MakeColorFilter: vi.fn(),
+			},
+		} as never;
+		const commands = [
+			{
+				type: CommandType.RenderTarget,
+				props: { width: 64, height: 32 },
+				children: [{ type: CommandType.DrawPaint }],
+			},
+		];
+
+		replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		const metrics = listener.mock.calls[0]?.[0] as {
+			commandCount: number;
+			renderTargetCount: number;
+			offscreenPixelCount: number;
+			offscreenAllocCount: number;
+			offscreenReuseCount: number;
+			offscreenFlushCount: number;
+			snapshotCount: number;
+			snapshotBySource: {
+				asImageCopy: number;
+				asImage: number;
+				makeImageSnapshot: number;
+			};
+			compositeDrawImageCount: number;
+			durationMs: number;
+		};
+		expect(metrics.commandCount).toBe(1);
+		expect(metrics.renderTargetCount).toBe(1);
+		expect(metrics.offscreenPixelCount).toBe(64 * 32);
+		expect(metrics.offscreenAllocCount).toBe(1);
+		expect(metrics.offscreenReuseCount).toBe(0);
+		expect(metrics.offscreenFlushCount).toBe(1);
+		expect(metrics.snapshotCount).toBe(1);
+		expect(metrics.snapshotBySource.makeImageSnapshot).toBe(1);
+		expect(metrics.compositeDrawImageCount).toBe(1);
+		expect(metrics.durationMs).toBeGreaterThanOrEqual(0);
 	});
 });
