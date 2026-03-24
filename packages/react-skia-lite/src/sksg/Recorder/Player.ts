@@ -184,7 +184,6 @@ const createReplayMetrics = (): RenderTargetReplayMetrics => ({
   snapshotCount: 0,
   snapshotBySource: {
     asImageCopy: 0,
-    asImage: 0,
     makeImageSnapshot: 0,
   },
   compositeDrawImageCount: 0,
@@ -370,9 +369,7 @@ const playRenderTarget = (
     if (metrics) {
       metrics.offscreenFlushCount += 1;
     }
-    const snapshot = makeSurfaceSnapshotImage(surface, {
-      preference: ctx.retainResources ? "copy-first" : "alias-first",
-    });
+    const snapshot = makeSurfaceSnapshotImage(surface);
     if (metrics) {
       metrics.snapshotCount += 1;
       metrics.snapshotBySource[snapshot.source] += 1;
