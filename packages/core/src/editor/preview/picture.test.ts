@@ -41,6 +41,7 @@ const {
 vi.mock("react-skia-lite", async () => {
 	const NodeType = {
 		BackdropFilter: "skBackdropFilter",
+		RenderTarget: "skRenderTarget",
 	} as const;
 	return {
 		NodeType,
@@ -129,6 +130,23 @@ describe("renderNodeToPicture", () => {
 		expect(recordingCanvas.drawImage).toHaveBeenCalledWith(image, 0, 0);
 		expect(image.dispose).toHaveBeenCalledTimes(1);
 		expect(surface.dispose).toHaveBeenCalledTimes(1);
+	});
+
+	it("已包含 RenderTarget 时不会重复创建 Backdrop 隔离 surface", () => {
+		const child = React.createElement("child", { id: "content" });
+		renderMock.mockImplementation(() => {
+			sceneGraph.children = [
+				{
+					type: "skRenderTarget",
+					children: [{ type: "skBackdropFilter", children: [] }],
+				},
+			];
+		});
+
+		renderNodeToPicture(child, { width: 320, height: 180 });
+
+		expect(makeSurfaceMock).not.toHaveBeenCalled();
+		expect(drawOnCanvasMock).toHaveBeenCalledWith(recordingCanvas);
 	});
 
 	it("WebGL 下包含 BackdropFilter 的树会回退到原始 picture 录制路径", () => {

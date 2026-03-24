@@ -134,6 +134,72 @@ describe("RenderTarget player", () => {
 		expect(finalPaint?.getAlphaf?.()).toBe(0.25);
 	});
 
+	it("WebGPU 下 RenderTarget 分配失败会直接抛错", () => {
+		vi.mocked(getSkiaRenderBackend).mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+
+		const rootCanvas = createCanvas();
+		const skia = {
+			Paint: vi.fn(() => createPaint()),
+			Color: vi.fn((color: string) => color),
+			Surface: {
+				MakeOffscreen: vi.fn(() => null),
+			},
+			ImageFilter: {
+				MakeColorFilter: vi.fn(),
+			},
+		} as never;
+		const commands = [
+			{
+				type: CommandType.RenderTarget,
+				props: { width: 64, height: 32, debugLabel: "scene-preview" },
+				children: [
+					{ type: CommandType.SaveBackdropFilter },
+					{ type: CommandType.RestoreBackdropFilter },
+				],
+			},
+		];
+
+		expect(() => {
+			replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
+		}).toThrow("failed to allocate offscreen surface on webgpu");
+	});
+
+	it("WebGPU 下无 BackdropFilter 时分配失败会回退到 direct replay", () => {
+		vi.mocked(getSkiaRenderBackend).mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+
+		const rootCanvas = createCanvas();
+		const skia = {
+			Paint: vi.fn(() => createPaint()),
+			Color: vi.fn((color: string) => color),
+			Surface: {
+				MakeOffscreen: vi.fn(() => null),
+			},
+			ImageFilter: {
+				MakeColorFilter: vi.fn(),
+			},
+		} as never;
+		const commands = [
+			{
+				type: CommandType.RenderTarget,
+				props: { width: 64, height: 32, debugLabel: "scene-preview" },
+				children: [{ type: CommandType.DrawPaint }],
+			},
+		];
+
+		replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
+		expect(rootCanvas.drawPaint).toHaveBeenCalledTimes(1);
+	});
+
 	it("WebGL 下在 RenderTarget 内执行 BackdropFilter 时继续复用 saveLayer", () => {
 		vi.mocked(getSkiaRenderBackend).mockReturnValue({
 			bundle: "webgl",

@@ -273,6 +273,37 @@ const collectElements = (
 	return result;
 };
 
+const isFrameRenderTargetElement = (node: React.ReactNode): node is AnyElement => {
+	if (!isElement(node)) {
+		return false;
+	}
+	const props = node.props as {
+		debugLabel?: unknown;
+		width?: unknown;
+		height?: unknown;
+	};
+	return (
+		props.debugLabel === "frame-root-webgpu-backdrop" &&
+		typeof props.width === "number" &&
+		typeof props.height === "number"
+	);
+};
+
+const extractFrameChildren = (children: React.ReactNode[]) => {
+	if (children.length !== 1) {
+		return children;
+	}
+	const [rootNode] = children;
+	if (!isFrameRenderTargetElement(rootNode)) {
+		return children;
+	}
+	const nestedChildren = rootNode.props.children as React.ReactNode;
+	if (Array.isArray(nestedChildren)) {
+		return nestedChildren;
+	}
+	return nestedChildren ? [nestedChildren] : [];
+};
+
 describe("buildSkiaTree transform wrapper", () => {
 	it("为普通元素套用统一 transform wrapper 并应用 opacity", async () => {
 		const element = createElement({
@@ -406,7 +437,7 @@ describe("buildSkiaTree transform wrapper", () => {
 			deps,
 		);
 
-		const renderedChildren = children.slice(1).filter(Boolean);
+		const renderedChildren = extractFrameChildren(children).slice(1).filter(Boolean);
 		const transitionNode = renderedChildren.find(
 			(node) => isElement(node) && node.type === TransitionRenderer,
 		);
@@ -512,7 +543,9 @@ describe("buildSkiaTree transform wrapper", () => {
 			localDeps,
 		);
 
-		const renderedChildren = renderState.children.slice(1).filter(Boolean);
+		const renderedChildren = extractFrameChildren(renderState.children)
+			.slice(1)
+			.filter(Boolean);
 		const transitionNode = renderedChildren.find(
 			(node) => isElement(node) && node.type === TransitionRenderer,
 		);
@@ -524,6 +557,79 @@ describe("buildSkiaTree transform wrapper", () => {
 			(node) => "picture" in node.props,
 		);
 		expect(compositionPictureNodes.length).toBeGreaterThan(0);
+		renderState.dispose?.();
+	});
+
+	it("WebGPU 下会统一注入根级 RenderTarget", async () => {
+		getSkiaRenderBackendMock.mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+		const clip = createElement({
+			id: "clip-webgpu-rt",
+			type: "Image",
+			component: "image",
+		});
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [clip],
+				displayTime: 0,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+				},
+			},
+			deps,
+		);
+
+		expect(renderState.children).toHaveLength(1);
+		const rootNode = renderState.children[0];
+		expect(isFrameRenderTargetElement(rootNode)).toBe(true);
+		if (!isFrameRenderTargetElement(rootNode)) return;
+		expect(rootNode.props.width).toBe(1920);
+		expect(rootNode.props.height).toBe(1080);
+		expect(rootNode.props.debugLabel).toBe("frame-root-webgpu-backdrop");
+
+		renderState.dispose?.();
+	});
+
+	it("WebGL 下不会注入根级 RenderTarget", async () => {
+		const clip = createElement({
+			id: "clip-webgl-no-rt",
+			type: "Image",
+			component: "image",
+		});
+
+		const renderState = await buildSkiaRenderStateCore(
+			{
+				elements: [clip],
+				displayTime: 0,
+				tracks,
+				getTrackIndexForElement,
+				sortByTrackIndex,
+				prepare: {
+					isExporting: false,
+					fps: 30,
+					canvasSize: { width: 1920, height: 1080 },
+				},
+			},
+			deps,
+		);
+
+		expect(renderState.children).toHaveLength(2);
+		const rootNode = renderState.children[0];
+		expect(isElement(rootNode)).toBe(true);
+		if (!isElement(rootNode)) return;
+		expect(rootNode.props.color).toBe("black");
+		expect(rootNode.props.debugLabel).toBeUndefined();
+
 		renderState.dispose?.();
 	});
 
@@ -604,7 +710,9 @@ describe("buildSkiaTree transform wrapper", () => {
 			localDeps,
 		);
 
-		const renderedChildren = renderState.children.slice(1).filter(Boolean);
+		const renderedChildren = extractFrameChildren(renderState.children)
+			.slice(1)
+			.filter(Boolean);
 		const transitionNode = renderedChildren.find(
 			(node) => isElement(node) && node.type === TransitionRenderer,
 		);

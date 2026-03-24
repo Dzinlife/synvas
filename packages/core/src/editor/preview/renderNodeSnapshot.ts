@@ -45,6 +45,15 @@ const hasBackdropFilterNode = (nodes: SceneGraphNodeLike[]): boolean => {
 	});
 };
 
+const hasRenderTargetNode = (nodes: SceneGraphNodeLike[]): boolean => {
+	return nodes.some((node) => {
+		if (node.type === NodeType.RenderTarget) {
+			return true;
+		}
+		return hasRenderTargetNode(node.children ?? []);
+	});
+};
+
 export const renderNodeToPicture = (
 	node: ReactNode,
 	size: { width: number; height: number },
@@ -61,10 +70,15 @@ export const renderNodeToPicture = (
 	root.render(node);
 	try {
 		const renderBackend = getSkiaRenderBackend();
-		const shouldIsolateBackdrop = hasBackdropFilterNode(
-			(root.sg as { children?: SceneGraphNodeLike[] }).children ?? [],
-		);
-		if (!shouldIsolateBackdrop || renderBackend.kind !== "webgpu") {
+		const sceneChildren =
+			(root.sg as { children?: SceneGraphNodeLike[] }).children ?? [];
+		const shouldIsolateBackdrop = hasBackdropFilterNode(sceneChildren);
+		const hasRenderTarget = hasRenderTargetNode(sceneChildren);
+		if (
+			!shouldIsolateBackdrop ||
+			renderBackend.kind !== "webgpu" ||
+			hasRenderTarget
+		) {
 			root.drawOnCanvas(canvas);
 			return recorder.finishRecordingAsPicture();
 		}
@@ -75,21 +89,21 @@ export const renderNodeToPicture = (
 		if (!surface) {
 			root.drawOnCanvas(canvas);
 			return recorder.finishRecordingAsPicture();
-			}
+		}
+		try {
+			const surfaceCanvas = surface.getCanvas();
+			surfaceCanvas.clear(Skia.Color("transparent"));
+			root.drawOnCanvas(surfaceCanvas);
+			surface.flush();
+			const image = surface.asImage?.() ?? surface.makeImageSnapshot();
 			try {
-				const surfaceCanvas = surface.getCanvas();
-				surfaceCanvas.clear(Skia.Color("transparent"));
-				root.drawOnCanvas(surfaceCanvas);
-				surface.flush();
-				const image = surface.asImage?.() ?? surface.makeImageSnapshot();
-				try {
-					canvas.drawImage(image, 0, 0);
-				} finally {
-					image.dispose?.();
-				}
+				canvas.drawImage(image, 0, 0);
 			} finally {
-				surface.dispose?.();
+				image.dispose?.();
 			}
+		} finally {
+			surface.dispose?.();
+		}
 	} finally {
 		root.unmount();
 	}

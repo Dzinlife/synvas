@@ -3,7 +3,9 @@ import {
 	Fill,
 	Group,
 	Picture,
+	RenderTarget,
 	Skia,
+	getSkiaRenderBackend,
 	type SkImage,
 	type SkPicture,
 } from "react-skia-lite";
@@ -633,10 +635,29 @@ const buildSkiaRenderStateWithScopeCore = async (
 
 	const plans = await Promise.all(orderedElements.map(buildElementPlan));
 
-	const children = [
+	const frameChildren = [
 		<Fill key="background" color="black" />,
 		...plans.map((plan) => plan.node),
 	];
+	const shouldWrapWithRenderTarget =
+		getSkiaRenderBackend().kind === "webgpu" &&
+		typeof canvasSize?.width === "number" &&
+		typeof canvasSize?.height === "number" &&
+		canvasSize.width > 0 &&
+		canvasSize.height > 0;
+	const children = shouldWrapWithRenderTarget
+		? [
+				<RenderTarget
+					key="frame-root-webgpu-backdrop"
+					width={canvasSize.width}
+					height={canvasSize.height}
+					clearColor="transparent"
+					debugLabel="frame-root-webgpu-backdrop"
+				>
+					{frameChildren}
+				</RenderTarget>,
+			]
+		: frameChildren;
 
 	const ready = shouldAwaitReady || forcePrepareFrames
 		// forcePrepareFrames 的语义也必须等待 prepareRenderFrame 完成，

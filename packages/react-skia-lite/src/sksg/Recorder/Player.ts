@@ -61,6 +61,7 @@ import {
   makeSurfaceSnapshotImage,
   type DrawingContext,
 } from "./DrawingContext";
+import { getSkiaRenderBackend } from "../../skia/web/renderBackend";
 
 const renderTargetFallbackWarnings = new Set<string>();
 
@@ -140,15 +141,39 @@ const playGroup = (
   flushPendingGroups(ctx, pending, playFn);
 };
 
+const hasBackdropFilterInCommands = (commands: Command[]): boolean => {
+  for (const command of commands) {
+    if (isCommand(command, CommandType.SaveBackdropFilter)) {
+      return true;
+    }
+    if (isGroup(command) && hasBackdropFilterInCommands(command.children)) {
+      return true;
+    }
+    if (isRenderTarget(command) && hasBackdropFilterInCommands(command.children)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const playRenderTarget = (
   ctx: DrawingContext,
   command: RenderTargetCommand,
   playFn: (ctx: DrawingContext, cmd: Command) => void
 ) => {
+  const renderBackend = getSkiaRenderBackend();
   const width = Math.max(1, Math.ceil(command.props.width));
   const height = Math.max(1, Math.ceil(command.props.height));
   const surface = ctx.Skia.Surface.MakeOffscreen(width, height);
   if (!surface) {
+    const hasBackdropFilterCommand = hasBackdropFilterInCommands(command.children);
+    if (renderBackend.kind === "webgpu" && hasBackdropFilterCommand) {
+      throw new Error(
+        `[react-skia-lite] RenderTarget ${
+          command.props.debugLabel ? `"${command.props.debugLabel}" ` : ""
+        }failed to allocate offscreen surface on webgpu`
+      );
+    }
     warnRenderTargetFallback(command.props.debugLabel);
     command.children.forEach((child) => {
       playFn(ctx, child);
