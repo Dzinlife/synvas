@@ -70,12 +70,66 @@ const MAX_RENDER_TARGET_POOL_KEYS = 16;
 const MAX_RENDER_TARGET_SURFACES_PER_KEY = 2;
 const renderTargetSurfacePool = new Map<string, SkSurface[]>();
 
+const resolveImageSize = (
+  image: unknown,
+  fallbackWidth: number,
+  fallbackHeight: number
+) => {
+  const target = image as {
+    width?: number | (() => number);
+    height?: number | (() => number);
+  };
+  const rawWidth =
+    typeof target.width === "function" ? target.width() : target.width;
+  const rawHeight =
+    typeof target.height === "function" ? target.height() : target.height;
+  return {
+    width:
+      typeof rawWidth === "number" && Number.isFinite(rawWidth) && rawWidth > 0
+        ? rawWidth
+        : fallbackWidth,
+    height:
+      typeof rawHeight === "number" && Number.isFinite(rawHeight) && rawHeight > 0
+        ? rawHeight
+        : fallbackHeight,
+  };
+};
+
+const resolveRenderTargetPixelRatio = (
+  explicitPixelRatio: number | undefined,
+  inheritedPixelRatio: number | undefined
+) => {
+  if (
+    typeof explicitPixelRatio === "number" &&
+    Number.isFinite(explicitPixelRatio) &&
+    explicitPixelRatio > 0
+  ) {
+    return Math.min(4, Math.max(1, explicitPixelRatio));
+  }
+  if (
+    typeof inheritedPixelRatio === "number" &&
+    Number.isFinite(inheritedPixelRatio) &&
+    inheritedPixelRatio > 0
+  ) {
+    return Math.min(4, Math.max(1, inheritedPixelRatio));
+  }
+  if (
+    typeof window !== "undefined" &&
+    Number.isFinite(window.devicePixelRatio) &&
+    window.devicePixelRatio > 0
+  ) {
+    return Math.min(4, Math.max(1, window.devicePixelRatio));
+  }
+  return 1;
+};
+
 const resolveRenderTargetSurfacePoolKey = (
   backendKind: string,
   width: number,
-  height: number
+  height: number,
+  pixelRatio: number
 ) => {
-  return `${backendKind}:${width}x${height}`;
+  return `${backendKind}:${width}x${height}@${pixelRatio}`;
 };
 
 const disposeSurfaceList = (surfaces: SkSurface[]) => {
@@ -100,9 +154,15 @@ const acquireRenderTargetSurface = (
   Skia: DrawingContext["Skia"],
   width: number,
   height: number,
-  backendKind: string
+  backendKind: string,
+  pixelRatio: number
 ) => {
-  const key = resolveRenderTargetSurfacePoolKey(backendKind, width, height);
+  const key = resolveRenderTargetSurfacePoolKey(
+    backendKind,
+    width,
+    height,
+    pixelRatio
+  );
   const pooled = renderTargetSurfacePool.get(key);
   if (pooled && pooled.length > 0) {
     const pooledSurface = pooled.pop();
@@ -116,7 +176,7 @@ const acquireRenderTargetSurface = (
       };
     }
   }
-  const created = Skia.Surface.MakeOffscreen(width, height);
+  const created = Skia.Surface.MakeOffscreen(width, height, pixelRatio);
   if (!created) {
     return null;
   }
@@ -130,9 +190,15 @@ const releaseRenderTargetSurface = (
   surface: SkSurface,
   width: number,
   height: number,
-  backendKind: string
+  backendKind: string,
+  pixelRatio: number
 ) => {
-  const key = resolveRenderTargetSurfacePoolKey(backendKind, width, height);
+  const key = resolveRenderTargetSurfacePoolKey(
+    backendKind,
+    width,
+    height,
+    pixelRatio
+  );
   let pooled = renderTargetSurfacePool.get(key);
   if (!pooled) {
     if (renderTargetSurfacePool.size >= MAX_RENDER_TARGET_POOL_KEYS) {
@@ -306,16 +372,23 @@ const playRenderTarget = (
   const renderBackend = getSkiaRenderBackend();
   const width = Math.max(1, Math.ceil(command.props.width));
   const height = Math.max(1, Math.ceil(command.props.height));
+  const pixelRatio = resolveRenderTargetPixelRatio(
+    command.props.pixelRatio,
+    ctx.renderTarget?.pixelRatio
+  );
   if (metrics) {
     metrics.renderTargetCount += 1;
-    metrics.offscreenPixelCount += width * height;
+    metrics.offscreenPixelCount +=
+      Math.max(1, Math.ceil(width * pixelRatio)) *
+      Math.max(1, Math.ceil(height * pixelRatio));
   }
 
   const acquiredSurface = acquireRenderTargetSurface(
     ctx.Skia,
     width,
     height,
-    renderBackend.kind
+    renderBackend.kind,
+    pixelRatio
   );
   if (!acquiredSurface) {
     if (metrics) {
@@ -354,6 +427,7 @@ const playRenderTarget = (
       surface,
       width,
       height,
+      pixelRatio,
       debugLabel: command.props.debugLabel,
     },
     retainResources: ctx.retainResources,
@@ -378,7 +452,24 @@ const playRenderTarget = (
     const retainSurfaceForSnapshot =
       ctx.retainResources && snapshot.requiresSurfaceRetention;
     try {
-      ctx.canvas.drawImage(image, 0, 0, ctx.paint);
+      const imageSize = resolveImageSize(image, width, height);
+      ctx.canvas.drawImageRect(
+        image,
+        {
+          x: 0,
+          y: 0,
+          width: imageSize.width,
+          height: imageSize.height,
+        },
+        {
+          x: 0,
+          y: 0,
+          width,
+          height,
+        },
+        ctx.paint,
+        true
+      );
       if (metrics) {
         metrics.compositeDrawImageCount += 1;
       }
@@ -388,7 +479,13 @@ const playRenderTarget = (
         ctx.retainResource(() => {
           image.dispose?.();
           if (retainSurfaceForSnapshot) {
-            releaseRenderTargetSurface(surface, width, height, renderBackend.kind);
+            releaseRenderTargetSurface(
+              surface,
+              width,
+              height,
+              renderBackend.kind,
+              pixelRatio
+            );
           }
         });
       }
@@ -403,7 +500,13 @@ const playRenderTarget = (
       ctx.retainResource(cleanup);
     });
     if (!retainedSurfaceInCleanup) {
-      releaseRenderTargetSurface(surface, width, height, renderBackend.kind);
+      releaseRenderTargetSurface(
+        surface,
+        width,
+        height,
+        renderBackend.kind,
+        pixelRatio
+      );
     }
   }
 };

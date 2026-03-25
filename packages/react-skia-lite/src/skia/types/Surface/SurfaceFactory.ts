@@ -14,6 +14,11 @@ export interface SurfaceFactory {
    * Creates a GPU backed surface.
    * @param width - number of pixels of the width of the drawable area.
    * @param height - number of pixels of the height of the drawable area.
+   * @param pixelRatio - optional pixel ratio for offscreen allocation and canvas scale.
    */
-  MakeOffscreen: (width: number, height: number) => SkSurface | null;
+  MakeOffscreen: (
+    width: number,
+    height: number,
+    pixelRatio?: number
+  ) => SkSurface | null;
 }

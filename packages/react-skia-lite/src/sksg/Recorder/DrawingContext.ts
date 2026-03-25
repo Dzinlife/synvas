@@ -21,6 +21,7 @@ export type ActiveRenderTarget = {
   surface: SkSurface;
   width: number;
   height: number;
+  pixelRatio: number;
   debugLabel?: string;
 };
 
@@ -47,6 +48,31 @@ const isCanvasMatrixIdentity = (canvas: SkCanvas) => {
   } finally {
     matrix.dispose?.();
   }
+};
+
+const resolveImageSize = (
+  image: unknown,
+  fallbackWidth: number,
+  fallbackHeight: number
+) => {
+  const target = image as {
+    width?: number | (() => number);
+    height?: number | (() => number);
+  };
+  const rawWidth =
+    typeof target.width === "function" ? target.width() : target.width;
+  const rawHeight =
+    typeof target.height === "function" ? target.height() : target.height;
+  return {
+    width:
+      typeof rawWidth === "number" && Number.isFinite(rawWidth) && rawWidth > 0
+        ? rawWidth
+        : fallbackWidth,
+    height:
+      typeof rawHeight === "number" && Number.isFinite(rawHeight) && rawHeight > 0
+        ? rawHeight
+        : fallbackHeight,
+  };
 };
 
 export type SurfaceSnapshotSource = "asImageCopy" | "makeImageSnapshot";
@@ -183,7 +209,8 @@ export const createDrawingContext = (
     ) {
       const scratchSurface = Skia.Surface.MakeOffscreen(
         renderTarget.width,
-        renderTarget.height
+        renderTarget.height,
+        renderTarget.pixelRatio
       );
       if (scratchSurface) {
         const sourceImage = renderTarget.surface.makeImageSnapshot();
@@ -195,14 +222,56 @@ export const createDrawingContext = (
           const scratchCanvas = scratchSurface.getCanvas();
           filteredPaint.setImageFilter(imageFilter);
           scratchCanvas.clear(Skia.Color("transparent"));
-          scratchCanvas.drawImage(sourceImage, 0, 0, filteredPaint);
+          const sourceImageSize = resolveImageSize(
+            sourceImage,
+            renderTarget.width,
+            renderTarget.height
+          );
+          scratchCanvas.drawImageRect(
+            sourceImage,
+            {
+              x: 0,
+              y: 0,
+              width: sourceImageSize.width,
+              height: sourceImageSize.height,
+            },
+            {
+              x: 0,
+              y: 0,
+              width: renderTarget.width,
+              height: renderTarget.height,
+            },
+            filteredPaint,
+            true
+          );
           scratchSurface.flush();
           const filteredSnapshot = makeSurfaceSnapshotImage(scratchSurface);
           const filteredImage = filteredSnapshot.image;
           retainScratchSurface =
             retainResources && filteredSnapshot.requiresSurfaceRetention;
           try {
-            canvas.drawImage(filteredImage, 0, 0, backdropPaint);
+            const filteredImageSize = resolveImageSize(
+              filteredImage,
+              renderTarget.width,
+              renderTarget.height
+            );
+            canvas.drawImageRect(
+              filteredImage,
+              {
+                x: 0,
+                y: 0,
+                width: filteredImageSize.width,
+                height: filteredImageSize.height,
+              },
+              {
+                x: 0,
+                y: 0,
+                width: renderTarget.width,
+                height: renderTarget.height,
+              },
+              backdropPaint,
+              true
+            );
             if (retainResources) {
               retainedFilteredImage = true;
               retainResource(() => {

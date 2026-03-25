@@ -26,10 +26,38 @@ const webgpuCanvasContextCache = new WeakMap<
 	CachedWebGPUCanvasContext
 >();
 
+const normalizeOffscreenPixelRatio = (value: number) => {
+	return Math.min(4, Math.max(1, value));
+};
+
 const releaseWebGLCanvasContext = (canvas: CanvasElement) => {
 	const context = canvas.getContext("webgl2") as WebGL2RenderingContext | null;
 	const loseContext = context?.getExtension("WEBGL_lose_context");
 	loseContext?.loseContext();
+};
+
+const resolveOffscreenPixelRatio = (pixelRatio?: number) => {
+	if (
+		typeof pixelRatio === "number" &&
+		Number.isFinite(pixelRatio) &&
+		pixelRatio > 0
+	) {
+		return normalizeOffscreenPixelRatio(pixelRatio);
+	}
+	if (
+		typeof window !== "undefined" &&
+		Number.isFinite(window.devicePixelRatio) &&
+		window.devicePixelRatio > 0
+	) {
+		return normalizeOffscreenPixelRatio(window.devicePixelRatio);
+	}
+	return 1;
+};
+
+const applyOffscreenCanvasScale = (surface: JsiSkSurface, pixelRatio: number) => {
+	if (pixelRatio === 1) return surface;
+	surface.getCanvas().scale(pixelRatio, pixelRatio);
+	return surface;
 };
 
 const setCanvasDisplayP3IfPossible = (canvas: CanvasElement) => {
@@ -140,9 +168,13 @@ export const createSkiaOffscreenSurface = (
 	width: number,
 	height: number,
 	backend: SkiaRenderBackend = getSkiaRenderBackend(),
+	pixelRatio?: number,
 ) => {
-	const targetWidth = Math.max(1, Math.ceil(width));
-	const targetHeight = Math.max(1, Math.ceil(height));
+	const logicalWidth = Math.max(1, Math.ceil(width));
+	const logicalHeight = Math.max(1, Math.ceil(height));
+	const resolvedPixelRatio = resolveOffscreenPixelRatio(pixelRatio);
+	const targetWidth = Math.max(1, Math.ceil(logicalWidth * resolvedPixelRatio));
+	const targetHeight = Math.max(1, Math.ceil(logicalHeight * resolvedPixelRatio));
 	if (backend.kind === "webgpu") {
 		const surface = toCanvasKitWebGPU(CanvasKit).SkSurfaces?.RenderTarget?.(
 			backend.deviceContext,
@@ -160,7 +192,10 @@ export const createSkiaOffscreenSurface = (
 		if (!surface) {
 			return null;
 		}
-		return new JsiSkSurface(CanvasKit, surface);
+		return applyOffscreenCanvasScale(
+			new JsiSkSurface(CanvasKit, surface),
+			resolvedPixelRatio,
+		);
 	}
 	if (
 		backend.kind === "webgl" &&
@@ -174,7 +209,10 @@ export const createSkiaOffscreenSurface = (
 				targetHeight,
 			);
 			if (surface) {
-				return new JsiSkSurface(CanvasKit, surface);
+				return applyOffscreenCanvasScale(
+					new JsiSkSurface(CanvasKit, surface),
+					resolvedPixelRatio,
+				);
 			}
 		}
 	}
@@ -209,21 +247,27 @@ export const createSkiaOffscreenSurface = (
 			releaseWebGLCanvasContext(canvas);
 			return null;
 		}
-		return new JsiSkSurface(CanvasKit, surface, () => {
-			try {
-				grContext.delete();
-			} catch {}
-			if (typeof CanvasKit.deleteContext === "function") {
-				CanvasKit.deleteContext(contextHandle);
-			}
-			releaseWebGLCanvasContext(canvas);
-		});
+		return applyOffscreenCanvasScale(
+			new JsiSkSurface(CanvasKit, surface, () => {
+				try {
+					grContext.delete();
+				} catch {}
+				if (typeof CanvasKit.deleteContext === "function") {
+					CanvasKit.deleteContext(contextHandle);
+				}
+				releaseWebGLCanvasContext(canvas);
+			}),
+			resolvedPixelRatio,
+		);
 	}
 	const surface = CanvasKit.MakeSurface(targetWidth, targetHeight);
 	if (!surface) {
 		return null;
 	}
-	return new JsiSkSurface(CanvasKit, surface);
+	return applyOffscreenCanvasScale(
+		new JsiSkSurface(CanvasKit, surface),
+		resolvedPixelRatio,
+	);
 };
 
 export const assignCurrentSkiaSwapChainTexture = (surface: JsiSkSurface) => {

@@ -40,6 +40,7 @@ export interface ChildrenProps {
 export interface RenderTargetProps extends ChildrenProps {
 	width: number;
 	height: number;
+	pixelRatio?: number;
 	clearColor?: Color;
 	debugLabel?: string;
 }

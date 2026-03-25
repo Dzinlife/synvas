@@ -76,17 +76,6 @@ const resolveNowMs = (): number => {
 	return Date.now();
 };
 
-const resolveFrameDpr = (): number => {
-	if (
-		typeof window !== "undefined" &&
-		Number.isFinite(window.devicePixelRatio) &&
-		window.devicePixelRatio > 0
-	) {
-		return Math.min(4, Math.max(0.5, window.devicePixelRatio));
-	}
-	return 1;
-};
-
 const clampLod = (lod: number): number => {
 	return Math.max(TILE_LOD_MIN, Math.min(TILE_LOD_MAX, Math.round(lod)));
 };
@@ -196,10 +185,7 @@ export class StaticTileScheduler {
 	beginFrame(input: TileSchedulerFrameInput): TileFrameResult {
 		this.tick += 1;
 		const debugEnabled = Boolean(input.debugEnabled);
-		const nextTargetLod = this.resolveTargetLod(
-			input.camera.zoom,
-			resolveFrameDpr(),
-		);
+		const nextTargetLod = this.resolveTargetLod(input.camera.zoom);
 		const targetChanged = nextTargetLod !== this.targetLod;
 		this.targetLod = nextTargetLod;
 		const nextComposeLod = this.resolveComposeLod(nextTargetLod);
@@ -266,10 +252,9 @@ export class StaticTileScheduler {
 		} catch {}
 	}
 
-	private resolveTargetLod(zoom: number, dpr: number): number {
-		// 引擎层按 zoom*dpr 选级，保证高 DPR 下静态 tile 仍有足够采样密度。
-		const safeScale = Math.max(zoom * dpr, TILE_CAMERA_EPSILON);
-		const zoomLevel = Math.log2(safeScale);
+	private resolveTargetLod(zoom: number): number {
+		const safeZoom = Math.max(zoom, TILE_CAMERA_EPSILON);
+		const zoomLevel = Math.log2(safeZoom);
 		const previous = this.targetLod;
 		const rounded = clampLod(Math.round(zoomLevel));
 		if (rounded === previous) return previous;

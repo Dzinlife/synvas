@@ -651,6 +651,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 					key="frame-root-webgpu-backdrop"
 					width={canvasSize.width}
 					height={canvasSize.height}
+					pixelRatio={isExporting ? 1 : undefined}
 					clearColor="transparent"
 					debugLabel="frame-root-webgpu-backdrop"
 				>

@@ -48,16 +48,24 @@ const createPaint = () => {
 const createCanvas = () => ({
 	clear: vi.fn(),
 	drawImage: vi.fn(),
+	drawImageRect: vi.fn(),
 	drawPaint: vi.fn(),
 	saveLayer: vi.fn(),
 	restore: vi.fn(),
 	getTotalMatrix: vi.fn(() => createMatrix()),
 });
 
-const createSnapshotImage = (label: string) => ({
+const createSnapshotImage = (
+	label: string,
+	size?: { width: number; height: number },
+) => ({
 	label,
+	width: vi.fn(() => size?.width ?? 64),
+	height: vi.fn(() => size?.height ?? 32),
 	makeNonTextureImage: vi.fn(() => ({
 		label: `${label}:raster`,
+		width: vi.fn(() => size?.width ?? 64),
+		height: vi.fn(() => size?.height ?? 32),
 		dispose: vi.fn(),
 	})),
 	dispose: vi.fn(),
@@ -69,17 +77,20 @@ const createSurface = (
 	options?: {
 		asImageCopy?: boolean;
 		asImage?: boolean;
+		snapshotSize?: { width: number; height: number };
 	},
 ) => ({
 	getCanvas: vi.fn(() => canvas),
-	makeImageSnapshot: vi.fn(() => createSnapshotImage(label)),
+	makeImageSnapshot: vi.fn(() =>
+		createSnapshotImage(label, options?.snapshotSize),
+	),
 	asImageCopy: vi.fn(() => {
 		if (!options?.asImageCopy) return null;
-		return createSnapshotImage(`${label}:asImageCopy`);
+		return createSnapshotImage(`${label}:asImageCopy`, options?.snapshotSize);
 	}),
 	asImage: vi.fn(() => {
 		if (!options?.asImage) return null;
-		return createSnapshotImage(`${label}:asImage`);
+		return createSnapshotImage(`${label}:asImage`, options?.snapshotSize);
 	}),
 	flush: vi.fn(),
 	dispose: vi.fn(),
@@ -147,9 +158,9 @@ describe("RenderTarget player", () => {
 		expect(makeOffscreenMock).toHaveBeenCalledTimes(2);
 		expect(targetCanvas.saveLayer).not.toHaveBeenCalled();
 		expect(targetCanvas.clear).toHaveBeenCalledTimes(1);
-		expect(scratchCanvas.drawImage).toHaveBeenCalledTimes(1);
-		expect(rootCanvas.drawImage).toHaveBeenCalledTimes(1);
-		const finalPaint = targetCanvas.drawImage.mock.calls[0]?.[3] as
+		expect(scratchCanvas.drawImageRect).toHaveBeenCalledTimes(1);
+		expect(rootCanvas.drawImageRect).toHaveBeenCalledTimes(1);
+		const finalPaint = targetCanvas.drawImageRect.mock.calls[0]?.[3] as
 			| { getAlphaf?: () => number }
 			| undefined;
 		expect(finalPaint?.getAlphaf?.()).toBe(0.25);
@@ -268,7 +279,7 @@ describe("RenderTarget player", () => {
 
 		expect(makeOffscreenMock).toHaveBeenCalledTimes(1);
 		expect(targetCanvas.saveLayer).toHaveBeenCalledTimes(1);
-		expect(rootCanvas.drawImage).toHaveBeenCalledTimes(1);
+		expect(rootCanvas.drawImageRect).toHaveBeenCalledTimes(1);
 	});
 
 	it("RenderTarget surface 在回放之间会复用", () => {
@@ -303,7 +314,55 @@ describe("RenderTarget player", () => {
 		replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
 
 		expect(makeOffscreenMock).toHaveBeenCalledTimes(1);
-		expect(rootCanvas.drawImage).toHaveBeenCalledTimes(2);
+		expect(rootCanvas.drawImageRect).toHaveBeenCalledTimes(2);
+	});
+
+	it("RenderTarget 合成会按逻辑尺寸回贴，避免 DPR 下二次放大", () => {
+		vi.mocked(getSkiaRenderBackend).mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+
+		const rootCanvas = createCanvas();
+		const targetCanvas = createCanvas();
+		const targetSurface = createSurface(targetCanvas, "scaled-snapshot", {
+			snapshotSize: { width: 128, height: 64 },
+		});
+		const skia = {
+			Paint: vi.fn(() => createPaint()),
+			Color: vi.fn((color: string) => color),
+			Surface: {
+				MakeOffscreen: vi.fn(() => targetSurface),
+			},
+			ImageFilter: {
+				MakeColorFilter: vi.fn(),
+			},
+		} as never;
+		const commands = [
+			{
+				type: CommandType.RenderTarget,
+				props: { width: 64, height: 32 },
+				children: [{ type: CommandType.DrawPaint }],
+			},
+		];
+
+		replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
+
+		expect(rootCanvas.drawImageRect).toHaveBeenCalledWith(
+			expect.any(Object),
+			expect.objectContaining({
+				width: 128,
+				height: 64,
+			}),
+			expect.objectContaining({
+				width: 64,
+				height: 32,
+			}),
+			expect.any(Object),
+			true,
+		);
 	});
 
 	it("retainResources=true 时优先使用 asImageCopy 并可立即复用 surface", () => {

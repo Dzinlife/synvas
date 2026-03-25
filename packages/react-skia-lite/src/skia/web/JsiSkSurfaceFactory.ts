@@ -18,7 +18,13 @@ export class JsiSkSurfaceFactory extends Host implements SurfaceFactory {
 		);
 	}
 
-	MakeOffscreen(width: number, height: number) {
-		return createSkiaOffscreenSurface(this.CanvasKit, width, height);
+	MakeOffscreen(width: number, height: number, pixelRatio?: number) {
+		return createSkiaOffscreenSurface(
+			this.CanvasKit,
+			width,
+			height,
+			undefined,
+			pixelRatio,
+		);
 	}
 }

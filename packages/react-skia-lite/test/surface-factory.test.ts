@@ -94,6 +94,110 @@ describe("surfaceFactory", () => {
 		expect(snapshotDeleteMock).not.toHaveBeenCalled();
 	});
 
+	it("WebGPU offscreen surface 默认按 devicePixelRatio 分配并预缩放", () => {
+		const scaleMock = vi.fn();
+		const renderTargetMock = vi.fn(
+			(_deviceContext: unknown, imageInfo: { width: number; height: number }) => ({
+				delete: vi.fn(),
+				flush: vi.fn(),
+				width: () => imageInfo.width,
+				height: () => imageInfo.height,
+				getCanvas: () => ({
+					clear: vi.fn(),
+					save: vi.fn(),
+					restore: vi.fn(),
+					scale: scaleMock,
+					drawPicture: vi.fn(),
+				}),
+				makeImageSnapshot: vi.fn(),
+			}),
+		);
+		const canvasKit = {
+			ColorType: { RGBA_8888: "rgba8888" },
+			AlphaType: { Premul: "premul" },
+			ColorSpace: { SRGB: "srgb" },
+			SkSurfaces: {
+				RenderTarget: renderTargetMock,
+			},
+		} as never;
+		const backend = {
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: { id: "ctx" },
+		} as const;
+		vi.stubGlobal("window", {
+			devicePixelRatio: 2,
+		});
+
+		const surface = createSkiaOffscreenSurface(canvasKit, 64, 32, backend);
+		surface?.dispose();
+
+		expect(renderTargetMock).toHaveBeenCalledWith(
+			backend.deviceContext,
+			expect.objectContaining({
+				width: 128,
+				height: 64,
+			}),
+			false,
+			undefined,
+			"",
+		);
+		expect(scaleMock).toHaveBeenCalledWith(2, 2);
+	});
+
+	it("offscreen surface 允许显式传入 pixelRatio=1 禁用 dpr 放大", () => {
+		const scaleMock = vi.fn();
+		const renderTargetMock = vi.fn(
+			(_deviceContext: unknown, imageInfo: { width: number; height: number }) => ({
+				delete: vi.fn(),
+				flush: vi.fn(),
+				width: () => imageInfo.width,
+				height: () => imageInfo.height,
+				getCanvas: () => ({
+					clear: vi.fn(),
+					save: vi.fn(),
+					restore: vi.fn(),
+					scale: scaleMock,
+					drawPicture: vi.fn(),
+				}),
+				makeImageSnapshot: vi.fn(),
+			}),
+		);
+		const canvasKit = {
+			ColorType: { RGBA_8888: "rgba8888" },
+			AlphaType: { Premul: "premul" },
+			ColorSpace: { SRGB: "srgb" },
+			SkSurfaces: {
+				RenderTarget: renderTargetMock,
+			},
+		} as never;
+		const backend = {
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: { id: "ctx" },
+		} as const;
+		vi.stubGlobal("window", {
+			devicePixelRatio: 2,
+		});
+
+		const surface = createSkiaOffscreenSurface(canvasKit, 64, 32, backend, 1);
+		surface?.dispose();
+
+		expect(renderTargetMock).toHaveBeenCalledWith(
+			backend.deviceContext,
+			expect.objectContaining({
+				width: 64,
+				height: 32,
+			}),
+			false,
+			undefined,
+			"",
+		);
+		expect(scaleMock).not.toHaveBeenCalled();
+	});
+
 	it("WebGPU offscreen surface 不再自行创建外部 GPUTexture", () => {
 		const deleteMock = vi.fn();
 		const renderTargetMock = vi.fn(
