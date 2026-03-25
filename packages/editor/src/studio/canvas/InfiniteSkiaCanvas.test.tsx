@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { act, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { StudioProject, VideoCanvasNode } from "core/studio/types";
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
@@ -12,8 +12,16 @@ import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 const { rootRenderSpy } = vi.hoisted(() => ({
 	rootRenderSpy: vi.fn(),
 }));
+const { tilePipelineMockState } = vi.hoisted(() => ({
+	tilePipelineMockState: {
+		enabled: false,
+	},
+}));
 const { runtimeManagerMock } = vi.hoisted(() => ({
 	runtimeManagerMock: {},
+}));
+const { acquireImageAssetMock } = vi.hoisted(() => ({
+	acquireImageAssetMock: vi.fn(),
 }));
 const {
 	focusLayerPointerDownSpy,
@@ -128,6 +136,53 @@ vi.mock("react-skia-lite", async () => {
 			},
 		};
 	};
+	const createSurface = () => {
+		const canvas = {
+			clear: vi.fn(),
+			save: vi.fn(),
+			restore: vi.fn(),
+			translate: vi.fn(),
+			scale: vi.fn(),
+			drawPicture: vi.fn(),
+			drawImageRect: vi.fn(),
+		};
+		return {
+			getCanvas: () => canvas,
+			flush: vi.fn(),
+			asImageCopy: () => ({
+				dispose: vi.fn(),
+			}),
+			makeImageSnapshot: () => ({
+				dispose: vi.fn(),
+			}),
+			dispose: vi.fn(),
+		};
+	};
+	const skiaMock = {
+		RuntimeEffect: {
+			Make: () => ({ type: "runtime-effect" }),
+		},
+		Font: () => ({
+			getTextWidth: (text: string) => text.length * 6,
+			getMetrics: () => ({
+				ascent: -9,
+				descent: 2,
+				leading: 0,
+			}),
+		}),
+		get Paint() {
+			if (!tilePipelineMockState.enabled) return undefined;
+			return () => ({
+				dispose: vi.fn(),
+			});
+		},
+		Surface: {
+			get MakeOffscreen() {
+				if (!tilePipelineMockState.enabled) return undefined;
+				return () => createSurface();
+			},
+		},
+	};
 
 	return {
 		Canvas,
@@ -165,24 +220,16 @@ vi.mock("react-skia-lite", async () => {
 				leading: 0,
 			}),
 		}),
-		Skia: {
-			RuntimeEffect: {
-				Make: () => ({ type: "runtime-effect" }),
-			},
-			Font: () => ({
-				getTextWidth: (text: string) => text.length * 6,
-				getMetrics: () => ({
-					ascent: -9,
-					descent: 2,
-					leading: 0,
-				}),
-			}),
-		},
+		Skia: skiaMock,
 	};
 });
 
 vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", () => ({
 	useStudioRuntimeManager: () => runtimeManagerMock,
+}));
+
+vi.mock("@/assets/imageAsset", () => ({
+	acquireImageAsset: acquireImageAssetMock,
 }));
 
 vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
@@ -352,6 +399,36 @@ const getCanvasNodeInteractionItems = (tree: React.ReactNode): AnyElement[] => {
 	});
 };
 
+const getStaticTileLayerElement = (
+	tree: React.ReactNode,
+): AnyElement | null => {
+	return (
+		collectElements(tree, (element) => {
+			return resolveComponentNames(element.type).includes("StaticTileLayer");
+		})[0] ?? null
+	);
+};
+
+const getDragProxyLayerElement = (tree: React.ReactNode): AnyElement | null => {
+	return (
+		collectElements(tree, (element) => {
+			return resolveComponentNames(element.type).includes("DragProxyLayer");
+		})[0] ?? null
+	);
+};
+
+const getSelectionBoundsInteractionLayerElement = (
+	tree: React.ReactNode,
+): AnyElement | null => {
+	return (
+		collectElements(tree, (element) => {
+			return resolveComponentNames(element.type).includes(
+				"SelectionBoundsInteractionLayer",
+			);
+		})[0] ?? null
+	);
+};
+
 const createVideoNode = (
 	id: string,
 	zIndex: number,
@@ -389,6 +466,16 @@ const createSceneNode = (id: string, zIndex: number) => ({
 	sceneId: "scene-1",
 });
 
+const createImageAsset = (id: string): StudioProject["assets"][number] => ({
+	id,
+	kind: "image",
+	name: id,
+	locator: {
+		type: "linked-remote",
+		uri: `https://example.com/${id}.png`,
+	},
+});
+
 const createCameraShared = (camera: { x: number; y: number; zoom: number }) => {
 	let currentValue = camera;
 	const listeners = new Map<
@@ -418,11 +505,49 @@ const createCameraShared = (camera: { x: number; y: number; zoom: number }) => {
 	};
 };
 
+const createDragEvent = (
+	movementX: number,
+	movementY: number,
+): CanvasNodeDragEvent => ({
+	clientX: 0,
+	clientY: 0,
+	button: 0,
+	buttons: 1,
+	shiftKey: false,
+	altKey: false,
+	metaKey: false,
+	ctrlKey: false,
+	movementX,
+	movementY,
+	first: false,
+	last: false,
+	tap: false,
+});
+
 const emptyScenes: StudioProject["scenes"] = {};
 
 describe("InfiniteSkiaCanvas", () => {
+	afterEach(() => {
+		cleanup();
+	});
+
 	beforeEach(() => {
 		rootRenderSpy.mockReset();
+		tilePipelineMockState.enabled = false;
+		acquireImageAssetMock.mockReset();
+		acquireImageAssetMock.mockImplementation(async (uri: string) => {
+			return {
+				asset: {
+					image: {
+						id: uri,
+						width: 256,
+						height: 144,
+						dispose: vi.fn(),
+					},
+				},
+				release: vi.fn(),
+			};
+		});
 		focusLayerPointerDownSpy.mockReset();
 		focusLayerPointerMoveSpy.mockReset();
 		focusLayerPointerUpSpy.mockReset();
@@ -515,7 +640,7 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 		const initialRenderCount = rootRenderSpy.mock.calls.length;
 		const tree = getLatestRenderTree();
-			const nodeItems = getCanvasNodeInteractionItems(tree);
+		const nodeItems = getCanvasNodeInteractionItems(tree);
 		const targetNodeItem = nodeItems.find(
 			(nodeItem) =>
 				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
@@ -571,12 +696,12 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-			const interactionNodeIds = getCanvasNodeInteractionItems(tree).map(
-				(nodeItem) => {
-					return getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id;
-				},
-			);
-			expect(interactionNodeIds).toEqual(["node-a", "node-b", "node-c"]);
+		const interactionNodeIds = getCanvasNodeInteractionItems(tree).map(
+			(nodeItem) => {
+				return getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id;
+			},
+		);
+		expect(interactionNodeIds).toEqual(["node-a", "node-b", "node-c"]);
 
 		const overlayProps = getElementProps<{
 			selectedNodes?: Array<{ id: string }>;
@@ -660,7 +785,7 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const tree = getLatestRenderTree();
 		const labelLayerElement = getLabelLayerElement(tree);
-	const labelLayerProps = getElementProps<{
+		const labelLayerProps = getElementProps<{
 			nodes?: unknown[];
 			camera?: { _isSharedValue?: boolean };
 			focusedNodeId?: string | null;
@@ -698,14 +823,15 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(overlayElement).toBeTruthy();
 		expect(labelLayerElement).toBeTruthy();
 		expect(
-			(overlayElement?.props.camera as
-				| { _isSharedValue?: boolean }
-				| undefined)?._isSharedValue,
+			(overlayElement?.props.camera as { _isSharedValue?: boolean } | undefined)
+				?._isSharedValue,
 		).toBe(true);
 		expect(
-			(labelLayerElement?.props.camera as
-				| { _isSharedValue?: boolean }
-				| undefined)?._isSharedValue,
+			(
+				labelLayerElement?.props.camera as
+					| { _isSharedValue?: boolean }
+					| undefined
+			)?._isSharedValue,
 		).toBe(true);
 
 		const backgroundElement = collectElements(tree, (element) => {
@@ -713,9 +839,11 @@ describe("InfiniteSkiaCanvas", () => {
 		})[0];
 		expect(backgroundElement).toBeTruthy();
 		expect(
-			(backgroundElement?.props.uniforms as
-				| { _isSharedValue?: boolean }
-				| undefined)?._isSharedValue,
+			(
+				backgroundElement?.props.uniforms as
+					| { _isSharedValue?: boolean }
+					| undefined
+			)?._isSharedValue,
 		).toBe(true);
 
 		const fastWorldGroup = collectElements(tree, (element) => {
@@ -727,31 +855,11 @@ describe("InfiniteSkiaCanvas", () => {
 		})[0];
 		expect(fastWorldGroup).toBeTruthy();
 		expect(
-			(
-				fastWorldGroup?.props.transform as
-					| { value?: unknown }
-					| undefined
-			)?.value,
+			(fastWorldGroup?.props.transform as { value?: unknown } | undefined)
+				?.value,
 		).toEqual([
 			{
-				matrix: [
-					1.25,
-					0,
-					0,
-					30,
-					0,
-					1.25,
-					0,
-					-15,
-					0,
-					0,
-					1,
-					0,
-					0,
-					0,
-					0,
-					1,
-				],
+				matrix: [1.25, 0, 0, 30, 0, 1.25, 0, -15, 0, 0, 1, 0, 0, 0, 0, 1],
 			},
 		]);
 	});
@@ -862,7 +970,7 @@ describe("InfiniteSkiaCanvas", () => {
 		const labelLayerElement = getLabelLayerElement(tree);
 		expect(typeof labelLayerElement?.props.getNodeLayout).toBe("function");
 
-			const nodeItems = getCanvasNodeRenderItems(tree);
+		const nodeItems = getCanvasNodeRenderItems(tree);
 		const targetNodeItem = nodeItems.find((nodeItem) => {
 			return (
 				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
@@ -889,6 +997,171 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
+	it("tile 命中后仅 active 节点保持 live", async () => {
+		tilePipelineMockState.enabled = true;
+		const sceneNode = {
+			...createSceneNode("node-scene", 0),
+			thumbnail: {
+				assetId: "scene-thumb",
+				sourceSignature: "scene-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		const activeNode = {
+			...createVideoNode("node-active", 1),
+			thumbnail: {
+				assetId: "video-thumb",
+				sourceSignature: "video-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[sceneNode, activeNode]}
+				scenes={emptyScenes}
+				assets={[
+					createImageAsset("scene-thumb"),
+					createImageAsset("video-thumb"),
+				]}
+				activeNodeId="node-active"
+				selectedNodeIds={["node-active"]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			const staticTileLayerProps = getElementProps<{
+				drawItems?: Array<unknown>;
+			}>(getStaticTileLayerElement(getLatestRenderTree()));
+			expect(staticTileLayerProps?.drawItems?.length ?? 0).toBeGreaterThan(0);
+		});
+		await waitFor(() => {
+			const liveNodeIds = getCanvasNodeRenderItems(getLatestRenderTree()).map(
+				(nodeItem) =>
+					getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id,
+			);
+			expect(liveNodeIds).toEqual(["node-active"]);
+		});
+	});
+
+	it("tile miss 时会把缺失节点回退到 live", async () => {
+		tilePipelineMockState.enabled = true;
+		acquireImageAssetMock.mockRejectedValueOnce(new Error("missing raster"));
+		const sceneNode = {
+			...createSceneNode("node-scene", 0),
+			thumbnail: {
+				assetId: "scene-thumb",
+				sourceSignature: "scene-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[sceneNode]}
+				scenes={emptyScenes}
+				assets={[createImageAsset("scene-thumb")]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		const firstTree = getLatestRenderTree();
+		const firstLiveNodeIds = getCanvasNodeRenderItems(firstTree).map(
+			(nodeItem) => {
+				return getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id;
+			},
+		);
+		expect(firstLiveNodeIds).toContain("node-scene");
+	});
+
+	it("多选拖拽时 drag proxy 跟随并保持节点顺序", async () => {
+		tilePipelineMockState.enabled = true;
+		const nodeA = {
+			...createVideoNode("node-a", 0),
+			thumbnail: {
+				assetId: "thumb-a",
+				sourceSignature: "a-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		const nodeB = {
+			...createVideoNode("node-b", 1),
+			thumbnail: {
+				assetId: "thumb-b",
+				sourceSignature: "b-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		const nodeC = {
+			...createVideoNode("node-c", 2),
+			thumbnail: {
+				assetId: "thumb-c",
+				sourceSignature: "c-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[nodeA, nodeB, nodeC]}
+				scenes={emptyScenes}
+				assets={[
+					createImageAsset("thumb-a"),
+					createImageAsset("thumb-b"),
+					createImageAsset("thumb-c"),
+				]}
+				activeNodeId="node-c"
+				selectedNodeIds={["node-a", "node-b", "node-c"]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		const selectionLayerProps = getElementProps<{
+			onDragStart?: (event: CanvasNodeDragEvent) => void;
+			onDrag?: (event: CanvasNodeDragEvent) => void;
+		}>(getSelectionBoundsInteractionLayerElement(getLatestRenderTree()));
+		expect(selectionLayerProps).toBeTruthy();
+		act(() => {
+			selectionLayerProps?.onDragStart?.(createDragEvent(0, 0));
+			selectionLayerProps?.onDrag?.(createDragEvent(24, 12));
+		});
+		await waitFor(() => {
+			const dragProxyLayerProps = getElementProps<{
+				drawItems?: Array<{ nodeId: string }>;
+			}>(getDragProxyLayerElement(getLatestRenderTree()));
+			expect(
+				dragProxyLayerProps?.drawItems?.map((item) => item.nodeId),
+			).toEqual(["node-a", "node-b"]);
+		});
+	});
+
 	it("focus scene 模式会抑制普通 node 交互并接管 Focus 层事件", async () => {
 		render(
 			<InfiniteSkiaCanvas
@@ -912,7 +1185,7 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-			const nodeItems = getCanvasNodeInteractionItems(tree);
+		const nodeItems = getCanvasNodeInteractionItems(tree);
 		expect(nodeItems).toHaveLength(2);
 		expect(
 			nodeItems.every((nodeItem) => {
@@ -1093,13 +1366,20 @@ describe("InfiniteSkiaCanvas", () => {
 			expect(rootRenderSpy).toHaveBeenCalled();
 		});
 
+		await waitFor(() => {
+			const focusLayerElement = collectElements(
+				getLatestRenderTree(),
+				(element) =>
+					element.props.onLayerPointerDown === focusLayerPointerDownSpy,
+			)[0];
+			expect(focusLayerElement).toBeTruthy();
+		});
 		const tree = getLatestRenderTree();
 		const focusLayerElement = collectElements(
 			tree,
 			(element) =>
 				element.props.onLayerPointerDown === focusLayerPointerDownSpy,
 		)[0];
-		expect(focusLayerElement).toBeTruthy();
 		if (!focusLayerElement) return;
 		const handleItems = focusLayerElement.props.handleItems as Array<{
 			kind: string;

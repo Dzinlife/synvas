@@ -1,45 +1,56 @@
+import { useDrag } from "@use-gesture/react";
+import type { TimelineAsset } from "core/element/types";
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import type React from "react";
 import {
 	memo,
 	useCallback,
+	useEffect,
 	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
-import { useDrag } from "@use-gesture/react";
 import {
 	Canvas,
 	type CanvasRef,
 	Group,
+	Image,
+	type Matrix4,
 	makeMutable,
 	Rect,
 	type SharedValue,
+	type SkImage,
+	Skia,
 	type SkiaPointerEvent,
-	type Matrix4,
 	useDerivedValue,
 } from "react-skia-lite";
+import type { AssetHandle } from "@/assets/AssetStore";
+import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
+import { resolveAssetPlayableUri } from "@/projects/assetLocator";
+import { useProjectStore } from "@/projects/projectStore";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import { useSkiaUiTextSprites } from "@/studio/canvas/skia-text";
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import {
 	CanvasTriDotGridBackground,
 	resolveDotGridUniforms,
 } from "./CanvasTriDotGridBackground";
-import type { CanvasSnapGuidesScreen } from "./canvasSnapUtils";
+import {
+	type CanvasNodeLayoutState,
+	resolveCanvasCameraTransformMatrix,
+	resolveCanvasNodeLayoutWorldRect,
+} from "./canvasNodeLabelUtils";
 import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
+import type { CanvasSnapGuidesScreen } from "./canvasSnapUtils";
+import type { CameraState } from "./canvasWorkspaceUtils";
 import {
 	type CanvasNodeDragEvent,
 	type CanvasNodePointerEvent,
 	NodeInteractionWrapper,
 	resolvePointerEventMeta,
 } from "./NodeInteractionWrapper";
-import {
-	type CanvasNodeLayoutState,
-	resolveCanvasCameraTransformMatrix,
-	resolveCanvasNodeLayoutWorldRect,
-} from "./canvasNodeLabelUtils";
 import { getCanvasNodeDefinition } from "./node-system/registry";
 import type {
 	CanvasNodeFocusEditorBridgeProps,
@@ -47,8 +58,15 @@ import type {
 	CanvasNodeSkiaRenderProps,
 } from "./node-system/types";
 import {
-	type CameraState,
-} from "./canvasWorkspaceUtils";
+	createTileAabb,
+	StaticTileScheduler,
+	TILE_CAMERA_EPSILON,
+	type TileAabb,
+	type TileDebugItem,
+	type TileDrawItem,
+	type TileFrameResult,
+	type TileInput,
+} from "./tile";
 
 export type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 export type {
@@ -106,6 +124,159 @@ const EMPTY_SNAP_GUIDES_SCREEN: CanvasSnapGuidesScreen = {
 };
 
 const LAYOUT_EPSILON = 1e-6;
+const TILE_AABB_EPSILON = 1e-4;
+const TILE_PIPELINE_LISTENER_ID = 73001;
+const TILE_DEBUG_LAYER_ENABLED = true;
+const TILE_DEBUG_COORD_LABEL_LIMIT = 96;
+const TILE_DEBUG_TEXT_STYLE = {
+	fontFamily:
+		'-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif',
+	fontSizePx: 10,
+	fontWeight: 600,
+	lineHeightPx: 12,
+	color: "rgba(255,255,255,0.96)",
+	paddingPx: 0,
+};
+
+interface RasterImageCacheEntry {
+	uri: string;
+	image: SkImage | null;
+	width: number;
+	height: number;
+	handle: AssetHandle<ImageAsset> | null;
+	loading: boolean;
+}
+
+interface TileInputCacheEntry {
+	epoch: number;
+	sourceSignature: string;
+	input: TileInput | null;
+}
+
+interface DragProxyState {
+	active: boolean;
+	worldDx: number;
+	worldDy: number;
+}
+
+interface DragProxyDrawItem {
+	nodeId: string;
+	image: SkImage;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+const EMPTY_DRAG_PROXY_STATE: DragProxyState = {
+	active: false,
+	worldDx: 0,
+	worldDy: 0,
+};
+
+const EMPTY_STATIC_TILE_SNAPSHOT: {
+	inputs: TileInput[];
+	inputByNodeId: Map<string, TileInput>;
+} = {
+	inputs: [],
+	inputByNodeId: new Map<string, TileInput>(),
+};
+
+const isTileRasterNodeType = (node: CanvasNode): boolean => {
+	return (
+		node.type === "scene" || node.type === "image" || node.type === "video"
+	);
+};
+
+const isAlwaysLiveNodeType = (node: CanvasNode): boolean => {
+	return node.type === "text" || node.type === "audio";
+};
+
+const resolveTileNodeSourceSignature = (
+	node: CanvasNode,
+	scene: StudioProject["scenes"][string] | null,
+): string => {
+	if (node.type === "scene") {
+		return `scene:${node.sceneId}:${scene?.updatedAt ?? "none"}:${node.thumbnail?.sourceSignature ?? "none"}`;
+	}
+	if (node.type === "image") {
+		return `image:${node.assetId}:${node.thumbnail?.sourceSignature ?? "none"}`;
+	}
+	if (node.type === "video") {
+		return `video:${node.assetId}:${node.thumbnail?.sourceSignature ?? "none"}`;
+	}
+	return `${node.type}:${node.id}`;
+};
+
+const resolveSkImageSize = (
+	image: SkImage,
+	fallbackWidth: number,
+	fallbackHeight: number,
+): { width: number; height: number } => {
+	const candidate = image as {
+		width?: number | (() => number);
+		height?: number | (() => number);
+	};
+	const width =
+		typeof candidate.width === "function"
+			? candidate.width()
+			: (candidate.width ?? fallbackWidth);
+	const height =
+		typeof candidate.height === "function"
+			? candidate.height()
+			: (candidate.height ?? fallbackHeight);
+	return {
+		width: Math.max(1, Math.round(width)),
+		height: Math.max(1, Math.round(height)),
+	};
+};
+
+const isTileAabbEqual = (left: TileAabb, right: TileAabb): boolean => {
+	return (
+		Math.abs(left.left - right.left) < TILE_AABB_EPSILON &&
+		Math.abs(left.top - right.top) < TILE_AABB_EPSILON &&
+		Math.abs(left.right - right.right) < TILE_AABB_EPSILON &&
+		Math.abs(left.bottom - right.bottom) < TILE_AABB_EPSILON
+	);
+};
+
+const resolveNodeWorldAabb = (
+	node: Pick<CanvasNode, "x" | "y" | "width" | "height">,
+): TileAabb => {
+	return createTileAabb(
+		node.x,
+		node.y,
+		node.x + node.width,
+		node.y + node.height,
+	);
+};
+
+const resolveTileRasterAsset = (
+	node: CanvasNode,
+	assetById: Map<string, TimelineAsset>,
+): TimelineAsset | null => {
+	if (node.type === "image") {
+		const sourceAsset = assetById.get(node.assetId);
+		if (sourceAsset?.kind === "image") {
+			return sourceAsset;
+		}
+	}
+	const thumbnailAssetId = node.thumbnail?.assetId ?? null;
+	if (!thumbnailAssetId) return null;
+	const thumbnailAsset = assetById.get(thumbnailAssetId);
+	if (!thumbnailAsset || thumbnailAsset.kind !== "image") return null;
+	return thumbnailAsset;
+};
+
+const canUseTilePipeline = (): boolean => {
+	const surfaceFactory = (
+		Skia as unknown as { Surface?: { MakeOffscreen?: unknown } }
+	).Surface?.MakeOffscreen;
+	const paintFactory = (Skia as unknown as { Paint?: unknown }).Paint;
+	return (
+		typeof surfaceFactory === "function" && typeof paintFactory === "function"
+	);
+};
 
 const resolveNodeLayoutState = (node: CanvasNode): CanvasNodeLayoutState => {
 	return {
@@ -139,9 +310,7 @@ const resolveNodeStructureSignature = (nodes: CanvasNode[]): string => {
 
 const resolveSelectedNodeBounds = (
 	selectedNodes: CanvasNode[],
-	getNodeLayout: (
-		nodeId: string,
-	) => SharedValue<CanvasNodeLayoutState> | null,
+	getNodeLayout: (nodeId: string) => SharedValue<CanvasNodeLayoutState> | null,
 ) => {
 	let left = Number.POSITIVE_INFINITY;
 	let top = Number.POSITIVE_INFINITY;
@@ -178,9 +347,7 @@ const resolveSelectedNodeBounds = (
 
 interface SelectionBoundsInteractionLayerProps {
 	selectedNodes: CanvasNode[];
-	getNodeLayout: (
-		nodeId: string,
-	) => SharedValue<CanvasNodeLayoutState> | null;
+	getNodeLayout: (nodeId: string) => SharedValue<CanvasNodeLayoutState> | null;
 	onDragStart?: (event: CanvasNodeDragEvent) => void;
 	onDrag?: (event: CanvasNodeDragEvent) => void;
 	onDragEnd?: (event: CanvasNodeDragEvent) => void;
@@ -190,7 +357,14 @@ const SelectionBoundsInteractionLayer: React.FC<
 	SelectionBoundsInteractionLayerProps
 > = ({ selectedNodes, getNodeLayout, onDragStart, onDrag, onDragEnd }) => {
 	const bindDrag = useDrag(
-		({ first, last, tap, movement: [mx, my], xy: [clientX, clientY], event }) => {
+		({
+			first,
+			last,
+			tap,
+			movement: [mx, my],
+			xy: [clientX, clientY],
+			event,
+		}) => {
 			const dragEvent: CanvasNodeDragEvent = {
 				...resolvePointerEventMeta(event, clientX, clientY),
 				movementX: mx,
@@ -216,10 +390,7 @@ const SelectionBoundsInteractionLayer: React.FC<
 	};
 	const transform = useDerivedValue(() => {
 		const bounds = resolveSelectedNodeBounds(selectedNodes, getNodeLayout);
-		return [
-			{ translateX: bounds.left },
-			{ translateY: bounds.top },
-		];
+		return [{ translateX: bounds.left }, { translateY: bounds.top }];
 	});
 	const hitRect = useDerivedValue(() => {
 		const bounds = resolveSelectedNodeBounds(selectedNodes, getNodeLayout);
@@ -277,10 +448,9 @@ const CanvasNodeRenderItemComponent = ({
 	runtimeManager,
 }: CanvasNodeRenderItemProps) => {
 	const definition = getCanvasNodeDefinition(node.type);
-	const Renderer =
-		definition.skiaRenderer as React.ComponentType<
-			CanvasNodeSkiaRenderProps<CanvasNode>
-		>;
+	const Renderer = definition.skiaRenderer as React.ComponentType<
+		CanvasNodeSkiaRenderProps<CanvasNode>
+	>;
 	const clip = useDerivedValue(() => {
 		const worldRect = resolveCanvasNodeLayoutWorldRect(layout.value);
 		return {
@@ -382,6 +552,164 @@ const CanvasNodeInteractionItemComponent = ({
 const CanvasNodeInteractionItem = memo(CanvasNodeInteractionItemComponent);
 CanvasNodeInteractionItem.displayName = "CanvasNodeInteractionItem";
 
+const StaticTileLayerComponent = ({
+	drawItems,
+}: {
+	drawItems: TileDrawItem[];
+}) => {
+	if (drawItems.length <= 0) return null;
+	return (
+		<Group pointerEvents="none">
+			{drawItems.map((tile) => {
+				return (
+					<Image
+						key={`tile-ready-${tile.key}`}
+						image={tile.image}
+						x={tile.left}
+						y={tile.top}
+						width={tile.size}
+						height={tile.size}
+						fit="fill"
+						pointerEvents="none"
+					/>
+				);
+			})}
+		</Group>
+	);
+};
+const StaticTileLayer = memo(StaticTileLayerComponent);
+StaticTileLayer.displayName = "StaticTileLayer";
+
+const DragProxyLayerComponent = ({
+	drawItems,
+}: {
+	drawItems: DragProxyDrawItem[];
+}) => {
+	if (drawItems.length <= 0) return null;
+	return (
+		<Group pointerEvents="none">
+			{drawItems.map((item) => {
+				return (
+					<Image
+						key={`drag-proxy-${item.nodeId}`}
+						image={item.image}
+						x={item.x}
+						y={item.y}
+						width={item.width}
+						height={item.height}
+						fit="fill"
+						pointerEvents="none"
+					/>
+				);
+			})}
+		</Group>
+	);
+};
+const DragProxyLayer = memo(DragProxyLayerComponent);
+DragProxyLayer.displayName = "DragProxyLayer";
+
+const resolveTileDebugStrokeColor = (state: TileDebugItem["state"]): string => {
+	if (state === "READY") return "rgba(34,197,94,0.96)";
+	if (state === "QUEUED") return "rgba(245,158,11,0.96)";
+	if (state === "RENDERING") return "rgba(56,189,248,0.96)";
+	if (state === "STALE") return "rgba(239,68,68,0.96)";
+	return "rgba(156,163,175,0.96)";
+};
+
+const resolveTileDebugFillColor = (state: TileDebugItem["state"]): string => {
+	if (state === "READY") return "rgba(34,197,94,0.12)";
+	if (state === "QUEUED") return "rgba(245,158,11,0.12)";
+	if (state === "RENDERING") return "rgba(56,189,248,0.12)";
+	if (state === "STALE") return "rgba(239,68,68,0.12)";
+	return "rgba(156,163,175,0.08)";
+};
+
+const resolveTileDebugLabel = (
+	item: TileDebugItem,
+	includeCoord: boolean,
+): string => {
+	const parts = [
+		item.state,
+		item.queued ? "Q1" : "Q0",
+		item.hasImage ? "I1" : "I0",
+		item.isFallback ? "FB1" : "FB0",
+		`E${item.lastRenderedEpoch}`,
+	];
+	if (includeCoord) {
+		parts.unshift(`${item.tx},${item.ty}`);
+	}
+	return parts.join(" ");
+};
+
+const TileDebugLayerComponent = ({
+	debugItems,
+}: {
+	debugItems: TileDebugItem[];
+}) => {
+	const requests = useMemo(() => {
+		const includeCoord = debugItems.length <= TILE_DEBUG_COORD_LABEL_LIMIT;
+		return debugItems.map((item) => {
+			return {
+				text: resolveTileDebugLabel(item, includeCoord),
+				maxWidthPx: Math.max(48, Math.floor(item.size) - 10),
+				slotKey: `tile-debug-${item.key}`,
+				style: TILE_DEBUG_TEXT_STYLE,
+			};
+		});
+	}, [debugItems]);
+	const sprites = useSkiaUiTextSprites(requests);
+
+	if (debugItems.length <= 0) return null;
+	return (
+		<Group pointerEvents="none">
+			{debugItems.map((item, index) => {
+				const sprite = sprites[index];
+				const spriteImage = sprite?.image ?? null;
+				const spriteWidth = Math.min(
+					Math.max(1, sprite?.textWidth ?? 1),
+					Math.max(1, Math.floor(item.size) - 8),
+				);
+				const spriteHeight = Math.max(1, sprite?.textHeight ?? 1);
+				return (
+					<Group key={`tile-debug-${item.key}`} pointerEvents="none">
+						<Rect
+							x={item.left}
+							y={item.top}
+							width={item.size}
+							height={item.size}
+							color={resolveTileDebugFillColor(item.state)}
+							pointerEvents="none"
+						/>
+						<Rect
+							x={item.left}
+							y={item.top}
+							width={item.size}
+							height={item.size}
+							style="stroke"
+							strokeWidth={1}
+							color={resolveTileDebugStrokeColor(item.state)}
+							pointerEvents="none"
+						/>
+						{spriteImage && (
+							<Image
+								image={spriteImage}
+								x={item.left + 4}
+								y={item.top + 4}
+								width={spriteWidth}
+								height={spriteHeight}
+								fit="fill"
+								pointerEvents="none"
+							/>
+						)}
+					</Group>
+				);
+			})}
+		</Group>
+	);
+};
+const TileDebugLayer = memo(TileDebugLayerComponent);
+TileDebugLayer.displayName = "TileDebugLayer";
+
 const isLayerValueEqual = (left: unknown, right: unknown): boolean => {
 	if (left === right) return true;
 	if (typeof left !== typeof right) return false;
@@ -472,9 +800,35 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			enabled: false,
 			layerProps: null,
 		});
+	const [tileTick, setTileTick] = useState(0);
+	const [rasterCacheVersion, setRasterCacheVersion] = useState(0);
+	const [selectionDragProxy, setSelectionDragProxy] = useState<DragProxyState>(
+		EMPTY_DRAG_PROXY_STATE,
+	);
 	const assetById = useMemo(() => {
 		return new Map(assets.map((asset) => [asset.id, asset]));
 	}, [assets]);
+	const currentProjectId = useProjectStore((state) => state.currentProjectId);
+	const supportsTilePipeline = useMemo(() => {
+		return canUseTilePipeline();
+	}, []);
+	const tileSchedulerRef = useRef<StaticTileScheduler | null>(null);
+	const rasterCacheRef = useRef(new Map<string, RasterImageCacheEntry>());
+	const nodeRasterUriRef = useRef(new Map<string, string | null>());
+	const tileNodeAabbRef = useRef(new Map<string, TileAabb>());
+	const tileNodeSourceSignatureRef = useRef(new Map<string, string>());
+	const tileInputCacheRef = useRef(new Map<string, TileInputCacheEntry>());
+	const tileInputIdRef = useRef(new Map<string, number>());
+	const nextTileInputIdRef = useRef(1);
+	const tileTickRafRef = useRef<number | null>(null);
+	const tileListenerIdRef = useRef(
+		TILE_PIPELINE_LISTENER_ID + Math.floor(Math.random() * 100000),
+	);
+	const tilePipelineDisposedRef = useRef(false);
+	const latestTileFrameResultRef = useRef<TileFrameResult | null>(null);
+	const dragProxyBaseNodeRectRef = useRef(
+		new Map<string, { x: number; y: number; width: number; height: number }>(),
+	);
 	const nodeIdSet = useMemo(() => {
 		return new Set(nodes.map((node) => node.id));
 	}, [nodes]);
@@ -484,16 +838,44 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const getLatestNodeById = useCallback((nodeId: string) => {
 		return latestNodeByIdRef.current.get(nodeId) ?? null;
 	}, []);
+	const resolveTileInputId = useCallback((nodeId: string): number => {
+		const existing = tileInputIdRef.current.get(nodeId);
+		if (existing) return existing;
+		const nextId = nextTileInputIdRef.current;
+		nextTileInputIdRef.current += 1;
+		tileInputIdRef.current.set(nodeId, nextId);
+		return nextId;
+	}, []);
+	const scheduleTileTick = useCallback(() => {
+		if (!supportsTilePipeline) return;
+		if (tilePipelineDisposedRef.current) return;
+		if (tileTickRafRef.current !== null) return;
+		tileTickRafRef.current = requestAnimationFrame(() => {
+			tileTickRafRef.current = null;
+			if (tilePipelineDisposedRef.current) return;
+			setTileTick((prev) => prev + 1);
+		});
+	}, [supportsTilePipeline]);
+	const resolveNodeRasterUri = useCallback(
+		(node: CanvasNode): string | null => {
+			if (!isTileRasterNodeType(node)) return null;
+			const rasterAsset = resolveTileRasterAsset(node, assetById);
+			if (!rasterAsset) return null;
+			return (
+				resolveAssetPlayableUri(rasterAsset, {
+					projectId: currentProjectId,
+				}) ?? null
+			);
+		},
+		[assetById, currentProjectId],
+	);
 	const activeNode = useMemo(() => {
 		if (!activeNodeId) return null;
 		return renderNodes.find((node) => node.id === activeNodeId) ?? null;
 	}, [activeNodeId, renderNodes]);
-	const selectedNodeIdsKey = useMemo(() => {
-		return selectedNodeIds.join(",");
-	}, [selectedNodeIds]);
 	const selectedNodeIdSet = useMemo(() => {
 		return new Set(selectedNodeIds);
-	}, [selectedNodeIdsKey]);
+	}, [selectedNodeIds]);
 	const selectedNodes = useMemo(() => {
 		if (selectedNodeIdSet.size === 0) return [];
 		return renderNodes.filter((node) => selectedNodeIdSet.has(node.id));
@@ -562,6 +944,144 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		setHoveredNodeId(null);
 	}, [disableBaseNodeInteraction]);
 
+	useEffect(() => {
+		tilePipelineDisposedRef.current = false;
+		return () => {
+			tilePipelineDisposedRef.current = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		if (!supportsTilePipeline) return;
+		const scheduler = new StaticTileScheduler();
+		tileSchedulerRef.current = scheduler;
+		scheduleTileTick();
+		return () => {
+			scheduler.dispose();
+			tileSchedulerRef.current = null;
+			latestTileFrameResultRef.current = null;
+		};
+	}, [scheduleTileTick, supportsTilePipeline]);
+
+	useEffect(() => {
+		return () => {
+			if (tileTickRafRef.current !== null) {
+				cancelAnimationFrame(tileTickRafRef.current);
+				tileTickRafRef.current = null;
+			}
+		};
+	}, []);
+
+	useEffect(() => {
+		if (!supportsTilePipeline) return;
+		if (
+			typeof camera.addListener !== "function" ||
+			typeof camera.removeListener !== "function"
+		) {
+			return;
+		}
+		const listenerId = tileListenerIdRef.current;
+		camera.addListener(listenerId, scheduleTileTick);
+		return () => {
+			camera.removeListener(listenerId);
+		};
+	}, [camera, scheduleTileTick, supportsTilePipeline]);
+
+	useEffect(() => {
+		if (!supportsTilePipeline) return;
+		const nextNodeRasterUri = new Map<string, string | null>();
+		const requiredUris = new Set<string>();
+		for (const node of renderNodes) {
+			const latestNode = getLatestNodeById(node.id) ?? node;
+			if (!isTileRasterNodeType(latestNode) || latestNode.id === activeNodeId) {
+				nextNodeRasterUri.set(latestNode.id, null);
+				continue;
+			}
+			const uri = resolveNodeRasterUri(latestNode);
+			nextNodeRasterUri.set(latestNode.id, uri);
+			if (uri) {
+				requiredUris.add(uri);
+			}
+		}
+		nodeRasterUriRef.current = nextNodeRasterUri;
+		for (const [uri, entry] of rasterCacheRef.current.entries()) {
+			if (requiredUris.has(uri)) continue;
+			entry.handle?.release();
+			rasterCacheRef.current.delete(uri);
+		}
+		let disposed = false;
+		for (const uri of requiredUris) {
+			const existing = rasterCacheRef.current.get(uri);
+			if (existing) continue;
+			const nextEntry: RasterImageCacheEntry = {
+				uri,
+				image: null,
+				width: 1,
+				height: 1,
+				handle: null,
+				loading: true,
+			};
+			rasterCacheRef.current.set(uri, nextEntry);
+			void (async () => {
+				try {
+					const handle = await acquireImageAsset(uri);
+					if (disposed || tilePipelineDisposedRef.current) {
+						handle.release();
+						return;
+					}
+					const current = rasterCacheRef.current.get(uri);
+					if (current !== nextEntry) {
+						handle.release();
+						return;
+					}
+					const image = handle.asset.image;
+					const imageSize = resolveSkImageSize(image, 1, 1);
+					nextEntry.handle = handle;
+					nextEntry.image = image;
+					nextEntry.width = imageSize.width;
+					nextEntry.height = imageSize.height;
+					nextEntry.loading = false;
+					if (tilePipelineDisposedRef.current) {
+						handle.release();
+						return;
+					}
+					setRasterCacheVersion((prev) => prev + 1);
+					scheduleTileTick();
+				} catch {
+					if (disposed || tilePipelineDisposedRef.current) return;
+					const current = rasterCacheRef.current.get(uri);
+					if (current !== nextEntry) return;
+					nextEntry.loading = false;
+					setRasterCacheVersion((prev) => prev + 1);
+				}
+			})();
+		}
+		return () => {
+			disposed = true;
+		};
+	}, [
+		activeNodeId,
+		getLatestNodeById,
+		renderNodes,
+		resolveNodeRasterUri,
+		scheduleTileTick,
+		supportsTilePipeline,
+	]);
+
+	useEffect(() => {
+		return () => {
+			for (const entry of rasterCacheRef.current.values()) {
+				entry.handle?.release();
+			}
+			rasterCacheRef.current.clear();
+			nodeRasterUriRef.current.clear();
+			tileNodeAabbRef.current.clear();
+			tileNodeSourceSignatureRef.current.clear();
+			tileInputCacheRef.current.clear();
+			tileInputIdRef.current.clear();
+		};
+	}, []);
+
 	useLayoutEffect(() => {
 		const nextNodeIds = new Set<string>();
 		for (const node of nodes) {
@@ -584,6 +1104,44 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, [nodes]);
 
 	useLayoutEffect(() => {
+		if (!supportsTilePipeline) return;
+		const scheduler = tileSchedulerRef.current;
+		if (!scheduler) return;
+		let shouldTick = false;
+		for (const node of nodes) {
+			if (!isTileRasterNodeType(node) || node.id === activeNodeId) {
+				const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
+				if (oldAabb) {
+					scheduler.markDirtyRect(oldAabb);
+					tileNodeAabbRef.current.delete(node.id);
+					tileNodeSourceSignatureRef.current.delete(node.id);
+					shouldTick = true;
+				}
+				continue;
+			}
+			const scene =
+				node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
+			const sourceSignature = resolveTileNodeSourceSignature(node, scene);
+			const nextAabb = resolveNodeWorldAabb(node);
+			const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
+			if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
+				scheduler.markDirtyUnion(oldAabb, nextAabb);
+				tileNodeAabbRef.current.set(node.id, nextAabb);
+				shouldTick = true;
+			}
+			const prevSignature = tileNodeSourceSignatureRef.current.get(node.id);
+			if (prevSignature !== sourceSignature) {
+				tileNodeSourceSignatureRef.current.set(node.id, sourceSignature);
+				scheduler.markDirtyRect(nextAabb);
+				shouldTick = true;
+			}
+		}
+		if (shouldTick) {
+			scheduleTileTick();
+		}
+	}, [activeNodeId, nodes, scenes, scheduleTileTick, supportsTilePipeline]);
+
+	useLayoutEffect(() => {
 		// 节点列表变化时，清理已失效的 hover 引用
 		if (hoveredNodeId && !nodeIdSet.has(hoveredNodeId)) {
 			setHoveredNodeId(null);
@@ -599,6 +1157,18 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			draggingNodeIdRef.current = null;
 		}
 	}, [nodeIdSet]);
+
+	useLayoutEffect(() => {
+		if (!selectionDragProxy.active) return;
+		if (disableBaseNodeInteraction || selectedNodes.length <= 1) {
+			setSelectionDragProxy(EMPTY_DRAG_PROXY_STATE);
+			dragProxyBaseNodeRectRef.current.clear();
+		}
+	}, [
+		disableBaseNodeInteraction,
+		selectionDragProxy.active,
+		selectedNodes.length,
+	]);
 
 	const handlePointerEnter = useCallback(
 		(nodeId: string) => {
@@ -681,9 +1251,240 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		[getLatestNodeById, onNodeResize],
 	);
 
+	const handleSelectionBoundsDragStart = useCallback(
+		(event: CanvasNodeDragEvent) => {
+			if (!disableBaseNodeInteraction && selectedNodes.length > 1) {
+				dragProxyBaseNodeRectRef.current.clear();
+				for (const node of selectedNodes) {
+					if (node.id === activeNodeId) continue;
+					const layout = getNodeLayoutValue(node.id)?.value ?? node;
+					dragProxyBaseNodeRectRef.current.set(node.id, {
+						x: layout.x,
+						y: layout.y,
+						width: layout.width,
+						height: layout.height,
+					});
+				}
+				if (dragProxyBaseNodeRectRef.current.size > 0) {
+					setSelectionDragProxy({
+						active: true,
+						worldDx: 0,
+						worldDy: 0,
+					});
+				}
+			}
+			onSelectionDragStart?.(event);
+		},
+		[
+			activeNodeId,
+			disableBaseNodeInteraction,
+			getNodeLayoutValue,
+			onSelectionDragStart,
+			selectedNodes,
+		],
+	);
+
+	const handleSelectionBoundsDrag = useCallback(
+		(event: CanvasNodeDragEvent) => {
+			if (
+				selectionDragProxy.active &&
+				dragProxyBaseNodeRectRef.current.size > 0 &&
+				!disableBaseNodeInteraction
+			) {
+				const safeZoom = Math.max(camera.value.zoom, TILE_CAMERA_EPSILON);
+				const nextWorldDx = event.movementX / safeZoom;
+				const nextWorldDy = event.movementY / safeZoom;
+				setSelectionDragProxy((prev) => {
+					if (
+						!prev.active ||
+						Math.abs(prev.worldDx - nextWorldDx) > LAYOUT_EPSILON ||
+						Math.abs(prev.worldDy - nextWorldDy) > LAYOUT_EPSILON
+					) {
+						return {
+							active: true,
+							worldDx: nextWorldDx,
+							worldDy: nextWorldDy,
+						};
+					}
+					return prev;
+				});
+			}
+			onSelectionDrag?.(event);
+		},
+		[
+			camera,
+			disableBaseNodeInteraction,
+			onSelectionDrag,
+			selectionDragProxy.active,
+		],
+	);
+
+	const handleSelectionBoundsDragEnd = useCallback(
+		(event: CanvasNodeDragEvent) => {
+			if (selectionDragProxy.active) {
+				setSelectionDragProxy(EMPTY_DRAG_PROXY_STATE);
+			}
+			dragProxyBaseNodeRectRef.current.clear();
+			onSelectionDragEnd?.(event);
+		},
+		[onSelectionDragEnd, selectionDragProxy.active],
+	);
+
+	const staticTileSnapshot = useMemo(() => {
+		void nodes;
+		void rasterCacheVersion;
+		if (!supportsTilePipeline) {
+			return EMPTY_STATIC_TILE_SNAPSHOT;
+		}
+		const inputs: TileInput[] = [];
+		const inputByNodeId = new Map<string, TileInput>();
+		const visitedNodeIds = new Set<string>();
+		for (const node of renderNodes) {
+			const latestNode = getLatestNodeById(node.id) ?? node;
+			if (!isTileRasterNodeType(latestNode) || latestNode.id === activeNodeId) {
+				continue;
+			}
+			visitedNodeIds.add(latestNode.id);
+			const uri =
+				nodeRasterUriRef.current.get(latestNode.id) ??
+				resolveNodeRasterUri(latestNode);
+			const rasterEntry = uri
+				? (rasterCacheRef.current.get(uri) ?? null)
+				: null;
+			const image = rasterEntry?.image ?? null;
+			const sourceSignature =
+				tileNodeSourceSignatureRef.current.get(latestNode.id) ??
+				resolveTileNodeSourceSignature(
+					latestNode,
+					latestNode.type === "scene"
+						? (scenes[latestNode.sceneId] ?? null)
+						: null,
+				);
+			const cachedEntry = tileInputCacheRef.current.get(latestNode.id);
+			if (!image) {
+				tileInputCacheRef.current.set(latestNode.id, {
+					epoch: cachedEntry?.epoch ?? 0,
+					sourceSignature,
+					input: null,
+				});
+				continue;
+			}
+			let epoch = cachedEntry?.epoch ?? 0;
+			const cachedImage =
+				cachedEntry?.input?.kind === "raster" ? cachedEntry.input.image : null;
+			if (
+				!cachedEntry ||
+				cachedEntry.sourceSignature !== sourceSignature ||
+				cachedImage !== image
+			) {
+				epoch += 1;
+			}
+			const input: TileInput = {
+				kind: "raster",
+				id: resolveTileInputId(latestNode.id),
+				nodeId: latestNode.id,
+				image,
+				aabb: resolveNodeWorldAabb(latestNode),
+				sourceWidth:
+					rasterEntry?.width ??
+					Math.max(1, Math.round(Math.abs(latestNode.width))),
+				sourceHeight:
+					rasterEntry?.height ??
+					Math.max(1, Math.round(Math.abs(latestNode.height))),
+				epoch,
+			};
+			tileInputCacheRef.current.set(latestNode.id, {
+				epoch,
+				sourceSignature,
+				input,
+			});
+			inputs.push(input);
+			inputByNodeId.set(latestNode.id, input);
+		}
+		for (const nodeId of [...tileInputCacheRef.current.keys()]) {
+			if (visitedNodeIds.has(nodeId)) continue;
+			tileInputCacheRef.current.delete(nodeId);
+			tileInputIdRef.current.delete(nodeId);
+		}
+		return {
+			inputs,
+			inputByNodeId,
+		};
+	}, [
+		activeNodeId,
+		getLatestNodeById,
+		nodes,
+		rasterCacheVersion,
+		renderNodes,
+		resolveNodeRasterUri,
+		resolveTileInputId,
+		scenes,
+		supportsTilePipeline,
+	]);
+
 	useLayoutEffect(() => {
+		void tileTick;
 		const root = canvasRef.current?.getRoot();
 		if (!root) return;
+		let staticTileDrawItems: TileDrawItem[] = [];
+		let tileDebugItems: TileDebugItem[] = [];
+		const fallbackLiveNodeIdSet = new Set<string>();
+		const scheduler = supportsTilePipeline ? tileSchedulerRef.current : null;
+		if (scheduler) {
+			scheduler.setInputs(staticTileSnapshot.inputs);
+			const frameResult = scheduler.beginFrame({
+				camera: camera.value,
+				stageWidth: width,
+				stageHeight: height,
+				nowMs:
+					typeof performance !== "undefined" ? performance.now() : Date.now(),
+			});
+			latestTileFrameResultRef.current = frameResult;
+			staticTileDrawItems = frameResult.drawItems;
+			tileDebugItems = frameResult.debugItems;
+			for (const nodeId of frameResult.fallbackNodeIds) {
+				fallbackLiveNodeIdSet.add(nodeId);
+			}
+			if (frameResult.hasPendingWork) {
+				scheduleTileTick();
+			}
+		}
+		const liveNodeIdSet = new Set<string>();
+		for (const node of renderNodes) {
+			const latestNode = getLatestNodeById(node.id) ?? node;
+			const isAlwaysLive =
+				latestNode.id === activeNodeId || isAlwaysLiveNodeType(latestNode);
+			const hasStaticInput = staticTileSnapshot.inputByNodeId.has(
+				latestNode.id,
+			);
+			if (
+				isAlwaysLive ||
+				!hasStaticInput ||
+				fallbackLiveNodeIdSet.has(node.id)
+			) {
+				liveNodeIdSet.add(node.id);
+			}
+		}
+		const dragProxyDrawItems: DragProxyDrawItem[] = [];
+		if (selectionDragProxy.active && selectedNodes.length > 1) {
+			for (const node of renderNodes) {
+				if (!selectedNodeIdSet.has(node.id) || node.id === activeNodeId)
+					continue;
+				const input = staticTileSnapshot.inputByNodeId.get(node.id);
+				if (!input || input.kind !== "raster") continue;
+				const baseRect = dragProxyBaseNodeRectRef.current.get(node.id);
+				if (!baseRect) continue;
+				dragProxyDrawItems.push({
+					nodeId: node.id,
+					image: input.image,
+					x: baseRect.x + selectionDragProxy.worldDx,
+					y: baseRect.y + selectionDragProxy.worldDy,
+					width: baseRect.width,
+					height: baseRect.height,
+				});
+				liveNodeIdSet.delete(node.id);
+			}
+		}
 		root.render(
 			<Group>
 				<CanvasTriDotGridBackground
@@ -691,59 +1492,67 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					height={height}
 					uniforms={animatedGridUniforms}
 				/>
-					<Group transform={animatedCameraTransform}>
-						{selectedNodes.length > 1 && !disableBaseNodeInteraction && (
-							<SelectionBoundsInteractionLayer
-								selectedNodes={selectedNodes}
+				<Group transform={animatedCameraTransform}>
+					{selectedNodes.length > 1 && !disableBaseNodeInteraction && (
+						<SelectionBoundsInteractionLayer
+							selectedNodes={selectedNodes}
 							getNodeLayout={getNodeLayoutValue}
-							onDragStart={onSelectionDragStart}
-							onDrag={onSelectionDrag}
-								onDragEnd={onSelectionDragEnd}
+							onDragStart={handleSelectionBoundsDragStart}
+							onDrag={handleSelectionBoundsDrag}
+							onDragEnd={handleSelectionBoundsDragEnd}
+						/>
+					)}
+					<StaticTileLayer drawItems={staticTileDrawItems} />
+					{TILE_DEBUG_LAYER_ENABLED && (
+						<TileDebugLayer debugItems={tileDebugItems} />
+					)}
+					<DragProxyLayer drawItems={dragProxyDrawItems} />
+					{renderNodes.map((node) => {
+						if (!liveNodeIdSet.has(node.id)) return null;
+						const layout = getNodeLayoutValue(node.id);
+						if (!layout) return null;
+						const latestNode = getLatestNodeById(node.id) ?? node;
+						const scene =
+							latestNode.type === "scene"
+								? (scenes[latestNode.sceneId] ?? null)
+								: null;
+						const asset =
+							"assetId" in latestNode
+								? (assetById.get(latestNode.assetId) ?? null)
+								: null;
+						return (
+							<CanvasNodeRenderItem
+								key={`canvas-node-render-${node.id}`}
+								node={node}
+								layout={layout}
+								scene={scene}
+								asset={asset}
+								isActive={node.id === activeNodeId}
+								isFocused={node.id === focusedNodeId}
+								runtimeManager={runtimeManager}
 							/>
-						)}
-						{renderNodes.map((node) => {
-							const layout = getNodeLayoutValue(node.id);
-							if (!layout) return null;
-							const scene =
-								node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
-							const asset =
-								"assetId" in node ? (assetById.get(node.assetId) ?? null) : null;
-							const isFocused = node.id === focusedNodeId;
-							const isActive = node.id === activeNodeId;
-
-							return (
-								<CanvasNodeRenderItem
-									key={`canvas-node-render-${node.id}`}
-									node={node}
-									layout={layout}
-									scene={scene}
-									asset={asset}
-									isActive={isActive}
-									isFocused={isFocused}
-									runtimeManager={runtimeManager}
-								/>
-							);
-						})}
-						{renderNodes.map((node) => {
-							const layout = getNodeLayoutValue(node.id);
-							if (!layout) return null;
-							return (
-								<CanvasNodeInteractionItem
-									key={`canvas-node-interaction-${node.id}`}
-									node={node}
-									layout={layout}
-									disabled={disableBaseNodeInteraction}
-									onPointerEnter={handlePointerEnter}
-									onPointerLeave={handlePointerLeave}
-									onDragStart={handleNodeDragStart}
-									onDrag={handleNodeDrag}
-									onDragEnd={handleNodeDragEnd}
-									onClick={handleNodeClick}
-									onDoubleClick={handleNodeDoubleClick}
-								/>
-							);
-						})}
-					</Group>
+						);
+					})}
+					{renderNodes.map((node) => {
+						const layout = getNodeLayoutValue(node.id);
+						if (!layout) return null;
+						return (
+							<CanvasNodeInteractionItem
+								key={`canvas-node-interaction-${node.id}`}
+								node={node}
+								layout={layout}
+								disabled={disableBaseNodeInteraction}
+								onPointerEnter={handlePointerEnter}
+								onPointerLeave={handlePointerLeave}
+								onDragStart={handleNodeDragStart}
+								onDrag={handleNodeDrag}
+								onDragEnd={handleNodeDragEnd}
+								onClick={handleNodeClick}
+								onDoubleClick={handleNodeDoubleClick}
+							/>
+						);
+					})}
+				</Group>
 				<CanvasNodeLabelLayer
 					width={width}
 					height={height}
@@ -790,25 +1599,33 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		handleNodeDragStart,
 		handlePointerEnter,
 		handlePointerLeave,
+		handleSelectionBoundsDrag,
+		handleSelectionBoundsDragEnd,
+		handleSelectionBoundsDragStart,
 		height,
 		hoverNode,
-		hoveredNodeId,
-		onSelectionDrag,
-		onSelectionDragEnd,
-		onSelectionDragStart,
 		onSelectionResize,
 		renderNodes,
+		scheduleTileTick,
+		selectionDragProxy.active,
+		selectionDragProxy.worldDx,
+		selectionDragProxy.worldDy,
 		snapGuidesScreen,
+		staticTileSnapshot,
+		supportsTilePipeline,
+		tileTick,
 		runtimeManager,
 		scenes,
 		selectedNodeIdSet,
-			selectedNodes,
-			FocusEditorLayer,
-			width,
-			animatedCamera,
-			animatedCameraTransform,
-			animatedGridUniforms,
-		]);
+		selectedNodes,
+		FocusEditorLayer,
+		width,
+		animatedCamera,
+		animatedCameraTransform,
+		animatedGridUniforms,
+		camera,
+		getLatestNodeById,
+	]);
 
 	if (width <= 0 || height <= 0) return null;
 
