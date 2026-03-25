@@ -825,6 +825,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const nodeRasterUriRef = useRef(new Map<string, string | null>());
 	const tileNodeAabbRef = useRef(new Map<string, TileAabb>());
 	const tileNodeSourceSignatureRef = useRef(new Map<string, string>());
+	const tileInputEpochRef = useRef(new Map<string, number>());
 	const tileInputCacheRef = useRef(new Map<string, TileInputCacheEntry>());
 	const tileInputIdRef = useRef(new Map<string, number>());
 	const nextTileInputIdRef = useRef(1);
@@ -1087,6 +1088,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			nodeRasterUriRef.current.clear();
 			tileNodeAabbRef.current.clear();
 			tileNodeSourceSignatureRef.current.clear();
+			tileInputEpochRef.current.clear();
 			tileInputCacheRef.current.clear();
 			tileInputIdRef.current.clear();
 		};
@@ -1431,6 +1433,31 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		scenes,
 		supportsTilePipeline,
 	]);
+
+	useLayoutEffect(() => {
+		if (!supportsTilePipeline) return;
+		const scheduler = tileSchedulerRef.current;
+		if (!scheduler) return;
+		let shouldTick = false;
+		const nextInputNodeIdSet = new Set<string>();
+		for (const input of staticTileSnapshot.inputs) {
+			nextInputNodeIdSet.add(input.nodeId);
+			const prevEpoch = tileInputEpochRef.current.get(input.nodeId);
+			if (prevEpoch !== input.epoch) {
+				// 输入纹理晚到或替换时，强制重建覆盖区域，避免复用旧 tile 内容。
+				scheduler.markDirtyRect(input.aabb);
+				shouldTick = true;
+			}
+			tileInputEpochRef.current.set(input.nodeId, input.epoch);
+		}
+		for (const nodeId of [...tileInputEpochRef.current.keys()]) {
+			if (nextInputNodeIdSet.has(nodeId)) continue;
+			tileInputEpochRef.current.delete(nodeId);
+		}
+		if (shouldTick) {
+			scheduleTileTick();
+		}
+	}, [scheduleTileTick, staticTileSnapshot.inputs, supportsTilePipeline]);
 
 	useLayoutEffect(() => {
 		void tileTick;

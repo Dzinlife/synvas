@@ -5,9 +5,18 @@ import { StaticTileScheduler } from "./scheduler";
 import { PriorityTaskQueue, RenderTaskPool } from "./taskQueue";
 import type { TileInput } from "./types";
 
-const { makeOffscreenSpy } = vi.hoisted(() => {
+const { makeOffscreenSpy, createdCanvases } = vi.hoisted(() => {
 	return {
 		makeOffscreenSpy: vi.fn(),
+		createdCanvases: [] as Array<{
+			clear: ReturnType<typeof vi.fn>;
+			save: ReturnType<typeof vi.fn>;
+			restore: ReturnType<typeof vi.fn>;
+			translate: ReturnType<typeof vi.fn>;
+			scale: ReturnType<typeof vi.fn>;
+			drawPicture: ReturnType<typeof vi.fn>;
+			drawImageRect: ReturnType<typeof vi.fn>;
+		}>,
 	};
 });
 
@@ -29,6 +38,7 @@ vi.mock("react-skia-lite", () => {
 			drawPicture: vi.fn(),
 			drawImageRect: vi.fn(),
 		};
+		createdCanvases.push(canvas);
 		return {
 			getCanvas: () => canvas,
 			flush: vi.fn(),
@@ -119,6 +129,7 @@ const warmScheduler = (
 describe("tile scheduler", () => {
 	beforeEach(() => {
 		makeOffscreenSpy.mockClear();
+		createdCanvases.length = 0;
 	});
 
 	it("同一可见集重复 beginFrame 不会重复入队", () => {
@@ -354,6 +365,31 @@ describe("tile scheduler", () => {
 		]);
 		scheduler.beginFrame(createFrameInput());
 		expect(makeOffscreenSpy).toHaveBeenCalledTimes(1);
+		scheduler.dispose();
+	});
+
+	it("不同 lod 渲染会按 worldSize 缩放到固定 tile 纹理", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 1,
+		});
+		scheduler.setInputs([
+			createRasterInput({
+				left: -1024,
+				top: -1024,
+				right: 2048,
+				bottom: 2048,
+			}),
+		]);
+		scheduler.beginFrame(
+			createFrameInput({
+				zoom: 0.5,
+				stageWidth: 512,
+				stageHeight: 512,
+			}),
+		);
+		const firstCanvas = createdCanvases[0];
+		expect(firstCanvas).toBeTruthy();
+		expect(firstCanvas.scale).toHaveBeenCalledWith(0.5, 0.5);
 		scheduler.dispose();
 	});
 

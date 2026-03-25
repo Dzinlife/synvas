@@ -485,6 +485,7 @@ export class StaticTileScheduler {
 			record.worldLeft + record.worldSize,
 			record.worldTop + record.worldSize,
 		);
+		const worldToPixel = TILE_PIXEL_SIZE / Math.max(1, record.worldSize);
 		const surface = this.acquireSurface();
 		if (!surface) {
 			record.state = "STALE";
@@ -494,6 +495,8 @@ export class StaticTileScheduler {
 			const canvas = surface.getCanvas();
 			canvas.clear(Float32Array.of(0, 0, 0, 0));
 			canvas.save();
+			// 不同 LOD 的 world size 不同，这里统一映射到固定 512 像素纹理。
+			canvas.scale(worldToPixel, worldToPixel);
 			canvas.translate(-tileRect.left, -tileRect.top);
 			for (const input of this.inputs) {
 				if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
