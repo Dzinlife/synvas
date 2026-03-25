@@ -1,4 +1,5 @@
 import { Skia, type SkSurface } from "react-skia-lite";
+import RBush from "rbush";
 import {
 	TILE_CAMERA_EPSILON,
 	TILE_FRAME_BUDGET_MS,
@@ -44,6 +45,14 @@ interface TileSchedulerOptions {
 interface TileCoverInfo {
 	mode: TileCoverMode;
 	sourceLod: number | null;
+}
+
+interface TileInputSpatialItem {
+	minX: number;
+	minY: number;
+	maxX: number;
+	maxY: number;
+	order: number;
 }
 
 const DEFAULT_TILE_STATS: TileSchedulerStats = {
@@ -117,6 +126,10 @@ export class StaticTileScheduler {
 
 	private readonly imagePaint = Skia.Paint();
 
+	private readonly inputSpatialIndex = new RBush<TileInputSpatialItem>();
+
+	private readonly inputQueryScratch: TileInput[] = [];
+
 	private inputs: TileInput[] = [];
 
 	private queueEpoch = 1;
@@ -145,6 +158,43 @@ export class StaticTileScheduler {
 			this.bumpQueueEpoch();
 		}
 		this.inputs = inputs;
+		this.rebuildInputSpatialIndex();
+	}
+
+	private rebuildInputSpatialIndex(): void {
+		this.inputSpatialIndex.clear();
+		if (this.inputs.length <= 0) return;
+		const items: TileInputSpatialItem[] = new Array(this.inputs.length);
+		for (let order = 0; order < this.inputs.length; order += 1) {
+			const input = this.inputs[order];
+			items[order] = {
+				minX: input.aabb.left,
+				minY: input.aabb.top,
+				maxX: input.aabb.right,
+				maxY: input.aabb.bottom,
+				order,
+			};
+		}
+		this.inputSpatialIndex.load(items);
+	}
+
+	private queryInputsByRect(rect: TileAabb): TileInput[] {
+		this.inputQueryScratch.length = 0;
+		if (this.inputs.length <= 0) return this.inputQueryScratch;
+		const hits = this.inputSpatialIndex.search({
+			minX: rect.left,
+			minY: rect.top,
+			maxX: rect.right,
+			maxY: rect.bottom,
+		});
+		if (hits.length <= 0) return this.inputQueryScratch;
+		hits.sort((left, right) => left.order - right.order);
+		for (const hit of hits) {
+			const input = this.inputs[hit.order];
+			if (!input) continue;
+			this.inputQueryScratch.push(input);
+		}
+		return this.inputQueryScratch;
 	}
 
 	markDirtyUnion(oldAabb: TileAabb | null, nextAabb: TileAabb | null): void {
@@ -247,6 +297,8 @@ export class StaticTileScheduler {
 			} catch {}
 		}
 		this.surfaces.length = 0;
+		this.inputSpatialIndex.clear();
+		this.inputQueryScratch.length = 0;
 		try {
 			this.imagePaint.dispose?.();
 		} catch {}
@@ -367,7 +419,9 @@ export class StaticTileScheduler {
 		for (const key of this.visibleKeys) {
 			const { lod, tx, ty } = decodeTileKey(key);
 			const tileRect = resolveTileWorldRect(tx, ty, lod);
-			for (const input of this.inputs) {
+			const inputs = this.queryInputsByRect(tileRect);
+			if (inputs.length <= 0) continue;
+			for (const input of inputs) {
 				if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
 				this.visibleCoveredKeySet.add(key);
 				break;
@@ -498,7 +552,8 @@ export class StaticTileScheduler {
 			// 不同 LOD 的 world size 不同，这里统一映射到固定 512 像素纹理。
 			canvas.scale(worldToPixel, worldToPixel);
 			canvas.translate(-tileRect.left, -tileRect.top);
-			for (const input of this.inputs) {
+			const candidateInputs = this.queryInputsByRect(tileRect);
+			for (const input of candidateInputs) {
 				if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
 				if (input.kind === "picture") {
 					canvas.save();
@@ -621,7 +676,7 @@ export class StaticTileScheduler {
 		this.readyVisibleCount = 0;
 		this.coverFallbackCount = 0;
 
-		for (const key of this.visibleCoveredKeySet) {
+		for (const key of this.visibleKeys) {
 			this.visibleKeySet.add(key);
 			const record = this.tileByKey.get(key);
 			const decoded = record ?? decodeTileKey(key);
@@ -634,6 +689,14 @@ export class StaticTileScheduler {
 				this.visibleCoverInfoByKey.set(key, {
 					mode: "SELF",
 					sourceLod: record.lod,
+				});
+				continue;
+			}
+			const isCovered = this.visibleCoveredKeySet.has(key);
+			if (!isCovered) {
+				this.visibleCoverInfoByKey.set(key, {
+					mode: "NONE",
+					sourceLod: null,
 				});
 				continue;
 			}
@@ -671,7 +734,8 @@ export class StaticTileScheduler {
 				worldRect.bottom,
 			);
 			let hasFallback = false;
-			for (const input of this.inputs) {
+			const candidateInputs = this.queryInputsByRect(tileRect);
+			for (const input of candidateInputs) {
 				if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
 				hasFallback = true;
 				if (this.fallbackNodeIdSet.has(input.nodeId)) continue;

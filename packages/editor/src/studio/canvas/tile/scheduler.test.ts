@@ -70,6 +70,7 @@ const createRasterInput = (
 		top: number;
 		right: number;
 		bottom: number;
+		image: SkImage;
 	}> = {},
 ): TileInput => {
 	const left = input.left ?? 0;
@@ -80,9 +81,11 @@ const createRasterInput = (
 		kind: "raster",
 		id: input.id ?? 1,
 		nodeId: input.nodeId ?? "node-a",
-		image: {
-			dispose: vi.fn(),
-		} as unknown as SkImage,
+		image:
+			input.image ??
+			({
+				dispose: vi.fn(),
+			} as unknown as SkImage),
 		aabb: createTileAabb(left, top, right, bottom),
 		sourceWidth: Math.max(1, Math.round(right - left)),
 		sourceHeight: Math.max(1, Math.round(bottom - top)),
@@ -393,6 +396,51 @@ describe("tile scheduler", () => {
 		scheduler.dispose();
 	});
 
+	it("空间索引查询后仍保持输入绘制顺序", () => {
+		const firstImage = {
+			dispose: vi.fn(),
+		} as unknown as SkImage;
+		const secondImage = {
+			dispose: vi.fn(),
+		} as unknown as SkImage;
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 1,
+		});
+		scheduler.setInputs([
+			createRasterInput({
+				id: 1,
+				nodeId: "node-order-a",
+				left: 0,
+				top: 0,
+				right: 512,
+				bottom: 512,
+				image: firstImage,
+			}),
+			createRasterInput({
+				id: 2,
+				nodeId: "node-order-b",
+				left: 0,
+				top: 0,
+				right: 512,
+				bottom: 512,
+				image: secondImage,
+			}),
+		]);
+		scheduler.beginFrame(
+			createFrameInput({
+				stageWidth: 512,
+				stageHeight: 512,
+				zoom: 1,
+			}),
+		);
+		const firstCanvas = createdCanvases[0];
+		expect(firstCanvas).toBeTruthy();
+		expect(firstCanvas.drawImageRect).toHaveBeenCalledTimes(2);
+		expect(firstCanvas.drawImageRect.mock.calls[0]?.[0]).toBe(firstImage);
+		expect(firstCanvas.drawImageRect.mock.calls[1]?.[0]).toBe(secondImage);
+		scheduler.dispose();
+	});
+
 	it("LRU 会在超限时优先驱逐不可见 ready tile", () => {
 		const scheduler = new StaticTileScheduler({
 			maxTasksPerTick: 16,
@@ -542,6 +590,60 @@ describe("tile scheduler", () => {
 		);
 		expect(dirtyFrame.hasPendingWork).toBe(true);
 		expect(dirtyFrame.stats.queuedCount).toBeGreaterThan(0);
+		scheduler.dispose();
+	});
+
+	it("输入临时不覆盖时仍会绘制可见 READY tile", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 8,
+		});
+		scheduler.setInputs([
+			createRasterInput({
+				nodeId: "node-ready",
+				left: 0,
+				top: 0,
+				right: 512,
+				bottom: 512,
+			}),
+		]);
+		warmScheduler(scheduler, 10, {
+			stageWidth: 512,
+			stageHeight: 512,
+			zoom: 1,
+		});
+		const warmFrame = scheduler.beginFrame(
+			createFrameInput({
+				stageWidth: 512,
+				stageHeight: 512,
+				zoom: 1,
+			}),
+		);
+		expect(warmFrame.stats.readyVisibleCount).toBeGreaterThan(0);
+		expect(warmFrame.drawItems.length).toBeGreaterThan(0);
+
+		scheduler.setInputs([
+			createRasterInput({
+				id: 2,
+				nodeId: "node-far",
+				left: 4096,
+				top: 4096,
+				right: 4608,
+				bottom: 4608,
+			}),
+		]);
+		const uncoveredFrame = scheduler.beginFrame(
+			createFrameInput({
+				stageWidth: 512,
+				stageHeight: 512,
+				zoom: 1,
+				debugEnabled: true,
+			}),
+		);
+		expect(uncoveredFrame.drawItems.length).toBeGreaterThan(0);
+		expect(uncoveredFrame.debugItems.some((item) => item.coverMode === "SELF")).toBe(
+			true,
+		);
+		expect(uncoveredFrame.fallbackNodeIds.length).toBe(0);
 		scheduler.dispose();
 	});
 });

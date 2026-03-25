@@ -96,6 +96,7 @@ interface InfiniteSkiaCanvasProps {
 	height: number;
 	camera: SharedValue<CameraState>;
 	nodes: CanvasNode[];
+	tileSourceNodes?: CanvasNode[];
 	scenes: StudioProject["scenes"];
 	assets: StudioProject["assets"];
 	activeNodeId: string | null;
@@ -353,6 +354,14 @@ const resolveNodeStructureSignature = (nodes: CanvasNode[]): string => {
 			return rest;
 		}),
 	);
+};
+
+const compareCanvasNodePaintOrder = (
+	left: CanvasNode,
+	right: CanvasNode,
+): number => {
+	if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
+	return left.createdAt - right.createdAt;
 };
 
 const resolveSelectedNodeBounds = (
@@ -829,6 +838,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	height,
 	camera,
 	nodes,
+	tileSourceNodes,
 	scenes,
 	assets,
 	activeNodeId,
@@ -852,11 +862,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const runtimeManager = useStudioRuntimeManager();
 	const canvasRef = useRef<CanvasRef>(null);
 	const draggingNodeIdRef = useRef<string | null>(null);
+	const tileNodes = tileSourceNodes ?? nodes;
 	const latestNodeByIdRef = useRef(new Map<string, CanvasNode>());
 	const nodeLayoutValuesRef = useRef(
 		new Map<string, SharedValue<CanvasNodeLayoutState>>(),
 	);
-	latestNodeByIdRef.current = new Map(nodes.map((node) => [node.id, node]));
+	latestNodeByIdRef.current = new Map(tileNodes.map((node) => [node.id, node]));
 	const nodeStructureSignature = useMemo(() => {
 		return resolveNodeStructureSignature(nodes);
 	}, [nodes]);
@@ -1079,7 +1090,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (!supportsTilePipeline) return;
 		const nextNodeRasterUri = new Map<string, string | null>();
 		const requiredUris = new Set<string>();
-		for (const node of renderNodes) {
+		for (const node of tileNodes) {
 			const latestNode = getLatestNodeById(node.id) ?? node;
 			if (!isTileRasterNodeType(latestNode) || latestNode.id === activeNodeId) {
 				nextNodeRasterUri.set(latestNode.id, null);
@@ -1150,7 +1161,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, [
 		activeNodeId,
 		getLatestNodeById,
-		renderNodes,
+		tileNodes,
 		resolveNodeRasterUri,
 		scheduleTileTick,
 		supportsTilePipeline,
@@ -1176,7 +1187,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 	useLayoutEffect(() => {
 		const nextNodeIds = new Set<string>();
-		for (const node of nodes) {
+		for (const node of tileNodes) {
 			nextNodeIds.add(node.id);
 			const nextLayout = resolveNodeLayoutState(node);
 			const currentLayout = nodeLayoutValuesRef.current.get(node.id);
@@ -1193,14 +1204,16 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			if (nextNodeIds.has(nodeId)) continue;
 			nodeLayoutValuesRef.current.delete(nodeId);
 		}
-	}, [nodes]);
+	}, [tileNodes]);
 
 	useLayoutEffect(() => {
 		if (!supportsTilePipeline) return;
 		const scheduler = tileSchedulerRef.current;
 		if (!scheduler) return;
 		let shouldTick = false;
-		for (const node of nodes) {
+		const nextTileNodeIdSet = new Set<string>();
+		for (const node of tileNodes) {
+			nextTileNodeIdSet.add(node.id);
 			if (!isTileRasterNodeType(node) || node.id === activeNodeId) {
 				const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 				if (oldAabb) {
@@ -1228,10 +1241,20 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				shouldTick = true;
 			}
 		}
+		for (const nodeId of [...tileNodeAabbRef.current.keys()]) {
+			if (nextTileNodeIdSet.has(nodeId)) continue;
+			const oldAabb = tileNodeAabbRef.current.get(nodeId) ?? null;
+			if (oldAabb) {
+				scheduler.markDirtyRect(oldAabb);
+				shouldTick = true;
+			}
+			tileNodeAabbRef.current.delete(nodeId);
+			tileNodeSourceSignatureRef.current.delete(nodeId);
+		}
 		if (shouldTick) {
 			scheduleTileTick();
 		}
-	}, [activeNodeId, nodes, scenes, scheduleTileTick, supportsTilePipeline]);
+	}, [activeNodeId, scenes, scheduleTileTick, supportsTilePipeline, tileNodes]);
 
 	useLayoutEffect(() => {
 		// 节点列表变化时，清理已失效的 hover 引用
@@ -1423,7 +1446,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	);
 
 	const staticTileSnapshot = useMemo(() => {
-		void nodes;
 		void rasterCacheVersion;
 		if (!supportsTilePipeline) {
 			return EMPTY_STATIC_TILE_SNAPSHOT;
@@ -1431,7 +1453,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const inputs: TileInput[] = [];
 		const inputByNodeId = new Map<string, TileInput>();
 		const visitedNodeIds = new Set<string>();
-		for (const node of renderNodes) {
+		for (const node of tileNodes) {
 			const latestNode = getLatestNodeById(node.id) ?? node;
 			if (!isTileRasterNodeType(latestNode) || latestNode.id === activeNodeId) {
 				continue;
@@ -1571,13 +1593,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, [
 		activeNodeId,
 		getLatestNodeById,
-		nodes,
 		rasterCacheVersion,
-		renderNodes,
 		resolveNodeRasterUri,
 		resolveTileInputId,
 		scenes,
 		supportsTilePipeline,
+		tileNodes,
 		tileInputMode,
 	]);
 
@@ -1650,6 +1671,19 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				liveNodeIdSet.add(node.id);
 			}
 		}
+		const liveRenderNodes = [...renderNodes];
+		if (fallbackLiveNodeIdSet.size > 0) {
+			const liveRenderNodeIdSet = new Set(renderNodes.map((node) => node.id));
+			for (const fallbackNodeId of fallbackLiveNodeIdSet) {
+				liveNodeIdSet.add(fallbackNodeId);
+				if (liveRenderNodeIdSet.has(fallbackNodeId)) continue;
+				const fallbackNode = getLatestNodeById(fallbackNodeId);
+				if (!fallbackNode) continue;
+				liveRenderNodes.push(fallbackNode);
+				liveRenderNodeIdSet.add(fallbackNodeId);
+			}
+			liveRenderNodes.sort(compareCanvasNodePaintOrder);
+		}
 		const dragProxyDrawItems: DragProxyDrawItem[] = [];
 		if (selectionDragProxy.active && selectedNodes.length > 1) {
 			for (const node of renderNodes) {
@@ -1708,7 +1742,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						/>
 					)}
 					<DragProxyLayer drawItems={dragProxyDrawItems} />
-					{renderNodes.map((node) => {
+					{liveRenderNodes.map((node) => {
 						if (!liveNodeIdSet.has(node.id)) return null;
 						const layout = getNodeLayoutValue(node.id);
 						if (!layout) return null;

@@ -1099,6 +1099,63 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(firstLiveNodeIds).toContain("node-scene");
 	});
 
+	it("tile 输入会使用 tileSourceNodes，而不是仅依赖 nodes(cull 子集)", async () => {
+		tilePipelineMockState.enabled = true;
+		const nodeInRender = {
+			...createSceneNode("node-scene-visible", 0),
+			thumbnail: {
+				assetId: "scene-thumb-a",
+				sourceSignature: "scene-a-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		const nodeOnlyInTileSource = {
+			...createSceneNode("node-scene-cull-only", 1),
+			x: 4096,
+			y: 4096,
+			thumbnail: {
+				assetId: "scene-thumb-b",
+				sourceSignature: "scene-b-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[nodeInRender]}
+				tileSourceNodes={[nodeInRender, nodeOnlyInTileSource]}
+				scenes={emptyScenes}
+				assets={[
+					createImageAsset("scene-thumb-a"),
+					createImageAsset("scene-thumb-b"),
+				]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			const calledUris = acquireImageAssetMock.mock.calls.map((call) =>
+				String(call[0] ?? ""),
+			);
+			expect(
+				calledUris.some((uri) => uri.includes("scene-thumb-a.png")),
+			).toBe(true);
+			expect(
+				calledUris.some((uri) => uri.includes("scene-thumb-b.png")),
+			).toBe(true);
+		});
+	});
+
 	it("默认不渲染 TileDebugLayer", async () => {
 		tilePipelineMockState.enabled = true;
 		render(

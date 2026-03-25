@@ -4657,6 +4657,7 @@ const CanvasWorkspace = () => {
 				height={stageSize.height}
 				camera={cameraSharedValue}
 				nodes={renderNodes}
+				tileSourceNodes={sortedNodes}
 				scenes={currentProject.scenes}
 				assets={currentProject.assets}
 				activeNodeId={activeNodeId}
