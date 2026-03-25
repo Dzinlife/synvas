@@ -24,14 +24,15 @@ import {
 	type SkPicture,
 	Skia,
 	type SkiaPointerEvent,
+	Text,
 	useDerivedValue,
+	useFont,
 } from "react-skia-lite";
 import type { AssetHandle } from "@/assets/AssetStore";
 import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
-import { useSkiaUiTextSprites } from "@/studio/canvas/skia-text";
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import {
@@ -132,15 +133,11 @@ const LAYOUT_EPSILON = 1e-6;
 const TILE_AABB_EPSILON = 1e-4;
 const TILE_PIPELINE_LISTENER_ID = 73001;
 const TILE_DEBUG_COORD_LABEL_LIMIT = 96;
-const TILE_DEBUG_TEXT_STYLE = {
-	fontFamily:
-		'-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif',
-	fontSizePx: 10,
-	fontWeight: 600,
-	lineHeightPx: 12,
-	color: "rgba(255,255,255,0.96)",
-	paddingPx: 0,
-};
+const TILE_DEBUG_FONT_URI = "/Roboto-Medium.ttf";
+const TILE_DEBUG_FONT_SIZE_PX = 10;
+const TILE_DEBUG_TEXT_COLOR = "rgba(255,255,255,0.96)";
+const TILE_DEBUG_LABEL_OFFSET_X = 4;
+const TILE_DEBUG_LABEL_OFFSET_Y = 4;
 
 interface RasterImageCacheEntry {
 	uri: string;
@@ -698,35 +695,56 @@ const resolveTileDebugLabel = (
 	return parts.join(" ");
 };
 
+const resolveTileDebugTextTransform = (
+	left: number,
+	top: number,
+	inverseZoom: number,
+): Array<{ matrix: Matrix4 }> => {
+	const matrix: Matrix4 = [
+		inverseZoom,
+		0,
+		0,
+		left + TILE_DEBUG_LABEL_OFFSET_X * inverseZoom,
+		0,
+		inverseZoom,
+		0,
+		top + (TILE_DEBUG_LABEL_OFFSET_Y + TILE_DEBUG_FONT_SIZE_PX) * inverseZoom,
+		0,
+		0,
+		1,
+		0,
+		0,
+		0,
+		0,
+		1,
+	];
+	return [{ matrix }];
+};
+
 const TileDebugLayerComponent = ({
 	debugItems,
+	cameraZoom,
 }: {
 	debugItems: TileDebugItem[];
+	cameraZoom: number;
 }) => {
-	const requests = useMemo(() => {
+	const labeledItems = useMemo(() => {
 		const includeCoord = debugItems.length <= TILE_DEBUG_COORD_LABEL_LIMIT;
 		return debugItems.map((item) => {
 			return {
-				text: resolveTileDebugLabel(item, includeCoord),
-				maxWidthPx: Math.max(48, Math.floor(item.size) - 10),
-				slotKey: `tile-debug-${item.key}`,
-				style: TILE_DEBUG_TEXT_STYLE,
+				item,
+				label: resolveTileDebugLabel(item, includeCoord),
 			};
 		});
 	}, [debugItems]);
-	const sprites = useSkiaUiTextSprites(requests);
+	const tileDebugFont = useFont(TILE_DEBUG_FONT_URI, TILE_DEBUG_FONT_SIZE_PX);
+	const safeZoom = Math.max(cameraZoom, TILE_CAMERA_EPSILON);
+	const inverseZoom = 1 / safeZoom;
 
-	if (debugItems.length <= 0) return null;
+	if (labeledItems.length <= 0) return null;
 	return (
 		<Group pointerEvents="none">
-			{debugItems.map((item, index) => {
-				const sprite = sprites[index];
-				const spriteImage = sprite?.image ?? null;
-				const spriteWidth = Math.min(
-					Math.max(1, sprite?.textWidth ?? 1),
-					Math.max(1, Math.floor(item.size) - 8),
-				);
-				const spriteHeight = Math.max(1, sprite?.textHeight ?? 1);
+			{labeledItems.map(({ item, label }) => {
 				return (
 					<Group key={`tile-debug-${item.key}`} pointerEvents="none">
 						<Rect
@@ -747,16 +765,24 @@ const TileDebugLayerComponent = ({
 							color={resolveTileDebugStrokeColor(item.state)}
 							pointerEvents="none"
 						/>
-						{spriteImage && (
-							<Image
-								image={spriteImage}
-								x={item.left + 4}
-								y={item.top + 4}
-								width={spriteWidth}
-								height={spriteHeight}
-								fit="fill"
+						{tileDebugFont && (
+							<Group
+								transform={resolveTileDebugTextTransform(
+									item.left,
+									item.top,
+									inverseZoom,
+								)}
 								pointerEvents="none"
-							/>
+							>
+								<Text
+									text={label}
+									x={0}
+									y={0}
+									font={tileDebugFont}
+									color={TILE_DEBUG_TEXT_COLOR}
+									pointerEvents="none"
+								/>
+							</Group>
 						)}
 					</Group>
 				);
@@ -1676,7 +1702,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					)}
 					<StaticTileLayer drawItems={staticTileDrawItems} />
 					{tileDebugEnabled && (
-						<TileDebugLayer debugItems={tileDebugItems} />
+						<TileDebugLayer
+							debugItems={tileDebugItems}
+							cameraZoom={camera.value.zoom}
+						/>
 					)}
 					<DragProxyLayer drawItems={dragProxyDrawItems} />
 					{renderNodes.map((node) => {
