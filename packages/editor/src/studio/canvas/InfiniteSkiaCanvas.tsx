@@ -21,6 +21,7 @@ import {
 	Rect,
 	type SharedValue,
 	type SkImage,
+	type SkPicture,
 	Skia,
 	type SkiaPointerEvent,
 	useDerivedValue,
@@ -87,6 +88,8 @@ export interface CanvasSelectionResizeEvent {
 	event: CanvasNodeDragEvent;
 }
 
+export type TileInputMode = "raster" | "picture";
+
 interface InfiniteSkiaCanvasProps {
 	width: number;
 	height: number;
@@ -100,6 +103,7 @@ interface InfiniteSkiaCanvasProps {
 	snapGuidesScreen?: CanvasSnapGuidesScreen;
 	suspendHover?: boolean;
 	tileDebugEnabled?: boolean;
+	tileInputMode?: TileInputMode;
 	onNodeClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onNodeDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onNodeDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
@@ -150,6 +154,8 @@ interface RasterImageCacheEntry {
 interface TileInputCacheEntry {
 	epoch: number;
 	sourceSignature: string;
+	mode: TileInputMode;
+	rasterImage: SkImage | null;
 	input: TileInput | null;
 }
 
@@ -229,6 +235,50 @@ const resolveSkImageSize = (
 		width: Math.max(1, Math.round(width)),
 		height: Math.max(1, Math.round(height)),
 	};
+};
+
+const disposeTileInput = (input: TileInput | null | undefined) => {
+	if (!input) return;
+	try {
+		input.dispose?.();
+	} catch {}
+};
+
+const createTilePictureFromImage = (
+	image: SkImage,
+	sourceWidth: number,
+	sourceHeight: number,
+): { picture: SkPicture; dispose: () => void } | null => {
+	try {
+		const safeWidth = Math.max(1, Math.round(sourceWidth));
+		const safeHeight = Math.max(1, Math.round(sourceHeight));
+		const recorder = Skia.PictureRecorder();
+		const canvas = recorder.beginRecording({
+			x: 0,
+			y: 0,
+			width: safeWidth,
+			height: safeHeight,
+		});
+		const imageSize = resolveSkImageSize(image, safeWidth, safeHeight);
+		canvas.save();
+		canvas.scale(
+			safeWidth / Math.max(1, imageSize.width),
+			safeHeight / Math.max(1, imageSize.height),
+		);
+		canvas.drawImage(image, 0, 0);
+		canvas.restore();
+		const picture = recorder.finishRecordingAsPicture();
+		return {
+			picture,
+			dispose: () => {
+				try {
+					picture.dispose?.();
+				} catch {}
+			},
+		};
+	} catch {
+		return null;
+	}
 };
 
 const isTileAabbEqual = (left: TileAabb, right: TileAabb): boolean => {
@@ -761,6 +811,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	snapGuidesScreen = EMPTY_SNAP_GUIDES_SCREEN,
 	suspendHover = false,
 	tileDebugEnabled = false,
+	tileInputMode = "raster",
 	onNodeClick,
 	onNodeDoubleClick,
 	onNodeDragStart,
@@ -1084,6 +1135,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			for (const entry of rasterCacheRef.current.values()) {
 				entry.handle?.release();
 			}
+			for (const entry of tileInputCacheRef.current.values()) {
+				disposeTileInput(entry.input);
+			}
 			rasterCacheRef.current.clear();
 			nodeRasterUriRef.current.clear();
 			tileNodeAabbRef.current.clear();
@@ -1374,40 +1428,104 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				);
 			const cachedEntry = tileInputCacheRef.current.get(latestNode.id);
 			if (!image) {
+				disposeTileInput(cachedEntry?.input);
 				tileInputCacheRef.current.set(latestNode.id, {
 					epoch: cachedEntry?.epoch ?? 0,
 					sourceSignature,
+					mode: tileInputMode,
+					rasterImage: null,
 					input: null,
 				});
 				continue;
 			}
+			const sourceWidth =
+				rasterEntry?.width ?? Math.max(1, Math.round(Math.abs(latestNode.width)));
+			const sourceHeight =
+				rasterEntry?.height ??
+				Math.max(1, Math.round(Math.abs(latestNode.height)));
 			let epoch = cachedEntry?.epoch ?? 0;
-			const cachedImage =
-				cachedEntry?.input?.kind === "raster" ? cachedEntry.input.image : null;
-			if (
-				!cachedEntry ||
-				cachedEntry.sourceSignature !== sourceSignature ||
-				cachedImage !== image
-			) {
+			const sourceChanged = cachedEntry?.sourceSignature !== sourceSignature;
+			const modeChanged = cachedEntry?.mode !== tileInputMode;
+			const imageChanged = cachedEntry?.rasterImage !== image;
+			if (!cachedEntry || sourceChanged || modeChanged || imageChanged) {
 				epoch += 1;
 			}
-			const input: TileInput = {
-				kind: "raster",
-				id: resolveTileInputId(latestNode.id),
-				nodeId: latestNode.id,
-				image,
-				aabb: resolveNodeWorldAabb(latestNode),
-				sourceWidth:
-					rasterEntry?.width ??
-					Math.max(1, Math.round(Math.abs(latestNode.width))),
-				sourceHeight:
-					rasterEntry?.height ??
-					Math.max(1, Math.round(Math.abs(latestNode.height))),
-				epoch,
-			};
+			const inputId = resolveTileInputId(latestNode.id);
+			const aabb = resolveNodeWorldAabb(latestNode);
+			let input: TileInput;
+			if (tileInputMode === "picture") {
+				const canReusePicture =
+					Boolean(cachedEntry) &&
+					!sourceChanged &&
+					!modeChanged &&
+					!imageChanged &&
+					cachedEntry?.input?.kind === "picture";
+				if (canReusePicture && cachedEntry?.input?.kind === "picture") {
+					input = {
+						kind: "picture",
+						id: inputId,
+						nodeId: latestNode.id,
+						picture: cachedEntry.input.picture,
+						aabb,
+						sourceWidth,
+						sourceHeight,
+						epoch,
+						dispose: cachedEntry.input.dispose,
+					};
+				} else {
+					const pictureInput = createTilePictureFromImage(
+						image,
+						sourceWidth,
+						sourceHeight,
+					);
+					if (cachedEntry?.input?.kind === "picture") {
+						disposeTileInput(cachedEntry.input);
+					}
+					if (pictureInput) {
+						input = {
+							kind: "picture",
+							id: inputId,
+							nodeId: latestNode.id,
+							picture: pictureInput.picture,
+							aabb,
+							sourceWidth,
+							sourceHeight,
+							epoch,
+							dispose: pictureInput.dispose,
+						};
+					} else {
+						input = {
+							kind: "raster",
+							id: inputId,
+							nodeId: latestNode.id,
+							image,
+							aabb,
+							sourceWidth,
+							sourceHeight,
+							epoch,
+						};
+					}
+				}
+			} else {
+				if (cachedEntry?.input?.kind === "picture") {
+					disposeTileInput(cachedEntry.input);
+				}
+				input = {
+					kind: "raster",
+					id: inputId,
+					nodeId: latestNode.id,
+					image,
+					aabb,
+					sourceWidth,
+					sourceHeight,
+					epoch,
+				};
+			}
 			tileInputCacheRef.current.set(latestNode.id, {
 				epoch,
 				sourceSignature,
+				mode: tileInputMode,
+				rasterImage: image,
 				input,
 			});
 			inputs.push(input);
@@ -1415,6 +1533,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		}
 		for (const nodeId of [...tileInputCacheRef.current.keys()]) {
 			if (visitedNodeIds.has(nodeId)) continue;
+			const removedEntry = tileInputCacheRef.current.get(nodeId);
+			disposeTileInput(removedEntry?.input);
 			tileInputCacheRef.current.delete(nodeId);
 			tileInputIdRef.current.delete(nodeId);
 		}
@@ -1432,6 +1552,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		resolveTileInputId,
 		scenes,
 		supportsTilePipeline,
+		tileInputMode,
 	]);
 
 	useLayoutEffect(() => {
@@ -1509,12 +1630,25 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				if (!selectedNodeIdSet.has(node.id) || node.id === activeNodeId)
 					continue;
 				const input = staticTileSnapshot.inputByNodeId.get(node.id);
-				if (!input || input.kind !== "raster") continue;
+				let proxyImage: SkImage | null = null;
+				if (input?.kind === "raster") {
+					proxyImage = input.image;
+				} else {
+					const latestNode = getLatestNodeById(node.id) ?? node;
+					const uri =
+						nodeRasterUriRef.current.get(node.id) ??
+						resolveNodeRasterUri(latestNode);
+					const rasterEntry = uri
+						? (rasterCacheRef.current.get(uri) ?? null)
+						: null;
+					proxyImage = rasterEntry?.image ?? null;
+				}
+				if (!proxyImage) continue;
 				const baseRect = dragProxyBaseNodeRectRef.current.get(node.id);
 				if (!baseRect) continue;
 				dragProxyDrawItems.push({
 					nodeId: node.id,
-					image: input.image,
+					image: proxyImage,
 					x: baseRect.x + selectionDragProxy.worldDx,
 					y: baseRect.y + selectionDragProxy.worldDy,
 					width: baseRect.width,
@@ -1591,14 +1725,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						);
 					})}
 				</Group>
-				<CanvasNodeLabelLayer
+				{/* <CanvasNodeLabelLayer
 					width={width}
 					height={height}
 					camera={animatedCamera}
 					getNodeLayout={getNodeLayoutValue}
 					nodes={renderNodes}
 					focusedNodeId={focusedNodeId}
-				/>
+				/> */}
 				{!disableBaseNodeInteraction && !focusedNodeId && (
 					<CanvasNodeOverlayLayer
 						width={width}
@@ -1664,6 +1798,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		animatedGridUniforms,
 		camera,
 		getLatestNodeById,
+		resolveNodeRasterUri,
 	]);
 
 	if (width <= 0 || height <= 0) return null;

@@ -81,6 +81,7 @@ interface MockInfiniteSkiaCanvasProps {
 	nodes?: CanvasNode[];
 	camera?: { value: CameraState; _isSharedValue?: boolean };
 	tileDebugEnabled?: boolean;
+	tileInputMode?: "raster" | "picture";
 	focusedNodeId?: string | null;
 	selectedNodeIds?: string[];
 	snapGuidesScreen?: {
@@ -3952,6 +3953,15 @@ describe("CanvasWorkspace", () => {
 		expect(getLatestInfiniteSkiaCanvasProps().tileDebugEnabled).toBe(true);
 		fireEvent.click(screen.getByRole("button", { name: "Tile 调试" }));
 		expect(getLatestInfiniteSkiaCanvasProps().tileDebugEnabled).toBe(false);
+	});
+
+	it("toolbar 的 Tile 输入模式按钮会透传到 InfiniteSkiaCanvas", () => {
+		render(<CanvasWorkspace />);
+		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("raster");
+		fireEvent.click(screen.getByTestId("canvas-tile-input-mode-toggle"));
+		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("picture");
+		fireEvent.click(screen.getByTestId("canvas-tile-input-mode-toggle"));
+		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("raster");
 	});
 
 	it("多选 bbox Alt 拖拽会复制整组并保持当前 active", () => {

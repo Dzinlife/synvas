@@ -136,6 +136,7 @@ import type {
 	CanvasNodeResizeAnchor,
 	CanvasNodeResizeEvent,
 	CanvasSelectionResizeEvent,
+	TileInputMode,
 } from "./InfiniteSkiaCanvas";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { useCanvasCameraController } from "./useCanvasCameraController";
@@ -1493,6 +1494,7 @@ const CanvasWorkspace = () => {
 	const [sidebarTab, setSidebarTab] = useState<CanvasSidebarTab>("nodes");
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 	const [tileDebugEnabled, setTileDebugEnabled] = useState(false);
+	const [tileInputMode, setTileInputMode] = useState<TileInputMode>("raster");
 
 	useEffect(() => {
 		setSidebarTab(focusedNodeId ? "element" : "nodes");
@@ -4663,6 +4665,7 @@ const CanvasWorkspace = () => {
 				snapGuidesScreen={snapGuidesScreen}
 				suspendHover={isCameraAnimating}
 				tileDebugEnabled={tileDebugEnabled}
+				tileInputMode={tileInputMode}
 				onNodeDragStart={handleSkiaNodeDragStart}
 				onNodeDrag={handleSkiaNodeDrag}
 				onNodeDragEnd={handleSkiaNodeDragEnd}
@@ -4697,6 +4700,12 @@ const CanvasWorkspace = () => {
 				tileDebugEnabled={tileDebugEnabled}
 				onToggleTileDebug={() => {
 					setTileDebugEnabled((prev) => !prev);
+				}}
+				tileInputMode={tileInputMode}
+				onToggleTileInputMode={() => {
+					setTileInputMode((prev) =>
+						prev === "raster" ? "picture" : "raster",
+					);
 				}}
 				sidebarExpanded={sidebarExpanded}
 				sidebarRect={overlayLayout.sidebarRect}

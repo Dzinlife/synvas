@@ -29,6 +29,7 @@ import {
 	resolveCanvasWorldRectScreenFrame,
 } from "./canvasNodeLabelUtils";
 import type { ResolvedCanvasDrawerOptions } from "./canvasWorkspaceUtils";
+import type { TileInputMode } from "./InfiniteSkiaCanvas";
 
 const SCENE_OWNER_PREFIX = "scene:";
 
@@ -59,6 +60,8 @@ interface CanvasWorkspaceOverlayProps {
 	onResetView: () => void;
 	tileDebugEnabled: boolean;
 	onToggleTileDebug: () => void;
+	tileInputMode: TileInputMode;
+	onToggleTileInputMode: () => void;
 	sidebarExpanded: boolean;
 	sidebarRect: OverlayRect;
 	expandButtonOffsetX: number;
@@ -240,6 +243,8 @@ const CanvasWorkspaceOverlay = ({
 	onResetView,
 	tileDebugEnabled,
 	onToggleTileDebug,
+	tileInputMode,
+	onToggleTileInputMode,
 	sidebarExpanded,
 	sidebarRect,
 	expandButtonOffsetX,
@@ -421,6 +426,20 @@ const CanvasWorkspaceOverlay = ({
 							<Bug className="size-3" />
 							<span>Tile 调试</span>
 						</span>
+					</button>
+					<button
+						type="button"
+						onClick={onToggleTileInputMode}
+						aria-label="Tile 输入模式"
+						aria-pressed={tileInputMode === "picture"}
+						data-testid="canvas-tile-input-mode-toggle"
+						className={`rounded px-2 py-1 transition ${
+							tileInputMode === "picture"
+								? "bg-white/10 text-emerald-300 hover:bg-white/20"
+								: "bg-white/5 text-white/55 hover:bg-white/10"
+						}`}
+					>
+						<span>{`Tile 输入: ${tileInputMode === "picture" ? "Picture" : "Raster"}`}</span>
 					</button>
 					<button
 						type="button"
