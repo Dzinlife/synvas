@@ -282,6 +282,38 @@ describe("tile scheduler", () => {
 		scheduler.dispose();
 	});
 
+	it("高 dpr 下会提升 target lod", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 0,
+		});
+		scheduler.setInputs([createRasterInput()]);
+		const descriptor = Object.getOwnPropertyDescriptor(
+			globalThis,
+			"window",
+		);
+		Object.defineProperty(globalThis, "window", {
+			value: {
+				devicePixelRatio: 2,
+			},
+			configurable: true,
+		});
+		try {
+			const frame = scheduler.beginFrame(
+				createFrameInput({
+					zoom: 1,
+				}),
+			);
+			expect(frame.stats.targetLod).toBe(1);
+		} finally {
+			if (descriptor) {
+				Object.defineProperty(globalThis, "window", descriptor);
+			} else {
+				delete (globalThis as { window?: unknown }).window;
+			}
+			scheduler.dispose();
+		}
+	});
+
 	it("LOD 切级会丢弃旧批次队列并限制为当前可见规模", () => {
 		const scheduler = new StaticTileScheduler({
 			maxTasksPerTick: 0,
