@@ -99,6 +99,7 @@ interface InfiniteSkiaCanvasProps {
 	focusedNodeId: string | null;
 	snapGuidesScreen?: CanvasSnapGuidesScreen;
 	suspendHover?: boolean;
+	tileDebugEnabled?: boolean;
 	onNodeClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onNodeDoubleClick?: (node: CanvasNode, event: CanvasNodePointerEvent) => void;
 	onNodeDragStart?: (node: CanvasNode, event: CanvasNodeDragEvent) => void;
@@ -126,7 +127,6 @@ const EMPTY_SNAP_GUIDES_SCREEN: CanvasSnapGuidesScreen = {
 const LAYOUT_EPSILON = 1e-6;
 const TILE_AABB_EPSILON = 1e-4;
 const TILE_PIPELINE_LISTENER_ID = 73001;
-const TILE_DEBUG_LAYER_ENABLED = true;
 const TILE_DEBUG_COORD_LABEL_LIMIT = 96;
 const TILE_DEBUG_TEXT_STYLE = {
 	fontFamily:
@@ -629,12 +629,19 @@ const resolveTileDebugLabel = (
 	includeCoord: boolean,
 ): string => {
 	const parts = [
+		`L${item.lod}`,
 		item.state,
 		item.queued ? "Q1" : "Q0",
 		item.hasImage ? "I1" : "I0",
-		item.isFallback ? "FB1" : "FB0",
+		item.coverMode,
 		`E${item.lastRenderedEpoch}`,
 	];
+	if (item.coverSourceLod !== null) {
+		parts.push(`S${item.coverSourceLod}`);
+	}
+	if (item.isFallback) {
+		parts.push("FB1");
+	}
 	if (includeCoord) {
 		parts.unshift(`${item.tx},${item.ty}`);
 	}
@@ -753,6 +760,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	focusedNodeId,
 	snapGuidesScreen = EMPTY_SNAP_GUIDES_SCREEN,
 	suspendHover = false,
+	tileDebugEnabled = false,
 	onNodeClick,
 	onNodeDoubleClick,
 	onNodeDragStart,
@@ -974,16 +982,18 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 	useEffect(() => {
 		if (!supportsTilePipeline) return;
+		const addListener = camera.addListener;
+		const removeListener = camera.removeListener;
 		if (
-			typeof camera.addListener !== "function" ||
-			typeof camera.removeListener !== "function"
+			typeof addListener !== "function" ||
+			typeof removeListener !== "function"
 		) {
 			return;
 		}
 		const listenerId = tileListenerIdRef.current;
-		camera.addListener(listenerId, scheduleTileTick);
+		addListener(listenerId, scheduleTileTick);
 		return () => {
-			camera.removeListener(listenerId);
+			removeListener(listenerId);
 		};
 	}, [camera, scheduleTileTick, supportsTilePipeline]);
 
@@ -1438,6 +1448,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				stageHeight: height,
 				nowMs:
 					typeof performance !== "undefined" ? performance.now() : Date.now(),
+				debugEnabled: tileDebugEnabled,
 			});
 			latestTileFrameResultRef.current = frameResult;
 			staticTileDrawItems = frameResult.drawItems;
@@ -1503,7 +1514,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						/>
 					)}
 					<StaticTileLayer drawItems={staticTileDrawItems} />
-					{TILE_DEBUG_LAYER_ENABLED && (
+					{tileDebugEnabled && (
 						<TileDebugLayer debugItems={tileDebugItems} />
 					)}
 					<DragProxyLayer drawItems={dragProxyDrawItems} />
@@ -1614,6 +1625,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		staticTileSnapshot,
 		supportsTilePipeline,
 		tileTick,
+		tileDebugEnabled,
 		runtimeManager,
 		scenes,
 		selectedNodeIdSet,

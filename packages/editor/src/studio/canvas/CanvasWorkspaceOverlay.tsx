@@ -1,6 +1,6 @@
 import type { TimelineAsset, TimelineElement } from "core/element/types";
 import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
-import { PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
+import { Bug, PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import { AnimatePresence, motion, usePresence } from "motion/react";
 import type React from "react";
 import { useCallback, useContext, useEffect, useMemo } from "react";
@@ -57,6 +57,8 @@ interface CanvasWorkspaceOverlayProps {
 	onZoomIn: () => void;
 	onZoomOut: () => void;
 	onResetView: () => void;
+	tileDebugEnabled: boolean;
+	onToggleTileDebug: () => void;
 	sidebarExpanded: boolean;
 	sidebarRect: OverlayRect;
 	expandButtonOffsetX: number;
@@ -236,6 +238,8 @@ const CanvasWorkspaceOverlay = ({
 	onZoomIn,
 	onZoomOut,
 	onResetView,
+	tileDebugEnabled,
+	onToggleTileDebug,
 	sidebarExpanded,
 	sidebarRect,
 	expandButtonOffsetX,
@@ -400,6 +404,23 @@ const CanvasWorkspaceOverlay = ({
 						}`}
 					>
 						<SnapIcon className="size-4" />
+					</button>
+					<button
+						type="button"
+						onClick={onToggleTileDebug}
+						aria-label="Tile 调试"
+						aria-pressed={tileDebugEnabled}
+						data-testid="canvas-tile-debug-toggle"
+						className={`rounded px-2 py-1 transition ${
+							tileDebugEnabled
+								? "bg-white/10 text-sky-300 hover:bg-white/20"
+								: "bg-white/5 text-white/55 hover:bg-white/10"
+						}`}
+					>
+						<span className="flex items-center gap-1">
+							<Bug className="size-3" />
+							<span>Tile 调试</span>
+						</span>
 					</button>
 					<button
 						type="button"

@@ -80,6 +80,7 @@ interface MockInfiniteSkiaCanvasProps {
 	height: number;
 	nodes?: CanvasNode[];
 	camera?: { value: CameraState; _isSharedValue?: boolean };
+	tileDebugEnabled?: boolean;
 	focusedNodeId?: string | null;
 	selectedNodeIds?: string[];
 	snapGuidesScreen?: {
@@ -3942,6 +3943,15 @@ describe("CanvasWorkspace", () => {
 			vertical: [],
 			horizontal: [],
 		});
+	});
+
+	it("toolbar 的 Tile 调试按钮会透传到 InfiniteSkiaCanvas", () => {
+		render(<CanvasWorkspace />);
+		expect(getLatestInfiniteSkiaCanvasProps().tileDebugEnabled).toBe(false);
+		fireEvent.click(screen.getByRole("button", { name: "Tile 调试" }));
+		expect(getLatestInfiniteSkiaCanvasProps().tileDebugEnabled).toBe(true);
+		fireEvent.click(screen.getByRole("button", { name: "Tile 调试" }));
+		expect(getLatestInfiniteSkiaCanvasProps().tileDebugEnabled).toBe(false);
 	});
 
 	it("多选 bbox Alt 拖拽会复制整组并保持当前 active", () => {

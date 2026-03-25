@@ -5,6 +5,9 @@ const TILE_COORD_OFFSET = 1 << 20;
 const TILE_COORD_BITS = 21;
 const TILE_COORD_BASE = 2 ** TILE_COORD_BITS;
 const TILE_LOD_STRIDE = TILE_COORD_BASE * TILE_COORD_BASE;
+const TILE_LOD_BITS = 11;
+const TILE_LOD_BASE_VALUE = 2 ** TILE_LOD_BITS;
+const TILE_LOD_BIAS = TILE_LOD_BASE_VALUE / 2;
 
 const normalizeCoord = (value: number): number => {
 	const rounded = Math.round(value);
@@ -14,8 +17,8 @@ const normalizeCoord = (value: number): number => {
 
 const normalizeLod = (lod: number): number => {
 	const rounded = Math.round(lod);
-	const normalized = rounded % 0x800;
-	return normalized < 0 ? normalized + 0x800 : normalized;
+	const clamped = Math.max(-TILE_LOD_BIAS, Math.min(TILE_LOD_BIAS - 1, rounded));
+	return clamped + TILE_LOD_BIAS;
 };
 
 export const createTileAabb = (
@@ -59,13 +62,18 @@ export const encodeTileKey = ({ lod, tx, ty }: TileKey): number => {
 
 export const decodeTileKey = (key: number): TileKey => {
 	const safeKey = Math.max(0, Math.floor(key));
-	const lod = Math.floor(safeKey / TILE_LOD_STRIDE);
-	const remainder = safeKey - lod * TILE_LOD_STRIDE;
+	const encodedLod = Math.floor(safeKey / TILE_LOD_STRIDE);
+	const remainder = safeKey - encodedLod * TILE_LOD_STRIDE;
 	const txEncoded = Math.floor(remainder / TILE_COORD_BASE);
 	const tyEncoded = remainder - txEncoded * TILE_COORD_BASE;
 	const tx = txEncoded - TILE_COORD_OFFSET;
 	const ty = tyEncoded - TILE_COORD_OFFSET;
+	const lod = encodedLod - TILE_LOD_BIAS;
 	return { lod, tx, ty };
+};
+
+export const resolveTileWorldSize = (lod: number = TILE_LOD_BASE): number => {
+	return TILE_WORLD_SIZE_L0 * 2 ** -lod;
 };
 
 export const resolveTileWorldRect = (
@@ -73,7 +81,7 @@ export const resolveTileWorldRect = (
 	ty: number,
 	lod: number = TILE_LOD_BASE,
 ): TileAabb => {
-	const worldSize = TILE_WORLD_SIZE_L0 / 2 ** lod;
+	const worldSize = resolveTileWorldSize(lod);
 	const left = tx * worldSize;
 	const top = ty * worldSize;
 	const right = left + worldSize;

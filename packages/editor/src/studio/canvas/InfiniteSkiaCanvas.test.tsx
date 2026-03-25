@@ -417,6 +417,14 @@ const getDragProxyLayerElement = (tree: React.ReactNode): AnyElement | null => {
 	);
 };
 
+const getTileDebugLayerElement = (tree: React.ReactNode): AnyElement | null => {
+	return (
+		collectElements(tree, (element) => {
+			return resolveComponentNames(element.type).includes("TileDebugLayer");
+		})[0] ?? null
+	);
+};
+
 const getSelectionBoundsInteractionLayerElement = (
 	tree: React.ReactNode,
 ): AnyElement | null => {
@@ -1089,6 +1097,77 @@ describe("InfiniteSkiaCanvas", () => {
 			},
 		);
 		expect(firstLiveNodeIds).toContain("node-scene");
+	});
+
+	it("默认不渲染 TileDebugLayer", async () => {
+		tilePipelineMockState.enabled = true;
+		render(
+			<InfiniteSkiaCanvas
+				width={256}
+				height={256}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[
+					{
+						...createSceneNode("node-scene", 0),
+						thumbnail: {
+							assetId: "scene-thumb",
+							sourceSignature: "scene-v1",
+							frame: 0,
+							generatedAt: 1,
+							version: 1 as const,
+						},
+					},
+				]}
+				scenes={emptyScenes}
+				assets={[createImageAsset("scene-thumb")]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		expect(getTileDebugLayerElement(getLatestRenderTree())).toBeNull();
+	});
+
+	it("tileDebugEnabled 开启时渲染 TileDebugLayer", async () => {
+		tilePipelineMockState.enabled = true;
+		render(
+			<InfiniteSkiaCanvas
+				width={256}
+				height={256}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[
+					{
+						...createSceneNode("node-scene", 0),
+						thumbnail: {
+							assetId: "scene-thumb",
+							sourceSignature: "scene-v1",
+							frame: 0,
+							generatedAt: 1,
+							version: 1 as const,
+						},
+					},
+				]}
+				scenes={emptyScenes}
+				assets={[createImageAsset("scene-thumb")]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+				tileDebugEnabled={true}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		await waitFor(() => {
+			expect(getTileDebugLayerElement(getLatestRenderTree())).toBeTruthy();
+		});
 	});
 
 	it("多选拖拽时 drag proxy 跟随并保持节点顺序", async () => {

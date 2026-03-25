@@ -1,4 +1,8 @@
 export const TILE_LOD_BASE = 0 as const;
+export const TILE_LOD_MIN = -6;
+export const TILE_LOD_MAX = 2;
+export const TILE_LOD_HYSTERESIS = 0.2;
+export const TILE_LOD_STEP_PER_FRAME = 1;
 export const TILE_WORLD_SIZE_L0 = 512;
 export const TILE_PIXEL_SIZE = 512;
 export const TILE_OVERSCAN_TILES = 1;

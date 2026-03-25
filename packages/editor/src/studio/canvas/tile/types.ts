@@ -14,6 +14,8 @@ export type TileState = "EMPTY" | "QUEUED" | "RENDERING" | "READY" | "STALE";
 
 export type TilePriority = "HIGH" | "MID" | "LOW";
 
+export type TileCoverMode = "NONE" | "SELF" | "PARENT" | "CHILD" | "LIVE";
+
 export type TileInput =
 	| {
 			kind: "picture";
@@ -71,6 +73,7 @@ export interface RenderTask {
 export interface TileDrawItem {
 	key: number;
 	lod: number;
+	sourceLod?: number;
 	tx: number;
 	ty: number;
 	left: number;
@@ -92,17 +95,22 @@ export interface TileDebugItem {
 	hasImage: boolean;
 	lastRenderedEpoch: number;
 	isFallback: boolean;
+	coverSourceLod: number | null;
+	coverMode: TileCoverMode;
 }
 
 export interface TileSchedulerStats {
 	visibleCount: number;
 	readyVisibleCount: number;
 	fallbackNodeCount: number;
+	coverFallbackCount: number;
 	queuedCount: number;
 	renderingCount: number;
 	readyCount: number;
 	staleCount: number;
 	frameTaskCount: number;
+	targetLod: number;
+	composeLod: number;
 }
 
 export interface TileFrameResult {
@@ -118,4 +126,5 @@ export interface TileSchedulerFrameInput {
 	stageWidth: number;
 	stageHeight: number;
 	nowMs: number;
+	debugEnabled?: boolean;
 }

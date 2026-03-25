@@ -3,12 +3,15 @@ import {
 	TILE_CAMERA_EPSILON,
 	TILE_FRAME_BUDGET_MS,
 	TILE_LOD_BASE,
+	TILE_LOD_HYSTERESIS,
+	TILE_LOD_MAX,
+	TILE_LOD_MIN,
+	TILE_LOD_STEP_PER_FRAME,
 	TILE_MAX_READY_TILES,
 	TILE_MAX_TASKS_PER_TICK,
 	TILE_OVERSCAN_TILES,
 	TILE_PIXEL_SIZE,
 	TILE_SURFACE_POOL_SIZE,
-	TILE_WORLD_SIZE_L0,
 } from "./constants";
 import {
 	createTileAabb,
@@ -16,10 +19,12 @@ import {
 	encodeTileKey,
 	isTileAabbIntersected,
 	resolveTileWorldRect,
+	resolveTileWorldSize,
 } from "./geometry";
 import { PriorityTaskQueue, RenderTaskPool } from "./taskQueue";
 import type {
 	TileAabb,
+	TileCoverMode,
 	TileDebugItem,
 	TileDrawItem,
 	TileFrameResult,
@@ -36,27 +41,23 @@ interface TileSchedulerOptions {
 	maxReadyTiles?: number;
 }
 
+interface TileCoverInfo {
+	mode: TileCoverMode;
+	sourceLod: number | null;
+}
+
 const DEFAULT_TILE_STATS: TileSchedulerStats = {
 	visibleCount: 0,
 	readyVisibleCount: 0,
 	fallbackNodeCount: 0,
+	coverFallbackCount: 0,
 	queuedCount: 0,
 	renderingCount: 0,
 	readyCount: 0,
 	staleCount: 0,
 	frameTaskCount: 0,
-};
-
-const isCameraChanged = (
-	left: { x: number; y: number; zoom: number } | null,
-	right: { x: number; y: number; zoom: number },
-): boolean => {
-	if (!left) return true;
-	return (
-		Math.abs(left.x - right.x) > TILE_CAMERA_EPSILON ||
-		Math.abs(left.y - right.y) > TILE_CAMERA_EPSILON ||
-		Math.abs(left.zoom - right.zoom) > TILE_CAMERA_EPSILON
-	);
+	targetLod: TILE_LOD_BASE,
+	composeLod: TILE_LOD_BASE,
 };
 
 const disposeImage = (
@@ -73,6 +74,10 @@ const resolveNowMs = (): number => {
 		return performance.now();
 	}
 	return Date.now();
+};
+
+const clampLod = (lod: number): number => {
+	return Math.max(TILE_LOD_MIN, Math.min(TILE_LOD_MAX, Math.round(lod)));
 };
 
 export class StaticTileScheduler {
@@ -92,6 +97,14 @@ export class StaticTileScheduler {
 
 	private readonly visibleKeySet = new Set<number>();
 
+	private readonly visibleCoveredKeySet = new Set<number>();
+
+	private readonly visibleFallbackKeySet = new Set<number>();
+
+	private readonly visibleCoverInfoByKey = new Map<number, TileCoverInfo>();
+
+	private readonly drawSourceKeySet = new Set<number>();
+
 	private readonly drawItems: TileDrawItem[] = [];
 
 	private readonly debugItems: TileDebugItem[] = [];
@@ -99,10 +112,6 @@ export class StaticTileScheduler {
 	private readonly fallbackNodeIdSet = new Set<string>();
 
 	private readonly fallbackNodeIds: string[] = [];
-
-	private readonly visibleFallbackKeySet = new Set<number>();
-
-	private readonly visibleCoveredKeySet = new Set<number>();
 
 	private readonly surfaces: SkSurface[] = [];
 
@@ -114,7 +123,15 @@ export class StaticTileScheduler {
 
 	private tick = 0;
 
-	private cameraSnapshot: { x: number; y: number; zoom: number } | null = null;
+	private targetLod: number = TILE_LOD_BASE;
+
+	private composeLod: number = TILE_LOD_BASE;
+
+	private missingVisibleCount = 0;
+
+	private readyVisibleCount = 0;
+
+	private coverFallbackCount = 0;
 
 	constructor(options: TileSchedulerOptions = {}) {
 		this.frameBudgetMs = options.frameBudgetMs ?? TILE_FRAME_BUDGET_MS;
@@ -151,36 +168,48 @@ export class StaticTileScheduler {
 
 	markDirtyRect(rect: TileAabb | null): void {
 		if (!rect) return;
-		const tileSize = TILE_WORLD_SIZE_L0;
-		const txStart = Math.floor(rect.left / tileSize);
-		const txEnd = Math.floor((rect.right - Number.EPSILON) / tileSize);
-		const tyStart = Math.floor(rect.top / tileSize);
-		const tyEnd = Math.floor((rect.bottom - Number.EPSILON) / tileSize);
-		for (let ty = tyStart; ty <= tyEnd; ty += 1) {
-			for (let tx = txStart; tx <= txEnd; tx += 1) {
-				const key = encodeTileKey({
-					lod: TILE_LOD_BASE,
-					tx,
-					ty,
-				});
-				const record = this.ensureTileRecord(key);
-				if (record.state === "READY") {
-					record.state = "STALE";
-				}
-			}
+		for (const record of this.tileByKey.values()) {
+			if (record.state !== "READY" || !record.image) continue;
+			const tileRect = createTileAabb(
+				record.worldLeft,
+				record.worldTop,
+				record.worldLeft + record.worldSize,
+				record.worldTop + record.worldSize,
+			);
+			if (!isTileAabbIntersected(tileRect, rect)) continue;
+			record.state = "STALE";
 		}
 		this.bumpQueueEpoch();
 	}
 
 	beginFrame(input: TileSchedulerFrameInput): TileFrameResult {
 		this.tick += 1;
-		const cameraChanged = isCameraChanged(this.cameraSnapshot, input.camera);
-		if (cameraChanged) {
+		const debugEnabled = Boolean(input.debugEnabled);
+		const nextTargetLod = this.resolveTargetLod(input.camera.zoom);
+		const targetChanged = nextTargetLod !== this.targetLod;
+		this.targetLod = nextTargetLod;
+		const nextComposeLod = this.resolveComposeLod(nextTargetLod);
+		const composeChanged = nextComposeLod !== this.composeLod;
+		this.composeLod = nextComposeLod;
+		if (targetChanged || composeChanged) {
 			this.bumpQueueEpoch();
-			this.cameraSnapshot = {
-				x: input.camera.x,
-				y: input.camera.y,
-				zoom: input.camera.zoom,
+		}
+
+		if (this.inputs.length <= 0 && !debugEnabled) {
+			this.visibleKeys.length = 0;
+			this.drawItems.length = 0;
+			this.debugItems.length = 0;
+			this.fallbackNodeIds.length = 0;
+			this.missingVisibleCount = 0;
+			this.readyVisibleCount = 0;
+			this.coverFallbackCount = 0;
+			const stats = this.collectStats(0);
+			return {
+				drawItems: [],
+				debugItems: [],
+				fallbackNodeIds: [],
+				hasPendingWork: this.taskQueue.size() > 0,
+				stats,
 			};
 		}
 
@@ -193,16 +222,14 @@ export class StaticTileScheduler {
 		);
 		const frameTaskCount = this.runTasksWithinBudget(input.nowMs);
 		this.resolveDrawItemsAndFallback();
-		this.resolveDebugItems();
+		this.resolveDebugItems(debugEnabled);
 		this.evictLeastRecentlyUsedReadyTiles();
 		const stats = this.collectStats(frameTaskCount);
 		return {
 			drawItems: [...this.drawItems],
 			debugItems: [...this.debugItems],
 			fallbackNodeIds: [...this.fallbackNodeIds],
-			hasPendingWork:
-				this.taskQueue.size() > 0 ||
-				this.drawItems.length < this.visibleCoveredKeySet.size,
+			hasPendingWork: this.taskQueue.size() > 0,
 			stats,
 		};
 	}
@@ -223,6 +250,33 @@ export class StaticTileScheduler {
 		try {
 			this.imagePaint.dispose?.();
 		} catch {}
+	}
+
+	private resolveTargetLod(zoom: number): number {
+		const safeZoom = Math.max(zoom, TILE_CAMERA_EPSILON);
+		const zoomLevel = Math.log2(safeZoom);
+		const previous = this.targetLod;
+		const rounded = clampLod(Math.round(zoomLevel));
+		if (rounded === previous) return previous;
+		if (rounded > previous) {
+			const threshold = previous + 0.5 + TILE_LOD_HYSTERESIS;
+			if (zoomLevel < threshold) return previous;
+		}
+		if (rounded < previous) {
+			const threshold = previous - 0.5 - TILE_LOD_HYSTERESIS;
+			if (zoomLevel > threshold) return previous;
+		}
+		return rounded;
+	}
+
+	private resolveComposeLod(targetLod: number): number {
+		const previous = this.composeLod;
+		if (previous === targetLod) return previous;
+		const step = Math.max(1, TILE_LOD_STEP_PER_FRAME);
+		if (targetLod > previous) {
+			return clampLod(Math.min(targetLod, previous + step));
+		}
+		return clampLod(Math.max(targetLod, previous - step));
 	}
 
 	private clearTaskQueue(): void {
@@ -282,7 +336,7 @@ export class StaticTileScheduler {
 			return;
 		}
 		const safeZoom = Math.max(input.camera.zoom, TILE_CAMERA_EPSILON);
-		const tileSize = TILE_WORLD_SIZE_L0;
+		const tileSize = resolveTileWorldSize(this.composeLod);
 		const overscanWorld = tileSize * TILE_OVERSCAN_TILES;
 		const left = -input.camera.x - overscanWorld;
 		const right = input.stageWidth / safeZoom - input.camera.x + overscanWorld;
@@ -296,7 +350,7 @@ export class StaticTileScheduler {
 		for (let ty = tyStart; ty <= tyEnd; ty += 1) {
 			for (let tx = txStart; tx <= txEnd; tx += 1) {
 				const key = encodeTileKey({
-					lod: TILE_LOD_BASE,
+					lod: this.composeLod,
 					tx,
 					ty,
 				});
@@ -393,6 +447,11 @@ export class StaticTileScheduler {
 				this.taskPool.release(task);
 				continue;
 			}
+			if (!this.visibleCoveredKeySet.has(task.key)) {
+				record.state = record.image ? "READY" : "STALE";
+				this.taskPool.release(task);
+				continue;
+			}
 			this.renderTask(record);
 			frameTaskCount += 1;
 			this.taskPool.release(task);
@@ -485,36 +544,128 @@ export class StaticTileScheduler {
 		}
 	}
 
+	private pushDrawRecord(record: TileRecord): void {
+		if (!record.image) return;
+		if (this.drawSourceKeySet.has(record.key)) return;
+		this.drawSourceKeySet.add(record.key);
+		record.lastUsedTick = this.tick;
+		this.drawItems.push({
+			key: record.key,
+			lod: record.lod,
+			sourceLod: record.lod,
+			tx: record.tx,
+			ty: record.ty,
+			left: record.worldLeft,
+			top: record.worldTop,
+			size: record.worldSize,
+			image: record.image,
+		});
+	}
+
+	private resolveParentCoverRecord(
+		lod: number,
+		tx: number,
+		ty: number,
+	): TileRecord | null {
+		const parentLod = lod - 1;
+		if (parentLod < TILE_LOD_MIN) return null;
+		const parentKey = encodeTileKey({
+			lod: parentLod,
+			tx: Math.floor(tx / 2),
+			ty: Math.floor(ty / 2),
+		});
+		const parentRecord = this.tileByKey.get(parentKey);
+		if (!parentRecord || parentRecord.state !== "READY" || !parentRecord.image) {
+			return null;
+		}
+		return parentRecord;
+	}
+
+	private resolveChildCoverRecords(
+		lod: number,
+		tx: number,
+		ty: number,
+	): TileRecord[] | null {
+		const childLod = lod + 1;
+		if (childLod > TILE_LOD_MAX) return null;
+		const children: TileRecord[] = [];
+		for (let offsetY = 0; offsetY <= 1; offsetY += 1) {
+			for (let offsetX = 0; offsetX <= 1; offsetX += 1) {
+				const childKey = encodeTileKey({
+					lod: childLod,
+					tx: tx * 2 + offsetX,
+					ty: ty * 2 + offsetY,
+				});
+				const childRecord = this.tileByKey.get(childKey);
+				if (!childRecord || childRecord.state !== "READY" || !childRecord.image) {
+					return null;
+				}
+				children.push(childRecord);
+			}
+		}
+		return children;
+	}
+
 	private resolveDrawItemsAndFallback(): void {
 		this.drawItems.length = 0;
 		this.fallbackNodeIds.length = 0;
 		this.fallbackNodeIdSet.clear();
 		this.visibleKeySet.clear();
 		this.visibleFallbackKeySet.clear();
+		this.visibleCoverInfoByKey.clear();
+		this.drawSourceKeySet.clear();
+		this.missingVisibleCount = 0;
+		this.readyVisibleCount = 0;
+		this.coverFallbackCount = 0;
 
 		for (const key of this.visibleCoveredKeySet) {
 			this.visibleKeySet.add(key);
 			const record = this.tileByKey.get(key);
-			if (!record) continue;
-			record.lastUsedTick = this.tick;
-			if (record.state === "READY" && record.image) {
-				this.drawItems.push({
-					key,
-					lod: record.lod,
-					tx: record.tx,
-					ty: record.ty,
-					left: record.worldLeft,
-					top: record.worldTop,
-					size: record.worldSize,
-					image: record.image,
+			const decoded = record ?? decodeTileKey(key);
+			const lod = decoded.lod;
+			const tx = decoded.tx;
+			const ty = decoded.ty;
+			if (record && record.state === "READY" && record.image) {
+				this.pushDrawRecord(record);
+				this.readyVisibleCount += 1;
+				this.visibleCoverInfoByKey.set(key, {
+					mode: "SELF",
+					sourceLod: record.lod,
 				});
 				continue;
 			}
+
+			this.missingVisibleCount += 1;
+			const parentRecord = this.resolveParentCoverRecord(lod, tx, ty);
+			if (parentRecord) {
+				this.pushDrawRecord(parentRecord);
+				this.coverFallbackCount += 1;
+				this.visibleCoverInfoByKey.set(key, {
+					mode: "PARENT",
+					sourceLod: parentRecord.lod,
+				});
+				continue;
+			}
+
+			const childRecords = this.resolveChildCoverRecords(lod, tx, ty);
+			if (childRecords) {
+				for (const childRecord of childRecords) {
+					this.pushDrawRecord(childRecord);
+				}
+				this.coverFallbackCount += 1;
+				this.visibleCoverInfoByKey.set(key, {
+					mode: "CHILD",
+					sourceLod: childRecords[0]?.lod ?? lod + 1,
+				});
+				continue;
+			}
+
+			const worldRect = resolveTileWorldRect(tx, ty, lod);
 			const tileRect = createTileAabb(
-				record.worldLeft,
-				record.worldTop,
-				record.worldLeft + record.worldSize,
-				record.worldTop + record.worldSize,
+				worldRect.left,
+				worldRect.top,
+				worldRect.right,
+				worldRect.bottom,
 			);
 			let hasFallback = false;
 			for (const input of this.inputs) {
@@ -526,14 +677,34 @@ export class StaticTileScheduler {
 			}
 			if (hasFallback) {
 				this.visibleFallbackKeySet.add(key);
+				this.visibleCoverInfoByKey.set(key, {
+					mode: "LIVE",
+					sourceLod: null,
+				});
+				continue;
 			}
+			this.visibleCoverInfoByKey.set(key, {
+				mode: "NONE",
+				sourceLod: null,
+			});
 		}
+
+		this.drawItems.sort((left, right) => {
+			if (left.lod !== right.lod) return left.lod - right.lod;
+			if (left.top !== right.top) return left.top - right.top;
+			if (left.left !== right.left) return left.left - right.left;
+			return left.key - right.key;
+		});
 	}
 
-	private resolveDebugItems(): void {
+	private resolveDebugItems(debugEnabled: boolean): void {
 		this.debugItems.length = 0;
+		if (!debugEnabled) {
+			return;
+		}
 		for (const key of this.visibleKeys) {
 			const record = this.tileByKey.get(key);
+			const coverInfo = this.visibleCoverInfoByKey.get(key);
 			if (!record) {
 				const { lod, tx, ty } = decodeTileKey(key);
 				const worldRect = resolveTileWorldRect(tx, ty, lod);
@@ -549,7 +720,9 @@ export class StaticTileScheduler {
 					queued: false,
 					hasImage: false,
 					lastRenderedEpoch: 0,
-					isFallback: false,
+					isFallback: coverInfo?.mode === "LIVE",
+					coverSourceLod: coverInfo?.sourceLod ?? null,
+					coverMode: coverInfo?.mode ?? "NONE",
 				});
 				continue;
 			}
@@ -565,25 +738,30 @@ export class StaticTileScheduler {
 				queued: record.queued,
 				hasImage: Boolean(record.image),
 				lastRenderedEpoch: record.lastRenderedEpoch,
-				isFallback: this.visibleFallbackKeySet.has(key),
+				isFallback: coverInfo?.mode === "LIVE",
+				coverSourceLod: coverInfo?.sourceLod ?? null,
+				coverMode: coverInfo?.mode ?? "NONE",
 			});
 		}
 	}
 
 	private evictLeastRecentlyUsedReadyTiles(): void {
-		const readyRecords: TileRecord[] = [];
+		const evictableReadyRecords: TileRecord[] = [];
+		let totalReadyCount = 0;
 		for (const record of this.tileByKey.values()) {
 			if (record.state !== "READY" || !record.image) continue;
-			if (this.visibleKeySet.has(record.key)) continue;
-			readyRecords.push(record);
+			totalReadyCount += 1;
+			if (this.drawSourceKeySet.has(record.key)) continue;
+			evictableReadyRecords.push(record);
 		}
-		const totalReadyCount = readyRecords.length + this.drawItems.length;
 		if (totalReadyCount <= this.maxReadyTiles) {
 			return;
 		}
-		readyRecords.sort((left, right) => left.lastUsedTick - right.lastUsedTick);
+		evictableReadyRecords.sort(
+			(left, right) => left.lastUsedTick - right.lastUsedTick,
+		);
 		let removeCount = totalReadyCount - this.maxReadyTiles;
-		for (const record of readyRecords) {
+		for (const record of evictableReadyRecords) {
 			if (removeCount <= 0) break;
 			disposeImage(record.image);
 			record.image = null;
@@ -596,10 +774,13 @@ export class StaticTileScheduler {
 		const stats: TileSchedulerStats = {
 			...DEFAULT_TILE_STATS,
 			visibleCount: this.visibleKeys.length,
-			readyVisibleCount: this.drawItems.length,
+			readyVisibleCount: this.readyVisibleCount,
 			fallbackNodeCount: this.fallbackNodeIds.length,
+			coverFallbackCount: this.coverFallbackCount,
 			queuedCount: this.taskQueue.size(),
 			frameTaskCount,
+			targetLod: this.targetLod,
+			composeLod: this.composeLod,
 		};
 		for (const record of this.tileByKey.values()) {
 			if (record.state === "READY") {

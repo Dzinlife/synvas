@@ -1492,6 +1492,7 @@ const CanvasWorkspace = () => {
 	const isSidebarFocusMode = focusedNode?.type === "scene";
 	const [sidebarTab, setSidebarTab] = useState<CanvasSidebarTab>("nodes");
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
+	const [tileDebugEnabled, setTileDebugEnabled] = useState(false);
 
 	useEffect(() => {
 		setSidebarTab(focusedNodeId ? "element" : "nodes");
@@ -4649,18 +4650,19 @@ const CanvasWorkspace = () => {
 			}}
 			onDrop={handleCanvasDrop}
 		>
-				<InfiniteSkiaCanvas
-					width={stageSize.width}
-					height={stageSize.height}
-					camera={cameraSharedValue}
-					nodes={renderNodes}
-					scenes={currentProject.scenes}
-					assets={currentProject.assets}
-					activeNodeId={activeNodeId}
+			<InfiniteSkiaCanvas
+				width={stageSize.width}
+				height={stageSize.height}
+				camera={cameraSharedValue}
+				nodes={renderNodes}
+				scenes={currentProject.scenes}
+				assets={currentProject.assets}
+				activeNodeId={activeNodeId}
 				selectedNodeIds={normalizedSelectedNodeIds}
 				focusedNodeId={focusedNodeId}
 				snapGuidesScreen={snapGuidesScreen}
 				suspendHover={isCameraAnimating}
+				tileDebugEnabled={tileDebugEnabled}
 				onNodeDragStart={handleSkiaNodeDragStart}
 				onNodeDrag={handleSkiaNodeDrag}
 				onNodeDragEnd={handleSkiaNodeDragEnd}
@@ -4692,6 +4694,10 @@ const CanvasWorkspace = () => {
 				onZoomIn={() => handleZoomByStep(1.1)}
 				onZoomOut={() => handleZoomByStep(0.9)}
 				onResetView={handleResetView}
+				tileDebugEnabled={tileDebugEnabled}
+				onToggleTileDebug={() => {
+					setTileDebugEnabled((prev) => !prev);
+				}}
 				sidebarExpanded={sidebarExpanded}
 				sidebarRect={overlayLayout.sidebarRect}
 				expandButtonOffsetX={expandButtonOffsetX}
