@@ -63,6 +63,7 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 	create: () => ({ type: "image" }),
 	skiaRenderer: ImageNodeSkiaRenderer,
 	toolbar: ImageNodeToolbar,
+	focusable: true,
 	resolveResizeConstraints: ({ node, asset }) => {
 		const sourceWidth = asset?.meta?.sourceSize?.width ?? node.width;
 		const sourceHeight = asset?.meta?.sourceSize?.height ?? node.height;

@@ -63,6 +63,7 @@ import {
 	createTileAabb,
 	StaticTileScheduler,
 	TILE_CAMERA_EPSILON,
+	TILE_PIXEL_SIZE,
 	type TileAabb,
 	type TileDebugItem,
 	type TileDrawItem,
@@ -139,6 +140,7 @@ const TILE_DEBUG_FONT_SIZE_PX = 10;
 const TILE_DEBUG_TEXT_COLOR = "rgba(255,255,255,0.96)";
 const TILE_DEBUG_LABEL_OFFSET_X = 4;
 const TILE_DEBUG_LABEL_OFFSET_Y = 4;
+const TILE_DRAW_BLEED_TEXEL = 0.5;
 
 interface RasterImageCacheEntry {
 	uri: string;
@@ -617,14 +619,19 @@ const StaticTileLayerComponent = ({
 	return (
 		<Group pointerEvents="none">
 			{drawItems.map((tile) => {
+				// 按纹理 texel 轻微外扩，避免缩放/采样导致 tile 边界出现黑缝
+				const bleed = (tile.size / TILE_PIXEL_SIZE) * TILE_DRAW_BLEED_TEXEL;
+				const drawX = tile.left - bleed;
+				const drawY = tile.top - bleed;
+				const drawSize = tile.size + bleed * 2;
 				return (
 					<Image
 						key={`tile-ready-${tile.key}`}
 						image={tile.image}
-						x={tile.left}
-						y={tile.top}
-						width={tile.size}
-						height={tile.size}
+						x={drawX}
+						y={drawY}
+						width={drawSize}
+						height={drawSize}
 						fit="fill"
 						pointerEvents="none"
 					/>
