@@ -132,7 +132,6 @@ import {
 } from "./canvasWorkspaceUtils";
 import type {
 	CanvasNodeDragEvent,
-	CanvasNodePointerEvent,
 	CanvasNodeResizeAnchor,
 	CanvasNodeResizeEvent,
 	CanvasSelectionResizeEvent,
@@ -257,6 +256,38 @@ interface PendingCanvasClickSuppression {
 	suppressCanvas: boolean;
 }
 
+interface CanvasBasePointerSession {
+	pointerId: number;
+	pointerType: string;
+	gesture: "tap" | "node-drag" | "selection-drag" | "marquee";
+	startClientX: number;
+	startClientY: number;
+	startNodeId: string | null;
+	startTarget: EventTarget | null;
+}
+
+interface CanvasTapRecord {
+	nodeId: string;
+	pointerType: string;
+	clientX: number;
+	clientY: number;
+	timestampMs: number;
+}
+
+interface CanvasPointerTapMeta {
+	target: EventTarget | null;
+	clientX: number;
+	clientY: number;
+	button: number;
+	buttons: number;
+	shiftKey: boolean;
+	altKey: boolean;
+	metaKey: boolean;
+	ctrlKey: boolean;
+	pointerType: string;
+	timestampMs: number;
+}
+
 type CanvasGraphHistoryEntry = ClipboardCanvasGraphHistoryEntry;
 type PendingCameraCullUpdateKind = "pan" | "immediate" | "smooth";
 
@@ -277,7 +308,10 @@ interface CanvasRenderCullState {
 const CANVAS_MARQUEE_ACTIVATION_PX = 3;
 const CANVAS_ORTHOGONAL_DRAG_LOCK_THRESHOLD_PX = 6;
 const CANVAS_RENDER_CULL_OVERSCAN_SCREEN_PX = 160;
-const PAN_CULL_IDLE_FLUSH_MS = 300;
+const PAN_CULL_IDLE_FLUSH_MS = 160;
+const DOUBLE_TAP_MAX_DELAY_MS = 300;
+const DOUBLE_TAP_MAX_DISTANCE_PX = 24;
+const TAP_MOVE_THRESHOLD_PX = 3;
 const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
 	import.meta.env.DEV &&
 	(import.meta.env as Record<string, unknown>)
@@ -787,6 +821,7 @@ const CanvasWorkspace = () => {
 	const [contextMenuState, setContextMenuState] =
 		useState<CanvasContextMenuState>({ open: false });
 	const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+	const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 	const [selectedTimelineElement, setSelectedTimelineElement] =
 		useState<TimelineElement | null>(null);
 	const [marqueeRect, setMarqueeRect] = useState<CanvasMarqueeRect>({
@@ -814,6 +849,8 @@ const CanvasWorkspace = () => {
 	const marqueeSessionRef = useRef<CanvasMarqueeSession | null>(null);
 	const pendingClickSuppressionRef =
 		useRef<PendingCanvasClickSuppression | null>(null);
+	const pointerSessionRef = useRef<CanvasBasePointerSession | null>(null);
+	const lastTapRecordRef = useRef<CanvasTapRecord | null>(null);
 	const lastPointerClientRef = useRef<{ x: number; y: number } | null>(null);
 	const lastCanvasPointerWorldRef = useRef<{ x: number; y: number } | null>(
 		null,
@@ -910,20 +947,20 @@ const CanvasWorkspace = () => {
 			};
 		});
 	});
-	const schedulePanCullCommit = useEffectEvent((camera: CameraState) => {
-		panCullPendingCameraRef.current = camera;
-		if (!panCullBurstActiveRef.current) {
-			panCullBurstActiveRef.current = true;
-			flushPendingPanCullCommit();
-		}
-		clearPanCullIdleTimer();
-		if (typeof window === "undefined") return;
-		panCullIdleTimerRef.current = window.setTimeout(() => {
-			panCullIdleTimerRef.current = null;
-			panCullBurstActiveRef.current = false;
-			flushPendingPanCullCommit();
-		}, PAN_CULL_IDLE_FLUSH_MS);
-	});
+		const schedulePanCullCommit = useEffectEvent((camera: CameraState) => {
+			panCullPendingCameraRef.current = camera;
+			if (!panCullBurstActiveRef.current) {
+				panCullBurstActiveRef.current = true;
+				flushPendingPanCullCommit();
+			}
+			clearPanCullIdleTimer();
+			if (typeof window === "undefined") return;
+			panCullIdleTimerRef.current = window.setTimeout(() => {
+				panCullIdleTimerRef.current = null;
+				panCullBurstActiveRef.current = false;
+				flushPendingPanCullCommit();
+			}, PAN_CULL_IDLE_FLUSH_MS);
+		});
 	const lockRenderCullToViewportRect = useEffectEvent(
 		(viewportRect: CanvasViewportWorldRect | null, camera: CameraState) => {
 			clearPanCullIdleTimer();
@@ -978,21 +1015,21 @@ const CanvasWorkspace = () => {
 		pendingCameraCullUpdateKindRef.current = "smooth";
 		applyCamera(nextCamera);
 	});
-	const handleCameraStoreCameraChange = useEffectEvent(
-		(nextCamera: CameraState, previousCamera: CameraState) => {
-			const pendingKind = pendingCameraCullUpdateKindRef.current;
-			pendingCameraCullUpdateKindRef.current = null;
-			if (isCameraAnimating || pendingKind === "smooth") return;
-			const shouldThrottleCullUpdate =
-				pendingKind === "pan" &&
-				!isCameraStateEqual(previousCamera, nextCamera);
-			if (shouldThrottleCullUpdate) {
-				schedulePanCullCommit(nextCamera);
-				return;
-			}
-			commitLiveCullCamera(nextCamera);
-		},
-	);
+		const handleCameraStoreCameraChange = useEffectEvent(
+			(nextCamera: CameraState, previousCamera: CameraState) => {
+				const pendingKind = pendingCameraCullUpdateKindRef.current;
+				pendingCameraCullUpdateKindRef.current = null;
+				if (isCameraAnimating || pendingKind === "smooth") return;
+				const shouldThrottleCullUpdate =
+					pendingKind === "pan" &&
+					!isCameraStateEqual(previousCamera, nextCamera);
+				if (shouldThrottleCullUpdate) {
+					schedulePanCullCommit(nextCamera);
+					return;
+				}
+				commitLiveCullCamera(nextCamera);
+			},
+		);
 	const syncCameraFromStore = useEffectEvent(() => {
 		stopCameraAnimation();
 		applyInstantCameraWithCullIntent(getCanvasCamera(), "immediate");
@@ -1025,14 +1062,14 @@ const CanvasWorkspace = () => {
 		if (renderCullModeRef.current !== "locked") return;
 		commitLiveCullCamera(getCamera());
 	}, [commitLiveCullCamera, getCamera, stageSize.height, stageSize.width]);
-	useEffect(() => {
-		return () => {
-			clearPanCullIdleTimer();
-			panCullPendingCameraRef.current = null;
-			panCullBurstActiveRef.current = false;
-			pendingCameraCullUpdateKindRef.current = null;
-		};
-	}, [clearPanCullIdleTimer]);
+		useEffect(() => {
+			return () => {
+				clearPanCullIdleTimer();
+				panCullPendingCameraRef.current = null;
+				panCullBurstActiveRef.current = false;
+				pendingCameraCullUpdateKindRef.current = null;
+			};
+		}, []);
 	useEffect(() => {
 		const handleWindowMouseMove = (event: MouseEvent) => {
 			lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
@@ -1638,11 +1675,71 @@ const CanvasWorkspace = () => {
 		// 只有没被新的 mousedown 打断时，才把它视为上一轮手势的尾随 click。
 		return pendingSuppression;
 	}, [clearPendingClickSuppression]);
+	const commitHoveredNodeId = useCallback((nextNodeId: string | null) => {
+		setHoveredNodeId((prevNodeId) => {
+			if (prevNodeId === nextNodeId) return prevNodeId;
+			return nextNodeId;
+		});
+	}, []);
+	const clearHoveredNode = useCallback(() => {
+		commitHoveredNodeId(null);
+	}, [commitHoveredNodeId]);
+	const resolvePointerTapMeta = useCallback(
+		(event: React.PointerEvent<HTMLDivElement>): CanvasPointerTapMeta => {
+			return {
+				target: event.target,
+				clientX: event.clientX,
+				clientY: event.clientY,
+				button: event.button,
+				buttons: event.buttons,
+				shiftKey: event.shiftKey,
+				altKey: event.altKey,
+				metaKey: event.metaKey,
+				ctrlKey: event.ctrlKey,
+				pointerType: event.pointerType || "mouse",
+				timestampMs:
+					typeof event.timeStamp === "number" &&
+					Number.isFinite(event.timeStamp)
+						? event.timeStamp
+						: performance.now(),
+			};
+		},
+		[],
+	);
+	const isPointerTapWithinThreshold = useCallback(
+		(session: CanvasBasePointerSession, clientX: number, clientY: number) => {
+			return (
+				Math.abs(clientX - session.startClientX) <= TAP_MOVE_THRESHOLD_PX &&
+				Math.abs(clientY - session.startClientY) <= TAP_MOVE_THRESHOLD_PX
+			);
+		},
+		[],
+	);
+	const isDoubleTapRecordMatch = useCallback(
+		(previous: CanvasTapRecord | null, current: CanvasTapRecord) => {
+			if (!previous) return false;
+			if (previous.nodeId !== current.nodeId) return false;
+			if (previous.pointerType !== current.pointerType) return false;
+			const deltaTime = current.timestampMs - previous.timestampMs;
+			if (deltaTime < 0 || deltaTime > DOUBLE_TAP_MAX_DELAY_MS) return false;
+			const deltaX = current.clientX - previous.clientX;
+			const deltaY = current.clientY - previous.clientY;
+			return (
+				Math.hypot(deltaX, deltaY) <= DOUBLE_TAP_MAX_DISTANCE_PX
+			);
+		},
+		[],
+	);
 
 	useEffect(() => {
 		if (canvasSnapEnabled) return;
 		clearCanvasSnapGuides();
 	}, [canvasSnapEnabled, clearCanvasSnapGuides]);
+	useEffect(() => {
+		if (isCanvasInteractionLocked) {
+			clearHoveredNode();
+		}
+	}, [clearHoveredNode, isCanvasInteractionLocked]);
 	const isResizeAnchorHitAtWorldPoint = useCallback(
 		(worldX: number, worldY: number) => {
 			const currentZoom = getCamera().zoom;
@@ -1875,8 +1972,8 @@ const CanvasWorkspace = () => {
 	const handleContainerWheel = useCallback(
 		(event: WheelEvent) => {
 			if (isOverlayWheelTarget(event.target)) return;
-			event.preventDefault();
 			if (focusedNodeId) return;
+			event.preventDefault();
 			const currentCamera = getCamera();
 			if (event.ctrlKey || event.metaKey) {
 				const oldZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
@@ -2853,6 +2950,7 @@ const CanvasWorkspace = () => {
 			if (!canInteractNode) return;
 			clearCanvasMarquee();
 			clearCanvasSnapGuides();
+			clearHoveredNode();
 			if (node.locked) {
 				handleNodeActivate(node);
 				return;
@@ -2881,14 +2979,15 @@ const CanvasWorkspace = () => {
 				guideValues: null,
 			};
 		},
-		[
-			clearPendingClickSuppression,
-			clearCanvasMarquee,
-			clearCanvasSnapGuides,
-			focusedNodeId,
-			commitSelectedNodeIds,
-			handleNodeActivate,
-			isCanvasInteractionLocked,
+			[
+				clearPendingClickSuppression,
+				clearCanvasMarquee,
+				clearCanvasSnapGuides,
+				clearHoveredNode,
+				focusedNodeId,
+				commitSelectedNodeIds,
+				handleNodeActivate,
+				isCanvasInteractionLocked,
 			normalizedSelectedNodeIds.length,
 			resolveNodeResizeConstraints,
 		],
@@ -3177,16 +3276,17 @@ const CanvasWorkspace = () => {
 				dragSession.timelineDropMode = false;
 				dragSession.timelineDropTarget = null;
 			}
-			if (
-				Math.abs(event.movementX) + Math.abs(event.movementY) <
-				CANVAS_MARQUEE_ACTIVATION_PX
-			) {
-				return;
-			}
-			const timelineDropTarget = resolveCanvasNodeTimelineDropTarget(
-				dragSession,
-				pointerX,
-				pointerY,
+				if (
+					Math.abs(event.movementX) + Math.abs(event.movementY) <
+					CANVAS_MARQUEE_ACTIVATION_PX
+				) {
+					return;
+				}
+				clearPendingClickSuppression();
+				const timelineDropTarget = resolveCanvasNodeTimelineDropTarget(
+					dragSession,
+					pointerX,
+					pointerY,
 			);
 			if (timelineDropTarget?.zone === "timeline") {
 				resetCanvasDragSession(dragSession);
@@ -3313,14 +3413,15 @@ const CanvasWorkspace = () => {
 			}
 			dragSession.moved = dragSession.moved || didMove;
 		},
-		[
-			appendCanvasGraphBatch,
-			buildCanvasCopyEntries,
-			canvasSnapEnabled,
-			clearCanvasSnapGuides,
-			getCamera,
-			resetCanvasDragSession,
-			resolveCanvasNodeTimelineDropTarget,
+			[
+				appendCanvasGraphBatch,
+				buildCanvasCopyEntries,
+				canvasSnapEnabled,
+				clearCanvasSnapGuides,
+				clearPendingClickSuppression,
+				getCamera,
+				resetCanvasDragSession,
+				resolveCanvasNodeTimelineDropTarget,
 			resolveCanvasGuideValues,
 			startCanvasTimelineDropPreview,
 			stopCanvasTimelineDropPreview,
@@ -3438,142 +3539,6 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const handleSkiaNodeDragStart = useCallback(
-		(node: CanvasNode, event: CanvasNodeDragEvent) => {
-			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
-				return;
-			}
-			if (event.button !== 0) return;
-			clearCanvasMarquee();
-			clearCanvasSnapGuides();
-			clearPendingClickSuppression();
-			const canInteractNode =
-				!isCanvasInteractionLocked || node.id === focusedNodeId;
-			if (!canInteractNode) return;
-			if (node.locked) {
-				if (!event.shiftKey) {
-					handleNodeActivate(node);
-				}
-				return;
-			}
-			const isNodeSelected = normalizedSelectedNodeIds.includes(node.id);
-			const pendingSelectedNodeIds = isNodeSelected
-				? normalizedSelectedNodeIds
-				: event.shiftKey
-					? [...normalizedSelectedNodeIds, node.id]
-					: [node.id];
-			beginCanvasDragSession({
-				origin: "node",
-				anchorNodeId: node.id,
-				pendingSelectedNodeIds,
-				copyMode: event.altKey,
-			});
-		},
-		[
-			beginCanvasDragSession,
-			clearPendingClickSuppression,
-			clearCanvasMarquee,
-			clearCanvasSnapGuides,
-			focusedNodeId,
-			handleNodeActivate,
-			isCanvasInteractionLocked,
-			normalizedSelectedNodeIds,
-		],
-	);
-
-	const handleSkiaNodeDrag = useCallback(
-		(node: CanvasNode, event: CanvasNodeDragEvent) => {
-			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
-				return;
-			}
-			const dragSession = nodeDragSessionRef.current;
-			if (!dragSession) return;
-			if (
-				dragSession.origin !== "node" ||
-				dragSession.anchorNodeId !== node.id
-			) {
-				return;
-			}
-			applyCanvasDragEvent(event);
-		},
-		[applyCanvasDragEvent],
-	);
-
-	const handleSkiaNodeDragEnd = useCallback(
-		(node: CanvasNode, event: CanvasNodeDragEvent) => {
-			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
-				return;
-			}
-			const dragSession = nodeDragSessionRef.current;
-			if (!dragSession) return;
-			if (
-				dragSession.origin !== "node" ||
-				dragSession.anchorNodeId !== node.id
-			) {
-				return;
-			}
-			finishCanvasDragSession(event);
-		},
-		[finishCanvasDragSession],
-	);
-
-	const handleSelectionBoundsDragStart = useCallback(
-		(event: CanvasNodeDragEvent) => {
-			if (
-				nodeResizeSessionRef.current ||
-				selectionResizeSessionRef.current ||
-				event.button !== 0 ||
-				isCanvasInteractionLocked ||
-				normalizedSelectedNodeIds.length <= 1
-			) {
-				return;
-			}
-			clearCanvasMarquee();
-			clearCanvasSnapGuides();
-			setPendingClickSuppression({
-				suppressNode: false,
-				suppressCanvas: true,
-			});
-			beginCanvasDragSession({
-				origin: "selection",
-				anchorNodeId: null,
-				pendingSelectedNodeIds: normalizedSelectedNodeIds,
-				copyMode: event.altKey,
-			});
-		},
-		[
-			beginCanvasDragSession,
-			clearCanvasMarquee,
-			clearCanvasSnapGuides,
-			isCanvasInteractionLocked,
-			normalizedSelectedNodeIds,
-			setPendingClickSuppression,
-		],
-	);
-
-	const handleSelectionBoundsDrag = useCallback(
-		(event: CanvasNodeDragEvent) => {
-			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current) {
-				return;
-			}
-			const dragSession = nodeDragSessionRef.current;
-			if (!dragSession || dragSession.origin !== "selection") return;
-			applyCanvasDragEvent(event);
-		},
-		[applyCanvasDragEvent],
-	);
-
-	const handleSelectionBoundsDragEnd = useCallback(
-		(event: CanvasNodeDragEvent) => {
-			if (nodeResizeSessionRef.current || selectionResizeSessionRef.current)
-				return;
-			const dragSession = nodeDragSessionRef.current;
-			if (!dragSession || dragSession.origin !== "selection") return;
-			finishCanvasDragSession(event);
-		},
-		[finishCanvasDragSession],
-	);
-
 	const handleSelectionResizeStart = useCallback(
 		(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
 			if (nodeResizeSessionRef.current || nodeDragSessionRef.current) return;
@@ -3582,6 +3547,7 @@ const CanvasWorkspace = () => {
 			if (!selectedBounds || selectedNodes.length <= 1) return;
 			clearCanvasMarquee();
 			clearCanvasSnapGuides();
+			clearHoveredNode();
 			const resizeNodes = selectedNodes.filter((node) => !node.locked);
 			if (resizeNodes.length === 0) return;
 			setPendingClickSuppression({
@@ -3620,12 +3586,13 @@ const CanvasWorkspace = () => {
 				guideValues: null,
 			};
 		},
-		[
-			clearCanvasMarquee,
-			clearCanvasSnapGuides,
-			isCanvasInteractionLocked,
-			resolveNodeResizeConstraints,
-			selectedBounds,
+			[
+				clearCanvasMarquee,
+				clearCanvasSnapGuides,
+				clearHoveredNode,
+				isCanvasInteractionLocked,
+				resolveNodeResizeConstraints,
+				selectedBounds,
 			selectedNodes,
 			setPendingClickSuppression,
 		],
@@ -3900,26 +3867,18 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const handleSkiaNodeClick = useCallback(
-		(node: CanvasNode, event: CanvasNodePointerEvent) => {
-			const pendingSuppression = resolvePendingClickSuppression();
-			if (pendingSuppression?.suppressNode) {
-				return;
-			}
+	const handleNodeTapSelection = useCallback(
+		(node: CanvasNode, event: CanvasPointerTapMeta) => {
 			if (event.shiftKey) {
 				handleToggleNodeSelection(node);
 				return;
 			}
 			handleNodeActivate(node);
 		},
-		[
-			handleNodeActivate,
-			handleToggleNodeSelection,
-			resolvePendingClickSuppression,
-		],
+		[handleNodeActivate, handleToggleNodeSelection],
 	);
 
-	const handleSkiaNodeDoubleClick = useCallback(
+	const handleNodeDoubleActivate = useCallback(
 		(node: CanvasNode) => {
 			const canInteractNode =
 				!isCanvasInteractionLocked || node.id === focusedNodeId;
@@ -3955,12 +3914,12 @@ const CanvasWorkspace = () => {
 				commitSelectedNodeIds,
 				focusedNodeId,
 				getCamera,
-			isCanvasInteractionLocked,
-			setFocusedNode,
-			stageSize.height,
-			stageSize.width,
-		],
-	);
+				isCanvasInteractionLocked,
+				setFocusedNode,
+				stageSize.height,
+				stageSize.width,
+			],
+		);
 
 	const handleSidebarNodeSelect = useCallback(
 		(node: CanvasNode) => {
@@ -4153,92 +4112,292 @@ const CanvasWorkspace = () => {
 	);
 
 	const finishCanvasMarquee = useCallback(
-		(_event: MouseEvent) => {
+		(): boolean => {
 			const marqueeSession = marqueeSessionRef.current;
-			if (!marqueeSession) return;
+			if (!marqueeSession) return false;
 			marqueeSessionRef.current = null;
-			if (!marqueeSession.activated) {
-				updateMarqueeRectState({
-					visible: false,
-					x1: marqueeRectRef.current.x1,
+				if (!marqueeSession.activated) {
+					updateMarqueeRectState({
+						visible: false,
+						x1: marqueeRectRef.current.x1,
 					y1: marqueeRectRef.current.y1,
 					x2: marqueeRectRef.current.x2,
 					y2: marqueeRectRef.current.y2,
 				});
-				return;
-			}
-			setPendingClickSuppression({
-				suppressNode: true,
-				suppressCanvas: true,
-			});
-			applyMarqueeSelection(marqueeRectRef.current);
-			updateMarqueeRectState({
-				visible: false,
+				return false;
+				}
+				setPendingClickSuppression({
+					suppressNode: true,
+					suppressCanvas: false,
+				});
+				applyMarqueeSelection(marqueeRectRef.current);
+				updateMarqueeRectState({
+					visible: false,
 				x1: marqueeRectRef.current.x1,
 				y1: marqueeRectRef.current.y1,
 				x2: marqueeRectRef.current.x2,
 				y2: marqueeRectRef.current.y2,
 			});
+			return true;
 		},
 		[applyMarqueeSelection, setPendingClickSuppression, updateMarqueeRectState],
 	);
 
-	const handleCanvasMouseDown = useCallback(
-		(event: React.MouseEvent<HTMLDivElement>) => {
-			lastPointerClientRef.current = {
-				x: event.clientX,
-				y: event.clientY,
+	const resolveCanvasDragEventFromPointer = useCallback(
+		(
+			session: CanvasBasePointerSession,
+			event: React.PointerEvent<HTMLDivElement>,
+			last: boolean,
+		): CanvasNodeDragEvent => {
+			return {
+				clientX: event.clientX,
+				clientY: event.clientY,
+				button: event.button,
+				buttons: last ? 0 : event.buttons,
+				shiftKey: event.shiftKey,
+				altKey: event.altKey,
+				metaKey: event.metaKey,
+				ctrlKey: event.ctrlKey,
+				movementX: event.clientX - session.startClientX,
+				movementY: event.clientY - session.startClientY,
+				first: false,
+				last,
+				tap: isPointerTapWithinThreshold(session, event.clientX, event.clientY),
 			};
-			clearPendingClickSuppression();
-			clearCanvasSnapGuides();
-			if (event.button !== 0) return;
-			if (!isCanvasSurfaceTarget(event.target)) return;
-			if (isOverlayWheelTarget(event.target)) return;
-			if (isCanvasInteractionLocked) return;
-			const world = resolveWorldPoint(event.clientX, event.clientY);
-			lastCanvasPointerWorldRef.current = world;
-			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) return;
-			const node = getTopHitNode(world.x, world.y);
-			if (node) return;
-			if (
-				selectedBounds &&
-				normalizedSelectedNodeIds.length > 1 &&
-				isWorldPointInBounds(selectedBounds, world.x, world.y)
-			) {
+		},
+		[isPointerTapWithinThreshold],
+	);
+
+	const handleCanvasSurfaceTap = useCallback(
+		(tapMeta: CanvasPointerTapMeta) => {
+			const pendingSuppression = resolvePendingClickSuppression();
+			if (!isCanvasSurfaceTarget(tapMeta.target)) return;
+			if (isOverlayWheelTarget(tapMeta.target)) return;
+			if (isCanvasInteractionLocked) {
+				lastTapRecordRef.current = null;
 				return;
 			}
-			const local = resolveLocalPoint(event.clientX, event.clientY);
-			marqueeSessionRef.current = {
-				additive: event.shiftKey,
-				initialSelectedNodeIds: normalizedSelectedNodeIds,
-				startLocalX: local.x,
-				startLocalY: local.y,
-				activated: false,
-			};
-			updateMarqueeRectState({
-				visible: false,
-				x1: local.x,
-				y1: local.y,
-				x2: local.x,
-				y2: local.y,
-			});
+			const world = resolveWorldPoint(tapMeta.clientX, tapMeta.clientY);
+			lastCanvasPointerWorldRef.current = world;
+			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) {
+				lastTapRecordRef.current = null;
+				return;
+			}
+			const node = getTopHitNode(world.x, world.y);
+			const keepMultiSelectionBounds =
+				Boolean(
+					selectedBounds &&
+						normalizedSelectedNodeIds.length > 1 &&
+						isWorldPointInBounds(selectedBounds, world.x, world.y) &&
+						(!node || !normalizedSelectedNodeIds.includes(node.id)),
+				);
+			if (keepMultiSelectionBounds) {
+				lastTapRecordRef.current = null;
+				return;
+			}
+			if (node) {
+				if (pendingSuppression?.suppressNode) return;
+				handleNodeTapSelection(node, tapMeta);
+				if (tapMeta.shiftKey) {
+					lastTapRecordRef.current = null;
+					return;
+				}
+				const currentTap: CanvasTapRecord = {
+					nodeId: node.id,
+					pointerType: tapMeta.pointerType,
+					clientX: tapMeta.clientX,
+					clientY: tapMeta.clientY,
+					timestampMs: tapMeta.timestampMs,
+				};
+				if (isDoubleTapRecordMatch(lastTapRecordRef.current, currentTap)) {
+					handleNodeDoubleActivate(node);
+					lastTapRecordRef.current = null;
+					return;
+				}
+				lastTapRecordRef.current = currentTap;
+				return;
+			}
+			lastTapRecordRef.current = null;
+			if (pendingSuppression?.suppressCanvas) return;
+			if (tapMeta.shiftKey) return;
+			commitSelectedNodeIds([]);
 		},
 		[
-			clearCanvasSnapGuides,
+			commitSelectedNodeIds,
 			getTopHitNode,
-			isResizeAnchorHitAtWorldPoint,
+			handleNodeDoubleActivate,
+			handleNodeTapSelection,
+			isDoubleTapRecordMatch,
 			isCanvasInteractionLocked,
+			isResizeAnchorHitAtWorldPoint,
 			normalizedSelectedNodeIds,
-			resolveLocalPoint,
+			resolvePendingClickSuppression,
 			resolveWorldPoint,
 			selectedBounds,
-			updateMarqueeRectState,
-			clearPendingClickSuppression,
 		],
 	);
 
-	const handleCanvasMouseMove = useCallback(
-		(event: React.MouseEvent<HTMLDivElement>) => {
+	const updateHoverFromPointer = useCallback(
+		(target: EventTarget | null, clientX: number, clientY: number) => {
+			if (isCanvasInteractionLocked) {
+				clearHoveredNode();
+				return;
+			}
+			if (
+				nodeResizeSessionRef.current ||
+				selectionResizeSessionRef.current ||
+				nodeDragSessionRef.current ||
+				pointerSessionRef.current
+			) {
+				clearHoveredNode();
+				return;
+			}
+			if (!isCanvasSurfaceTarget(target) || isOverlayWheelTarget(target)) {
+				clearHoveredNode();
+				return;
+			}
+			const world = resolveWorldPoint(clientX, clientY);
+			const node = getTopHitNode(world.x, world.y);
+			commitHoveredNodeId(node?.id ?? null);
+		},
+		[
+			clearHoveredNode,
+			commitHoveredNodeId,
+			getTopHitNode,
+			isCanvasInteractionLocked,
+			resolveWorldPoint,
+		],
+	);
+
+	const handleCanvasPointerDown = useCallback(
+		(event: React.PointerEvent<HTMLDivElement>) => {
+				lastPointerClientRef.current = {
+					x: event.clientX,
+					y: event.clientY,
+				};
+				const world = resolveWorldPoint(event.clientX, event.clientY);
+				lastCanvasPointerWorldRef.current = world;
+				clearCanvasSnapGuides();
+			if (event.button !== 0 || !event.isPrimary) return;
+			if (!isCanvasSurfaceTarget(event.target)) return;
+			if (isOverlayWheelTarget(event.target)) return;
+			if (pointerSessionRef.current) return;
+			if (isCanvasInteractionLocked) {
+				clearHoveredNode();
+				return;
+			}
+			const canvasSurface = event.currentTarget;
+			try {
+				canvasSurface.setPointerCapture(event.pointerId);
+			} catch {}
+			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) {
+					clearHoveredNode();
+					pointerSessionRef.current = {
+						pointerId: event.pointerId,
+						pointerType: event.pointerType || "mouse",
+						gesture: "tap",
+						startClientX: event.clientX,
+						startClientY: event.clientY,
+						startNodeId: null,
+						startTarget: event.target,
+					};
+					return;
+				}
+			const node = getTopHitNode(world.x, world.y);
+			const isInSelectionBounds =
+				Boolean(
+					selectedBounds &&
+						normalizedSelectedNodeIds.length > 1 &&
+						isWorldPointInBounds(selectedBounds, world.x, world.y),
+				);
+			clearCanvasMarquee();
+			let gesture: CanvasBasePointerSession["gesture"] = "tap";
+				if (isInSelectionBounds) {
+					const didStartSelectionDrag = beginCanvasDragSession({
+						origin: "selection",
+						anchorNodeId: null,
+						pendingSelectedNodeIds: normalizedSelectedNodeIds,
+						copyMode: event.altKey,
+					});
+					if (didStartSelectionDrag) {
+						const existingSuppression = pendingClickSuppressionRef.current;
+						setPendingClickSuppression({
+							suppressNode: existingSuppression?.suppressNode ?? false,
+							suppressCanvas: true,
+						});
+						gesture = "selection-drag";
+					}
+			} else if (node && !node.locked) {
+				const isNodeSelected = normalizedSelectedNodeIds.includes(node.id);
+				const pendingSelectedNodeIds = isNodeSelected
+					? normalizedSelectedNodeIds
+					: event.shiftKey
+						? [...normalizedSelectedNodeIds, node.id]
+						: [node.id];
+				const didStartDrag = beginCanvasDragSession({
+					origin: "node",
+					anchorNodeId: node.id,
+					pendingSelectedNodeIds,
+					copyMode: event.altKey,
+				});
+				if (didStartDrag) {
+					gesture = "node-drag";
+				}
+			} else if (node?.locked) {
+				if (!event.shiftKey) {
+					handleNodeActivate(node);
+				}
+			} else if (!node) {
+				const local = resolveLocalPoint(event.clientX, event.clientY);
+				marqueeSessionRef.current = {
+					additive: event.shiftKey,
+					initialSelectedNodeIds: normalizedSelectedNodeIds,
+					startLocalX: local.x,
+					startLocalY: local.y,
+					activated: false,
+				};
+				updateMarqueeRectState({
+					visible: false,
+					x1: local.x,
+					y1: local.y,
+					x2: local.x,
+					y2: local.y,
+				});
+				gesture = "marquee";
+			}
+				if (gesture !== "tap") {
+					clearHoveredNode();
+				}
+				pointerSessionRef.current = {
+					pointerId: event.pointerId,
+					pointerType: event.pointerType || "mouse",
+					gesture,
+					startClientX: event.clientX,
+					startClientY: event.clientY,
+					startNodeId: isInSelectionBounds ? null : (node?.id ?? null),
+					startTarget: event.target,
+				};
+		},
+			[
+				beginCanvasDragSession,
+				clearCanvasMarquee,
+				clearCanvasSnapGuides,
+				clearHoveredNode,
+				getTopHitNode,
+				handleNodeActivate,
+				isResizeAnchorHitAtWorldPoint,
+				isCanvasInteractionLocked,
+				normalizedSelectedNodeIds,
+				resolveLocalPoint,
+				resolveWorldPoint,
+				selectedBounds,
+			setPendingClickSuppression,
+			updateMarqueeRectState,
+		],
+	);
+
+	const handleCanvasPointerMove = useCallback(
+		(event: React.PointerEvent<HTMLDivElement>) => {
 			lastPointerClientRef.current = {
 				x: event.clientX,
 				y: event.clientY,
@@ -4247,87 +4406,205 @@ const CanvasWorkspace = () => {
 				event.clientX,
 				event.clientY,
 			);
-			const marqueeSession = marqueeSessionRef.current;
-			if (!marqueeSession) return;
-			const local = resolveLocalPoint(event.clientX, event.clientY);
-			const deltaX = local.x - marqueeSession.startLocalX;
-			const deltaY = local.y - marqueeSession.startLocalY;
-			const hasActivated =
-				marqueeSession.activated ||
-				Math.abs(deltaX) >= CANVAS_MARQUEE_ACTIVATION_PX ||
-				Math.abs(deltaY) >= CANVAS_MARQUEE_ACTIVATION_PX;
-			marqueeSession.activated = hasActivated;
-			const nextRect: CanvasMarqueeRect = {
-				visible: hasActivated,
-				x1: marqueeSession.startLocalX,
-				y1: marqueeSession.startLocalY,
-				x2: local.x,
-				y2: local.y,
-			};
-			updateMarqueeRectState(nextRect);
-			if (!hasActivated) return;
-			applyMarqueeSelection(nextRect);
+			const pointerSession = pointerSessionRef.current;
+			if (pointerSession && pointerSession.pointerId === event.pointerId) {
+				if (
+					isCanvasInteractionLocked ||
+					nodeResizeSessionRef.current ||
+					selectionResizeSessionRef.current
+				) {
+					clearHoveredNode();
+					return;
+				}
+				if (
+					pointerSession.gesture === "node-drag" ||
+					pointerSession.gesture === "selection-drag"
+				) {
+					const dragSession = nodeDragSessionRef.current;
+					if (dragSession) {
+						applyCanvasDragEvent(
+							resolveCanvasDragEventFromPointer(pointerSession, event, false),
+						);
+					}
+					clearHoveredNode();
+					return;
+				}
+				if (pointerSession.gesture === "marquee") {
+					const marqueeSession = marqueeSessionRef.current;
+					if (!marqueeSession) {
+						clearHoveredNode();
+						return;
+					}
+					const local = resolveLocalPoint(event.clientX, event.clientY);
+					const deltaX = local.x - marqueeSession.startLocalX;
+					const deltaY = local.y - marqueeSession.startLocalY;
+						const hasActivated =
+							marqueeSession.activated ||
+							Math.abs(deltaX) >= CANVAS_MARQUEE_ACTIVATION_PX ||
+							Math.abs(deltaY) >= CANVAS_MARQUEE_ACTIVATION_PX;
+						marqueeSession.activated = hasActivated;
+						if (hasActivated) {
+							clearPendingClickSuppression();
+						}
+						const nextRect: CanvasMarqueeRect = {
+							visible: hasActivated,
+							x1: marqueeSession.startLocalX,
+						y1: marqueeSession.startLocalY,
+						x2: local.x,
+						y2: local.y,
+					};
+					updateMarqueeRectState(nextRect);
+					if (hasActivated) {
+						applyMarqueeSelection(nextRect);
+					}
+					clearHoveredNode();
+					return;
+				}
+			}
+			updateHoverFromPointer(event.target, event.clientX, event.clientY);
 		},
-		[
-			applyMarqueeSelection,
+			[
+				applyCanvasDragEvent,
+				applyMarqueeSelection,
+				clearHoveredNode,
+				clearPendingClickSuppression,
+				isCanvasInteractionLocked,
+				resolveCanvasDragEventFromPointer,
 			resolveLocalPoint,
 			resolveWorldPoint,
+			updateHoverFromPointer,
 			updateMarqueeRectState,
 		],
 	);
 
-	useEffect(() => {
-		const handleWindowMouseUp = (event: MouseEvent) => {
-			finishCanvasMarquee(event);
-		};
-		window.addEventListener("mouseup", handleWindowMouseUp);
-		return () => {
-			window.removeEventListener("mouseup", handleWindowMouseUp);
-		};
-	}, [finishCanvasMarquee]);
-
-	const handleCanvasClick = useCallback(
-		(event: React.MouseEvent<HTMLDivElement>) => {
+	const handleCanvasPointerUp = useCallback(
+		(event: React.PointerEvent<HTMLDivElement>) => {
 			lastPointerClientRef.current = {
 				x: event.clientX,
 				y: event.clientY,
 			};
-			const pendingSuppression = resolvePendingClickSuppression();
-			if (
-				pendingSuppression &&
-				(pendingSuppression.suppressCanvas || pendingSuppression.suppressNode)
-			) {
-				return;
-			}
-			if (!isCanvasSurfaceTarget(event.target)) return;
-			if (isOverlayWheelTarget(event.target)) return;
-			if (isCanvasInteractionLocked) return;
-			if (event.shiftKey) return;
 			const world = resolveWorldPoint(event.clientX, event.clientY);
 			lastCanvasPointerWorldRef.current = world;
-			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) return;
-			const node = getTopHitNode(world.x, world.y);
-			if (node) return;
-			if (
-				selectedBounds &&
-				normalizedSelectedNodeIds.length > 1 &&
-				isWorldPointInBounds(selectedBounds, world.x, world.y)
-			) {
+			const pointerSession = pointerSessionRef.current;
+			if (!pointerSession || pointerSession.pointerId !== event.pointerId) {
+				updateHoverFromPointer(event.target, event.clientX, event.clientY);
 				return;
 			}
-			commitSelectedNodeIds([]);
+			pointerSessionRef.current = null;
+			try {
+				if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+					event.currentTarget.releasePointerCapture(event.pointerId);
+				}
+			} catch {}
+				const tapMeta = {
+					...resolvePointerTapMeta(event),
+					target: pointerSession.startTarget,
+				};
+			const isTap = isPointerTapWithinThreshold(
+				pointerSession,
+				event.clientX,
+				event.clientY,
+			);
+			if (
+				pointerSession.gesture === "node-drag" ||
+				pointerSession.gesture === "selection-drag"
+			) {
+				const dragSession = nodeDragSessionRef.current;
+				const shouldResolveTap =
+					isTap &&
+					Boolean(
+						dragSession &&
+							!dragSession.timelineDropMode &&
+							!dragSession.moved &&
+							dragSession.origin ===
+								(pointerSession.gesture === "node-drag"
+									? "node"
+									: "selection"),
+					);
+				if (dragSession) {
+					finishCanvasDragSession(
+						resolveCanvasDragEventFromPointer(pointerSession, event, true),
+					);
+				}
+				if (
+					shouldResolveTap &&
+					(pointerSession.gesture !== "node-drag" ||
+						(pointerSession.startNodeId &&
+							getTopHitNode(world.x, world.y)?.id === pointerSession.startNodeId))
+				) {
+					handleCanvasSurfaceTap(tapMeta);
+				}
+				updateHoverFromPointer(event.target, event.clientX, event.clientY);
+				return;
+			}
+			if (pointerSession.gesture === "marquee") {
+				const didCommitMarquee = finishCanvasMarquee();
+				if (!didCommitMarquee && isTap) {
+					handleCanvasSurfaceTap(tapMeta);
+				}
+				updateHoverFromPointer(event.target, event.clientX, event.clientY);
+				return;
+			}
+			if (isTap) {
+				handleCanvasSurfaceTap(tapMeta);
+			}
+			updateHoverFromPointer(event.target, event.clientX, event.clientY);
 		},
 		[
-			commitSelectedNodeIds,
+			finishCanvasDragSession,
+			finishCanvasMarquee,
 			getTopHitNode,
-			isResizeAnchorHitAtWorldPoint,
-			isCanvasInteractionLocked,
-			normalizedSelectedNodeIds.length,
+			handleCanvasSurfaceTap,
+			isPointerTapWithinThreshold,
+			resolveCanvasDragEventFromPointer,
+			resolvePointerTapMeta,
 			resolveWorldPoint,
-			resolvePendingClickSuppression,
-			selectedBounds,
+			updateHoverFromPointer,
 		],
 	);
+
+	const handleCanvasPointerCancel = useCallback(
+		(event: React.PointerEvent<HTMLDivElement>) => {
+			const pointerSession = pointerSessionRef.current;
+			if (!pointerSession || pointerSession.pointerId !== event.pointerId) {
+				clearHoveredNode();
+				return;
+			}
+			pointerSessionRef.current = null;
+			lastTapRecordRef.current = null;
+			try {
+				if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+					event.currentTarget.releasePointerCapture(event.pointerId);
+				}
+			} catch {}
+			if (
+				pointerSession.gesture === "node-drag" ||
+				pointerSession.gesture === "selection-drag"
+			) {
+				if (nodeDragSessionRef.current) {
+					finishCanvasDragSession(
+						resolveCanvasDragEventFromPointer(pointerSession, event, true),
+					);
+				}
+				clearHoveredNode();
+				return;
+			}
+			if (pointerSession.gesture === "marquee") {
+				finishCanvasMarquee();
+			}
+			clearHoveredNode();
+		},
+		[
+			clearHoveredNode,
+			finishCanvasDragSession,
+			finishCanvasMarquee,
+			resolveCanvasDragEventFromPointer,
+		],
+	);
+
+	const handleCanvasPointerLeave = useCallback(() => {
+		clearHoveredNode();
+	}, [clearHoveredNode]);
 
 	const handleCanvasContextMenu = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
@@ -4337,8 +4614,8 @@ const CanvasWorkspace = () => {
 			};
 			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
-			event.preventDefault();
 			if (isCanvasInteractionLocked) return;
+			event.preventDefault();
 			const world = resolveWorldPoint(event.clientX, event.clientY);
 			lastCanvasPointerWorldRef.current = world;
 			const node = getTopHitNode(world.x, world.y);
@@ -4635,20 +4912,22 @@ const CanvasWorkspace = () => {
 			(overlayLayout.drawerRect.y + overlayLayout.drawerRect.height),
 	);
 
-	return (
-		<div
-			ref={containerRef}
-			data-testid="canvas-workspace"
-			role="application"
-			className="relative h-full w-full overflow-hidden"
-			onMouseOverCapture={handleEditorMouseOverCapture}
-			onMouseDown={handleCanvasMouseDown}
-			onMouseMove={handleCanvasMouseMove}
-			onClick={handleCanvasClick}
-			onContextMenu={handleCanvasContextMenu}
-			onDragOver={(event) => {
-				event.preventDefault();
-				event.dataTransfer.dropEffect = "copy";
+		return (
+			<div
+				ref={containerRef}
+				data-testid="canvas-workspace"
+				role="application"
+				className="relative h-full w-full overflow-hidden"
+				onMouseOverCapture={handleEditorMouseOverCapture}
+				onPointerDown={handleCanvasPointerDown}
+				onPointerMove={handleCanvasPointerMove}
+				onPointerUp={handleCanvasPointerUp}
+				onPointerCancel={handleCanvasPointerCancel}
+				onPointerLeave={handleCanvasPointerLeave}
+				onContextMenu={handleCanvasContextMenu}
+				onDragOver={(event) => {
+					event.preventDefault();
+					event.dataTransfer.dropEffect = "copy";
 			}}
 			onDrop={handleCanvasDrop}
 		>
@@ -4659,25 +4938,18 @@ const CanvasWorkspace = () => {
 				nodes={renderNodes}
 				tileSourceNodes={sortedNodes}
 				scenes={currentProject.scenes}
-				assets={currentProject.assets}
-				activeNodeId={activeNodeId}
-				selectedNodeIds={normalizedSelectedNodeIds}
-				focusedNodeId={focusedNodeId}
-				snapGuidesScreen={snapGuidesScreen}
-				suspendHover={isCameraAnimating}
-				tileDebugEnabled={tileDebugEnabled}
-				tileInputMode={tileInputMode}
-				onNodeDragStart={handleSkiaNodeDragStart}
-				onNodeDrag={handleSkiaNodeDrag}
-				onNodeDragEnd={handleSkiaNodeDragEnd}
-				onNodeResize={handleSkiaNodeResize}
-				onSelectionDragStart={handleSelectionBoundsDragStart}
-				onSelectionDrag={handleSelectionBoundsDrag}
-				onSelectionDragEnd={handleSelectionBoundsDragEnd}
-				onSelectionResize={handleSelectionResize}
-				onNodeClick={handleSkiaNodeClick}
-				onNodeDoubleClick={handleSkiaNodeDoubleClick}
-			/>
+					assets={currentProject.assets}
+					activeNodeId={activeNodeId}
+					selectedNodeIds={normalizedSelectedNodeIds}
+					focusedNodeId={focusedNodeId}
+					hoveredNodeId={hoveredNodeId}
+					snapGuidesScreen={snapGuidesScreen}
+					suspendHover={isCameraAnimating}
+					tileDebugEnabled={tileDebugEnabled}
+					tileInputMode={tileInputMode}
+					onNodeResize={handleSkiaNodeResize}
+					onSelectionResize={handleSelectionResize}
+				/>
 			{marqueeRect.visible && (
 				<div
 					data-testid="canvas-selection-rect"

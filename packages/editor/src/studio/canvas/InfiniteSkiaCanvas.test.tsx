@@ -4,7 +4,6 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { StudioProject, VideoCanvasNode } from "core/studio/types";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
@@ -347,15 +346,6 @@ const getOverlayElement = (tree: React.ReactNode): AnyElement | null => {
 	);
 };
 
-const getLabelLayerElement = (tree: React.ReactNode): AnyElement | null => {
-	return (
-		collectElements(
-			tree,
-			(element) => element.type === CanvasNodeLabelLayer,
-		)[0] ?? null
-	);
-};
-
 const resolveComponentNames = (type: React.ElementType): string[] => {
 	if (typeof type === "function") {
 		return [type.displayName, type.name].filter(Boolean) as string[];
@@ -391,28 +381,12 @@ const getCanvasNodeRenderItems = (tree: React.ReactNode): AnyElement[] => {
 	});
 };
 
-const getCanvasNodeInteractionItems = (tree: React.ReactNode): AnyElement[] => {
-	return collectElements(tree, (element) => {
-		return resolveComponentNames(element.type).includes(
-			"CanvasNodeInteractionItem",
-		);
-	});
-};
-
 const getStaticTileLayerElement = (
 	tree: React.ReactNode,
 ): AnyElement | null => {
 	return (
 		collectElements(tree, (element) => {
 			return resolveComponentNames(element.type).includes("StaticTileLayer");
-		})[0] ?? null
-	);
-};
-
-const getDragProxyLayerElement = (tree: React.ReactNode): AnyElement | null => {
-	return (
-		collectElements(tree, (element) => {
-			return resolveComponentNames(element.type).includes("DragProxyLayer");
 		})[0] ?? null
 	);
 };
@@ -425,16 +399,10 @@ const getTileDebugLayerElement = (tree: React.ReactNode): AnyElement | null => {
 	);
 };
 
-const getSelectionBoundsInteractionLayerElement = (
-	tree: React.ReactNode,
-): AnyElement | null => {
-	return (
-		collectElements(tree, (element) => {
-			return resolveComponentNames(element.type).includes(
-				"SelectionBoundsInteractionLayer",
-			);
-		})[0] ?? null
-	);
+const hasNamedComponent = (tree: React.ReactNode, name: string): boolean => {
+	return collectElements(tree, (element) => {
+		return resolveComponentNames(element.type).includes(name);
+	}).length > 0;
 };
 
 const createVideoNode = (
@@ -512,25 +480,6 @@ const createCameraShared = (camera: { x: number; y: number; zoom: number }) => {
 		},
 	};
 };
-
-const createDragEvent = (
-	movementX: number,
-	movementY: number,
-): CanvasNodeDragEvent => ({
-	clientX: 0,
-	clientY: 0,
-	button: 0,
-	buttons: 1,
-	shiftKey: false,
-	altKey: false,
-	metaKey: false,
-	ctrlKey: false,
-	movementX,
-	movementY,
-	first: false,
-	last: false,
-	tap: false,
-});
 
 const emptyScenes: StudioProject["scenes"] = {};
 
@@ -629,45 +578,44 @@ describe("InfiniteSkiaCanvas", () => {
 	});
 
 	it("hover 节点会透传到 overlay", async () => {
-		render(
+		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
+		const nodes = [createVideoNode("node-a", 0), createVideoNode("node-b", 1)];
+		const { rerender } = render(
 			<InfiniteSkiaCanvas
 				width={800}
 				height={600}
-				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
-				nodes={[createVideoNode("node-a", 0), createVideoNode("node-b", 1)]}
+				camera={camera}
+				nodes={nodes}
 				scenes={emptyScenes}
 				assets={[]}
 				activeNodeId="node-a"
 				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
+				hoveredNodeId={null}
 			/>,
 		);
 
 		await waitFor(() => {
 			expect(rootRenderSpy).toHaveBeenCalled();
 		});
-		const initialRenderCount = rootRenderSpy.mock.calls.length;
-		const tree = getLatestRenderTree();
-		const nodeItems = getCanvasNodeInteractionItems(tree);
-		const targetNodeItem = nodeItems.find(
-			(nodeItem) =>
-				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
-				"node-b",
+		const initialOverlayProps = getElementProps<{
+			hoverNode?: { id: string } | null;
+		}>(getOverlayElement(getLatestRenderTree()));
+		expect(initialOverlayProps?.hoverNode ?? null).toBeNull();
+		rerender(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={camera}
+				nodes={nodes}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId={null}
+				hoveredNodeId="node-b"
+			/>,
 		);
-		expect(targetNodeItem).toBeTruthy();
-		const targetNodeItemProps = getElementProps<{
-			onPointerEnter?: (nodeId: string) => void;
-		}>(targetNodeItem);
-
-		act(() => {
-			targetNodeItemProps?.onPointerEnter?.("node-b");
-		});
-
-		await waitFor(() => {
-			expect(rootRenderSpy.mock.calls.length).toBeGreaterThan(
-				initialRenderCount,
-			);
-		});
 
 		const nextTree = getLatestRenderTree();
 		const overlayElement = getOverlayElement(nextTree);
@@ -680,7 +628,7 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(overlayProps?.hoverNode?.id).toBe("node-b");
 	});
 
-	it("多选状态会透传到交互层与 overlay", async () => {
+	it("多选状态会透传到 overlay", async () => {
 		render(
 			<InfiniteSkiaCanvas
 				width={800}
@@ -696,6 +644,7 @@ describe("InfiniteSkiaCanvas", () => {
 				activeNodeId="node-b"
 				selectedNodeIds={["node-a", "node-b"]}
 				focusedNodeId={null}
+				hoveredNodeId={null}
 			/>,
 		);
 
@@ -704,13 +653,6 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const interactionNodeIds = getCanvasNodeInteractionItems(tree).map(
-			(nodeItem) => {
-				return getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id;
-			},
-		);
-		expect(interactionNodeIds).toEqual(["node-a", "node-b", "node-c"]);
-
 		const overlayProps = getElementProps<{
 			selectedNodes?: Array<{ id: string }>;
 		}>(getOverlayElement(tree));
@@ -772,7 +714,7 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(overlayElement).toBeNull();
 	});
 
-	it("正常模式会挂载 node label layer", async () => {
+	it("不渲染基础节点交互层", async () => {
 		render(
 			<InfiniteSkiaCanvas
 				width={800}
@@ -784,6 +726,7 @@ describe("InfiniteSkiaCanvas", () => {
 				activeNodeId="node-a"
 				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
+				hoveredNodeId={null}
 			/>,
 		);
 
@@ -792,20 +735,12 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const labelLayerElement = getLabelLayerElement(tree);
-		const labelLayerProps = getElementProps<{
-			nodes?: unknown[];
-			camera?: { _isSharedValue?: boolean };
-			focusedNodeId?: string | null;
-		}>(labelLayerElement);
-		expect(labelLayerElement).toBeTruthy();
-		expect(labelLayerProps?.nodes).toHaveLength(2);
-		expect(labelLayerProps?.camera?._isSharedValue).toBe(true);
-		expect(typeof labelLayerElement?.props.getNodeLayout).toBe("function");
-		expect(labelLayerProps?.focusedNodeId ?? null).toBeNull();
+		expect(hasNamedComponent(tree, "CanvasNodeInteractionItem")).toBe(false);
+		expect(hasNamedComponent(tree, "SelectionBoundsInteractionLayer")).toBe(false);
+		expect(hasNamedComponent(tree, "DragProxyLayer")).toBe(false);
 	});
 
-	it("摄像机动画中 overlay 与 label 也走 shared camera 快通道", async () => {
+	it("摄像机动画中 overlay 走 shared camera 快通道", async () => {
 		render(
 			<InfiniteSkiaCanvas
 				width={800}
@@ -817,6 +752,7 @@ describe("InfiniteSkiaCanvas", () => {
 				activeNodeId="node-a"
 				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
+				hoveredNodeId={null}
 				suspendHover
 			/>,
 		);
@@ -827,19 +763,10 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const tree = getLatestRenderTree();
 		const overlayElement = getOverlayElement(tree);
-		const labelLayerElement = getLabelLayerElement(tree);
 		expect(overlayElement).toBeTruthy();
-		expect(labelLayerElement).toBeTruthy();
 		expect(
 			(overlayElement?.props.camera as { _isSharedValue?: boolean } | undefined)
 				?._isSharedValue,
-		).toBe(true);
-		expect(
-			(
-				labelLayerElement?.props.camera as
-					| { _isSharedValue?: boolean }
-					| undefined
-			)?._isSharedValue,
 		).toBe(true);
 
 		const backgroundElement = collectElements(tree, (element) => {
@@ -972,13 +899,10 @@ describe("InfiniteSkiaCanvas", () => {
 			await Promise.resolve();
 		});
 
-		expect(rootRenderSpy.mock.calls.length).toBe(initialRenderCount);
+			expect(rootRenderSpy.mock.calls.length).toBe(initialRenderCount);
 
-		const tree = getLatestRenderTree();
-		const labelLayerElement = getLabelLayerElement(tree);
-		expect(typeof labelLayerElement?.props.getNodeLayout).toBe("function");
-
-		const nodeItems = getCanvasNodeRenderItems(tree);
+			const tree = getLatestRenderTree();
+			const nodeItems = getCanvasNodeRenderItems(tree);
 		const targetNodeItem = nodeItems.find((nodeItem) => {
 			return (
 				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
@@ -1227,7 +1151,7 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
-	it("多选拖拽时 drag proxy 跟随并保持节点顺序", async () => {
+	it("多选状态下不会出现旧交互层组件", async () => {
 		tilePipelineMockState.enabled = true;
 		const nodeA = {
 			...createVideoNode("node-a", 0),
@@ -1270,33 +1194,23 @@ describe("InfiniteSkiaCanvas", () => {
 					createImageAsset("thumb-a"),
 					createImageAsset("thumb-b"),
 					createImageAsset("thumb-c"),
-				]}
-				activeNodeId="node-c"
-				selectedNodeIds={["node-a", "node-b", "node-c"]}
-				focusedNodeId={null}
-			/>,
-		);
-		await waitFor(() => {
-			expect(rootRenderSpy).toHaveBeenCalled();
+					]}
+					activeNodeId="node-c"
+					selectedNodeIds={["node-a", "node-b", "node-c"]}
+					focusedNodeId={null}
+					hoveredNodeId={null}
+				/>,
+			);
+			await waitFor(() => {
+				expect(rootRenderSpy).toHaveBeenCalled();
+			});
+			const tree = getLatestRenderTree();
+			expect(hasNamedComponent(tree, "SelectionBoundsInteractionLayer")).toBe(
+				false,
+			);
+			expect(hasNamedComponent(tree, "DragProxyLayer")).toBe(false);
+			expect(hasNamedComponent(tree, "CanvasNodeInteractionItem")).toBe(false);
 		});
-		const selectionLayerProps = getElementProps<{
-			onDragStart?: (event: CanvasNodeDragEvent) => void;
-			onDrag?: (event: CanvasNodeDragEvent) => void;
-		}>(getSelectionBoundsInteractionLayerElement(getLatestRenderTree()));
-		expect(selectionLayerProps).toBeTruthy();
-		act(() => {
-			selectionLayerProps?.onDragStart?.(createDragEvent(0, 0));
-			selectionLayerProps?.onDrag?.(createDragEvent(24, 12));
-		});
-		await waitFor(() => {
-			const dragProxyLayerProps = getElementProps<{
-				drawItems?: Array<{ nodeId: string }>;
-			}>(getDragProxyLayerElement(getLatestRenderTree()));
-			expect(
-				dragProxyLayerProps?.drawItems?.map((item) => item.nodeId),
-			).toEqual(["node-a", "node-b"]);
-		});
-	});
 
 	it("focus scene 模式会抑制普通 node 交互并接管 Focus 层事件", async () => {
 		render(
@@ -1321,16 +1235,6 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		const tree = getLatestRenderTree();
-		const nodeItems = getCanvasNodeInteractionItems(tree);
-		expect(nodeItems).toHaveLength(2);
-		expect(
-			nodeItems.every((nodeItem) => {
-				return (
-					getElementProps<{ disabled?: boolean }>(nodeItem)?.disabled === true
-				);
-			}),
-		).toBe(true);
-
 		const focusLayer = collectElements(
 			tree,
 			(element) =>
@@ -1552,31 +1456,6 @@ describe("InfiniteSkiaCanvas", () => {
 		).toBe(false);
 	});
 
-	it("focus 状态下 label layer 仍然存在并拿到 focusedNodeId", async () => {
-		render(
-			<InfiniteSkiaCanvas
-				width={800}
-				height={600}
-				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
-				nodes={[createSceneNode("node-scene", 0)]}
-				scenes={emptyScenes}
-				assets={[]}
-				activeNodeId="node-scene"
-				selectedNodeIds={["node-scene"]}
-				focusedNodeId="node-scene"
-			/>,
-		);
-
-		await waitFor(() => {
-			expect(rootRenderSpy).toHaveBeenCalled();
-		});
-
-		const tree = getLatestRenderTree();
-		const labelLayerElement = getLabelLayerElement(tree);
-		expect(labelLayerElement).toBeTruthy();
-		expect(labelLayerElement?.props.focusedNodeId).toBe("node-scene");
-	});
-
 	it("会把 resize 回调透传到 overlay", async () => {
 		const onNodeResize = vi.fn();
 
@@ -1591,6 +1470,7 @@ describe("InfiniteSkiaCanvas", () => {
 				activeNodeId="node-a"
 				selectedNodeIds={["node-a"]}
 				focusedNodeId={null}
+				hoveredNodeId={null}
 				onNodeResize={onNodeResize}
 			/>,
 		);
