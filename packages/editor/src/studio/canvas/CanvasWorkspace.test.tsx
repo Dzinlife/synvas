@@ -37,6 +37,10 @@ import {
 } from "./canvasWorkspaceUtils";
 import * as canvasSnapUtils from "./canvasSnapUtils";
 import CanvasWorkspace from "./CanvasWorkspace";
+import {
+	TILE_MAX_TASKS_PER_TICK,
+	TILE_MAX_TASKS_PER_TICK_DRAG,
+} from "./tile/constants";
 
 const togglePlaybackMock = vi.fn();
 const infiniteSkiaCanvasPropsMock = vi.fn();
@@ -89,6 +93,7 @@ interface MockInfiniteSkiaCanvasProps {
 	} | null;
 	tileDebugEnabled?: boolean;
 	tileInputMode?: "raster" | "picture";
+	tileMaxTasksPerTick?: number;
 	focusedNodeId?: string | null;
 	hoveredNodeId?: string | null;
 	selectedNodeIds?: string[];
@@ -4030,6 +4035,60 @@ describe("CanvasWorkspace", () => {
 		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("picture");
 		fireEvent.click(screen.getByTestId("canvas-tile-input-mode-toggle"));
 		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("raster");
+	});
+
+	it("node-drag 手势期间会提升 tile 任务上限，结束后恢复默认值", () => {
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK,
+		);
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(300, 160),
+				buttons: 1,
+			});
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK_DRAG,
+		);
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(300, 160),
+				buttons: 0,
+			});
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK,
+		);
+	});
+
+	it("selection-drag 手势期间会提升 tile 任务上限，结束后恢复默认值", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK,
+		);
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(600, 200),
+				buttons: 1,
+			});
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK_DRAG,
+		);
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(600, 200),
+				buttons: 0,
+			});
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK,
+		);
 	});
 
 	it("多选 bbox Alt 拖拽会复制整组并保持当前 active", () => {

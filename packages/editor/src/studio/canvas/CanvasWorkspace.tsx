@@ -138,6 +138,10 @@ import type {
 	TileInputMode,
 } from "./InfiniteSkiaCanvas";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
+import {
+	TILE_MAX_TASKS_PER_TICK,
+	TILE_MAX_TASKS_PER_TICK_DRAG,
+} from "./tile/constants";
 import { useCanvasCameraController } from "./useCanvasCameraController";
 import { useNodeThumbnailGeneration } from "./useNodeThumbnailGeneration";
 
@@ -1532,6 +1536,10 @@ const CanvasWorkspace = () => {
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 	const [tileDebugEnabled, setTileDebugEnabled] = useState(false);
 	const [tileInputMode, setTileInputMode] = useState<TileInputMode>("raster");
+	const [isTileTaskBoostActive, setIsTileTaskBoostActive] = useState(false);
+	const tileMaxTasksPerTick = isTileTaskBoostActive
+		? TILE_MAX_TASKS_PER_TICK_DRAG
+		: TILE_MAX_TASKS_PER_TICK;
 
 	useEffect(() => {
 		setSidebarTab(focusedNodeId ? "element" : "nodes");
@@ -4332,25 +4340,27 @@ const CanvasWorkspace = () => {
 							suppressNode: existingSuppression?.suppressNode ?? false,
 							suppressCanvas: true,
 						});
+						setIsTileTaskBoostActive(true);
 						gesture = "selection-drag";
 					}
-			} else if (node && !node.locked) {
+				} else if (node && !node.locked) {
 				const isNodeSelected = normalizedSelectedNodeIds.includes(node.id);
 				const pendingSelectedNodeIds = isNodeSelected
 					? normalizedSelectedNodeIds
 					: event.shiftKey
 						? [...normalizedSelectedNodeIds, node.id]
 						: [node.id];
-				const didStartDrag = beginCanvasDragSession({
-					origin: "node",
-					anchorNodeId: node.id,
-					pendingSelectedNodeIds,
-					copyMode: event.altKey,
-				});
-				if (didStartDrag) {
-					gesture = "node-drag";
-				}
-			} else if (node?.locked) {
+					const didStartDrag = beginCanvasDragSession({
+						origin: "node",
+						anchorNodeId: node.id,
+						pendingSelectedNodeIds,
+						copyMode: event.altKey,
+					});
+					if (didStartDrag) {
+						setIsTileTaskBoostActive(true);
+						gesture = "node-drag";
+					}
+				} else if (node?.locked) {
 				if (!event.shiftKey) {
 					handleNodeActivate(node);
 				}
@@ -4494,6 +4504,7 @@ const CanvasWorkspace = () => {
 			lastCanvasPointerWorldRef.current = world;
 			const pointerSession = pointerSessionRef.current;
 			if (!pointerSession || pointerSession.pointerId !== event.pointerId) {
+				setIsTileTaskBoostActive(false);
 				updateHoverFromPointer(event.target, event.clientX, event.clientY);
 				return;
 			}
@@ -4516,6 +4527,7 @@ const CanvasWorkspace = () => {
 				pointerSession.gesture === "node-drag" ||
 				pointerSession.gesture === "selection-drag"
 			) {
+				setIsTileTaskBoostActive(false);
 				const dragSession = nodeDragSessionRef.current;
 				const shouldResolveTap =
 					isTap &&
@@ -4574,6 +4586,7 @@ const CanvasWorkspace = () => {
 		(event: React.PointerEvent<HTMLDivElement>) => {
 			const pointerSession = pointerSessionRef.current;
 			if (!pointerSession || pointerSession.pointerId !== event.pointerId) {
+				setIsTileTaskBoostActive(false);
 				clearHoveredNode();
 				return;
 			}
@@ -4588,6 +4601,7 @@ const CanvasWorkspace = () => {
 				pointerSession.gesture === "node-drag" ||
 				pointerSession.gesture === "selection-drag"
 			) {
+				setIsTileTaskBoostActive(false);
 				if (nodeDragSessionRef.current) {
 					finishCanvasDragSession(
 						resolveCanvasDragEventFromPointer(pointerSession, event, true),
@@ -4955,6 +4969,7 @@ const CanvasWorkspace = () => {
 					suspendHover={isCameraAnimating}
 					tileDebugEnabled={tileDebugEnabled}
 					tileInputMode={tileInputMode}
+					tileMaxTasksPerTick={tileMaxTasksPerTick}
 					onNodeResize={handleSkiaNodeResize}
 					onSelectionResize={handleSelectionResize}
 				/>

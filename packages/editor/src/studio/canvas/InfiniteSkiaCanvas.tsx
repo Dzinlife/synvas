@@ -31,6 +31,7 @@ import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
+import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import {
 	CanvasTriDotGridBackground,
@@ -44,9 +45,7 @@ import {
 import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 import type { CanvasSnapGuidesScreen } from "./canvasSnapUtils";
 import type { CameraState } from "./canvasWorkspaceUtils";
-import {
-	type CanvasNodeDragEvent,
-} from "./NodeInteractionWrapper";
+import type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
 import { getCanvasNodeDefinition } from "./node-system/registry";
 import type {
 	CanvasNodeFocusEditorBridgeProps,
@@ -111,6 +110,7 @@ interface InfiniteSkiaCanvasProps {
 	suspendHover?: boolean;
 	tileDebugEnabled?: boolean;
 	tileInputMode?: TileInputMode;
+	tileMaxTasksPerTick?: number;
 	onNodeResize?: (event: CanvasNodeResizeEvent) => void;
 	onSelectionResize?: (event: CanvasSelectionResizeEvent) => void;
 }
@@ -323,14 +323,6 @@ const resolveNodeStructureSignature = (nodes: CanvasNode[]): string => {
 			return rest;
 		}),
 	);
-};
-
-const compareCanvasNodePaintOrder = (
-	left: CanvasNode,
-	right: CanvasNode,
-): number => {
-	if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
-	return left.createdAt - right.createdAt;
 };
 
 interface CanvasNodeRenderItemProps {
@@ -633,6 +625,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	suspendHover = false,
 	tileDebugEnabled = false,
 	tileInputMode = "raster",
+	tileMaxTasksPerTick,
 	onNodeResize,
 	onSelectionResize,
 }) => {
@@ -1211,7 +1204,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (!root) return;
 		let staticTileDrawItems: TileDrawItem[] = [];
 		let tileDebugItems: TileDebugItem[] = [];
-		const fallbackLiveNodeIdSet = new Set<string>();
 		const scheduler = supportsTilePipeline ? tileSchedulerRef.current : null;
 		if (scheduler) {
 			scheduler.setInputs(staticTileSnapshot.inputs);
@@ -1222,13 +1214,11 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				nowMs:
 					typeof performance !== "undefined" ? performance.now() : Date.now(),
 				debugEnabled: tileDebugEnabled,
+				maxTasksPerTick: tileMaxTasksPerTick,
 			});
 			latestTileFrameResultRef.current = frameResult;
 			staticTileDrawItems = frameResult.drawItems;
 			tileDebugItems = frameResult.debugItems;
-			for (const nodeId of frameResult.fallbackNodeIds) {
-				fallbackLiveNodeIdSet.add(nodeId);
-			}
 			if (frameResult.hasPendingWork) {
 				scheduleTileTick();
 			}
@@ -1238,30 +1228,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			const latestNode = getLatestNodeById(node.id) ?? node;
 			const isAlwaysLive =
 				latestNode.id === activeNodeId || isAlwaysLiveNodeType(latestNode);
-			const hasStaticInput = staticTileSnapshot.inputByNodeId.has(
-				latestNode.id,
-			);
-			if (
-				isAlwaysLive ||
-				!hasStaticInput ||
-				fallbackLiveNodeIdSet.has(node.id)
-			) {
+			const isNonTileNode = !isTileRasterNodeType(latestNode);
+			if (isAlwaysLive || isNonTileNode) {
 				liveNodeIdSet.add(node.id);
 			}
 		}
 		const liveRenderNodes = [...renderNodes];
-		if (fallbackLiveNodeIdSet.size > 0) {
-			const liveRenderNodeIdSet = new Set(renderNodes.map((node) => node.id));
-			for (const fallbackNodeId of fallbackLiveNodeIdSet) {
-				liveNodeIdSet.add(fallbackNodeId);
-				if (liveRenderNodeIdSet.has(fallbackNodeId)) continue;
-				const fallbackNode = getLatestNodeById(fallbackNodeId);
-				if (!fallbackNode) continue;
-				liveRenderNodes.push(fallbackNode);
-				liveRenderNodeIdSet.add(fallbackNodeId);
-			}
-			liveRenderNodes.sort(compareCanvasNodePaintOrder);
-		}
 			root.render(
 				<Group>
 					<CanvasTriDotGridBackground
@@ -1304,14 +1276,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							);
 						})}
 					</Group>
-				{/* <CanvasNodeLabelLayer
+				<CanvasNodeLabelLayer
 					width={width}
 					height={height}
 					camera={animatedCamera}
 					getNodeLayout={getNodeLayoutValue}
 					nodes={renderNodes}
 					focusedNodeId={focusedNodeId}
-				/> */}
+				/>
 				{!disableBaseNodeInteraction && !focusedNodeId && (
 					<CanvasNodeOverlayLayer
 						width={width}
@@ -1355,6 +1327,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			supportsTilePipeline,
 			tileTick,
 			tileDebugEnabled,
+			tileMaxTasksPerTick,
 			runtimeManager,
 			scenes,
 			selectedNodes,

@@ -127,4 +127,5 @@ export interface TileSchedulerFrameInput {
 	stageHeight: number;
 	nowMs: number;
 	debugEnabled?: boolean;
+	maxTasksPerTick?: number;
 }

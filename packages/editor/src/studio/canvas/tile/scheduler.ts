@@ -235,6 +235,9 @@ export class StaticTileScheduler {
 	beginFrame(input: TileSchedulerFrameInput): TileFrameResult {
 		this.tick += 1;
 		const debugEnabled = Boolean(input.debugEnabled);
+		const maxTasksPerTick = this.resolveFrameMaxTasksPerTick(
+			input.maxTasksPerTick,
+		);
 		const nextTargetLod = this.resolveTargetLod(input.camera.zoom);
 		const targetChanged = nextTargetLod !== this.targetLod;
 		this.targetLod = nextTargetLod;
@@ -270,7 +273,10 @@ export class StaticTileScheduler {
 			input.stageWidth,
 			input.stageHeight,
 		);
-		const frameTaskCount = this.runTasksWithinBudget(input.nowMs);
+		const frameTaskCount = this.runTasksWithinBudget(
+			input.nowMs,
+			maxTasksPerTick,
+		);
 		this.resolveDrawItemsAndFallback();
 		this.resolveDebugItems(debugEnabled);
 		this.evictLeastRecentlyUsedReadyTiles();
@@ -479,11 +485,17 @@ export class StaticTileScheduler {
 		}
 	}
 
-	private runTasksWithinBudget(nowMs: number): number {
+	private resolveFrameMaxTasksPerTick(overrideValue: number | undefined): number {
+		if (overrideValue === undefined) return this.maxTasksPerTick;
+		if (!Number.isFinite(overrideValue)) return this.maxTasksPerTick;
+		return Math.max(0, Math.floor(overrideValue));
+	}
+
+	private runTasksWithinBudget(nowMs: number, maxTasksPerTick: number): number {
 		let frameTaskCount = 0;
 		const frameStart =
 			Number.isFinite(nowMs) && nowMs > 0 ? nowMs : resolveNowMs();
-		while (frameTaskCount < this.maxTasksPerTick) {
+		while (frameTaskCount < maxTasksPerTick) {
 			const elapsed = resolveNowMs() - frameStart;
 			if (elapsed >= this.frameBudgetMs) {
 				break;
@@ -683,6 +695,7 @@ export class StaticTileScheduler {
 			const lod = decoded.lod;
 			const tx = decoded.tx;
 			const ty = decoded.ty;
+			const isCovered = this.visibleCoveredKeySet.has(key);
 			if (record && record.state === "READY" && record.image) {
 				this.pushDrawRecord(record);
 				this.readyVisibleCount += 1;
@@ -692,7 +705,22 @@ export class StaticTileScheduler {
 				});
 				continue;
 			}
-			const isCovered = this.visibleCoveredKeySet.has(key);
+			const canReuseLastFrameImage =
+				Boolean(record?.image) &&
+				Boolean(isCovered) &&
+				(record?.state === "STALE" ||
+					record?.state === "QUEUED" ||
+					record?.state === "RENDERING");
+			if (record && canReuseLastFrameImage) {
+				// 标脏后在新图块就绪前，复用上一帧图块，避免切到 live 导致频闪。
+				this.pushDrawRecord(record);
+				this.coverFallbackCount += 1;
+				this.visibleCoverInfoByKey.set(key, {
+					mode: "SELF",
+					sourceLod: record.lod,
+				});
+				continue;
+			}
 			if (!isCovered) {
 				this.visibleCoverInfoByKey.set(key, {
 					mode: "NONE",
@@ -722,31 +750,6 @@ export class StaticTileScheduler {
 				this.visibleCoverInfoByKey.set(key, {
 					mode: "CHILD",
 					sourceLod: childRecords[0]?.lod ?? lod + 1,
-				});
-				continue;
-			}
-
-			const worldRect = resolveTileWorldRect(tx, ty, lod);
-			const tileRect = createTileAabb(
-				worldRect.left,
-				worldRect.top,
-				worldRect.right,
-				worldRect.bottom,
-			);
-			let hasFallback = false;
-			const candidateInputs = this.queryInputsByRect(tileRect);
-			for (const input of candidateInputs) {
-				if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
-				hasFallback = true;
-				if (this.fallbackNodeIdSet.has(input.nodeId)) continue;
-				this.fallbackNodeIdSet.add(input.nodeId);
-				this.fallbackNodeIds.push(input.nodeId);
-			}
-			if (hasFallback) {
-				this.visibleFallbackKeySet.add(key);
-				this.visibleCoverInfoByKey.set(key, {
-					mode: "LIVE",
-					sourceLod: null,
 				});
 				continue;
 			}

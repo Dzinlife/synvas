@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
+import { TILE_MAX_TASKS_PER_TICK_DRAG } from "./tile/constants";
+import { StaticTileScheduler } from "./tile/scheduler";
 
 const { rootRenderSpy } = vi.hoisted(() => ({
 	rootRenderSpy: vi.fn(),
@@ -1029,7 +1031,52 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
-	it("tile miss 时会把缺失节点回退到 live", async () => {
+	it("tileMaxTasksPerTick 会透传给 scheduler.beginFrame", async () => {
+		tilePipelineMockState.enabled = true;
+		const beginFrameSpy = vi.spyOn(StaticTileScheduler.prototype, "beginFrame");
+		try {
+			render(
+				<InfiniteSkiaCanvas
+					width={128}
+					height={128}
+					camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+					nodes={[
+						{
+							...createSceneNode("node-scene", 0),
+							thumbnail: {
+								assetId: "scene-thumb",
+								sourceSignature: "scene-v1",
+								frame: 0,
+								generatedAt: 1,
+								version: 1 as const,
+							},
+						},
+					]}
+					scenes={emptyScenes}
+					assets={[createImageAsset("scene-thumb")]}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					focusedNodeId={null}
+					tileMaxTasksPerTick={TILE_MAX_TASKS_PER_TICK_DRAG}
+				/>,
+			);
+			await waitFor(() => {
+				expect(beginFrameSpy).toHaveBeenCalled();
+			});
+			expect(
+				beginFrameSpy.mock.calls.some((call) => {
+					return (
+						(call[0] as { maxTasksPerTick?: number } | undefined)
+							?.maxTasksPerTick === TILE_MAX_TASKS_PER_TICK_DRAG
+					);
+				}),
+			).toBe(true);
+		} finally {
+			beginFrameSpy.mockRestore();
+		}
+	});
+
+	it("tile miss 时不会把非 active 节点回退到 live", async () => {
 		tilePipelineMockState.enabled = true;
 		acquireImageAssetMock.mockRejectedValueOnce(new Error("missing raster"));
 		const sceneNode = {
@@ -1064,7 +1111,7 @@ describe("InfiniteSkiaCanvas", () => {
 				return getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id;
 			},
 		);
-		expect(firstLiveNodeIds).toContain("node-scene");
+		expect(firstLiveNodeIds).not.toContain("node-scene");
 	});
 
 	it("tile 输入会使用 tileSourceNodes，而不是仅依赖 nodes(cull 子集)", async () => {

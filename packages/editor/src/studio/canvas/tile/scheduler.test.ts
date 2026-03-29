@@ -102,6 +102,7 @@ const createFrameInput = (
 		stageHeight: number;
 		nowMs: number;
 		debugEnabled: boolean;
+		maxTasksPerTick: number;
 	}>,
 ) => {
 	return {
@@ -116,6 +117,7 @@ const createFrameInput = (
 			input?.nowMs ??
 			(typeof performance !== "undefined" ? performance.now() : Date.now()),
 		debugEnabled: input?.debugEnabled ?? false,
+		maxTasksPerTick: input?.maxTasksPerTick,
 	};
 };
 
@@ -172,6 +174,77 @@ describe("tile scheduler", () => {
 		expect(firstFrame.debugItems).not.toBe(secondFrame.debugItems);
 		expect(firstFrame.fallbackNodeIds).not.toBe(secondFrame.fallbackNodeIds);
 		scheduler.dispose();
+	});
+
+	it("beginFrame 传入 maxTasksPerTick 时可覆盖默认消费上限", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 0,
+		});
+		scheduler.setInputs([
+			createRasterInput({
+				left: -1024,
+				top: -1024,
+				right: 2048,
+				bottom: 2048,
+			}),
+		]);
+		const frame = scheduler.beginFrame(
+			createFrameInput({
+				stageWidth: 512,
+				stageHeight: 512,
+				zoom: 1,
+				maxTasksPerTick: 1,
+			}),
+		);
+		expect(frame.stats.frameTaskCount).toBe(1);
+		scheduler.dispose();
+	});
+
+	it("每帧任务上限的非法输入会回退默认值，负值会夹紧到 0", () => {
+		const schedulerWithFallback = new StaticTileScheduler({
+			maxTasksPerTick: 1,
+		});
+		schedulerWithFallback.setInputs([
+			createRasterInput({
+				left: -1024,
+				top: -1024,
+				right: 2048,
+				bottom: 2048,
+			}),
+		]);
+		const fallbackFrame = schedulerWithFallback.beginFrame(
+			createFrameInput({
+				stageWidth: 512,
+				stageHeight: 512,
+				zoom: 1,
+				maxTasksPerTick: Number.NaN,
+			}),
+		);
+		expect(fallbackFrame.stats.frameTaskCount).toBe(1);
+		schedulerWithFallback.dispose();
+
+		const schedulerWithClamp = new StaticTileScheduler({
+			maxTasksPerTick: 1,
+		});
+		schedulerWithClamp.setInputs([
+			createRasterInput({
+				left: -1024,
+				top: -1024,
+				right: 2048,
+				bottom: 2048,
+			}),
+		]);
+		const clampedFrame = schedulerWithClamp.beginFrame(
+			createFrameInput({
+				stageWidth: 512,
+				stageHeight: 512,
+				zoom: 1,
+				maxTasksPerTick: -7,
+			}),
+		);
+		expect(clampedFrame.stats.frameTaskCount).toBe(0);
+		expect(clampedFrame.hasPendingWork).toBe(true);
+		schedulerWithClamp.dispose();
 	});
 
 	it("优先队列消费顺序遵循 HIGH -> MID -> LOW", () => {
@@ -547,7 +620,7 @@ describe("tile scheduler", () => {
 		scheduler.dispose();
 	});
 
-	it("oldAABB ∪ newAABB 标脏后会触发可见 fallback", () => {
+	it("oldAABB ∪ newAABB 标脏后会优先复用 stale tile，避免 live fallback", () => {
 		const scheduler = new StaticTileScheduler({
 			maxTasksPerTick: 1,
 		});
@@ -586,10 +659,16 @@ describe("tile scheduler", () => {
 				stageWidth: 1400,
 				stageHeight: 768,
 				zoom: 1,
+				debugEnabled: true,
 			}),
 		);
 		expect(dirtyFrame.hasPendingWork).toBe(true);
 		expect(dirtyFrame.stats.queuedCount).toBeGreaterThan(0);
+		expect(dirtyFrame.drawItems.length).toBeGreaterThan(0);
+		expect(dirtyFrame.fallbackNodeIds.length).toBe(0);
+		expect(dirtyFrame.debugItems.some((item) => item.coverMode === "LIVE")).toBe(
+			false,
+		);
 		scheduler.dispose();
 	});
 

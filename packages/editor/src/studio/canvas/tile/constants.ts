@@ -8,6 +8,7 @@ export const TILE_PIXEL_SIZE = 512;
 export const TILE_OVERSCAN_TILES = 1;
 export const TILE_FRAME_BUDGET_MS = 3;
 export const TILE_MAX_TASKS_PER_TICK = 4;
+export const TILE_MAX_TASKS_PER_TICK_DRAG = 16;
 export const TILE_MAX_READY_TILES = 384;
 export const TILE_TASK_QUEUE_CAPACITY = 2048;
 export const TILE_SURFACE_POOL_SIZE = 2;
