@@ -4136,26 +4136,22 @@ const CanvasWorkspace = () => {
 			const marqueeSession = marqueeSessionRef.current;
 			if (!marqueeSession) return false;
 			marqueeSessionRef.current = null;
-				if (!marqueeSession.activated) {
-					updateMarqueeRectState({
-						visible: false,
-						x1: marqueeRectRef.current.x1,
+			if (!marqueeSession.activated) {
+				updateMarqueeRectState({
+					visible: false,
+					x1: marqueeRectRef.current.x1,
 					y1: marqueeRectRef.current.y1,
 					x2: marqueeRectRef.current.x2,
 					y2: marqueeRectRef.current.y2,
 				});
 				return false;
-				}
-				setPendingClickSuppression({
-					suppressNode: true,
-					suppressCanvas: false,
-				});
-				applyMarqueeSelection(marqueeRectRef.current, {
-					isFinalize: true,
-					marqueeSession,
-				});
-				updateMarqueeRectState({
-					visible: false,
+			}
+			applyMarqueeSelection(marqueeRectRef.current, {
+				isFinalize: true,
+				marqueeSession,
+			});
+			updateMarqueeRectState({
+				visible: false,
 				x1: marqueeRectRef.current.x1,
 				y1: marqueeRectRef.current.y1,
 				x2: marqueeRectRef.current.x2,
@@ -4163,7 +4159,7 @@ const CanvasWorkspace = () => {
 			});
 			return true;
 		},
-		[applyMarqueeSelection, setPendingClickSuppression, updateMarqueeRectState],
+		[applyMarqueeSelection, updateMarqueeRectState],
 	);
 
 	const resolveCanvasDragEventFromPointer = useCallback(

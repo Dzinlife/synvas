@@ -3512,24 +3512,20 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
-	it("框选会替换选择，dragend 落在 node 上也不会被尾随 click 覆盖", () => {
+	it("框选结束后，首次单击其他节点应立即生效", () => {
 		render(<CanvasWorkspace />);
-		const beforeActiveNodeId =
-			useProjectStore.getState().currentProject?.ui.activeNodeId ?? null;
-		marqueeCanvasAt(1000, 100, 300, 160);
+		marqueeCanvasAt(980, 20, 100, 80);
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
 			"node-scene-1",
-			"node-video-1",
+		]);
+
+		clickNodeAt(720, 360);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-image-1",
 		]);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
-			beforeActiveNodeId,
+			"node-image-1",
 		);
-
-		clickNodeAt(300, 160);
-		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
-			"node-scene-1",
-			"node-video-1",
-		]);
 	});
 
 	it("框选拖拽过程中会透传 marqueeRectScreen.visible，结束后恢复 false", () => {
