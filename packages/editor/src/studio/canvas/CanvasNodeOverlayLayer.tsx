@@ -1,12 +1,6 @@
 import { useDrag } from "@use-gesture/react";
 import type { CanvasNode } from "core/studio/types";
-import {
-	useCallback,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
 	DashPathEffect,
 	Easing,
@@ -19,6 +13,7 @@ import {
 	useDerivedValue,
 	withTiming,
 } from "react-skia-lite";
+import { resolveNodeInteractionBorderStyle } from "./canvasNodeInteractionStyle";
 import type {
 	CanvasCameraState,
 	CanvasNodeLayoutState,
@@ -41,7 +36,6 @@ import {
 import type { CanvasSnapGuidesScreen } from "./canvasSnapUtils";
 import type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
 import { resolvePointerEventMeta } from "./NodeInteractionWrapper";
-import { resolveNodeInteractionBorderStyle } from "./canvasNodeInteractionStyle";
 
 const CAMERA_ZOOM_EPSILON = 1e-6;
 const RESIZE_ANCHOR_ENTER_OFFSET_PX = 8;
@@ -190,7 +184,7 @@ const createWorldRectOutlinePath = (
 interface CanvasResizeAnchorHandleProps {
 	anchor: CanvasNodeResizeAnchor;
 	camera: SharedValue<CanvasCameraState>;
-	resolveWorldRect: () => CanvasWorldRect;
+	worldRect: SharedValue<CanvasWorldRect>;
 	hoveredResizeAnchor: CanvasNodeResizeAnchor | null;
 	pressedResizeAnchor: CanvasNodeResizeAnchor | null;
 	onPointerEnter: () => void;
@@ -201,7 +195,7 @@ interface CanvasResizeAnchorHandleProps {
 const CanvasResizeAnchorHandle = ({
 	anchor,
 	camera,
-	resolveWorldRect,
+	worldRect,
 	hoveredResizeAnchor,
 	pressedResizeAnchor,
 	onPointerEnter,
@@ -213,7 +207,7 @@ const CanvasResizeAnchorHandle = ({
 	const hitRect = resolveAnchorHitRect(anchor);
 	const transform = useDerivedValue(() => {
 		const frame = resolveCanvasWorldRectScreenFrame(
-			resolveWorldRect(),
+			worldRect.value,
 			camera.value,
 		);
 		return resolveScreenCornerTransform(frame, anchor);
@@ -263,9 +257,7 @@ interface CanvasNodeOverlayLayerProps {
 	width: number;
 	height: number;
 	activeNode: CanvasNode | null;
-	getNodeLayout: (
-		nodeId: string,
-	) => SharedValue<CanvasNodeLayoutState> | null;
+	getNodeLayout: (nodeId: string) => SharedValue<CanvasNodeLayoutState> | null;
 	selectedNodes: CanvasNode[];
 	hoverNode: CanvasNode | null;
 	marqueeRectScreen?: {
@@ -332,47 +324,53 @@ export const CanvasNodeOverlayLayer = ({
 		},
 		[getNodeLayout],
 	);
-	const resolveSelectedWorldRect = useCallback((): CanvasWorldRect => {
-		const nodeLayouts = selectedNodes
-			.map((node) => {
-				return getNodeLayout(node.id)?.value ?? node;
-			})
-			.filter(Boolean);
-		let left = Number.POSITIVE_INFINITY;
-		let top = Number.POSITIVE_INFINITY;
-		let right = Number.NEGATIVE_INFINITY;
-		let bottom = Number.NEGATIVE_INFINITY;
-		for (const layout of nodeLayouts) {
-			const worldRect = resolveCanvasNodeLayoutWorldRect(layout);
-			left = Math.min(left, worldRect.left);
-			top = Math.min(top, worldRect.top);
-			right = Math.max(right, worldRect.right);
-			bottom = Math.max(bottom, worldRect.bottom);
-		}
-		if (
-			!Number.isFinite(left) ||
-			!Number.isFinite(top) ||
-			!Number.isFinite(right) ||
-			!Number.isFinite(bottom)
-		) {
+	const resolveWorldRectByNodes = useCallback(
+		(nodes: CanvasNode[]): CanvasWorldRect => {
+			const nodeLayouts = nodes
+				.map((node) => {
+					return getNodeLayout(node.id)?.value ?? node;
+				})
+				.filter(Boolean);
+			let left = Number.POSITIVE_INFINITY;
+			let top = Number.POSITIVE_INFINITY;
+			let right = Number.NEGATIVE_INFINITY;
+			let bottom = Number.NEGATIVE_INFINITY;
+			for (const layout of nodeLayouts) {
+				const worldRect = resolveCanvasNodeLayoutWorldRect(layout);
+				left = Math.min(left, worldRect.left);
+				top = Math.min(top, worldRect.top);
+				right = Math.max(right, worldRect.right);
+				bottom = Math.max(bottom, worldRect.bottom);
+			}
+			if (
+				!Number.isFinite(left) ||
+				!Number.isFinite(top) ||
+				!Number.isFinite(right) ||
+				!Number.isFinite(bottom)
+			) {
+				return {
+					left: 0,
+					top: 0,
+					right: 1,
+					bottom: 1,
+					width: 1,
+					height: 1,
+				};
+			}
 			return {
-				left: 0,
-				top: 0,
-				right: 1,
-				bottom: 1,
-				width: 1,
-				height: 1,
+				left,
+				top,
+				right,
+				bottom,
+				width: Math.max(1, right - left),
+				height: Math.max(1, bottom - top),
 			};
-		}
-		return {
-			left,
-			top,
-			right,
-			bottom,
-			width: Math.max(1, right - left),
-			height: Math.max(1, bottom - top),
-		};
-	}, [getNodeLayout, selectedNodes]);
+		},
+		[getNodeLayout],
+	);
+	const resolveSelectedWorldRect = useCallback((): CanvasWorldRect => {
+		return resolveWorldRectByNodes(selectedNodes);
+	}, [resolveWorldRectByNodes, selectedNodes]);
 	const isSingleSelection =
 		Boolean(activeNode) &&
 		(selectedNodes.length === 0 ||
@@ -387,12 +385,12 @@ export const CanvasNodeOverlayLayer = ({
 		? {
 				kind: "node" as const,
 				key: `node:${activeNode?.id ?? ""}`,
-		  }
+			}
 		: isSelectionResizeEnabled
 			? {
 					kind: "selection" as const,
 					key: `selection:${selectedNodes.map((node) => node.id).join(",")}`,
-			  }
+				}
 			: null;
 	const isResizeEnabled = Boolean(resizeTarget);
 	const selectedOutlineNodes = useMemo(() => {
@@ -534,7 +532,7 @@ export const CanvasNodeOverlayLayer = ({
 								worldX,
 								worldY,
 								cameraZoom: nextCamera.zoom,
-						  })
+							})
 						: resolveCanvasResizeAnchorAtRectWorldPoint({
 								x: resizeWorldRect.left,
 								y: resizeWorldRect.top,
@@ -543,7 +541,7 @@ export const CanvasNodeOverlayLayer = ({
 								worldX,
 								worldY,
 								cameraZoom: nextCamera.zoom,
-						  }),
+							}),
 				);
 			}
 			if (resizeTarget.kind === "node" && activeNode) {
@@ -643,28 +641,67 @@ export const CanvasNodeOverlayLayer = ({
 			Math.max(camera.value.zoom, CAMERA_ZOOM_EPSILON)
 		);
 	});
-	const hoverBorderPath = useMemo(() => {
-		if (!hoverBorderNode) return null;
-		return createWorldRectOutlinePath([
-			resolveNodeWorldRectByLayout(hoverBorderNode),
-		]);
-	}, [hoverBorderNode, resolveNodeWorldRectByLayout]);
-	const selectedOutlinePath = useMemo(() => {
-		if (selectedOutlineNodes.length === 0) return null;
-		return createWorldRectOutlinePath(
-			selectedOutlineNodes.map((node) => resolveNodeWorldRectByLayout(node)),
+	const nodeResizeWorldRect = useDerivedValue(() => {
+		if (!activeNode) {
+			return {
+				left: 0,
+				top: 0,
+				right: 1,
+				bottom: 1,
+				width: 1,
+				height: 1,
+			};
+		}
+		const nextLayout = getNodeLayout(activeNode.id)?.value ?? activeNode;
+		return resolveCanvasNodeLayoutWorldRect(nextLayout);
+	});
+	const selectionResizeWorldRect = useDerivedValue(() => {
+		return resolveWorldRectByNodes(selectedNodes);
+	});
+	const hoverBorderPath = useDerivedValue(() => {
+		if (!hoverBorderNode) return "";
+		const nextLayout =
+			getNodeLayout(hoverBorderNode.id)?.value ?? hoverBorderNode;
+		return (
+			createWorldRectOutlinePath([
+				resolveCanvasNodeLayoutWorldRect(nextLayout),
+			]) ?? ""
 		);
-	}, [resolveNodeWorldRectByLayout, selectedOutlineNodes]);
-	const activeBorderPath = useMemo(() => {
-		if (!activeNode) return null;
-		return createWorldRectOutlinePath([resolveNodeWorldRectByLayout(activeNode)]);
-	}, [activeNode, resolveNodeWorldRectByLayout]);
-	const selectionBoundsPath = useMemo(() => {
-		if (selectedNodes.length <= 1) return null;
-		return createWorldRectOutlinePath([resolveSelectedWorldRect()]);
-	}, [resolveSelectedWorldRect, selectedNodes.length]);
+	});
+	const selectedOutlinePath = useDerivedValue(() => {
+		if (selectedOutlineNodes.length === 0) return "";
+		const worldRects = selectedOutlineNodes.map((node) => {
+			const nextLayout = getNodeLayout(node.id)?.value ?? node;
+			return resolveCanvasNodeLayoutWorldRect(nextLayout);
+		});
+		return createWorldRectOutlinePath(worldRects) ?? "";
+	});
+	const activeBorderPath = useDerivedValue(() => {
+		if (!activeNode) return "";
+		const nextLayout = getNodeLayout(activeNode.id)?.value ?? activeNode;
+		return (
+			createWorldRectOutlinePath([
+				resolveCanvasNodeLayoutWorldRect(nextLayout),
+			]) ?? ""
+		);
+	});
+	const selectionBoundsPath = useDerivedValue(() => {
+		if (selectedNodes.length <= 1) return "";
+		return (
+			createWorldRectOutlinePath([resolveWorldRectByNodes(selectedNodes)]) ?? ""
+		);
+	});
+	const hasHoverBorderPath = Boolean(hoverBorderNode);
+	const hasSelectedOutlinePath = selectedOutlineNodes.length > 0;
+	const hasActiveBorderPath = Boolean(activeNode);
+	const hasSelectionBoundsPath = selectedNodes.length > 1;
+	const resizeWorldRect =
+		resizeTarget?.kind === "node"
+			? nodeResizeWorldRect
+			: selectionResizeWorldRect;
 	const hasSnapGuides =
-		snapGuidesScreen.vertical.length > 0 || snapGuidesScreen.horizontal.length > 0;
+		snapGuidesScreen.vertical.length > 0 ||
+		snapGuidesScreen.horizontal.length > 0;
 	const hasVisibleMarquee = Boolean(marqueeRectScreen?.visible);
 
 	if (
@@ -728,7 +765,7 @@ export const CanvasNodeOverlayLayer = ({
 					</Line>
 				))}
 				<Group transform={overlayWorldTransform} pointerEvents="none">
-					{hoverBorderPath && (
+					{hasHoverBorderPath && (
 						<Path
 							path={hoverBorderPath}
 							style="stroke"
@@ -737,7 +774,7 @@ export const CanvasNodeOverlayLayer = ({
 							pointerEvents="none"
 						/>
 					)}
-					{selectedOutlinePath && (
+					{hasSelectedOutlinePath && (
 						<Path
 							path={selectedOutlinePath}
 							style="stroke"
@@ -746,7 +783,7 @@ export const CanvasNodeOverlayLayer = ({
 							pointerEvents="none"
 						/>
 					)}
-					{activeBorderPath && (
+					{hasActiveBorderPath && (
 						<Path
 							path={activeBorderPath}
 							style="stroke"
@@ -755,7 +792,7 @@ export const CanvasNodeOverlayLayer = ({
 							pointerEvents="none"
 						/>
 					)}
-					{selectionBoundsPath && (
+					{hasSelectionBoundsPath && (
 						<Path
 							path={selectionBoundsPath}
 							style="stroke"
@@ -771,13 +808,7 @@ export const CanvasNodeOverlayLayer = ({
 					<CanvasResizeAnchorHandle
 						anchor="top-left"
 						camera={camera}
-						resolveWorldRect={
-							resizeTarget.kind === "node" && activeNode
-								? () => {
-										return resolveNodeWorldRectByLayout(activeNode);
-								  }
-								: resolveSelectedWorldRect
-						}
+						worldRect={resizeWorldRect}
 						hoveredResizeAnchor={hoveredResizeAnchor}
 						pressedResizeAnchor={pressedResizeAnchor}
 						onPointerEnter={() => {
@@ -791,13 +822,7 @@ export const CanvasNodeOverlayLayer = ({
 					<CanvasResizeAnchorHandle
 						anchor="top-right"
 						camera={camera}
-						resolveWorldRect={
-							resizeTarget.kind === "node" && activeNode
-								? () => {
-										return resolveNodeWorldRectByLayout(activeNode);
-								  }
-								: resolveSelectedWorldRect
-						}
+						worldRect={resizeWorldRect}
 						hoveredResizeAnchor={hoveredResizeAnchor}
 						pressedResizeAnchor={pressedResizeAnchor}
 						onPointerEnter={() => {
@@ -811,13 +836,7 @@ export const CanvasNodeOverlayLayer = ({
 					<CanvasResizeAnchorHandle
 						anchor="bottom-right"
 						camera={camera}
-						resolveWorldRect={
-							resizeTarget.kind === "node" && activeNode
-								? () => {
-										return resolveNodeWorldRectByLayout(activeNode);
-								  }
-								: resolveSelectedWorldRect
-						}
+						worldRect={resizeWorldRect}
 						hoveredResizeAnchor={hoveredResizeAnchor}
 						pressedResizeAnchor={pressedResizeAnchor}
 						onPointerEnter={() => {
@@ -831,13 +850,7 @@ export const CanvasNodeOverlayLayer = ({
 					<CanvasResizeAnchorHandle
 						anchor="bottom-left"
 						camera={camera}
-						resolveWorldRect={
-							resizeTarget.kind === "node" && activeNode
-								? () => {
-										return resolveNodeWorldRectByLayout(activeNode);
-								  }
-								: resolveSelectedWorldRect
-						}
+						worldRect={resizeWorldRect}
 						hoveredResizeAnchor={hoveredResizeAnchor}
 						pressedResizeAnchor={pressedResizeAnchor}
 						onPointerEnter={() => {
