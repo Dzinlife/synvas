@@ -1,6 +1,12 @@
 import { useDrag } from "@use-gesture/react";
 import type { CanvasNode } from "core/studio/types";
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import {
 	DashPathEffect,
 	Easing,
@@ -19,6 +25,7 @@ import type {
 	CanvasWorldRect,
 } from "./canvasNodeLabelUtils";
 import {
+	resolveCanvasCameraTransformMatrix,
 	resolveCanvasNodeLayoutWorldRect,
 	resolveCanvasWorldRectScreenFrame,
 } from "./canvasNodeLabelUtils";
@@ -169,53 +176,15 @@ const resolveScreenCornerTransform = (
 	return [{ translateX: frame.x }, { translateY: frame.bottom }];
 };
 
-interface CanvasScreenRectOutlineProps {
-	resolveWorldRect: () => CanvasWorldRect;
-	camera: SharedValue<CanvasCameraState>;
-	color: string;
-	baseStrokeWidthPx: number;
-}
-
-const CanvasScreenRectOutline = ({
-	resolveWorldRect,
-	camera,
-	color,
-	baseStrokeWidthPx,
-}: CanvasScreenRectOutlineProps) => {
-	const transform = useDerivedValue(() => {
-		const frame = resolveCanvasWorldRectScreenFrame(
-			resolveWorldRect(),
-			camera.value,
-		);
-		return [{ translateX: frame.x }, { translateY: frame.y }];
-	});
-	const width = useDerivedValue(() => {
-		return resolveCanvasWorldRectScreenFrame(
-			resolveWorldRect(),
-			camera.value,
-		).width;
-	});
-	const height = useDerivedValue(() => {
-		return resolveCanvasWorldRectScreenFrame(
-			resolveWorldRect(),
-			camera.value,
-		).height;
-	});
-
-	return (
-		<Group transform={transform}>
-			<Rect
-				opacity={1}
-				x={0}
-				y={0}
-				width={width}
-				height={height}
-				style="stroke"
-				strokeWidth={baseStrokeWidthPx}
-				color={color}
-			/>
-		</Group>
-	);
+const createWorldRectOutlinePath = (
+	worldRects: CanvasWorldRect[],
+): string | null => {
+	if (worldRects.length === 0) return null;
+	return worldRects
+		.map((rect) => {
+			return `M ${rect.left} ${rect.top} L ${rect.right} ${rect.top} L ${rect.right} ${rect.bottom} L ${rect.left} ${rect.bottom} Z`;
+		})
+		.join(" ");
 };
 
 interface CanvasResizeAnchorHandleProps {
@@ -435,6 +404,9 @@ export const CanvasNodeOverlayLayer = ({
 		!selectedNodeIdSet.has(hoverNode.id)
 			? hoverNode
 			: null;
+	const overlayWorldTransform = useDerivedValue(() => {
+		return resolveCanvasCameraTransformMatrix(camera.value);
+	});
 
 	useLayoutEffect(() => {
 		const resizeTargetKey = resizeTarget?.key ?? null;
@@ -647,6 +619,50 @@ export const CanvasNodeOverlayLayer = ({
 		...activeBorderStyle,
 		color: "rgba(251,146,60,0.72)",
 	};
+	const hoverBorderStrokeWidth = useDerivedValue(() => {
+		return (
+			hoverBorderStyle.baseStrokeWidthPx /
+			Math.max(camera.value.zoom, CAMERA_ZOOM_EPSILON)
+		);
+	});
+	const selectedBorderStrokeWidth = useDerivedValue(() => {
+		return (
+			selectedBorderStyle.baseStrokeWidthPx /
+			Math.max(camera.value.zoom, CAMERA_ZOOM_EPSILON)
+		);
+	});
+	const activeBorderStrokeWidth = useDerivedValue(() => {
+		return (
+			activeBorderStyle.baseStrokeWidthPx /
+			Math.max(camera.value.zoom, CAMERA_ZOOM_EPSILON)
+		);
+	});
+	const groupBorderStrokeWidth = useDerivedValue(() => {
+		return (
+			groupBorderStyle.baseStrokeWidthPx /
+			Math.max(camera.value.zoom, CAMERA_ZOOM_EPSILON)
+		);
+	});
+	const hoverBorderPath = useMemo(() => {
+		if (!hoverBorderNode) return null;
+		return createWorldRectOutlinePath([
+			resolveNodeWorldRectByLayout(hoverBorderNode),
+		]);
+	}, [hoverBorderNode, resolveNodeWorldRectByLayout]);
+	const selectedOutlinePath = useMemo(() => {
+		if (selectedOutlineNodes.length === 0) return null;
+		return createWorldRectOutlinePath(
+			selectedOutlineNodes.map((node) => resolveNodeWorldRectByLayout(node)),
+		);
+	}, [resolveNodeWorldRectByLayout, selectedOutlineNodes]);
+	const activeBorderPath = useMemo(() => {
+		if (!activeNode) return null;
+		return createWorldRectOutlinePath([resolveNodeWorldRectByLayout(activeNode)]);
+	}, [activeNode, resolveNodeWorldRectByLayout]);
+	const selectionBoundsPath = useMemo(() => {
+		if (selectedNodes.length <= 1) return null;
+		return createWorldRectOutlinePath([resolveSelectedWorldRect()]);
+	}, [resolveSelectedWorldRect, selectedNodes.length]);
 	const hasSnapGuides =
 		snapGuidesScreen.vertical.length > 0 || snapGuidesScreen.horizontal.length > 0;
 	const hasVisibleMarquee = Boolean(marqueeRectScreen?.visible);
@@ -711,48 +727,44 @@ export const CanvasNodeOverlayLayer = ({
 						<DashPathEffect intervals={[4, 4]} phase={0} />
 					</Line>
 				))}
-				{hoverBorderNode && (
-					<CanvasScreenRectOutline
-						key={`canvas-node-hover-outline-overlay-${hoverBorderNode.id}`}
-						resolveWorldRect={() => {
-							return resolveNodeWorldRectByLayout(hoverBorderNode);
-						}}
-						camera={camera}
-						baseStrokeWidthPx={hoverBorderStyle.baseStrokeWidthPx}
-						color={hoverBorderStyle.color}
-					/>
-				)}
-				{selectedOutlineNodes.map((node) => (
-					<CanvasScreenRectOutline
-						key={`canvas-node-selected-outline-overlay-${node.id}`}
-						resolveWorldRect={() => {
-							return resolveNodeWorldRectByLayout(node);
-						}}
-						camera={camera}
-						baseStrokeWidthPx={selectedBorderStyle.baseStrokeWidthPx}
-						color={selectedBorderStyle.color}
-					/>
-				))}
-				{activeNode && (
-					<CanvasScreenRectOutline
-						key={`canvas-node-active-outline-overlay-${activeNode.id}`}
-						resolveWorldRect={() => {
-							return resolveNodeWorldRectByLayout(activeNode);
-						}}
-						camera={camera}
-						baseStrokeWidthPx={activeBorderStyle.baseStrokeWidthPx}
-						color={activeBorderStyle.color}
-					/>
-				)}
-				{selectedNodes.length > 1 && (
-					<CanvasScreenRectOutline
-						key="canvas-selection-bounds-overlay"
-						resolveWorldRect={resolveSelectedWorldRect}
-						camera={camera}
-						baseStrokeWidthPx={groupBorderStyle.baseStrokeWidthPx}
-						color={groupBorderStyle.color}
-					/>
-				)}
+				<Group transform={overlayWorldTransform} pointerEvents="none">
+					{hoverBorderPath && (
+						<Path
+							path={hoverBorderPath}
+							style="stroke"
+							strokeWidth={hoverBorderStrokeWidth}
+							color={hoverBorderStyle.color}
+							pointerEvents="none"
+						/>
+					)}
+					{selectedOutlinePath && (
+						<Path
+							path={selectedOutlinePath}
+							style="stroke"
+							strokeWidth={selectedBorderStrokeWidth}
+							color={selectedBorderStyle.color}
+							pointerEvents="none"
+						/>
+					)}
+					{activeBorderPath && (
+						<Path
+							path={activeBorderPath}
+							style="stroke"
+							strokeWidth={activeBorderStrokeWidth}
+							color={activeBorderStyle.color}
+							pointerEvents="none"
+						/>
+					)}
+					{selectionBoundsPath && (
+						<Path
+							path={selectionBoundsPath}
+							style="stroke"
+							strokeWidth={groupBorderStrokeWidth}
+							color={groupBorderStyle.color}
+							pointerEvents="none"
+						/>
+					)}
+				</Group>
 			</Group>
 			{resizeTarget && isResizeEnabled && (
 				<Group zIndex={1_000_001} pointerEvents="auto">
