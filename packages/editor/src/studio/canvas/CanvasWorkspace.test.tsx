@@ -4159,6 +4159,21 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("多选 resize 结束后，首次单击其他节点应立即生效", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+		resizeSelectionBoundsAt(940, 480, 1040, 480, "bottom-right");
+
+		clickNodeAt(100, 80);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-scene-1",
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-scene-1",
+		]);
+	});
+
 	it("单节点 resize 会吸附到其他节点边线", () => {
 		render(<CanvasWorkspace />);
 		resizeNodeAt(720, 360, 482, 360, "top-left");
@@ -4374,12 +4389,12 @@ describe("CanvasWorkspace", () => {
 		expect(image?.y).toBe(320);
 	});
 
-	it("拖拽结束后的首个 click 会被抑制，避免 active 误切换", () => {
+	it("拖拽结束后，首次单击其他节点应立即生效", () => {
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 420, 260);
 		clickNodeAt(720, 360);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
-			"node-scene-1",
+			"node-image-1",
 		);
 	});
 
@@ -4478,12 +4493,12 @@ describe("CanvasWorkspace", () => {
 		expect(past[0]?.kind).toBe("canvas.node-layout");
 	});
 
-	it("resize 结束后的首个 click 会被抑制，避免选中其他节点", () => {
+	it("resize 结束后，首次单击其他节点应立即生效", () => {
 		render(<CanvasWorkspace />);
 		resizeNodeAt(300, 160, 360, 220, "bottom-right");
 		clickNodeAt(720, 360);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
-			"node-video-1",
+			"node-image-1",
 		);
 	});
 

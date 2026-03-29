@@ -3146,10 +3146,6 @@ const CanvasWorkspace = () => {
 			if (!resizeSession) return;
 			if (resizeSession.nodeId !== node.id) return;
 			if (resizeSession.anchor !== anchor) return;
-			setPendingClickSuppression({
-				suppressNode: true,
-				suppressCanvas: true,
-			});
 			if (!resizeSession.moved) return;
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
@@ -3165,10 +3161,10 @@ const CanvasWorkspace = () => {
 				before: resizeSession.before,
 				after,
 				focusNodeId: latestProject.ui.focusedNodeId,
-			});
-		},
-		[clearCanvasSnapGuides, pushHistory, setPendingClickSuppression],
-	);
+				});
+			},
+			[clearCanvasSnapGuides, pushHistory],
+		);
 
 	const handleSkiaNodeResize = useCallback(
 		(resizeEvent: CanvasNodeResizeEvent) => {
@@ -3475,10 +3471,6 @@ const CanvasWorkspace = () => {
 				}
 				return;
 			}
-			setPendingClickSuppression({
-				suppressNode: true,
-				suppressCanvas: true,
-			});
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			if (dragSession.copyEntries.length > 0) {
@@ -3542,22 +3534,22 @@ const CanvasWorkspace = () => {
 				});
 				return;
 			}
-			pushHistory({
-				kind: "canvas.node-layout.batch",
-				entries: nextEntries,
-				focusNodeId: latestProject.ui.focusedNodeId,
-			});
-		},
-		[
-			clearCanvasSnapGuides,
-			commitCanvasTimelineDrop,
-			pushHistory,
-			removeCanvasGraphBatch,
-			resetCanvasDragSession,
-			setPendingClickSuppression,
-			stopCanvasTimelineDropPreview,
-		],
-	);
+				pushHistory({
+					kind: "canvas.node-layout.batch",
+					entries: nextEntries,
+					focusNodeId: latestProject.ui.focusedNodeId,
+				});
+			},
+			[
+				clearCanvasSnapGuides,
+				commitCanvasTimelineDrop,
+				pushHistory,
+				removeCanvasGraphBatch,
+				resetCanvasDragSession,
+				setPendingClickSuppression,
+				stopCanvasTimelineDropPreview,
+			],
+		);
 
 	const handleSelectionResizeStart = useCallback(
 		(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
@@ -3815,10 +3807,6 @@ const CanvasWorkspace = () => {
 			selectionResizeSessionRef.current = null;
 			clearCanvasSnapGuides();
 			if (!resizeSession) return;
-			setPendingClickSuppression({
-				suppressNode: true,
-				suppressCanvas: true,
-			});
 			if (!resizeSession.moved) return;
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
@@ -3858,14 +3846,14 @@ const CanvasWorkspace = () => {
 				});
 				return;
 			}
-			pushHistory({
-				kind: "canvas.node-layout.batch",
-				entries: nextEntries,
-				focusNodeId: latestProject.ui.focusedNodeId,
-			});
-		},
-		[clearCanvasSnapGuides, pushHistory, setPendingClickSuppression],
-	);
+				pushHistory({
+					kind: "canvas.node-layout.batch",
+					entries: nextEntries,
+					focusNodeId: latestProject.ui.focusedNodeId,
+				});
+			},
+			[clearCanvasSnapGuides, pushHistory],
+		);
 
 	const handleSelectionResize = useCallback(
 		(resizeEvent: CanvasSelectionResizeEvent) => {
