@@ -1,30 +1,33 @@
-import React, { useEffect, useMemo } from "react";
+import type React from "react";
+import { useEffect, useMemo } from "react";
 import {
 	FontEdging,
 	FontHinting,
 	Glyphs,
 	Group,
-	Path,
 	Paragraph,
+	Path,
+	type SkFont,
 	Skia,
 	type SkPath,
+	type SkTypeface,
 } from "react-skia-lite";
 import {
 	useRenderTime,
 	useTimelineStore,
 } from "@/scene-editor/contexts/TimelineContext";
 import { createModelSelector } from "../model/registry";
-import {
-	buildFancyGlyphSlices,
-	type FancyGlyphSlice,
-} from "./helpers";
+import { buildFancyGlyphSlices, type FancyGlyphSlice } from "./helpers";
 import type { FancyTextInternal, FancyTextProps } from "./model";
 
 interface FancyTextRendererProps {
 	id: string;
 }
 
-const useFancyTextSelector = createModelSelector<FancyTextProps, FancyTextInternal>();
+const useFancyTextSelector = createModelSelector<
+	FancyTextProps,
+	FancyTextInternal
+>();
 
 const resolveGlyphWindowInfluence = (
 	center: number,
@@ -49,12 +52,26 @@ const buildGlyphObjects = (slice: FancyGlyphSlice) => {
 	}));
 };
 
+const createRenderFont = (typeface: SkTypeface, fontSize: number): SkFont => {
+	const font = Skia.Font(typeface, fontSize);
+	font.setEdging(FontEdging.SubpixelAntiAlias);
+	font.setEmbeddedBitmaps(false);
+	font.setHinting(FontHinting.None);
+	font.setSubpixel(true);
+	font.setLinearMetrics(true);
+	return font;
+};
+
 const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
-	const paragraph = useFancyTextSelector(id, (state) => state.internal.paragraph);
-	const typeface = useFancyTextSelector(id, (state) => state.internal.typeface);
+	const paragraph = useFancyTextSelector(
+		id,
+		(state) => state.internal.paragraph,
+	);
 	const color = useFancyTextSelector(id, (state) => state.props.color);
-	const fontSize = useFancyTextSelector(id, (state) => state.props.fontSize);
-	const waveRadius = useFancyTextSelector(id, (state) => state.props.waveRadius);
+	const waveRadius = useFancyTextSelector(
+		id,
+		(state) => state.props.waveRadius,
+	);
 	const waveTranslateY = useFancyTextSelector(
 		id,
 		(state) => state.props.waveTranslateY,
@@ -81,23 +98,6 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 		return relativeTime / duration;
 	}, [currentTime, end, start]);
 
-	const renderFont = useMemo(() => {
-		if (!typeface) return null;
-		const nextFont = Skia.Font(typeface, fontSize);
-		nextFont.setEdging(FontEdging.SubpixelAntiAlias);
-		nextFont.setEmbeddedBitmaps(false);
-		nextFont.setHinting(FontHinting.None);
-		nextFont.setSubpixel(true);
-		nextFont.setLinearMetrics(true);
-		return nextFont;
-	}, [fontSize, typeface]);
-
-	useEffect(() => {
-		return () => {
-			renderFont?.dispose();
-		};
-	}, [renderFont]);
-
 	const layoutData = useMemo(() => {
 		if (!paragraph) return null;
 		try {
@@ -113,15 +113,53 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 	}, [paragraph, width]);
 
 	const renderData = useMemo(() => {
-		if (!renderFont || !layoutData || layoutData.glyphSlices.length === 0) {
+		const disposableFonts: SkFont[] = [];
+		const resolveSliceFontCache = new WeakMap<
+			SkTypeface,
+			Map<number, SkFont>
+		>();
+		const resolveSliceFont = (slice: FancyGlyphSlice): SkFont | null => {
+			if (!slice.typeface) return null;
+			let fontBySize = resolveSliceFontCache.get(slice.typeface);
+			if (!fontBySize) {
+				fontBySize = new Map<number, SkFont>();
+				resolveSliceFontCache.set(slice.typeface, fontBySize);
+			}
+			const cached = fontBySize.get(slice.fontSize);
+			if (cached) {
+				return cached;
+			}
+			const created = createRenderFont(slice.typeface, slice.fontSize);
+			fontBySize.set(slice.fontSize, created);
+			disposableFonts.push(created);
+			return created;
+		};
+
+		if (!layoutData || layoutData.glyphSlices.length === 0) {
 			return {
-				glyphSlices: layoutData?.glyphSlices ?? [],
+				glyphSlices: [] as Array<{ slice: FancyGlyphSlice; font: SkFont }>,
 				pathItems: [] as Array<{ key: string; path: SkPath }>,
+				fonts: disposableFonts,
+				canRenderGlyphs: true,
+			};
+		}
+
+		const slicesWithFonts = layoutData.glyphSlices.map((slice) => ({
+			slice,
+			font: resolveSliceFont(slice),
+		}));
+		if (slicesWithFonts.some((item) => item.font === null)) {
+			return {
+				glyphSlices: [] as Array<{ slice: FancyGlyphSlice; font: SkFont }>,
+				pathItems: [] as Array<{ key: string; path: SkPath }>,
+				fonts: disposableFonts,
+				canRenderGlyphs: false,
 			};
 		}
 
 		let flowCursor = 0;
-		const preparedSlices = layoutData.glyphSlices.map((slice) => {
+		const preparedSlices = slicesWithFonts.map((item) => {
+			const { slice, font } = item;
 			const preparedGlyphs = slice.glyphIds.map((_glyphId, glyphIndex) => {
 				const advance = slice.advances[glyphIndex] ?? 1;
 				const glyphStart = flowCursor;
@@ -134,6 +172,7 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 			});
 			return {
 				slice,
+				font: font as SkFont,
 				preparedGlyphs,
 			};
 		});
@@ -141,19 +180,25 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 		const totalFlowLength = flowCursor;
 		if (!Number.isFinite(totalFlowLength) || totalFlowLength <= 0) {
 			return {
-				glyphSlices: layoutData.glyphSlices,
+				glyphSlices: preparedSlices.map((item) => ({
+					slice: item.slice,
+					font: item.font,
+				})),
 				pathItems: [] as Array<{ key: string; path: SkPath }>,
+				fonts: disposableFonts,
+				canRenderGlyphs: true,
 			};
 		}
 
 		const travelStart = -safeWaveRadius;
 		const travelEnd = totalFlowLength + safeWaveRadius;
-		const windowCenter = travelStart + (travelEnd - travelStart) * sweepProgress;
+		const windowCenter =
+			travelStart + (travelEnd - travelStart) * sweepProgress;
 
-		const glyphSlices: FancyGlyphSlice[] = [];
+		const glyphSlices: Array<{ slice: FancyGlyphSlice; font: SkFont }> = [];
 		const pathItems: Array<{ key: string; path: SkPath }> = [];
 
-		preparedSlices.forEach(({ slice, preparedGlyphs }, sliceIndex) => {
+		preparedSlices.forEach(({ slice, font, preparedGlyphs }, sliceIndex) => {
 			let hasInfluence = false;
 			const rsxforms = slice.positions.map((position, glyphIndex) => {
 				const advance = slice.advances[glyphIndex] ?? 1;
@@ -175,17 +220,23 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 			});
 
 			if (!hasInfluence) {
-				glyphSlices.push(slice);
+				glyphSlices.push({
+					slice,
+					font,
+				});
 				return;
 			}
 
 			const path = Skia.Path.MakeFromRSXformGlyphs(
 				slice.glyphIds,
 				rsxforms,
-				renderFont,
+				font,
 			);
 			if (!path) {
-				glyphSlices.push(slice);
+				glyphSlices.push({
+					slice,
+					font,
+				});
 				return;
 			}
 
@@ -198,10 +249,11 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 		return {
 			glyphSlices,
 			pathItems,
+			fonts: disposableFonts,
+			canRenderGlyphs: true,
 		};
 	}, [
 		layoutData,
-		renderFont,
 		safeWaveRadius,
 		safeWaveScale,
 		safeWaveTranslateY,
@@ -213,21 +265,24 @@ const FancyTextRenderer: React.FC<FancyTextRendererProps> = ({ id }) => {
 			for (const item of renderData.pathItems) {
 				item.path.dispose();
 			}
+			for (const font of renderData.fonts) {
+				font.dispose();
+			}
 		};
-	}, [renderData.pathItems]);
+	}, [renderData.fonts, renderData.pathItems]);
 
 	if (!paragraph) return null;
-	if (!renderFont || !layoutData) {
+	if (!layoutData || !renderData.canRenderGlyphs) {
 		return <Paragraph paragraph={paragraph} x={0} y={0} width={width} />;
 	}
 
 	return (
 		<Group>
-			{renderData.glyphSlices.map((slice, index) => (
+			{renderData.glyphSlices.map((item, index) => (
 				<Glyphs
-					key={`inactive-${slice.start}-${slice.end}-${index}`}
-					font={renderFont}
-					glyphs={buildGlyphObjects(slice)}
+					key={`inactive-${item.slice.start}-${item.slice.end}-${index}`}
+					font={item.font}
+					glyphs={buildGlyphObjects(item.slice)}
 					color={color}
 				/>
 			))}

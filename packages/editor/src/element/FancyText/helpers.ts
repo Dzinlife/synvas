@@ -14,6 +14,8 @@ export interface FancyTextActiveWordState {
 export interface FancyGlyphSlice {
 	start: number;
 	end: number;
+	typeface: ShapedLine["runs"][number]["typeface"];
+	fontSize: number;
 	glyphIds: number[];
 	positions: SkPoint[];
 	advances: number[];
@@ -97,10 +99,8 @@ export const resolveFancyTextActiveWordState = (params: {
 
 const resolveRunTextStart = (offsets: Uint32Array): number => offsets[0] ?? 0;
 
-const resolveRunTextEnd = (
-	offsets: Uint32Array,
-	glyphCount: number,
-): number => offsets[glyphCount] ?? offsets[offsets.length - 1] ?? 0;
+const resolveRunTextEnd = (offsets: Uint32Array, glyphCount: number): number =>
+	offsets[glyphCount] ?? offsets[offsets.length - 1] ?? 0;
 
 const findGlyphBoundary = (
 	offsets: Uint32Array,
@@ -170,6 +170,8 @@ export const sliceGlyphRunByTextRange = (
 	return {
 		start: sliceStart,
 		end: sliceEnd,
+		typeface: run.typeface,
+		fontSize: run.size,
 		glyphIds,
 		positions,
 		advances,

@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 
 import { cleanup, render } from "@testing-library/react";
-import React from "react";
+import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
 	modelState: {
 		internal: {
-			paragraph: null as any,
-			font: null as any,
-			typeface: null as any,
+			paragraph: null as unknown,
+			font: null as unknown,
+			typeface: null as unknown,
 			wordSegments: [] as Array<{ text: string; start: number; end: number }>,
 		},
 		props: {
@@ -89,15 +89,19 @@ vi.mock("react-skia-lite", async () => {
 
 vi.mock("../model/registry", () => ({
 	createModelSelector: () => {
-		return (_id: string, selector: (state: typeof mocks.modelState) => unknown) =>
-			selector(mocks.modelState);
+		return (
+			_id: string,
+			selector: (state: typeof mocks.modelState) => unknown,
+		) => selector(mocks.modelState);
 	},
 }));
 
 vi.mock("@/scene-editor/contexts/TimelineContext", () => ({
 	useRenderTime: () => mocks.currentTime,
 	useTimelineStore: (
-		selector: (state: { getElementById: () => typeof mocks.timelineElement }) => unknown,
+		selector: (state: {
+			getElementById: () => typeof mocks.timelineElement;
+		}) => unknown,
 	) =>
 		selector({
 			getElementById: () => mocks.timelineElement as never,
@@ -105,6 +109,10 @@ vi.mock("@/scene-editor/contexts/TimelineContext", () => ({
 }));
 
 import FancyTextRenderer from "./renderer";
+
+const renderFancyText = () => {
+	return render(<FancyTextRenderer id={`fancy-text-${Math.random()}`} />);
+};
 
 describe("FancyText renderer", () => {
 	beforeEach(() => {
@@ -120,7 +128,7 @@ describe("FancyText renderer", () => {
 					baseline: 30,
 					runs: [
 						{
-							typeface: null,
+							typeface: { id: "run-typeface" },
 							size: 48,
 							fakeBold: false,
 							fakeItalic: false,
@@ -159,11 +167,13 @@ describe("FancyText renderer", () => {
 
 	it("正常路径会按整段 glyph flow 生成组合 path", () => {
 		mocks.currentTime = 51;
-		const { container } = render(<FancyTextRenderer id="fancy-text-1" />);
+		const { container } = renderFancyText();
 
 		expect(container.querySelectorAll('[data-kind="glyphs"]')).toHaveLength(0);
 		expect(container.querySelectorAll('[data-kind="path"]')).toHaveLength(1);
-		expect(container.querySelectorAll('[data-kind="paragraph"]')).toHaveLength(0);
+		expect(container.querySelectorAll('[data-kind="paragraph"]')).toHaveLength(
+			0,
+		);
 
 		const paragraph = mocks.modelState.internal.paragraph;
 		expect(paragraph.layout).toHaveBeenCalledWith(240);
@@ -177,7 +187,8 @@ describe("FancyText renderer", () => {
 				dispose: expect.any(Function),
 			}),
 		);
-		const rsxforms = mocks.makePathFromRSXformGlyphs.mock.calls[0]?.[1] as Array<{
+		const rsxforms = mocks.makePathFromRSXformGlyphs.mock
+			.calls[0]?.[1] as Array<{
 			ty: number;
 		}>;
 		expect(rsxforms).toHaveLength(4);
@@ -188,7 +199,7 @@ describe("FancyText renderer", () => {
 
 	it("整句 sweep 的第一帧会从文本外侧进入", () => {
 		mocks.currentTime = 0;
-		const { container } = render(<FancyTextRenderer id="fancy-text-1" />);
+		const { container } = renderFancyText();
 
 		expect(container.querySelectorAll('[data-kind="glyphs"]')).toHaveLength(1);
 		expect(container.querySelectorAll('[data-kind="path"]')).toHaveLength(0);
@@ -202,7 +213,7 @@ describe("FancyText renderer", () => {
 			dispose,
 		});
 
-		const { unmount } = render(<FancyTextRenderer id="fancy-text-1" />);
+		const { unmount } = renderFancyText();
 		unmount();
 
 		expect(dispose).toHaveBeenCalledTimes(1);

@@ -11,6 +11,11 @@ import {
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import type { EditorRuntime } from "@/scene-editor/runtime/types";
+import {
+	__resetFontRegistryForTests,
+	FONT_REGISTRY_PRIMARY_FAMILY,
+	fontRegistry,
+} from "@/typography/fontRegistry";
 import type { ComponentModel, ComponentModelStore } from "../model/types";
 import { type FancyTextWordSegment, segmentFancyTextWords } from "./helpers";
 
@@ -62,13 +67,6 @@ const MIN_WAVE_TRANSLATE_Y = 0;
 const MAX_WAVE_TRANSLATE_Y = 128;
 const MIN_WAVE_SCALE = 0;
 const MAX_WAVE_SCALE = 1;
-const ROBOTO_FONT_URI = "/Roboto-Medium.ttf";
-const ROBOTO_FONT_FAMILY = "Roboto";
-
-let robotoResourcesPromise: Promise<{
-	typeface: SkTypeface | null;
-	fontProvider: SkTypefaceFontProvider | null;
-}> | null = null;
 
 const clampNumber = (value: number, min: number, max: number): number => {
 	return Math.min(max, Math.max(min, value));
@@ -162,44 +160,17 @@ const resolveSkiaColor = (color: string) => {
 	}
 };
 
-const loadRobotoResources = async (): Promise<{
-	typeface: SkTypeface | null;
-	fontProvider: SkTypefaceFontProvider | null;
-}> => {
-	if (!robotoResourcesPromise) {
-		robotoResourcesPromise = (async () => {
-			try {
-				const fontData = await Skia.Data.fromURI(ROBOTO_FONT_URI);
-				const typeface = Skia.Typeface.MakeFreeTypeFaceFromData(fontData);
-				if (!typeface) {
-					console.warn("[FancyTextModel] Failed to create Roboto typeface");
-					return { typeface: null, fontProvider: null };
-				}
-				const provider = Skia.TypefaceFontProvider.Make();
-				provider.registerFont(typeface, ROBOTO_FONT_FAMILY);
-				return {
-					typeface,
-					fontProvider: provider,
-				};
-			} catch (error) {
-				console.warn("[FancyTextModel] Failed to load Roboto font:", error);
-				return { typeface: null, fontProvider: null };
-			}
-		})();
-	}
-	return robotoResourcesPromise;
-};
-
 const buildParagraph = (
 	props: Required<FancyTextProps>,
 	fontProvider: SkTypefaceFontProvider | null,
+	runPlan: Array<{ text: string; fontFamilies: string[] }>,
 ): SkParagraph => {
-	const textStyle = {
+	const baseTextStyle = {
 		color: resolveSkiaColor(props.color),
 		fontSize: props.fontSize,
 		heightMultiplier: props.lineHeight,
 		locale: props.locale,
-		...(fontProvider ? { fontFamilies: [ROBOTO_FONT_FAMILY] } : {}),
+		...(fontProvider ? { fontFamilies: [FONT_REGISTRY_PRIMARY_FAMILY] } : {}),
 	};
 	const builder = fontProvider
 		? Skia.ParagraphBuilder.Make(
@@ -212,7 +183,19 @@ const buildParagraph = (
 				textAlign: resolveSkiaTextAlign(props.textAlign),
 			});
 	try {
-		builder.pushStyle(textStyle).addText(props.text).pop();
+		if (runPlan.length <= 0) {
+			builder.pushStyle(baseTextStyle).addText(props.text).pop();
+			return builder.build();
+		}
+		for (const run of runPlan) {
+			builder
+				.pushStyle({
+					...baseTextStyle,
+					...(fontProvider ? { fontFamilies: run.fontFamilies } : {}),
+				})
+				.addText(run.text)
+				.pop();
+		}
 		return builder.build();
 	} finally {
 		builder.dispose();
@@ -234,7 +217,7 @@ const buildFont = (
 };
 
 export const __resetFancyTextFontProviderCacheForTests = (): void => {
-	robotoResourcesPromise = null;
+	__resetFontRegistryForTests();
 };
 
 export function createFancyTextModel(
@@ -244,6 +227,7 @@ export function createFancyTextModel(
 ): FancyTextModelStore {
 	let disposed = false;
 	let rebuildEpoch = 0;
+	let unsubscribeFontRegistry: (() => void) | null = null;
 	let store: FancyTextModelStore;
 
 	const applyBuiltState = (
@@ -273,15 +257,22 @@ export function createFancyTextModel(
 			},
 		}));
 
-		const { typeface, fontProvider } = await loadRobotoResources();
+		void fontRegistry
+			.ensureCoverage({ text: normalizedProps.text })
+			.catch((error) => {
+				console.warn("[FancyTextModel] ensureCoverage failed:", error);
+			});
+		const fontProvider = await fontRegistry.getFontProvider();
 		if (disposed || currentEpoch !== rebuildEpoch) {
 			return;
 		}
 
 		let paragraph: SkParagraph | null = null;
 		let font: SkFont | null = null;
+		const typeface = fontRegistry.getPrimaryTypeface();
 		try {
-			paragraph = buildParagraph(normalizedProps, fontProvider);
+			const runPlan = fontRegistry.getParagraphRunPlan(normalizedProps.text);
+			paragraph = buildParagraph(normalizedProps, fontProvider, runPlan);
 			font = buildFont(typeface, normalizedProps.fontSize);
 		} catch (error) {
 			paragraph?.dispose();
@@ -469,6 +460,8 @@ export function createFancyTextModel(
 			dispose: () => {
 				disposed = true;
 				rebuildEpoch += 1;
+				unsubscribeFontRegistry?.();
+				unsubscribeFontRegistry = null;
 				const paragraph = get().internal.paragraph;
 				paragraph?.dispose();
 				const font = get().internal.font;
@@ -506,6 +499,10 @@ export function createFancyTextModel(
 			},
 		})),
 	);
+	unsubscribeFontRegistry = fontRegistry.subscribe(() => {
+		if (disposed) return;
+		void rebuildParagraph(store.getState().props);
+	});
 
 	return store;
 }

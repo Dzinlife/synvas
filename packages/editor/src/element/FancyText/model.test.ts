@@ -7,13 +7,59 @@ import {
 	createFancyTextModel,
 } from "./model";
 
-const mocks = vi.hoisted(() => ({
-	dataFromURI: vi.fn(),
-	makeFreeTypeFaceFromData: vi.fn(),
-	makeTypefaceFontProvider: vi.fn(),
-	makeFont: vi.fn(),
-	paragraphBuilderMake: vi.fn(),
-	skiaColor: vi.fn((value: string) => value),
+const mocks = vi.hoisted(() => {
+	const registryListeners = new Set<() => void>();
+	const runPlanByText = new Map<
+		string,
+		Array<{ text: string; fontFamilies: string[] }>
+	>();
+	return {
+		ensureCoverage: vi.fn(),
+		getFontProvider: vi.fn(),
+		getPrimaryTypeface: vi.fn(),
+		getParagraphRunPlan: vi.fn((text: string) => {
+			if (!text) return [];
+			return (
+				runPlanByText.get(text) ?? [{ text, fontFamilies: ["Noto Sans SC"] }]
+			);
+		}),
+		subscribe: vi.fn((listener: () => void) => {
+			registryListeners.add(listener);
+			return () => {
+				registryListeners.delete(listener);
+			};
+		}),
+		resetRegistryForTests: vi.fn(() => {
+			registryListeners.clear();
+			runPlanByText.clear();
+		}),
+		setRunPlan: (
+			text: string,
+			runPlan: Array<{ text: string; fontFamilies: string[] }>,
+		) => {
+			runPlanByText.set(text, runPlan);
+		},
+		emitRegistryUpdate: () => {
+			for (const listener of [...registryListeners]) {
+				listener();
+			}
+		},
+		skiaColor: vi.fn((value: string) => value),
+		makeFont: vi.fn(),
+		paragraphBuilderMake: vi.fn(),
+	};
+});
+
+vi.mock("@/typography/fontRegistry", () => ({
+	FONT_REGISTRY_PRIMARY_FAMILY: "Noto Sans SC",
+	__resetFontRegistryForTests: mocks.resetRegistryForTests,
+	fontRegistry: {
+		ensureCoverage: mocks.ensureCoverage,
+		getFontProvider: mocks.getFontProvider,
+		getPrimaryTypeface: mocks.getPrimaryTypeface,
+		getParagraphRunPlan: mocks.getParagraphRunPlan,
+		subscribe: mocks.subscribe,
+	},
 }));
 
 vi.mock("react-skia-lite", () => ({
@@ -37,15 +83,6 @@ vi.mock("react-skia-lite", () => ({
 		End: 5,
 	},
 	Skia: {
-		Data: {
-			fromURI: mocks.dataFromURI,
-		},
-		Typeface: {
-			MakeFreeTypeFaceFromData: mocks.makeFreeTypeFaceFromData,
-		},
-		TypefaceFontProvider: {
-			Make: mocks.makeTypefaceFontProvider,
-		},
 		Font: mocks.makeFont,
 		ParagraphBuilder: {
 			Make: mocks.paragraphBuilderMake,
@@ -75,9 +112,7 @@ describe("FancyText model", () => {
 		vi.fn().mockImplementation((locale: string) => ({
 			segment: (text: string) => {
 				if (locale === "fr-FR") {
-					return [
-						{ segment: text, index: 0, isWordLike: true },
-					];
+					return [{ segment: text, index: 0, isWordLike: true }];
 				}
 				return [
 					{ segment: "Hello", index: 0, isWordLike: true },
@@ -97,11 +132,9 @@ describe("FancyText model", () => {
 			Segmenter: segmenterMock,
 		});
 
-		mocks.dataFromURI.mockResolvedValue({ id: "font-data" });
-		mocks.makeFreeTypeFaceFromData.mockReturnValue({ id: "roboto-typeface" });
-		mocks.makeTypefaceFontProvider.mockImplementation(() => ({
-			registerFont: vi.fn(),
-		}));
+		mocks.ensureCoverage.mockResolvedValue(undefined);
+		mocks.getFontProvider.mockResolvedValue({ registerFont: vi.fn() });
+		mocks.getPrimaryTypeface.mockReturnValue({ id: "primary-typeface" });
 		mocks.makeFont.mockImplementation(() => ({
 			setEdging: vi.fn(),
 			setEmbeddedBitmaps: vi.fn(),
@@ -129,7 +162,7 @@ describe("FancyText model", () => {
 		vi.unstubAllGlobals();
 	});
 
-	it("init 会加载 Roboto 资源并构建 paragraph/font", async () => {
+	it("init 会先触发 coverage 并按主字体 run 构建 paragraph", async () => {
 		const store = createFancyTextModel(
 			"fancy-text-1",
 			{
@@ -139,93 +172,137 @@ describe("FancyText model", () => {
 		);
 
 		await store.getState().init();
-		const provider = mocks.makeTypefaceFontProvider.mock.results[0]?.value as
-			| { registerFont: ReturnType<typeof vi.fn> }
-			| undefined;
-		const font = mocks.makeFont.mock.results[0]?.value as
+		const builder = mocks.paragraphBuilderMake.mock.results[0]?.value as
 			| {
-					setEdging: ReturnType<typeof vi.fn>;
-					setEmbeddedBitmaps: ReturnType<typeof vi.fn>;
-					setHinting: ReturnType<typeof vi.fn>;
-					setSubpixel: ReturnType<typeof vi.fn>;
-					setLinearMetrics: ReturnType<typeof vi.fn>;
-				}
+					pushStyle: ReturnType<typeof vi.fn>;
+					addText: ReturnType<typeof vi.fn>;
+			  }
 			| undefined;
 
-		expect(mocks.dataFromURI).toHaveBeenCalledWith("/Roboto-Medium.ttf");
-		expect(provider?.registerFont).toHaveBeenCalledWith(
-			{ id: "roboto-typeface" },
-			"Roboto",
+		expect(mocks.ensureCoverage).toHaveBeenCalledWith({ text: "Hello world" });
+		expect(mocks.getFontProvider).toHaveBeenCalledTimes(1);
+		expect(mocks.getParagraphRunPlan).toHaveBeenCalledWith("Hello world");
+		expect(builder?.pushStyle).toHaveBeenCalledWith(
+			expect.objectContaining({
+				fontFamilies: ["Noto Sans SC"],
+			}),
 		);
-		expect(mocks.makeFont).toHaveBeenCalledWith({ id: "roboto-typeface" }, 48);
-		expect(font?.setEdging).toHaveBeenCalledWith(2);
-		expect(font?.setEmbeddedBitmaps).toHaveBeenCalledWith(false);
-		expect(font?.setHinting).toHaveBeenCalledWith(0);
-		expect(font?.setSubpixel).toHaveBeenCalledWith(true);
-		expect(font?.setLinearMetrics).toHaveBeenCalledWith(true);
-		expect(store.getState().internal.paragraph).toBeTruthy();
-		expect(store.getState().internal.font).toBeTruthy();
+		expect(builder?.addText).toHaveBeenCalledWith("Hello world");
 		expect(store.getState().internal.wordSegments).toEqual([
 			{ text: "Hello", start: 0, end: 5 },
 			{ text: "world", start: 6, end: 11 },
 		]);
-		expect(store.getState().props.waveRadius).toBe(48);
-		expect(store.getState().props.waveTranslateY).toBe(8);
-		expect(store.getState().props.waveScale).toBe(0.16);
 		expect(store.getState().internal.isReady).toBe(true);
 	});
 
-	it("setProps 更新 locale 后会重建 paragraph 和分词结果", async () => {
+	it("registry 更新后会重建并把 confirmed unsupported 字符切到 fallback run", async () => {
+		mocks.setRunPlan("中文🙂", [
+			{ text: "中文🙂", fontFamilies: ["Noto Sans SC"] },
+		]);
 		const store = createFancyTextModel(
 			"fancy-text-2",
 			{
-				text: "Bonjour",
-				locale: "en-US",
+				text: "中文🙂",
 			},
 			runtime,
 		);
 		await store.getState().init();
 
-		store.getState().setProps({ locale: "fr-FR" });
+		mocks.setRunPlan("中文🙂", [
+			{ text: "中文", fontFamilies: ["Noto Sans SC"] },
+			{ text: "🙂", fontFamilies: ["Noto Sans SC", "Noto Color Emoji"] },
+		]);
+		mocks.emitRegistryUpdate();
+
 		await waitForCondition(() => {
 			return (
-				store.getState().props.locale === "fr-FR" &&
+				mocks.paragraphBuilderMake.mock.calls.length >= 2 &&
 				store.getState().constraints.isLoading === false
 			);
 		});
 
-		const segmenter = (globalThis.Intl as typeof Intl & {
-			Segmenter: ReturnType<typeof createSegmenterMock>;
-		}).Segmenter;
-		expect(segmenter).toHaveBeenLastCalledWith("fr-FR", {
-			granularity: "word",
-		});
-		expect(store.getState().internal.wordSegments).toEqual([
-			{ text: "Bonjour", start: 0, end: 7 },
-		]);
+		const builder = mocks.paragraphBuilderMake.mock.results.at(-1)?.value as
+			| {
+					pushStyle: ReturnType<typeof vi.fn>;
+					addText: ReturnType<typeof vi.fn>;
+			  }
+			| undefined;
+
+		expect(builder?.pushStyle).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({
+				fontFamilies: ["Noto Sans SC"],
+			}),
+		);
+		expect(builder?.pushStyle).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({
+				fontFamilies: ["Noto Sans SC", "Noto Color Emoji"],
+			}),
+		);
+		expect(builder?.addText).toHaveBeenNthCalledWith(1, "中文");
+		expect(builder?.addText).toHaveBeenNthCalledWith(2, "🙂");
 	});
 
-	it("没有 word-like segment 时会保留空分词结果", async () => {
-		const segmenterMock = vi.fn().mockImplementation(() => ({
-			segment: () => [
-				{ segment: " ", index: 0, isWordLike: false },
-				{ segment: ",", index: 1, isWordLike: false },
-			],
-		}));
-		vi.stubGlobal("Intl", {
-			...globalThis.Intl,
-			Segmenter: segmenterMock,
-		});
-
+	it("unknown 或 pending 字符不会提前 fallback", async () => {
+		mocks.setRunPlan("🧪", [{ text: "🧪", fontFamilies: ["Noto Sans SC"] }]);
 		const store = createFancyTextModel(
 			"fancy-text-3",
 			{
-				text: " ,",
+				text: "🧪",
 			},
 			runtime,
 		);
 		await store.getState().init();
 
-		expect(store.getState().internal.wordSegments).toEqual([]);
+		const builder = mocks.paragraphBuilderMake.mock.results.at(-1)?.value as
+			| {
+					pushStyle: ReturnType<typeof vi.fn>;
+			  }
+			| undefined;
+		expect(builder?.pushStyle).toHaveBeenCalledTimes(1);
+		expect(builder?.pushStyle).toHaveBeenCalledWith(
+			expect.objectContaining({
+				fontFamilies: ["Noto Sans SC"],
+			}),
+		);
+	});
+
+	it("epoch 竞争下会保留最新文本的构建结果", async () => {
+		let resolveFirstProvider:
+			| ((provider: { registerFont: ReturnType<typeof vi.fn> }) => void)
+			| null = null;
+		const firstProviderPromise = new Promise<{
+			registerFont: ReturnType<typeof vi.fn>;
+		}>((resolve) => {
+			resolveFirstProvider = resolve;
+		});
+		mocks.getFontProvider
+			.mockImplementationOnce(() => firstProviderPromise)
+			.mockResolvedValue({ registerFont: vi.fn() });
+
+		const store = createFancyTextModel(
+			"fancy-text-4",
+			{
+				text: "first",
+			},
+			runtime,
+		);
+		const initPromise = store.getState().init();
+		store.getState().setProps({ text: "second" });
+		resolveFirstProvider?.({ registerFont: vi.fn() });
+		await initPromise;
+
+		await waitForCondition(() => {
+			return store.getState().constraints.isLoading === false;
+		});
+
+		const builder = mocks.paragraphBuilderMake.mock.results.at(-1)?.value as
+			| {
+					addText: ReturnType<typeof vi.fn>;
+			  }
+			| undefined;
+		expect(store.getState().props.text).toBe("second");
+		expect(builder?.addText).toHaveBeenCalledWith("second");
 	});
 });

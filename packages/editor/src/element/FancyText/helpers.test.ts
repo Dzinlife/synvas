@@ -45,6 +45,8 @@ describe("FancyText helpers", () => {
 		expect(sliceGlyphRunByTextRange(run, 0, 4)).toEqual({
 			start: 0,
 			end: 4,
+			typeface: null,
+			fontSize: 48,
 			glyphIds: [11, 12, 13, 14],
 			positions: [
 				{ x: 0, y: 20 },
@@ -88,6 +90,8 @@ describe("FancyText helpers", () => {
 			{
 				start: 0,
 				end: 1,
+				typeface: null,
+				fontSize: 48,
 				glyphIds: [1],
 				positions: [{ x: 0, y: 20 }],
 				advances: [10],
@@ -97,6 +101,8 @@ describe("FancyText helpers", () => {
 			{
 				start: 3,
 				end: 4,
+				typeface: null,
+				fontSize: 48,
 				glyphIds: [4],
 				positions: [{ x: 30, y: 20 }],
 				advances: [10],
@@ -108,6 +114,8 @@ describe("FancyText helpers", () => {
 			{
 				start: 1,
 				end: 3,
+				typeface: null,
+				fontSize: 48,
 				glyphIds: [2, 3],
 				positions: [
 					{ x: 10, y: 20 },
