@@ -3507,30 +3507,37 @@ describe("CanvasWorkspace", () => {
 
 	it("框选会替换选择，dragend 落在 node 上也不会被尾随 click 覆盖", () => {
 		render(<CanvasWorkspace />);
+		const beforeActiveNodeId =
+			useProjectStore.getState().currentProject?.ui.activeNodeId ?? null;
 		marqueeCanvasAt(1000, 100, 300, 160);
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
 			"node-scene-1",
 			"node-video-1",
 		]);
-			expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
-				"node-video-1",
-			);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			beforeActiveNodeId,
+		);
 
-			clickNodeAt(300, 160);
-			expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
-				"node-scene-1",
-				"node-video-1",
-			]);
+		clickNodeAt(300, 160);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-scene-1",
+			"node-video-1",
+		]);
 	});
 
 	it("框选 dragend 落在空白处后，单击空白即可清空选择", () => {
 		render(<CanvasWorkspace />);
+		const beforeActiveNodeId =
+			useProjectStore.getState().currentProject?.ui.activeNodeId ?? null;
 		marqueeCanvasAt(1100, 100, 200, 700);
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
 			"node-scene-1",
 			"node-video-1",
 			"node-image-1",
 		]);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			beforeActiveNodeId,
+		);
 
 		clickCanvasAt(1120, 700);
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([]);
@@ -3541,6 +3548,8 @@ describe("CanvasWorkspace", () => {
 
 	it("Shift 框选会基于初始选择做 toggle", () => {
 		render(<CanvasWorkspace />);
+		const beforeActiveNodeId =
+			useProjectStore.getState().currentProject?.ui.activeNodeId ?? null;
 		marqueeCanvasAt(1000, 100, 300, 160);
 		marqueeCanvasAt(1000, 520, 650, 300, { shiftKey: true });
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
@@ -3548,7 +3557,33 @@ describe("CanvasWorkspace", () => {
 			"node-image-1",
 		]);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
-			"node-image-1",
+			beforeActiveNodeId,
+		);
+	});
+
+	it("框选命中 0 个节点时会清空选择但保持 active", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		const beforeActiveNodeId =
+			useProjectStore.getState().currentProject?.ui.activeNodeId ?? null;
+		expect(beforeActiveNodeId).toBe("node-video-1");
+
+		marqueeCanvasAt(1080, 60, 1180, 140);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([]);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			beforeActiveNodeId,
+		);
+	});
+
+	it("无 active 时框选单节点会转为 active 并清空选区", () => {
+		render(<CanvasWorkspace />);
+		clickCanvasAt(1120, 700);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBeNull();
+
+		marqueeCanvasAt(980, 20, 100, 80);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([]);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-scene-1",
 		);
 	});
 

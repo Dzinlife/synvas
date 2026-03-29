@@ -1773,17 +1773,28 @@ const CanvasWorkspace = () => {
 		[getCamera, activeNode, isSingleSelection, selectedBounds, selectedNodes],
 	);
 
-	const commitSelectedNodeIds = useCallback(
+	const normalizeSelectionByLatestProject = useCallback(
 		(nextSelectedNodeIds: string[]) => {
 			const latestProject =
 				useProjectStore.getState().currentProject ?? currentProject;
 			const latestNodeIdSet = new Set(
 				latestProject?.canvas.nodes.map((node) => node.id) ?? [],
 			);
-			const normalized = normalizeSelectedNodeIds(
-				nextSelectedNodeIds,
-				latestNodeIdSet,
-			);
+			return {
+				latestProject,
+				normalized: normalizeSelectedNodeIds(
+					nextSelectedNodeIds,
+					latestNodeIdSet,
+				),
+			};
+		},
+		[currentProject],
+	);
+
+	const commitSelectedNodeIds = useCallback(
+		(nextSelectedNodeIds: string[]) => {
+			const { latestProject, normalized } =
+				normalizeSelectionByLatestProject(nextSelectedNodeIds);
 			setSelectedNodeIds(normalized);
 			const nextPrimaryNodeId = getPrimarySelectedNodeId(normalized);
 			if (nextPrimaryNodeId) {
@@ -1797,7 +1808,25 @@ const CanvasWorkspace = () => {
 			}
 			setActiveNode(nextPrimaryNodeId);
 		},
-		[currentProject, setActiveNode, setActiveScene],
+		[normalizeSelectionByLatestProject, setActiveNode, setActiveScene],
+	);
+
+	const commitMarqueeSelectedNodeIds = useCallback(
+		(nextSelectedNodeIds: string[], isFinalize = false) => {
+			const { latestProject, normalized } =
+				normalizeSelectionByLatestProject(nextSelectedNodeIds);
+			if (
+				isFinalize &&
+				!latestProject?.ui.activeNodeId &&
+				normalized.length === 1
+			) {
+				setActiveNode(normalized[0] ?? null);
+				setSelectedNodeIds([]);
+				return;
+			}
+			setSelectedNodeIds(normalized);
+		},
+		[normalizeSelectionByLatestProject, setActiveNode],
 	);
 
 	useEffect(() => {
@@ -1823,10 +1852,7 @@ const CanvasWorkspace = () => {
 			const nextSelected = currentNodeIdSet.has(focusedNodeId)
 				? [focusedNodeId]
 				: [];
-			if (
-				nextSelected.length !== normalizedSelectedNodeIds.length ||
-				nextSelected[0] !== normalizedSelectedNodeIds[0]
-			) {
+			if (!areNodeIdsEqual(nextSelected, normalizedSelectedNodeIds)) {
 				setSelectedNodeIds(nextSelected);
 			}
 			return;
@@ -1835,24 +1861,10 @@ const CanvasWorkspace = () => {
 			selectedNodeIds,
 			currentNodeIdSet,
 		);
-		const primarySelectedNodeId = getPrimarySelectedNodeId(filteredSelected);
-		if (primarySelectedNodeId === activeNodeId) {
-			if (filteredSelected.length !== selectedNodeIds.length) {
-				setSelectedNodeIds(filteredSelected);
-			}
-			return;
-		}
-		if (!activeNodeId || !currentNodeIdSet.has(activeNodeId)) {
-			if (filteredSelected.length > 0) {
-				setSelectedNodeIds([]);
-			}
-			return;
-		}
-		if (filteredSelected.length !== 1 || filteredSelected[0] !== activeNodeId) {
-			setSelectedNodeIds([activeNodeId]);
+		if (!areNodeIdsEqual(filteredSelected, selectedNodeIds)) {
+			setSelectedNodeIds(filteredSelected);
 		}
 	}, [
-		activeNodeId,
 		currentNodeIdSet,
 		focusedNodeId,
 		normalizedSelectedNodeIds,
@@ -2147,8 +2159,16 @@ const CanvasWorkspace = () => {
 	);
 
 	const applyMarqueeSelection = useCallback(
-		(rect: CanvasMarqueeRect) => {
-			const marqueeSession = marqueeSessionRef.current;
+		(
+			rect: CanvasMarqueeRect,
+			options?: {
+				isFinalize?: boolean;
+				marqueeSession?: CanvasMarqueeSession | null;
+			},
+		) => {
+			const isFinalize = options?.isFinalize ?? false;
+			const marqueeSession =
+				options?.marqueeSession ?? marqueeSessionRef.current;
 			if (!marqueeSession) return;
 			const hitNodeIds = collectIntersectedNodeIds(rect);
 			if (marqueeSession.additive) {
@@ -2159,12 +2179,12 @@ const CanvasWorkspace = () => {
 						nodeId,
 					);
 				}
-				commitSelectedNodeIds(nextSelectedNodeIds);
+				commitMarqueeSelectedNodeIds(nextSelectedNodeIds, isFinalize);
 				return;
 			}
-			commitSelectedNodeIds(hitNodeIds);
+			commitMarqueeSelectedNodeIds(hitNodeIds, isFinalize);
 		},
-		[collectIntersectedNodeIds, commitSelectedNodeIds],
+		[collectIntersectedNodeIds, commitMarqueeSelectedNodeIds],
 	);
 
 	const resolveNodeResizeConstraints = useCallback(
@@ -4130,7 +4150,10 @@ const CanvasWorkspace = () => {
 					suppressNode: true,
 					suppressCanvas: false,
 				});
-				applyMarqueeSelection(marqueeRectRef.current);
+				applyMarqueeSelection(marqueeRectRef.current, {
+					isFinalize: true,
+					marqueeSession,
+				});
 				updateMarqueeRectState({
 					visible: false,
 				x1: marqueeRectRef.current.x1,
