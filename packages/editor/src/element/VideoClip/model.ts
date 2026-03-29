@@ -162,8 +162,24 @@ export const calculateVideoTime = ({
 const DEFAULT_FPS = 30;
 // 目标时间回退超过该帧数则重启流式播放（按时间线 FPS 计算）
 const PLAYBACK_BACK_JUMP_FRAMES = 3;
-const PLAYBACK_DRIFT_FLOOR_SECONDS = 1.0;
-const PLAYBACK_DRIFT_ADAPTIVE_MULTIPLIER = 2;
+// 漂移阈值的最小下限：至少允许落后 2 帧时间线时长，避免阈值过小导致抖动 seek。
+const PLAYBACK_DRIFT_FLOOR_TIMELINE_FRAMES = 2;
+// 自适应阈值系数：基于观测到的视频帧间隔动态放宽阈值，兼容任意素材 FPS。
+const PLAYBACK_DRIFT_ADAPTIVE_MULTIPLIER = 1.5;
+// 启动期宽限：初始还拿不到观测帧间隔时，短暂无进展不立即触发 seek。
+const PLAYBACK_DRIFT_STARTUP_GRACE_SECONDS = 0.2;
+// 启动期漂移阈值系数：使用 timeline 帧间隔兜底估算启动期可接受漂移。
+const PLAYBACK_DRIFT_STARTUP_MULTIPLIER = 3;
+// 正常播放态停滞阈值倍率：只有“漂移超阈值 + 停滞超阈值”才触发 seek。
+const PLAYBACK_DRIFT_STALL_MULTIPLIER = 1.25;
+// 停滞阈值下限：避免阈值过小，轻微瞬时抖动就触发 seek。
+const PLAYBACK_DRIFT_STALL_MIN_SECONDS = 0.1;
+// 停滞阈值上限：避免阈值过大，真实卡顿时恢复过慢。
+const PLAYBACK_DRIFT_STALL_MAX_SECONDS = 0.6;
+// 硬追赶阈值倍率：漂移过大时直接 seek，不再等待停滞时长累计。
+const PLAYBACK_DRIFT_HARD_CATCHUP_MULTIPLIER = 2.5;
+// 漂移 seek 冷却：限制连续 seek 频率，避免重新引入 seek 风暴。
+const PLAYBACK_DRIFT_SEEK_COOLDOWN_SECONDS = 0.35;
 const DEFAULT_FRAME_CHANNEL: RenderFrameChannel = "current";
 const getNowMs = () =>
 	typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -233,6 +249,10 @@ export function createVideoClipModel(
 		offscreen: null,
 	};
 	let observedPlaybackFrameIntervalByChannel: Record<string, number | null> = {
+		current: null,
+		offscreen: null,
+	};
+	let lastDriftSeekAtMsByChannel: Record<RenderFrameChannel, number | null> = {
 		current: null,
 		offscreen: null,
 	};
@@ -344,6 +364,7 @@ export function createVideoClipModel(
 			current: null,
 			offscreen: null,
 		};
+		lastDriftSeekAtMsByChannel = { current: null, offscreen: null };
 	};
 
 	const markReversePrewarmCompleted = (key: string) => {
@@ -1097,11 +1118,25 @@ export function createVideoClipModel(
 			observedFrameInterval:
 				observedPlaybackFrameIntervalByChannel[frameChannel],
 			stalledDurationSeconds,
-			driftFloorSeconds: PLAYBACK_DRIFT_FLOOR_SECONDS,
+			driftFloorSeconds:
+				frameInterval * PLAYBACK_DRIFT_FLOOR_TIMELINE_FRAMES,
 			adaptiveMultiplier: PLAYBACK_DRIFT_ADAPTIVE_MULTIPLIER,
+			startupGraceSeconds: PLAYBACK_DRIFT_STARTUP_GRACE_SECONDS,
+			startupDriftMultiplier: PLAYBACK_DRIFT_STARTUP_MULTIPLIER,
+			stallMultiplier: PLAYBACK_DRIFT_STALL_MULTIPLIER,
+			stallMinSeconds: PLAYBACK_DRIFT_STALL_MIN_SECONDS,
+			stallMaxSeconds: PLAYBACK_DRIFT_STALL_MAX_SECONDS,
+			hardCatchupMultiplier: PLAYBACK_DRIFT_HARD_CATCHUP_MULTIPLIER,
 		});
 		if (shouldSeek) {
-			await seekToTime(alignedVideoTime, { frameChannel });
+			const lastDriftSeekAtMs = lastDriftSeekAtMsByChannel[frameChannel];
+			if (
+				lastDriftSeekAtMs === null ||
+				nowMs - lastDriftSeekAtMs >= PLAYBACK_DRIFT_SEEK_COOLDOWN_SECONDS * 1000
+			) {
+				lastDriftSeekAtMsByChannel[frameChannel] = nowMs;
+				await seekToTime(alignedVideoTime, { frameChannel });
+			}
 		}
 		lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
 	};
