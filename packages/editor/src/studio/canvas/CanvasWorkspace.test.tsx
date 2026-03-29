@@ -80,6 +80,13 @@ interface MockInfiniteSkiaCanvasProps {
 	height: number;
 	nodes?: CanvasNode[];
 	camera?: { value: CameraState; _isSharedValue?: boolean };
+	marqueeRectScreen?: {
+		visible: boolean;
+		x1: number;
+		y1: number;
+		x2: number;
+		y2: number;
+	} | null;
 	tileDebugEnabled?: boolean;
 	tileInputMode?: "raster" | "picture";
 	focusedNodeId?: string | null;
@@ -3525,6 +3532,29 @@ describe("CanvasWorkspace", () => {
 		]);
 	});
 
+	it("框选拖拽过程中会透传 marqueeRectScreen.visible，结束后恢复 false", () => {
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+		fireEvent.pointerDown(canvas, {
+			...createPointerPatch(1000, 100),
+			buttons: 1,
+		});
+		fireEvent.pointerMove(canvas, {
+			...createPointerPatch(300, 160),
+			buttons: 1,
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().marqueeRectScreen?.visible).toBe(
+			true,
+		);
+		fireEvent.pointerUp(canvas, {
+			...createPointerPatch(300, 160),
+			buttons: 0,
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().marqueeRectScreen?.visible).toBe(
+			false,
+		);
+	});
+
 	it("框选 dragend 落在空白处后，单击空白即可清空选择", () => {
 		render(<CanvasWorkspace />);
 		const beforeActiveNodeId =
@@ -4302,7 +4332,9 @@ describe("CanvasWorkspace", () => {
 			buttons: 0,
 		});
 
-		expect(screen.queryByTestId("canvas-selection-rect")).toBeNull();
+		expect(getLatestInfiniteSkiaCanvasProps().marqueeRectScreen?.visible).toBe(
+			false,
+		);
 
 		dragNodeAt(720, 360, 820, 420);
 		const image = useProjectStore

@@ -299,6 +299,13 @@ interface CanvasNodeOverlayLayerProps {
 	) => SharedValue<CanvasNodeLayoutState> | null;
 	selectedNodes: CanvasNode[];
 	hoverNode: CanvasNode | null;
+	marqueeRectScreen?: {
+		visible: boolean;
+		x1: number;
+		y1: number;
+		x2: number;
+		y2: number;
+	} | null;
 	snapGuidesScreen: CanvasSnapGuidesScreen;
 	camera: SharedValue<CanvasCameraState>;
 	onNodeResize?: (event: {
@@ -321,6 +328,7 @@ export const CanvasNodeOverlayLayer = ({
 	getNodeLayout,
 	selectedNodes,
 	hoverNode,
+	marqueeRectScreen = null,
 	snapGuidesScreen,
 	camera,
 	onNodeResize,
@@ -641,9 +649,11 @@ export const CanvasNodeOverlayLayer = ({
 	};
 	const hasSnapGuides =
 		snapGuidesScreen.vertical.length > 0 || snapGuidesScreen.horizontal.length > 0;
+	const hasVisibleMarquee = Boolean(marqueeRectScreen?.visible);
 
 	if (
 		!hasSnapGuides &&
+		!hasVisibleMarquee &&
 		!activeNode &&
 		!hoverBorderNode &&
 		selectedOutlineNodes.length === 0 &&
@@ -655,6 +665,28 @@ export const CanvasNodeOverlayLayer = ({
 	return (
 		<>
 			<Group zIndex={1_000_000} pointerEvents="none">
+				{hasVisibleMarquee && marqueeRectScreen && (
+					<>
+						<Rect
+							x={Math.min(marqueeRectScreen.x1, marqueeRectScreen.x2)}
+							y={Math.min(marqueeRectScreen.y1, marqueeRectScreen.y2)}
+							width={Math.abs(marqueeRectScreen.x2 - marqueeRectScreen.x1)}
+							height={Math.abs(marqueeRectScreen.y2 - marqueeRectScreen.y1)}
+							color="rgba(56,189,248,0.1)"
+							pointerEvents="none"
+						/>
+						<Rect
+							x={Math.min(marqueeRectScreen.x1, marqueeRectScreen.x2)}
+							y={Math.min(marqueeRectScreen.y1, marqueeRectScreen.y2)}
+							width={Math.abs(marqueeRectScreen.x2 - marqueeRectScreen.x1)}
+							height={Math.abs(marqueeRectScreen.y2 - marqueeRectScreen.y1)}
+							style="stroke"
+							strokeWidth={1}
+							color="rgba(125,211,252,0.7)"
+							pointerEvents="none"
+						/>
+					</>
+				)}
 				{snapGuidesScreen.vertical.map((x) => (
 					<Line
 						key={`canvas-snap-v-${x}`}

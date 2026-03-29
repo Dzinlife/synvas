@@ -84,6 +84,14 @@ export interface CanvasSelectionResizeEvent {
 	event: CanvasNodeDragEvent;
 }
 
+export interface CanvasMarqueeRectScreen {
+	visible: boolean;
+	x1: number;
+	y1: number;
+	x2: number;
+	y2: number;
+}
+
 export type TileInputMode = "raster" | "picture";
 
 interface InfiniteSkiaCanvasProps {
@@ -98,6 +106,7 @@ interface InfiniteSkiaCanvasProps {
 	selectedNodeIds: string[];
 	focusedNodeId: string | null;
 	hoveredNodeId: string | null;
+	marqueeRectScreen?: CanvasMarqueeRectScreen | null;
 	snapGuidesScreen?: CanvasSnapGuidesScreen;
 	suspendHover?: boolean;
 	tileDebugEnabled?: boolean;
@@ -619,6 +628,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	selectedNodeIds,
 	focusedNodeId,
 	hoveredNodeId,
+	marqueeRectScreen = null,
 	snapGuidesScreen = EMPTY_SNAP_GUIDES_SCREEN,
 	suspendHover = false,
 	tileDebugEnabled = false,
@@ -1310,6 +1320,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						getNodeLayout={getNodeLayoutValue}
 						selectedNodes={selectedNodes}
 						hoverNode={hoverNode}
+						marqueeRectScreen={marqueeRectScreen}
 						snapGuidesScreen={snapGuidesScreen}
 						camera={animatedCamera}
 						onNodeResize={handleOverlayNodeResize}
@@ -1337,6 +1348,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			hoverNode,
 			onSelectionResize,
 			renderNodes,
+			marqueeRectScreen,
 			scheduleTileTick,
 			snapGuidesScreen,
 			staticTileSnapshot,

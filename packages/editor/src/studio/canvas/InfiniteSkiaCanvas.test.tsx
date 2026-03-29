@@ -577,6 +577,50 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
+	it("会把 marqueeRectScreen 透传给 overlay", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[createVideoNode("node-a", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId={null}
+				marqueeRectScreen={{
+					visible: true,
+					x1: 120,
+					y1: 80,
+					x2: 300,
+					y2: 240,
+				}}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const overlayProps = getElementProps<{
+			marqueeRectScreen?: {
+				visible: boolean;
+				x1: number;
+				y1: number;
+				x2: number;
+				y2: number;
+			} | null;
+		}>(getOverlayElement(getLatestRenderTree()));
+		expect(overlayProps?.marqueeRectScreen).toEqual({
+			visible: true,
+			x1: 120,
+			y1: 80,
+			x2: 300,
+			y2: 240,
+		});
+	});
+
 	it("hover 节点会透传到 overlay", async () => {
 		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
 		const nodes = [createVideoNode("node-a", 0), createVideoNode("node-b", 1)];

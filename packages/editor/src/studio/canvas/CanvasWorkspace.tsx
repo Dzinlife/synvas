@@ -4966,6 +4966,7 @@ const CanvasWorkspace = () => {
 					selectedNodeIds={normalizedSelectedNodeIds}
 					focusedNodeId={focusedNodeId}
 					hoveredNodeId={hoveredNodeId}
+					marqueeRectScreen={marqueeRect}
 					snapGuidesScreen={snapGuidesScreen}
 					suspendHover={isCameraAnimating}
 					tileDebugEnabled={tileDebugEnabled}
@@ -4973,18 +4974,6 @@ const CanvasWorkspace = () => {
 					onNodeResize={handleSkiaNodeResize}
 					onSelectionResize={handleSelectionResize}
 				/>
-			{marqueeRect.visible && (
-				<div
-					data-testid="canvas-selection-rect"
-					className="pointer-events-none absolute z-20 border border-sky-300/70 bg-sky-400/10"
-					style={{
-						left: Math.min(marqueeRect.x1, marqueeRect.x2),
-						top: Math.min(marqueeRect.y1, marqueeRect.y2),
-						width: Math.abs(marqueeRect.x2 - marqueeRect.x1),
-						height: Math.abs(marqueeRect.y2 - marqueeRect.y1),
-					}}
-				/>
-			)}
 
 			<CanvasWorkspaceOverlay
 				toolbarLeftOffset={toolbarLeftOffset}
