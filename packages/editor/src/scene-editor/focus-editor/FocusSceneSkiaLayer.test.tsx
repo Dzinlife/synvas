@@ -155,7 +155,7 @@ const resolveSceneBox = (element: TimelineElement) => {
 	};
 };
 
-const setupInteractions = (elements: TimelineElement[]) => {
+const setupInteractions = (initialElements: TimelineElement[]) => {
 	const runtime = createTestEditorRuntime("focus-scene-interactions-test");
 	const timelineRef = {
 		kind: "scene" as const,
@@ -165,8 +165,9 @@ const setupInteractions = (elements: TimelineElement[]) => {
 	runtime.setActiveEditTimeline(timelineRef);
 	const timelineStore = timelineRuntime.timelineStore;
 	timelineStore.getState().setCanvasSize(CANVAS_SIZE);
-	timelineStore.getState().setElements(elements, { history: false });
-	const interactiveElementsRef = { current: elements };
+	timelineStore.getState().setElements(initialElements, { history: false });
+	let interactiveElements = initialElements;
+	const interactiveElementsRef = { current: interactiveElements };
 	const hook = renderHook(
 		() =>
 			useFocusSceneSkiaInteractions({
@@ -176,7 +177,7 @@ const setupInteractions = (elements: TimelineElement[]) => {
 				focusedNode,
 				sourceWidth: 1000,
 				sourceHeight: 1000,
-				interactiveElements: elements,
+				interactiveElements,
 				interactiveElementsRef,
 				timelineStore,
 			}),
@@ -184,9 +185,17 @@ const setupInteractions = (elements: TimelineElement[]) => {
 			wrapper: createRuntimeProviderWrapper(runtime),
 		},
 	);
+	const syncInteractiveElements = (
+		nextElements: TimelineElement[] = timelineStore.getState().elements,
+	) => {
+		interactiveElements = nextElements;
+		interactiveElementsRef.current = nextElements;
+		hook.rerender();
+	};
 	return {
 		timelineStore,
 		modelRegistry: timelineRuntime.modelRegistry,
+		syncInteractiveElements,
 		...hook,
 	};
 };
@@ -274,6 +283,38 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		const movedCenter = resolveSceneCenter(movedElement ?? elementA);
 		expect(movedCenter.x).toBeCloseTo(500, 2);
 		expect(movedCenter.y).toBeCloseTo(200, 2);
+	});
+
+	it("move 后 undo 不会出现旧选中框", () => {
+		const elementA = createElement("element-a", 200, 200);
+		const { result, timelineStore, syncInteractiveElements } = setupInteractions([
+			elementA,
+		]);
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(200, 200));
+			result.current.onLayerPointerUp(createPointerEvent(200, 200));
+		});
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(200, 200));
+			result.current.onLayerPointerMove(createPointerEvent(500, 200));
+			result.current.onLayerPointerUp(createPointerEvent(500, 200));
+		});
+
+		act(() => {
+			syncInteractiveElements(timelineStore.getState().elements);
+		});
+
+		expect(result.current.selectionFrameScreen?.cx ?? 0).toBeCloseTo(500, 2);
+
+		act(() => {
+			timelineStore.getState().setElements([elementA], { history: false });
+			syncInteractiveElements(timelineStore.getState().elements);
+		});
+
+		expect(result.current.selectionFrameScreen?.cx ?? 0).toBeCloseTo(200, 2);
+		expect(result.current.selectionFrameScreen?.cy ?? 0).toBeCloseTo(200, 2);
 	});
 
 	it("并列同尺寸元素吸附时会显示全部匹配吸附线", () => {

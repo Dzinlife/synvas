@@ -835,6 +835,7 @@ export const useFocusSceneSkiaInteractions = ({
 	const interactionSessionRef = useRef<InteractionSession>(null);
 	const transformPointerInputRef = useRef<TransformPointerInput | null>(null);
 	const selectionFrameOverrideSelectionKeyRef = useRef<string | null>(null);
+	const selectionFrameSceneOverrideRef = useRef<FocusFrame | null>(null);
 	const selectedIdsKey = useMemo(() => {
 		return [...selectedIds].sort().join("|");
 	}, [selectedIds]);
@@ -862,6 +863,22 @@ export const useFocusSceneSkiaInteractions = ({
 			{ fireImmediately: true },
 		);
 	}, [timelineStore]);
+
+	useEffect(() => {
+		selectionFrameSceneOverrideRef.current = selectionFrameSceneOverride;
+	}, [selectionFrameSceneOverride]);
+
+	useEffect(() => {
+		if (!timelineStore) return;
+		return timelineStore.subscribe(
+			(state) => state.elements,
+			() => {
+				if (interactionSessionRef.current) return;
+				if (!selectionFrameSceneOverrideRef.current) return;
+				applySelectionFrameOverride(null);
+			},
+		);
+	}, [applySelectionFrameOverride, timelineStore]);
 
 	const captureHistorySnapshot =
 		useCallback((): TimelineHistorySnapshot | null => {
