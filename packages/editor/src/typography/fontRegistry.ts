@@ -9,10 +9,13 @@ import {
 const PRIMARY_FONT_FAMILY = "Noto Sans SC";
 const PRIMARY_FONT_WEIGHT = 400;
 const PRIMARY_LOCAL_SUBSET_URI = "/fonts/NotoSansSC-Base-400.woff2";
+const APPLE_EMOJI_FAMILY = "Apple Color Emoji";
+const APPLE_EMOJI_LOCAL_URI = "/fonts/AppleColorEmoji-Linux.ttf";
 const COVERAGE_DEBOUNCE_MS = 120;
 const REQUEST_TIMEOUT_MS = 5_000;
 const REQUEST_FAILURE_COOLDOWN_MS = 10_000;
 const MAX_TEXT_CHUNK_CODE_POINTS = 64;
+const EMOJI_LIKE_CHAR_PATTERN = /\p{Extended_Pictographic}/u;
 
 const FONT_CACHE_DB_NAME = "ai-nle-font-cache";
 const FONT_CACHE_DB_VERSION = 1;
@@ -28,7 +31,13 @@ const PRIMARY_FONT_DESCRIPTOR: FontFamilyDescriptor = {
 	weight: PRIMARY_FONT_WEIGHT,
 };
 
+const APPLE_EMOJI_DESCRIPTOR: FontFamilyDescriptor = {
+	family: APPLE_EMOJI_FAMILY,
+	weight: null,
+};
+
 const FALLBACK_FONT_DESCRIPTORS: readonly FontFamilyDescriptor[] = [
+	APPLE_EMOJI_DESCRIPTOR,
 	{ family: "Noto Sans", weight: 400 },
 	{ family: "Noto Sans JP", weight: 400 },
 	{ family: "Noto Sans KR", weight: 400 },
@@ -201,12 +210,27 @@ const hasSameFontFamilies = (left: string[], right: string[]): boolean => {
 	return true;
 };
 
+const isRegionalIndicatorCodePoint = (codePoint: number): boolean => {
+	return codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff;
+};
+
+const isEmojiLikeCodePoint = (char: string, codePoint: number): boolean => {
+	if (EMOJI_LIKE_CHAR_PATTERN.test(char)) {
+		return true;
+	}
+	if (codePoint === 0xfe0f || codePoint === 0x200d || codePoint === 0x20e3) {
+		return true;
+	}
+	return isRegionalIndicatorCodePoint(codePoint);
+};
+
 class FontRegistry {
 	private listeners = new Set<() => void>();
 	private provider: SkTypefaceFontProvider | null = null;
 	private providerPromise: Promise<SkTypefaceFontProvider | null> | null = null;
 	private bootstrapPromise: Promise<void> | null = null;
 	private localSubsetLoaded = false;
+	private localAppleEmojiLoaded = false;
 
 	private readonly primaryTypefaces: LoadedTypefaceEntry[] = [];
 	private readonly fallbackTypefacesByFamily = new Map<
@@ -265,6 +289,39 @@ class FontRegistry {
 		return provider;
 	}
 
+	private rebindResolvedFallbackToAppleEmoji(): boolean {
+		const loadedAppleFamily = buildRegisteredFamilyName(
+			APPLE_EMOJI_DESCRIPTOR,
+			"local-bootstrap",
+			true,
+		);
+		const appleEntries =
+			this.fallbackTypefacesByFamily.get(APPLE_EMOJI_FAMILY) ?? [];
+		if (appleEntries.length === 0) {
+			return false;
+		}
+		let changed = false;
+		for (const [codePoint, resolvedFamily] of this
+			.resolvedFallbackFamilyByCodePoint) {
+			const char = String.fromCodePoint(codePoint);
+			const matchedAppleFamily = this.findFallbackFamilyForChar(
+				APPLE_EMOJI_FAMILY,
+				char,
+			);
+			if (!matchedAppleFamily) {
+				continue;
+			}
+			if (resolvedFamily !== loadedAppleFamily) {
+				this.resolvedFallbackFamilyByCodePoint.set(
+					codePoint,
+					loadedAppleFamily,
+				);
+				changed = true;
+			}
+		}
+		return changed;
+	}
+
 	private async ensureBootstrap(): Promise<void> {
 		if (this.bootstrapPromise) {
 			await this.bootstrapPromise;
@@ -272,27 +329,65 @@ class FontRegistry {
 		}
 		this.bootstrapPromise = (async () => {
 			const provider = await this.ensureProvider();
-			if (!provider || this.localSubsetLoaded) {
+			if (!provider) {
 				return;
 			}
-			const typeface = await this.loadTypefaceFromUri(PRIMARY_LOCAL_SUBSET_URI);
-			if (!typeface) {
-				return;
+			let hasStateChanged = false;
+			if (!this.localSubsetLoaded) {
+				const typeface = await this.loadTypefaceFromUri(
+					PRIMARY_LOCAL_SUBSET_URI,
+				);
+				if (typeface) {
+					const registeredFamily = buildRegisteredFamilyName(
+						PRIMARY_FONT_DESCRIPTOR,
+						"local-bootstrap",
+						true,
+					);
+					provider.registerFont(typeface, registeredFamily);
+					this.primaryTypefaces.push({
+						typeface,
+						familyName: registeredFamily,
+					});
+					this.localSubsetLoaded = true;
+					hasStateChanged = true;
+				}
 			}
-			const registeredFamily = buildRegisteredFamilyName(
-				PRIMARY_FONT_DESCRIPTOR,
-				"local-bootstrap",
-				true,
-			);
-			provider.registerFont(typeface, registeredFamily);
-			this.primaryTypefaces.push({
-				typeface,
-				familyName: registeredFamily,
-			});
-			this.localSubsetLoaded = true;
-			this.notifySubscribers();
+			if (!this.localAppleEmojiLoaded) {
+				const typeface = await this.loadTypefaceFromUri(APPLE_EMOJI_LOCAL_URI);
+				if (typeface) {
+					const registeredFamily = buildRegisteredFamilyName(
+						APPLE_EMOJI_DESCRIPTOR,
+						"local-bootstrap",
+						true,
+					);
+					provider.registerFont(typeface, registeredFamily);
+					const familyTypefaces =
+						this.fallbackTypefacesByFamily.get(APPLE_EMOJI_FAMILY) ?? [];
+					familyTypefaces.push({
+						typeface,
+						familyName: registeredFamily,
+					});
+					this.fallbackTypefacesByFamily.set(
+						APPLE_EMOJI_FAMILY,
+						familyTypefaces,
+					);
+					this.getUnsupportedSetForFallbackFamily(APPLE_EMOJI_FAMILY).clear();
+					this.localAppleEmojiLoaded = true;
+					hasStateChanged = true;
+				}
+			}
+			if (this.rebindResolvedFallbackToAppleEmoji()) {
+				hasStateChanged = true;
+			}
+			if (hasStateChanged) {
+				this.notifySubscribers();
+			}
 		})();
-		await this.bootstrapPromise;
+		try {
+			await this.bootstrapPromise;
+		} finally {
+			this.bootstrapPromise = null;
+		}
 	}
 
 	private async loadTypefaceFromUri(uri: string): Promise<SkTypeface | null> {
@@ -796,6 +891,12 @@ class FontRegistry {
 			if (eligibleCodePoints.length === 0) {
 				continue;
 			}
+			if (descriptor.family === APPLE_EMOJI_FAMILY) {
+				for (const codePoint of eligibleCodePoints) {
+					unsupportedByFamily.add(codePoint);
+				}
+				continue;
+			}
 
 			for (const chunk of chunkCodePoints(
 				eligibleCodePoints,
@@ -912,9 +1013,25 @@ class FontRegistry {
 			const nextFontFamilies = fallbackFamily
 				? [primaryFamily, fallbackFamily]
 				: [primaryFamily];
-			const nextStatus: "primary" | "fallback" = fallbackFamily
-				? "fallback"
-				: "primary";
+			const shouldPreferAppleEmoji =
+				codePoint !== undefined &&
+				this.localAppleEmojiLoaded &&
+				isEmojiLikeCodePoint(char, codePoint);
+			if (shouldPreferAppleEmoji) {
+				const resolvedAppleFamily =
+					this.findFallbackFamilyForChar(APPLE_EMOJI_FAMILY, char) ??
+					APPLE_EMOJI_FAMILY;
+				const existingAppleIndex =
+					nextFontFamilies.indexOf(resolvedAppleFamily);
+				if (existingAppleIndex === -1) {
+					nextFontFamilies.unshift(resolvedAppleFamily);
+				} else if (existingAppleIndex > 0) {
+					nextFontFamilies.splice(existingAppleIndex, 1);
+					nextFontFamilies.unshift(resolvedAppleFamily);
+				}
+			}
+			const nextStatus: "primary" | "fallback" =
+				nextFontFamilies.length > 1 ? "fallback" : "primary";
 
 			if (
 				currentFontFamilies === null ||
@@ -984,6 +1101,7 @@ class FontRegistry {
 		this.providerPromise = null;
 		this.bootstrapPromise = null;
 		this.localSubsetLoaded = false;
+		this.localAppleEmojiLoaded = false;
 		this.isFlushingCoverage = false;
 		this.fontCacheDbPromise = null;
 	}

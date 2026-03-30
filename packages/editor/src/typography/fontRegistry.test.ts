@@ -14,6 +14,8 @@ interface MockTypeface {
 }
 
 const mocks = vi.hoisted(() => {
+	const APPLE_EMOJI_FAMILY = "Apple Color Emoji";
+	const APPLE_EMOJI_URI_TOKEN = "AppleColorEmoji-Linux.ttf";
 	const localCoverage = new Set<string>([
 		"花",
 		"字",
@@ -127,7 +129,12 @@ const mocks = vi.hoisted(() => {
 		) => {
 			let family = FONT_REGISTRY_PRIMARY_FAMILY;
 			let textChars = [...localCoverage];
-			if (data.type === "bytes") {
+			if (data.type === "uri") {
+				if (data.uri.includes(APPLE_EMOJI_URI_TOKEN)) {
+					family = APPLE_EMOJI_FAMILY;
+					textChars = ["🙂"];
+				}
+			} else if (data.type === "bytes") {
 				const payload = decodePayload(data.bytes);
 				if (!payload) {
 					return null;
@@ -323,11 +330,27 @@ describe("FontRegistry", () => {
 		expect(pickGoogleCssCalls()).toHaveLength(1);
 	});
 
-	it("主字体确认不含字符后才触发 fallback family", async () => {
+	it("emoji 字符会优先使用 Apple fallback family", async () => {
 		mocks.familyRuleByName.set("Noto Sans SC", () => false);
 		mocks.familyRuleByName.set("Noto Sans", () => false);
 		mocks.familyRuleByName.set("Noto Sans JP", () => false);
 		mocks.familyRuleByName.set("Noto Sans KR", () => false);
+		mocks.familyRuleByName.set("Apple Color Emoji", (char) => char === "🙂");
+
+		await fontRegistry.ensureCoverage({ text: "🙂" });
+
+		const runPlan = fontRegistry.getParagraphRunPlan("🙂");
+		expect(runPlan).toHaveLength(1);
+		expect(runPlan[0]?.text).toBe("🙂");
+		expect(runPlan[0]?.status).toBe("fallback");
+		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Apple Color Emoji")).toBe(
+			true,
+		);
+		expect(runPlan[0]?.fontFamilies[1]).toBe("Noto Sans SC");
+	});
+
+	it("主字体请求失败时 emoji 仍然优先走 Apple fallback", async () => {
+		mocks.cssFailureFamilies.add("Noto Sans SC");
 		mocks.familyRuleByName.set("Noto Color Emoji", (char) => char === "🙂");
 
 		await fontRegistry.ensureCoverage({ text: "🙂" });
@@ -336,27 +359,27 @@ describe("FontRegistry", () => {
 		expect(runPlan).toHaveLength(1);
 		expect(runPlan[0]?.text).toBe("🙂");
 		expect(runPlan[0]?.status).toBe("fallback");
-		expect(runPlan[0]?.fontFamilies[0]).toBe("Noto Sans SC");
-		expect(runPlan[0]?.fontFamilies[1]?.startsWith("Noto Color Emoji")).toBe(
+		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Apple Color Emoji")).toBe(
 			true,
 		);
+		expect(runPlan[0]?.fontFamilies[1]).toBe("Noto Sans SC");
+		expect(pickGoogleCssCalls()).toHaveLength(1);
 	});
 
-	it("主字体请求失败时不会进入 fallback（严格模式）", async () => {
-		mocks.cssFailureFamilies.add("Noto Sans SC");
-		mocks.familyRuleByName.set("Noto Color Emoji", (char) => char === "🙂");
+	it("主字体已支持 emoji 时仍会优先选择 Apple family", async () => {
+		mocks.familyRuleByName.set("Noto Sans SC", (char) => char === "🙂");
+		mocks.familyRuleByName.set("Apple Color Emoji", (char) => char === "🙂");
 
 		await fontRegistry.ensureCoverage({ text: "🙂" });
 
 		const runPlan = fontRegistry.getParagraphRunPlan("🙂");
-		expect(runPlan).toEqual([
-			{
-				text: "🙂",
-				fontFamilies: ["Noto Sans SC"],
-				status: "primary",
-			},
-		]);
-		expect(pickGoogleCssCalls()).toHaveLength(1);
+		expect(runPlan).toHaveLength(1);
+		expect(runPlan[0]?.text).toBe("🙂");
+		expect(runPlan[0]?.status).toBe("fallback");
+		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Apple Color Emoji")).toBe(
+			true,
+		);
+		expect(runPlan[0]?.fontFamilies[1]?.startsWith("Noto Sans SC")).toBe(true);
 	});
 
 	it("IndexedDB 命中后刷新可直接恢复 coverage 且不重复下载", async () => {

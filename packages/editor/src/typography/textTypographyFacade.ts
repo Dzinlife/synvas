@@ -85,11 +85,11 @@ class TextTypographyFacade {
 		text: string,
 	): Promise<TextTypographyRenderContext> {
 		const normalizedText = typeof text === "string" ? text : "";
-		void fontRegistry
-			.ensureCoverage({ text: normalizedText })
-			.catch((error) => {
-				console.warn("[TextTypographyFacade] ensureCoverage failed:", error);
-			});
+		try {
+			await fontRegistry.ensureCoverage({ text: normalizedText });
+		} catch (error) {
+			console.warn("[TextTypographyFacade] ensureCoverage failed:", error);
+		}
 		const fontProvider = await fontRegistry.getFontProvider();
 		const runPlan = fontRegistry.getParagraphRunPlan(normalizedText);
 		const primaryTypeface = fontRegistry.getPrimaryTypeface();
