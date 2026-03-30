@@ -1,10 +1,11 @@
 import type { TimelineElement } from "core/element/types";
 import type React from "react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { useModelSelectorSafe } from "@/element/model";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { getTransformSize } from "@/element/transform";
+import { useTimelineStoreApi } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { framesToTimecode } from "@/utils/timecode";
 import {
 	useElements,
@@ -13,10 +14,46 @@ import {
 } from "../contexts/TimelineContext";
 import CommonElementSettingsPanel from "./CommonElementSettingsPanel";
 
+type TextParagraphLike = {
+	layout: (width: number) => void;
+	getHeight: () => number;
+};
+
+const TEXT_REFLOW_EPSILON = 1e-3;
+
+const isTextParagraphLike = (value: unknown): value is TextParagraphLike => {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as Partial<TextParagraphLike>;
+	return (
+		typeof candidate.layout === "function" &&
+		typeof candidate.getHeight === "function"
+	);
+};
+
+const resolveTextReflowHeight = (params: {
+	paragraph: unknown;
+	baseWidth: number;
+}): number | null => {
+	const { paragraph, baseWidth } = params;
+	if (!isTextParagraphLike(paragraph)) return null;
+	if (!Number.isFinite(baseWidth) || baseWidth <= 0) return null;
+	try {
+		paragraph.layout(baseWidth);
+		const height = paragraph.getHeight();
+		if (!Number.isFinite(height) || height <= 0) return null;
+		return height;
+	} catch (_error) {
+		return null;
+	}
+};
+
 const ElementSettingsPanel: React.FC = () => {
 	const { selectedElement, selectedElementId } = useSelectedElement();
 	const { setElements } = useElements();
 	const { fps } = useFps();
+	const timelineStore = useTimelineStoreApi();
+	const pendingTextReflowTxnIdRef = useRef<string | null>(null);
+	const lastSelectedElementIdRef = useRef<string | null>(null);
 
 	const durationFrames = useMemo(() => {
 		if (!selectedElement) return 0;
@@ -32,11 +69,27 @@ const ElementSettingsPanel: React.FC = () => {
 		(state) => state.constraints,
 		{},
 	);
+	const textParagraph = useModelSelectorSafe(
+		selectedElementId ?? undefined,
+		(state) => {
+			const internal = state.internal as { paragraph?: unknown } | undefined;
+			return internal?.paragraph ?? null;
+		},
+		null,
+	);
+	const isModelLoading = useModelSelectorSafe(
+		selectedElementId ?? undefined,
+		(state) => Boolean(state.constraints.isLoading),
+		false,
+	);
 	const selectedDefinition = useMemo(() => {
 		if (!selectedElement) return undefined;
 		return componentRegistry.get(selectedElement.component);
 	}, [selectedElement?.component, selectedElement]);
 	const SettingComponent = selectedDefinition?.Setting;
+	const shouldUseTextReflow =
+		selectedDefinition?.meta.resizeBehavior === "text-width-reflow";
+	const selectedTransform = selectedElement?.transform ?? null;
 
 	const updateSelectedElement = useCallback(
 		(
@@ -44,21 +97,18 @@ const ElementSettingsPanel: React.FC = () => {
 			options?: { history?: boolean },
 		) => {
 			if (!selectedElementId) return;
-			setElements(
-				(prev) => {
-					let didChange = false;
-					const nextElements = prev.map((element) => {
-						if (element.id !== selectedElementId) return element;
-						const nextElement = updater(element);
-						if (nextElement !== element) {
-							didChange = true;
-						}
-						return nextElement;
-					});
-					return didChange ? nextElements : prev;
-				},
-				options,
-			);
+			setElements((prev) => {
+				let didChange = false;
+				const nextElements = prev.map((element) => {
+					if (element.id !== selectedElementId) return element;
+					const nextElement = updater(element);
+					if (nextElement !== element) {
+						didChange = true;
+					}
+					return nextElement;
+				});
+				return didChange ? nextElements : prev;
+			}, options);
 		},
 		[selectedElementId, setElements],
 	);
@@ -78,9 +128,82 @@ const ElementSettingsPanel: React.FC = () => {
 					};
 				}),
 			);
+			if (shouldUseTextReflow && selectedTransform) {
+				pendingTextReflowTxnIdRef.current =
+					timelineStore.getState().lastCommittedOtTxnId;
+				return;
+			}
+			pendingTextReflowTxnIdRef.current = null;
 		},
-		[selectedElementId, setElements],
+		[
+			selectedElementId,
+			selectedTransform,
+			setElements,
+			shouldUseTextReflow,
+			timelineStore,
+		],
 	);
+
+	useEffect(() => {
+		if (lastSelectedElementIdRef.current === selectedElementId) {
+			return;
+		}
+		lastSelectedElementIdRef.current = selectedElementId ?? null;
+		pendingTextReflowTxnIdRef.current = null;
+	}, [selectedElementId]);
+
+	useEffect(() => {
+		if (!selectedElementId) return;
+		if (!shouldUseTextReflow) return;
+		if (!selectedTransform) return;
+		if (isModelLoading) return;
+		const reflowHeight = resolveTextReflowHeight({
+			paragraph: textParagraph,
+			baseWidth: selectedTransform.baseSize.width,
+		});
+		const pendingTxnId = pendingTextReflowTxnIdRef.current;
+		pendingTextReflowTxnIdRef.current = null;
+		if (reflowHeight === null) return;
+		if (
+			Math.abs(selectedTransform.baseSize.height - reflowHeight) <=
+			TEXT_REFLOW_EPSILON
+		) {
+			return;
+		}
+		setElements(
+			(prev) => {
+				let didChange = false;
+				const nextElements = prev.map((element) => {
+					if (element.id !== selectedElementId) return element;
+					if (!element.transform) return element;
+					const currentHeight = element.transform.baseSize.height;
+					if (Math.abs(currentHeight - reflowHeight) <= TEXT_REFLOW_EPSILON) {
+						return element;
+					}
+					didChange = true;
+					return {
+						...element,
+						transform: {
+							...element.transform,
+							baseSize: {
+								...element.transform.baseSize,
+								height: reflowHeight,
+							},
+						},
+					};
+				});
+				return didChange ? nextElements : prev;
+			},
+			pendingTxnId ? { txnId: pendingTxnId } : { history: false },
+		);
+	}, [
+		isModelLoading,
+		selectedElementId,
+		selectedTransform,
+		setElements,
+		shouldUseTextReflow,
+		textParagraph,
+	]);
 
 	if (!selectedElement) {
 		return <div className="text-xs text-neutral-500">未选中元素</div>;
