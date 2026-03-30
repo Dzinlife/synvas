@@ -317,6 +317,20 @@ describe("FontRegistry", () => {
 		expect(requestedText).toContain("文");
 	});
 
+	it("控制字符不会进入远程子集请求", async () => {
+		await fontRegistry.ensureCoverage({ text: "a\nb\r\t" });
+
+		const cssCalls = pickGoogleCssCalls();
+		expect(cssCalls).toHaveLength(1);
+		const cssUrl = new URL(String(cssCalls[0]?.[0]));
+		const requestedText = cssUrl.searchParams.get("text") ?? "";
+		expect(requestedText).toContain("a");
+		expect(requestedText).toContain("b");
+		expect(requestedText.includes("\n")).toBe(false);
+		expect(requestedText.includes("\r")).toBe(false);
+		expect(requestedText.includes("\t")).toBe(false);
+	});
+
 	it("主字体子集拉取成功且 glyph 可用时保持主字体渲染", async () => {
 		mocks.familyRuleByName.set("Noto Sans SC", (char) => char === "测");
 

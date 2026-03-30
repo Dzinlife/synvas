@@ -225,7 +225,8 @@ export const CanvasNodeLabelLayer = ({
 	}, [focusedNodeId, height, nodes, width]);
 	const labelCoverageText = useMemo(() => {
 		if (labelCandidates.length <= 0) return "";
-		const labelText = labelCandidates.map((candidate) => candidate.text).join("\n");
+		// 覆盖集只关心字符集合，不需要换行分隔，避免注入控制字符。
+		const labelText = labelCandidates.map((candidate) => candidate.text).join("");
 		// 省略号由 paragraph 在布局阶段注入，需提前纳入覆盖集，避免 glyph 缺失。
 		return `${labelText}${LABEL_TEXT_ELLIPSIS}`;
 	}, [labelCandidates]);

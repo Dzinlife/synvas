@@ -195,7 +195,8 @@ export const FocusSceneSkiaLayer = ({
 		});
 	}, [labelItems]);
 	const labelCoverageText = useMemo(() => {
-		return labelTexts.join("\n");
+		// 覆盖集只关心字符集合，不需要换行分隔，避免注入控制字符。
+		return labelTexts.join("");
 	}, [labelTexts]);
 
 	useEffect(() => {

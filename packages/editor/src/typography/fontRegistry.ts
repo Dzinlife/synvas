@@ -89,6 +89,10 @@ const toSortedUniqueCodePoints = (text: string): number[] => {
 	for (const char of Array.from(text)) {
 		const codePoint = char.codePointAt(0);
 		if (codePoint === undefined) continue;
+		// 控制字符不需要字体覆盖，且会导致远程子集请求返回 400。
+		if (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)) {
+			continue;
+		}
 		unique.add(codePoint);
 	}
 	return [...unique].sort((left, right) => left - right);
