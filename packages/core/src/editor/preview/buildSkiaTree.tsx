@@ -2,17 +2,17 @@ import React from "react";
 import {
 	Fill,
 	Group,
+	getSkiaRenderBackend,
 	Picture,
 	RenderTarget,
-	Skia,
-	getSkiaRenderBackend,
 	type SkImage,
+	Skia,
 	type SkPicture,
 } from "react-skia-lite";
 import type {
 	ComponentModelStore,
-	RenderFrameChannel,
 	RendererPrepareFrameContext,
+	RenderFrameChannel,
 } from "../../element/model/types";
 import { transformPositionToCanvasPoint } from "../../element/position";
 import type { TimelineElement } from "../../element/types";
@@ -40,6 +40,8 @@ type RenderPrepareOptions = {
 	compositionPath?: string[];
 	maxCompositionDepth?: number;
 	frameChannel?: RenderFrameChannel;
+	compositionRenderTarget?: "picture" | "image";
+	frameSnapshotRenderTarget?: "picture" | "image";
 };
 
 type ResolvedComponent = {
@@ -77,7 +79,10 @@ export type BuildSkiaDeps = {
 	isTransitionElement?: (element: TimelineElement) => boolean;
 	resolveCompositionTimeline?: (
 		sceneId: string,
-	) => ResolvedCompositionTimeline | null | Promise<ResolvedCompositionTimeline | null>;
+	) =>
+		| ResolvedCompositionTimeline
+		| null
+		| Promise<ResolvedCompositionTimeline | null>;
 };
 
 const defaultIsTransitionElement = (element: TimelineElement): boolean =>
@@ -133,9 +138,7 @@ const resolveCompositionSceneId = (element: TimelineElement): string | null => {
 const resolveRenderFrameChannel = (
 	value: RenderFrameChannel | undefined,
 ): RenderFrameChannel => {
-	return value === "offscreen"
-		? "offscreen"
-		: DEFAULT_RENDER_FRAME_CHANNEL;
+	return value === "offscreen" ? "offscreen" : DEFAULT_RENDER_FRAME_CHANNEL;
 };
 
 const wrapWithTransform = (
@@ -329,7 +332,9 @@ const buildSkiaRenderStateWithScopeCore = async (
 		isTransitionElement,
 	});
 	const activeTransitionById = new Map(
-		transitionFrameState.activeTransitions.map((item) => [item.id, item] as const),
+		transitionFrameState.activeTransitions.map(
+			(item) => [item.id, item] as const,
+		),
 	);
 	const activeTransitionIds = new Set(
 		transitionFrameState.activeTransitions.map((item) => item.id),
@@ -449,10 +454,7 @@ const buildSkiaRenderStateWithScopeCore = async (
 						: deps;
 				const parentFps = resolveSafeFps(fps);
 				const childFps = resolveSafeFps(compositionTimeline.fps, parentFps);
-				const compositionStart = resolveFiniteNumber(
-					element.timeline.start,
-					0,
-				);
+				const compositionStart = resolveFiniteNumber(element.timeline.start, 0);
 				const compositionOffset = Math.max(
 					0,
 					Math.round(resolveFiniteNumber(element.timeline.offset, 0)),
@@ -660,11 +662,12 @@ const buildSkiaRenderStateWithScopeCore = async (
 			]
 		: frameChildren;
 
-	const ready = shouldAwaitReady || forcePrepareFrames
-		// forcePrepareFrames 的语义也必须等待 prepareRenderFrame 完成，
-		// 否则像 VideoClip 这类依赖离屏帧准备的元素会在未就绪时被提前截图成黑帧。
-		? Promise.all(plans.map((plan) => plan.ready)).then(() => undefined)
-		: Promise.resolve();
+	const ready =
+		shouldAwaitReady || forcePrepareFrames
+			? // forcePrepareFrames 的语义也必须等待 prepareRenderFrame 完成，
+				// 否则像 VideoClip 这类依赖离屏帧准备的元素会在未就绪时被提前截图成黑帧。
+				Promise.all(plans.map((plan) => plan.ready)).then(() => undefined)
+			: Promise.resolve();
 
 	return {
 		children,

@@ -109,6 +109,26 @@ const {
 	};
 });
 
+const typographyRevisionMock = vi.hoisted(() => {
+	const listeners = new Set<() => void>();
+	return {
+		subscribeRevision: vi.fn((listener: () => void) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		}),
+		emitRevision: () => {
+			for (const listener of [...listeners]) {
+				listener();
+			}
+		},
+		reset: () => {
+			listeners.clear();
+		},
+	};
+});
+
 vi.mock("react-skia-lite", async () => {
 	const ReactModule = await import("react");
 	const Canvas = ReactModule.forwardRef((_props: unknown, ref) => {
@@ -171,6 +191,12 @@ vi.mock("./buildSkiaTree", () => ({
 	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
 }));
 
+vi.mock("@/typography/textTypographyFacade", () => ({
+	textTypographyFacade: {
+		subscribeRevision: typographyRevisionMock.subscribeRevision,
+	},
+}));
+
 import { SkiaPreviewCanvas } from "./SkiaPreviewCanvas";
 
 const createElement = (id: string): TimelineElement => ({
@@ -226,6 +252,7 @@ describe("SkiaPreviewCanvas", () => {
 		rootRenderSpy.mockReset();
 		buildSkiaFrameSnapshotMock.mockReset();
 		timelineStore.reset();
+		typographyRevisionMock.reset();
 		timelineStore.setState({
 			elements: [createElement("clip-1")],
 		});
@@ -407,5 +434,33 @@ describe("SkiaPreviewCanvas", () => {
 		});
 
 		resolveSlowFrame?.();
+	});
+
+	it("字体 revision 变化会触发当前帧重录", async () => {
+		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) =>
+			createFrameSnapshot(`frame-${displayTime}`),
+		);
+		render(
+			<SkiaPreviewCanvas
+				canvasWidth={1920}
+				canvasHeight={1080}
+				tracks={tracks}
+				getTrackIndexForElement={getTrackIndexForElement}
+				sortByTrackIndex={sortByTrackIndex}
+				getElements={() => timelineStore.getState().elements}
+				getRenderTime={() => timelineStore.getState().currentTime}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(buildSkiaFrameSnapshotMock).toHaveBeenCalled();
+		});
+		const buildCallCount = buildSkiaFrameSnapshotMock.mock.calls.length;
+		typographyRevisionMock.emitRevision();
+		await waitFor(() => {
+			expect(buildSkiaFrameSnapshotMock.mock.calls.length).toBeGreaterThan(
+				buildCallCount,
+			);
+		});
 	});
 });

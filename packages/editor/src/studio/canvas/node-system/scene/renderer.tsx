@@ -24,6 +24,7 @@ import type {
 	TimelineRuntime,
 } from "@/scene-editor/runtime/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
+import { textTypographyFacade } from "@/typography/textTypographyFacade";
 import { useCanvasNodeThumbnailImage } from "../thumbnail/useCanvasNodeThumbnailImage";
 import type { CanvasNodeSkiaRenderProps } from "../types";
 
@@ -285,7 +286,9 @@ export const SceneNodeSkiaRenderer: React.FC<
 						state.canvasSize.height || sceneCanvasHeight || 1,
 					),
 				};
-				const resolveCompositionTimeline: ResolveCompositionTimeline = (sceneId) => {
+				const resolveCompositionTimeline: ResolveCompositionTimeline = (
+					sceneId,
+				) => {
 					const childRuntime = runtimeManager.getTimelineRuntime(
 						toSceneTimelineRef(sceneId),
 					);
@@ -299,7 +302,9 @@ export const SceneNodeSkiaRenderer: React.FC<
 						canvasSize: childState.canvasSize,
 						getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
 						wrapRenderNode: (childNode: ReactNode) => (
-							<EditorRuntimeProvider runtime={createScopedRuntime(childRuntime)}>
+							<EditorRuntimeProvider
+								runtime={createScopedRuntime(childRuntime)}
+							>
 								{childNode}
 							</EditorRuntimeProvider>
 						),
@@ -370,7 +375,10 @@ export const SceneNodeSkiaRenderer: React.FC<
 							frameState.dispose?.();
 							return;
 						}
-						replaceCurrentPicture(frameState.picture, frameState.dispose ?? null);
+						replaceCurrentPicture(
+							frameState.picture,
+							frameState.dispose ?? null,
+						);
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) return;
@@ -394,11 +402,11 @@ export const SceneNodeSkiaRenderer: React.FC<
 							frameState.dispose?.();
 							return;
 						}
-						replaceCurrentPicture(frameState.picture, frameState.dispose ?? null);
-						frameControllerRef.current.commitFrame(
-							frameIndex,
-							buildFrameState,
+						replaceCurrentPicture(
+							frameState.picture,
+							frameState.dispose ?? null,
 						);
+						frameControllerRef.current.commitFrame(frameIndex, buildFrameState);
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) return;
@@ -421,10 +429,7 @@ export const SceneNodeSkiaRenderer: React.FC<
 						entry.state.picture,
 						frameControllerRef.current.takeDispose(entry) ?? null,
 					);
-					frameControllerRef.current.commitFrame(
-						frameIndex,
-						buildFrameState,
-					);
+					frameControllerRef.current.commitFrame(frameIndex, buildFrameState);
 				})
 				.catch((error) => {
 					if (renderTokenRef.current !== renderToken) return;
@@ -550,13 +555,57 @@ export const SceneNodeSkiaRenderer: React.FC<
 		flushDeferredDisposeQueue,
 		invalidateBuffer,
 		isActive,
-		picture,
 		pictureOpacity,
 		preemptBuildQueue,
 		runRender,
 		runtime,
 		setPictureSharedValue,
 	]);
+
+	useEffect(() => {
+		if (!runtime || !isActive) return;
+		let pending = false;
+		let rafId: number | null = null;
+		const flush = () => {
+			pending = false;
+			rafId = null;
+			const timelineState = runtime.timelineStore.getState();
+			invalidateBuffer();
+			runRender(timelineState.elements, timelineState.getRenderTime());
+		};
+		const scheduleRefresh = () => {
+			if (pending) return;
+			pending = true;
+			if (
+				typeof window !== "undefined" &&
+				typeof window.requestAnimationFrame === "function"
+			) {
+				rafId = window.requestAnimationFrame(() => {
+					flush();
+				});
+				return;
+			}
+			void Promise.resolve().then(() => {
+				flush();
+			});
+		};
+		const unsubscribeTypographyRevision =
+			textTypographyFacade.subscribeRevision(() => {
+				scheduleRefresh();
+			});
+		return () => {
+			unsubscribeTypographyRevision();
+			if (
+				rafId !== null &&
+				typeof window !== "undefined" &&
+				typeof window.cancelAnimationFrame === "function"
+			) {
+				window.cancelAnimationFrame(rafId);
+			}
+			rafId = null;
+			pending = false;
+		};
+	}, [invalidateBuffer, isActive, runRender, runtime]);
 
 	useEffect(() => {
 		return () => {

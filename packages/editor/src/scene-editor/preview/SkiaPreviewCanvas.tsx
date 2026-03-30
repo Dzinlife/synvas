@@ -24,6 +24,7 @@ import {
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { TimelineTrack } from "@/scene-editor/timeline/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
+import { textTypographyFacade } from "@/typography/textTypographyFacade";
 import { buildSkiaFrameSnapshot } from "./buildSkiaTree";
 
 interface SkiaPreviewCanvasProps {
@@ -211,8 +212,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 							tracks: childState.tracks,
 							fps: childState.fps,
 							canvasSize: childState.canvasSize,
-							getModelStore: (id: string) =>
-								childRuntime.modelRegistry.get(id),
+							getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
 							wrapRenderNode: (childNode: React.ReactNode) => (
 								<EditorRuntimeContext.Provider
 									value={{
@@ -339,10 +339,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 						}
 						disposeRef.current?.();
 						disposeRef.current = frameState.dispose ?? null;
-						frameControllerRef.current.commitFrame(
-							frameIndex,
-							buildFrameState,
-						);
+						frameControllerRef.current.commitFrame(frameIndex, buildFrameState);
 					})
 					.catch((error) => {
 						if (renderTokenRef.current !== renderToken) {
@@ -374,10 +371,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 					const nextDispose = frameControllerRef.current.takeDispose(entry);
 					disposeRef.current?.();
 					disposeRef.current = nextDispose ?? null;
-					frameControllerRef.current.commitFrame(
-						frameIndex,
-						buildFrameState,
-					);
+					frameControllerRef.current.commitFrame(frameIndex, buildFrameState);
 				})
 				.catch((error) => {
 					if (renderTokenRef.current !== renderToken) {
@@ -448,6 +442,49 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			},
 		);
 	}, [getRenderTime, invalidateBuffer, runRender, timelineStore]);
+
+	useEffect(() => {
+		let pending = false;
+		let rafId: number | null = null;
+		const flush = () => {
+			pending = false;
+			rafId = null;
+			invalidateBuffer();
+			runRender(getElements(), getRenderTime());
+		};
+		const scheduleRefresh = () => {
+			if (pending) return;
+			pending = true;
+			if (
+				typeof window !== "undefined" &&
+				typeof window.requestAnimationFrame === "function"
+			) {
+				rafId = window.requestAnimationFrame(() => {
+					flush();
+				});
+				return;
+			}
+			void Promise.resolve().then(() => {
+				flush();
+			});
+		};
+		const unsubscribeTypographyRevision =
+			textTypographyFacade.subscribeRevision(() => {
+				scheduleRefresh();
+			});
+		return () => {
+			unsubscribeTypographyRevision();
+			if (
+				rafId !== null &&
+				typeof window !== "undefined" &&
+				typeof window.cancelAnimationFrame === "function"
+			) {
+				window.cancelAnimationFrame(rafId);
+			}
+			rafId = null;
+			pending = false;
+		};
+	}, [getElements, getRenderTime, invalidateBuffer, runRender]);
 
 	useEffect(() => {
 		return () => {

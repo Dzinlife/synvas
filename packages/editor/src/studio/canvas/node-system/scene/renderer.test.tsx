@@ -6,102 +6,122 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { buildSkiaFrameSnapshotMock, timelineStoreState, thumbnailImageMock } =
 	vi.hoisted(() => {
-	type StoreState = {
-		fps: number;
-		isPlaying: boolean;
-		currentTime: number;
-		previewTime: number | null;
-		elements: TimelineElement[];
-		tracks: Array<{
-			id: string;
-			role: "clip" | "effect" | "audio";
-			hidden: boolean;
-			locked: boolean;
-			muted: boolean;
-			solo: boolean;
-		}>;
-		canvasSize: { width: number; height: number };
-		getRenderTime: () => number;
-	};
-	type StoreSubscriber = {
-		selector: (state: StoreState) => unknown;
-		listener: (selected: unknown) => void;
-		lastSelected: unknown;
-	};
-
-	let state: StoreState = {
-		fps: 30,
-		isPlaying: false,
-		currentTime: 0,
-		previewTime: null,
-		elements: [],
-		tracks: [],
-		canvasSize: { width: 1920, height: 1080 },
-		getRenderTime: () => state.currentTime,
-	};
-	const subscribers: StoreSubscriber[] = [];
-
-	const subscribe = (
-		selector: (storeState: StoreState) => unknown,
-		listener: (selected: unknown) => void,
-		options?: { fireImmediately?: boolean },
-	): (() => void) => {
-		const subscriber: StoreSubscriber = {
-			selector,
-			listener,
-			lastSelected: selector(state),
+		type StoreState = {
+			fps: number;
+			isPlaying: boolean;
+			currentTime: number;
+			previewTime: number | null;
+			elements: TimelineElement[];
+			tracks: Array<{
+				id: string;
+				role: "clip" | "effect" | "audio";
+				hidden: boolean;
+				locked: boolean;
+				muted: boolean;
+				solo: boolean;
+			}>;
+			canvasSize: { width: number; height: number };
+			getRenderTime: () => number;
 		};
-		subscribers.push(subscriber);
-		if (options?.fireImmediately) {
-			listener(subscriber.lastSelected);
-		}
-		return () => {
-			const index = subscribers.indexOf(subscriber);
-			if (index >= 0) subscribers.splice(index, 1);
+		type StoreSubscriber = {
+			selector: (state: StoreState) => unknown;
+			listener: (selected: unknown) => void;
+			lastSelected: unknown;
 		};
-	};
 
-	const setState = (patch: Partial<StoreState>) => {
-		state = { ...state, ...patch };
-		for (const subscriber of [...subscribers]) {
-			const nextSelected = subscriber.selector(state);
-			if (nextSelected === subscriber.lastSelected) continue;
-			subscriber.lastSelected = nextSelected;
-			subscriber.listener(nextSelected);
-		}
-	};
-
-	const reset = () => {
-		state = {
+		let state: StoreState = {
 			fps: 30,
 			isPlaying: false,
 			currentTime: 0,
 			previewTime: null,
 			elements: [],
-			tracks: [
-				{
-					id: "main",
-					role: "clip",
-					hidden: false,
-					locked: false,
-					muted: false,
-					solo: false,
-				},
-			],
+			tracks: [],
 			canvasSize: { width: 1920, height: 1080 },
 			getRenderTime: () => state.currentTime,
 		};
-		subscribers.length = 0;
-	};
+		const subscribers: StoreSubscriber[] = [];
 
+		const subscribe = (
+			selector: (storeState: StoreState) => unknown,
+			listener: (selected: unknown) => void,
+			options?: { fireImmediately?: boolean },
+		): (() => void) => {
+			const subscriber: StoreSubscriber = {
+				selector,
+				listener,
+				lastSelected: selector(state),
+			};
+			subscribers.push(subscriber);
+			if (options?.fireImmediately) {
+				listener(subscriber.lastSelected);
+			}
+			return () => {
+				const index = subscribers.indexOf(subscriber);
+				if (index >= 0) subscribers.splice(index, 1);
+			};
+		};
+
+		const setState = (patch: Partial<StoreState>) => {
+			state = { ...state, ...patch };
+			for (const subscriber of [...subscribers]) {
+				const nextSelected = subscriber.selector(state);
+				if (nextSelected === subscriber.lastSelected) continue;
+				subscriber.lastSelected = nextSelected;
+				subscriber.listener(nextSelected);
+			}
+		};
+
+		const reset = () => {
+			state = {
+				fps: 30,
+				isPlaying: false,
+				currentTime: 0,
+				previewTime: null,
+				elements: [],
+				tracks: [
+					{
+						id: "main",
+						role: "clip",
+						hidden: false,
+						locked: false,
+						muted: false,
+						solo: false,
+					},
+				],
+				canvasSize: { width: 1920, height: 1080 },
+				getRenderTime: () => state.currentTime,
+			};
+			subscribers.length = 0;
+		};
+
+		return {
+			buildSkiaFrameSnapshotMock: vi.fn(),
+			thumbnailImageMock: vi.fn(),
+			timelineStoreState: {
+				getState: () => state,
+				subscribe,
+				setState,
+				reset,
+			},
+		};
+	});
+
+const typographyRevisionMock = vi.hoisted(() => {
+	const listeners = new Set<() => void>();
 	return {
-		buildSkiaFrameSnapshotMock: vi.fn(),
-		thumbnailImageMock: vi.fn(),
-		timelineStoreState: {
-			getState: () => state,
-			subscribe,
-			setState,
-			reset,
+		subscribeRevision: vi.fn((listener: () => void) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		}),
+		emitRevision: () => {
+			for (const listener of [...listeners]) {
+				listener();
+			}
+		},
+		reset: () => {
+			listeners.clear();
 		},
 	};
 });
@@ -249,6 +269,12 @@ vi.mock("../thumbnail/useCanvasNodeThumbnailImage", () => ({
 	useCanvasNodeThumbnailImage: thumbnailImageMock,
 }));
 
+vi.mock("@/typography/textTypographyFacade", () => ({
+	textTypographyFacade: {
+		subscribeRevision: typographyRevisionMock.subscribeRevision,
+	},
+}));
+
 import { SceneNodeSkiaRenderer } from "./renderer";
 
 const createElement = (id: string): TimelineElement => ({
@@ -341,6 +367,7 @@ describe("SceneNodeSkiaRenderer", () => {
 		thumbnailImageMock.mockReset();
 		thumbnailImageMock.mockReturnValue(null);
 		timelineStoreState.reset();
+		typographyRevisionMock.reset();
 		timelineStoreState.setState({
 			elements: [createElement("clip-1")],
 		});
@@ -364,16 +391,16 @@ describe("SceneNodeSkiaRenderer", () => {
 					};
 			  }
 			| undefined;
-		expect(firstBuildArgs?.prepare?.frameSnapshotRenderTarget).toBe(
-			"picture",
-		);
+		expect(firstBuildArgs?.prepare?.frameSnapshotRenderTarget).toBe("picture");
 		expect(firstBuildArgs?.prepare?.compositionRenderTarget).toBe("picture");
 	});
 
 	it("inactive 首屏无已提交画面时展示 thumbnail 且不触发构帧", async () => {
 		thumbnailImageMock.mockReturnValue({ id: "scene-thumb" });
 
-		const view = render(<SceneNodeSkiaRenderer {...createRendererProps(false)} />);
+		const view = render(
+			<SceneNodeSkiaRenderer {...createRendererProps(false)} />,
+		);
 
 		expect(buildSkiaFrameSnapshotMock).not.toHaveBeenCalled();
 		expect(
@@ -465,5 +492,23 @@ describe("SceneNodeSkiaRenderer", () => {
 				?.getAttribute("data-opacity"),
 		).toBe("1");
 		expect(buildSkiaFrameSnapshotMock.mock.calls.length).toBe(buildCallCount);
+	});
+
+	it("字体 revision 变化会触发当前帧重录", async () => {
+		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) =>
+			createFrameSnapshot(`frame-${displayTime}`),
+		);
+		render(<SceneNodeSkiaRenderer {...createRendererProps(true)} />);
+
+		await waitFor(() => {
+			expect(buildSkiaFrameSnapshotMock).toHaveBeenCalled();
+		});
+		const buildCallCount = buildSkiaFrameSnapshotMock.mock.calls.length;
+		typographyRevisionMock.emitRevision();
+		await waitFor(() => {
+			expect(buildSkiaFrameSnapshotMock.mock.calls.length).toBeGreaterThan(
+				buildCallCount,
+			);
+		});
 	});
 });

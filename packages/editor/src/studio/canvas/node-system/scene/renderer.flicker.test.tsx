@@ -16,6 +16,10 @@ const { buildSkiaFrameSnapshotMock } = vi.hoisted(() => ({
 	buildSkiaFrameSnapshotMock: vi.fn(),
 }));
 
+const typographyRevisionMock = vi.hoisted(() => ({
+	subscribeRevision: vi.fn(() => () => {}),
+}));
+
 vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
 	buildSkiaFrameSnapshot: buildSkiaFrameSnapshotMock,
 }));
@@ -23,6 +27,12 @@ vi.mock("@/scene-editor/preview/buildSkiaTree", () => ({
 vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", () => ({
 	EditorRuntimeProvider: ({ children }: { children: React.ReactNode }) => {
 		return children;
+	},
+}));
+
+vi.mock("@/typography/textTypographyFacade", () => ({
+	textTypographyFacade: {
+		subscribeRevision: typographyRevisionMock.subscribeRevision,
 	},
 }));
 

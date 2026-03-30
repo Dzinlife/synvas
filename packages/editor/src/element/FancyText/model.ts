@@ -8,15 +8,13 @@ import {
 	type SkTypefaceFontProvider,
 	TextAlign,
 } from "react-skia-lite";
-import { subscribeWithSelector } from "zustand/middleware";
-import { createStore } from "zustand/vanilla";
 import type { EditorRuntime } from "@/scene-editor/runtime/types";
+import { __resetTextTypographyFacadeForTests } from "@/typography/textTypographyFacade";
 import {
-	__resetFontRegistryForTests,
-	FONT_REGISTRY_PRIMARY_FAMILY,
-	fontRegistry,
-} from "@/typography/fontRegistry";
-import type { ComponentModel, ComponentModelStore } from "../model/types";
+	createTextLikeModelController,
+	type TextLikeModelInternalBase,
+} from "../model/createTextLikeModelController";
+import type { ComponentModelStore, ValidationResult } from "../model/types";
 import { type FancyTextWordSegment, segmentFancyTextWords } from "./helpers";
 
 export type TextAlignMode = "left" | "center" | "right";
@@ -34,13 +32,10 @@ export interface FancyTextProps {
 	waveScale?: number;
 }
 
-export interface FancyTextInternal {
-	paragraph: SkParagraph | null;
-	fontProvider: SkTypefaceFontProvider | null;
+export interface FancyTextInternal extends TextLikeModelInternalBase {
 	typeface: SkTypeface | null;
 	font: SkFont | null;
 	wordSegments: FancyTextWordSegment[];
-	isReady: boolean;
 }
 
 export type FancyTextModelStore = ComponentModelStore<
@@ -160,17 +155,19 @@ const resolveSkiaColor = (color: string) => {
 	}
 };
 
-const buildParagraph = (
-	props: Required<FancyTextProps>,
-	fontProvider: SkTypefaceFontProvider | null,
-	runPlan: Array<{ text: string; fontFamilies: string[] }>,
-): SkParagraph => {
+const buildParagraph = (params: {
+	props: Required<FancyTextProps>;
+	fontProvider: SkTypefaceFontProvider | null;
+	runPlan: Array<{ text: string; fontFamilies: string[] }>;
+	primaryFamily: string;
+}): SkParagraph => {
+	const { props, fontProvider, runPlan, primaryFamily } = params;
 	const baseTextStyle = {
 		color: resolveSkiaColor(props.color),
 		fontSize: props.fontSize,
 		heightMultiplier: props.lineHeight,
 		locale: props.locale,
-		...(fontProvider ? { fontFamilies: [FONT_REGISTRY_PRIMARY_FAMILY] } : {}),
+		...(fontProvider ? { fontFamilies: [primaryFamily] } : {}),
 	};
 	const builder = fontProvider
 		? Skia.ParagraphBuilder.Make(
@@ -216,8 +213,76 @@ const buildFont = (
 	return font;
 };
 
+const validateFancyTextProps = (
+	newProps: Partial<FancyTextProps>,
+): ValidationResult => {
+	const errors: string[] = [];
+	if (newProps.text !== undefined && typeof newProps.text !== "string") {
+		errors.push("text must be a string");
+	}
+	if (
+		newProps.fontSize !== undefined &&
+		(typeof newProps.fontSize !== "number" ||
+			!Number.isFinite(newProps.fontSize))
+	) {
+		errors.push("fontSize must be a finite number");
+	}
+	if (newProps.color !== undefined && typeof newProps.color !== "string") {
+		errors.push("color must be a string");
+	}
+	if (
+		newProps.textAlign !== undefined &&
+		newProps.textAlign !== "left" &&
+		newProps.textAlign !== "center" &&
+		newProps.textAlign !== "right"
+	) {
+		errors.push("textAlign must be left/center/right");
+	}
+	if (
+		newProps.lineHeight !== undefined &&
+		(typeof newProps.lineHeight !== "number" ||
+			!Number.isFinite(newProps.lineHeight))
+	) {
+		errors.push("lineHeight must be a finite number");
+	}
+	if (newProps.locale !== undefined && typeof newProps.locale !== "string") {
+		errors.push("locale must be a string");
+	}
+	if (
+		newProps.highlightColor !== undefined &&
+		typeof newProps.highlightColor !== "string"
+	) {
+		errors.push("highlightColor must be a string");
+	}
+	if (
+		newProps.waveRadius !== undefined &&
+		(typeof newProps.waveRadius !== "number" ||
+			!Number.isFinite(newProps.waveRadius))
+	) {
+		errors.push("waveRadius must be a finite number");
+	}
+	if (
+		newProps.waveTranslateY !== undefined &&
+		(typeof newProps.waveTranslateY !== "number" ||
+			!Number.isFinite(newProps.waveTranslateY))
+	) {
+		errors.push("waveTranslateY must be a finite number");
+	}
+	if (
+		newProps.waveScale !== undefined &&
+		(typeof newProps.waveScale !== "number" ||
+			!Number.isFinite(newProps.waveScale))
+	) {
+		errors.push("waveScale must be a finite number");
+	}
+	return {
+		valid: errors.length === 0,
+		errors,
+	};
+};
+
 export const __resetFancyTextFontProviderCacheForTests = (): void => {
-	__resetFontRegistryForTests();
+	__resetTextTypographyFacadeForTests();
 };
 
 export function createFancyTextModel(
@@ -225,284 +290,49 @@ export function createFancyTextModel(
 	initialProps: FancyTextProps,
 	_runtime: EditorRuntime,
 ): FancyTextModelStore {
-	let disposed = false;
-	let rebuildEpoch = 0;
-	let unsubscribeFontRegistry: (() => void) | null = null;
-	let store: FancyTextModelStore;
-
-	const applyBuiltState = (
-		nextParagraph: SkParagraph | null,
-		nextFont: SkFont | null,
-	): void => {
-		const previousParagraph = store.getState().internal.paragraph;
-		if (previousParagraph && previousParagraph !== nextParagraph) {
-			previousParagraph.dispose();
-		}
-		const previousFont = store.getState().internal.font;
-		if (previousFont && previousFont !== nextFont) {
-			previousFont.dispose();
-		}
-	};
-
-	const rebuildParagraph = async (props: FancyTextProps): Promise<void> => {
-		const currentEpoch = ++rebuildEpoch;
-		const normalizedProps = normalizeFancyTextProps(props);
-		store.setState((state) => ({
-			...state,
-			constraints: {
-				...state.constraints,
-				isLoading: true,
-				hasError: false,
-				errorMessage: undefined,
-			},
-		}));
-
-		void fontRegistry
-			.ensureCoverage({ text: normalizedProps.text })
-			.catch((error) => {
-				console.warn("[FancyTextModel] ensureCoverage failed:", error);
-			});
-		const fontProvider = await fontRegistry.getFontProvider();
-		if (disposed || currentEpoch !== rebuildEpoch) {
-			return;
-		}
-
-		let paragraph: SkParagraph | null = null;
-		let font: SkFont | null = null;
-		const typeface = fontRegistry.getPrimaryTypeface();
-		try {
-			const runPlan = fontRegistry.getParagraphRunPlan(normalizedProps.text);
-			paragraph = buildParagraph(normalizedProps, fontProvider, runPlan);
-			font = buildFont(typeface, normalizedProps.fontSize);
-		} catch (error) {
-			paragraph?.dispose();
-			font?.dispose();
-			if (disposed || currentEpoch !== rebuildEpoch) {
-				return;
-			}
-			store.setState((state) => ({
-				...state,
-				constraints: {
-					...state.constraints,
-					isLoading: false,
-					hasError: true,
-					errorMessage: error instanceof Error ? error.message : String(error),
-				},
-				internal: {
-					...state.internal,
-					isReady: false,
-				},
-			}));
-			return;
-		}
-
-		if (disposed || currentEpoch !== rebuildEpoch) {
-			paragraph?.dispose();
-			font?.dispose();
-			return;
-		}
-
-		const wordSegments = segmentFancyTextWords(
-			normalizedProps.text,
-			normalizedProps.locale,
-		);
-		applyBuiltState(paragraph, font);
-		store.setState((state) => ({
-			...state,
-			constraints: {
-				...state.constraints,
-				isLoading: false,
-				hasError: false,
-				errorMessage: undefined,
-			},
-			internal: {
-				...state.internal,
-				paragraph,
+	return createTextLikeModelController<FancyTextProps, FancyTextInternal>({
+		id,
+		type: "Text",
+		initialProps,
+		normalizeProps: (props) => normalizeFancyTextProps(props),
+		validateProps: validateFancyTextProps,
+		createInitialInternal: () => ({
+			paragraph: null,
+			fontProvider: null,
+			typeface: null,
+			font: null,
+			wordSegments: [],
+			isReady: false,
+		}),
+		buildParagraphFromRunPlan: ({
+			props,
+			fontProvider,
+			runPlan,
+			primaryFamily,
+		}) => {
+			return buildParagraph({
+				props: normalizeFancyTextProps(props),
 				fontProvider,
-				typeface,
-				font,
-				wordSegments,
-				isReady: true,
-			},
-		}));
-	};
-
-	store = createStore<ComponentModel<FancyTextProps, FancyTextInternal>>()(
-		subscribeWithSelector((set, get) => ({
-			id,
-			type: "Text",
-			props: normalizeFancyTextProps(initialProps),
-			constraints: {
-				canTrimStart: true,
-				canTrimEnd: true,
-				isLoading: false,
-			},
-			internal: {
-				paragraph: null,
-				fontProvider: null,
-				typeface: null,
-				font: null,
-				wordSegments: [],
-				isReady: false,
-			},
-
-			setProps: (partial) => {
-				const result = get().validate(partial);
-				if (!result.valid) return result;
-				const nextProps = normalizeFancyTextProps({
-					...get().props,
-					...partial,
-				});
-				set((state) => ({
-					...state,
-					props: nextProps,
-				}));
-				void rebuildParagraph(nextProps);
-				return result;
-			},
-
-			setConstraints: (partial) => {
-				set((state) => ({
-					...state,
-					constraints: {
-						...state.constraints,
-						...partial,
-					},
-				}));
-			},
-
-			setInternal: (partial) => {
-				set((state) => ({
-					...state,
-					internal: {
-						...state.internal,
-						...partial,
-					},
-				}));
-			},
-
-			validate: (newProps) => {
-				const errors: string[] = [];
-				if (newProps.text !== undefined && typeof newProps.text !== "string") {
-					errors.push("text must be a string");
-				}
-				if (
-					newProps.fontSize !== undefined &&
-					(typeof newProps.fontSize !== "number" ||
-						!Number.isFinite(newProps.fontSize))
-				) {
-					errors.push("fontSize must be a finite number");
-				}
-				if (
-					newProps.color !== undefined &&
-					typeof newProps.color !== "string"
-				) {
-					errors.push("color must be a string");
-				}
-				if (
-					newProps.textAlign !== undefined &&
-					newProps.textAlign !== "left" &&
-					newProps.textAlign !== "center" &&
-					newProps.textAlign !== "right"
-				) {
-					errors.push("textAlign must be left/center/right");
-				}
-				if (
-					newProps.lineHeight !== undefined &&
-					(typeof newProps.lineHeight !== "number" ||
-						!Number.isFinite(newProps.lineHeight))
-				) {
-					errors.push("lineHeight must be a finite number");
-				}
-				if (
-					newProps.locale !== undefined &&
-					typeof newProps.locale !== "string"
-				) {
-					errors.push("locale must be a string");
-				}
-				if (
-					newProps.highlightColor !== undefined &&
-					typeof newProps.highlightColor !== "string"
-				) {
-					errors.push("highlightColor must be a string");
-				}
-				if (
-					newProps.waveRadius !== undefined &&
-					(typeof newProps.waveRadius !== "number" ||
-						!Number.isFinite(newProps.waveRadius))
-				) {
-					errors.push("waveRadius must be a finite number");
-				}
-				if (
-					newProps.waveTranslateY !== undefined &&
-					(typeof newProps.waveTranslateY !== "number" ||
-						!Number.isFinite(newProps.waveTranslateY))
-				) {
-					errors.push("waveTranslateY must be a finite number");
-				}
-				if (
-					newProps.waveScale !== undefined &&
-					(typeof newProps.waveScale !== "number" ||
-						!Number.isFinite(newProps.waveScale))
-				) {
-					errors.push("waveScale must be a finite number");
-				}
-				return {
-					valid: errors.length === 0,
-					errors,
-				};
-			},
-
-			init: async () => {
-				await rebuildParagraph(get().props);
-			},
-
-			dispose: () => {
-				disposed = true;
-				rebuildEpoch += 1;
-				unsubscribeFontRegistry?.();
-				unsubscribeFontRegistry = null;
-				const paragraph = get().internal.paragraph;
-				paragraph?.dispose();
-				const font = get().internal.font;
-				font?.dispose();
-				set((state) => ({
-					...state,
-					internal: {
-						...state.internal,
-						paragraph: null,
-						fontProvider: null,
-						typeface: null,
-						font: null,
-						wordSegments: [],
-						isReady: false,
-					},
-					constraints: {
-						...state.constraints,
-						isLoading: false,
-					},
-				}));
-			},
-
-			waitForReady: () => {
-				return new Promise<void>((resolve) => {
-					if (get().internal.isReady) {
-						resolve();
-						return;
-					}
-					const unsubscribe = store.subscribe((state) => {
-						if (!state.internal.isReady) return;
-						unsubscribe();
-						resolve();
-					});
-				});
-			},
-		})),
-	);
-	unsubscribeFontRegistry = fontRegistry.subscribe(() => {
-		if (disposed) return;
-		void rebuildParagraph(store.getState().props);
+				runPlan,
+				primaryFamily,
+			});
+		},
+		buildExtraInternal: ({ props, primaryTypeface }) => {
+			const normalizedProps = normalizeFancyTextProps(props);
+			return {
+				typeface: primaryTypeface,
+				font: buildFont(primaryTypeface, normalizedProps.fontSize),
+				wordSegments: segmentFancyTextWords(
+					normalizedProps.text,
+					normalizedProps.locale,
+				),
+			};
+		},
+		disposeExtraInternal: (internal) => {
+			internal.font?.dispose();
+		},
+		disposeBuiltExtraInternal: (internal) => {
+			internal.font?.dispose?.();
+		},
 	});
-
-	return store;
 }

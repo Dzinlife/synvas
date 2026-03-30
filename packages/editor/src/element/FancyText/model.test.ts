@@ -8,57 +8,80 @@ import {
 } from "./model";
 
 const mocks = vi.hoisted(() => {
-	const registryListeners = new Set<() => void>();
+	const revisionListeners = new Set<() => void>();
 	const runPlanByText = new Map<
 		string,
-		Array<{ text: string; fontFamilies: string[] }>
+		Array<{
+			text: string;
+			fontFamilies: string[];
+			status: "primary" | "fallback";
+		}>
 	>();
+	let primaryTypeface: { id: string } | null = { id: "primary-typeface" };
 	return {
-		ensureCoverage: vi.fn(),
-		getFontProvider: vi.fn(),
-		getPrimaryTypeface: vi.fn(),
-		getParagraphRunPlan: vi.fn((text: string) => {
-			if (!text) return [];
-			return (
-				runPlanByText.get(text) ?? [{ text, fontFamilies: ["Noto Sans SC"] }]
-			);
-		}),
-		subscribe: vi.fn((listener: () => void) => {
-			registryListeners.add(listener);
+		resolveRenderContext: vi.fn(async (text: string) => ({
+			fontProvider: { registerFont: vi.fn() },
+			primaryTypeface,
+			runPlan: runPlanByText.get(text) ?? [
+				{
+					text,
+					fontFamilies: ["Noto Sans SC"],
+					status: "primary" as const,
+				},
+			],
+			primaryFamily: "Noto Sans SC",
+		})),
+		subscribeRevision: vi.fn((listener: () => void) => {
+			revisionListeners.add(listener);
 			return () => {
-				registryListeners.delete(listener);
+				revisionListeners.delete(listener);
 			};
 		}),
-		resetRegistryForTests: vi.fn(() => {
-			registryListeners.clear();
+		resetTypographyFacadeForTests: vi.fn(() => {
+			revisionListeners.clear();
 			runPlanByText.clear();
+			primaryTypeface = { id: "primary-typeface" };
 		}),
+		emitRevision: () => {
+			for (const listener of [...revisionListeners]) {
+				listener();
+			}
+		},
 		setRunPlan: (
 			text: string,
-			runPlan: Array<{ text: string; fontFamilies: string[] }>,
+			runPlan: Array<{
+				text: string;
+				fontFamilies: string[];
+				status: "primary" | "fallback";
+			}>,
 		) => {
 			runPlanByText.set(text, runPlan);
 		},
-		emitRegistryUpdate: () => {
-			for (const listener of [...registryListeners]) {
-				listener();
-			}
+		setPrimaryTypeface: (nextTypeface: { id: string } | null) => {
+			primaryTypeface = nextTypeface;
 		},
 		skiaColor: vi.fn((value: string) => value),
 		makeFont: vi.fn(),
 		paragraphBuilderMake: vi.fn(),
+		clearState: () => {
+			revisionListeners.clear();
+			runPlanByText.clear();
+			primaryTypeface = { id: "primary-typeface" };
+			mocks.resolveRenderContext.mockClear();
+			mocks.subscribeRevision.mockClear();
+			mocks.resetTypographyFacadeForTests.mockClear();
+			mocks.skiaColor.mockClear();
+			mocks.makeFont.mockClear();
+			mocks.paragraphBuilderMake.mockClear();
+		},
 	};
 });
 
-vi.mock("@/typography/fontRegistry", () => ({
-	FONT_REGISTRY_PRIMARY_FAMILY: "Noto Sans SC",
-	__resetFontRegistryForTests: mocks.resetRegistryForTests,
-	fontRegistry: {
-		ensureCoverage: mocks.ensureCoverage,
-		getFontProvider: mocks.getFontProvider,
-		getPrimaryTypeface: mocks.getPrimaryTypeface,
-		getParagraphRunPlan: mocks.getParagraphRunPlan,
-		subscribe: mocks.subscribe,
+vi.mock("@/typography/textTypographyFacade", () => ({
+	__resetTextTypographyFacadeForTests: mocks.resetTypographyFacadeForTests,
+	textTypographyFacade: {
+		resolveRenderContext: mocks.resolveRenderContext,
+		subscribeRevision: mocks.subscribeRevision,
 	},
 }));
 
@@ -123,7 +146,7 @@ describe("FancyText model", () => {
 		}));
 
 	beforeEach(() => {
-		vi.clearAllMocks();
+		mocks.clearState();
 		__resetFancyTextFontProviderCacheForTests();
 
 		const segmenterMock = createSegmenterMock();
@@ -132,9 +155,18 @@ describe("FancyText model", () => {
 			Segmenter: segmenterMock,
 		});
 
-		mocks.ensureCoverage.mockResolvedValue(undefined);
-		mocks.getFontProvider.mockResolvedValue({ registerFont: vi.fn() });
-		mocks.getPrimaryTypeface.mockReturnValue({ id: "primary-typeface" });
+		mocks.resolveRenderContext.mockImplementation(async (text: string) => ({
+			fontProvider: { registerFont: vi.fn() },
+			primaryTypeface: { id: "primary-typeface" },
+			runPlan: [
+				{
+					text,
+					fontFamilies: ["Noto Sans SC"],
+					status: "primary",
+				},
+			],
+			primaryFamily: "Noto Sans SC",
+		}));
 		mocks.makeFont.mockImplementation(() => ({
 			setEdging: vi.fn(),
 			setEmbeddedBitmaps: vi.fn(),
@@ -162,7 +194,7 @@ describe("FancyText model", () => {
 		vi.unstubAllGlobals();
 	});
 
-	it("init 会先触发 coverage 并按主字体 run 构建 paragraph", async () => {
+	it("init 会通过 facade 构建主字体 run", async () => {
 		const store = createFancyTextModel(
 			"fancy-text-1",
 			{
@@ -179,9 +211,7 @@ describe("FancyText model", () => {
 			  }
 			| undefined;
 
-		expect(mocks.ensureCoverage).toHaveBeenCalledWith({ text: "Hello world" });
-		expect(mocks.getFontProvider).toHaveBeenCalledTimes(1);
-		expect(mocks.getParagraphRunPlan).toHaveBeenCalledWith("Hello world");
+		expect(mocks.resolveRenderContext).toHaveBeenCalledWith("Hello world");
 		expect(builder?.pushStyle).toHaveBeenCalledWith(
 			expect.objectContaining({
 				fontFamilies: ["Noto Sans SC"],
@@ -195,24 +225,36 @@ describe("FancyText model", () => {
 		expect(store.getState().internal.isReady).toBe(true);
 	});
 
-	it("registry 更新后会重建并把 confirmed unsupported 字符切到 fallback run", async () => {
-		mocks.setRunPlan("中文🙂", [
-			{ text: "中文🙂", fontFamilies: ["Noto Sans SC"] },
-		]);
+	it("revision 更新后会重建并切换 fallback run", async () => {
+		const text = "中文🙂";
+		let currentRunPlan: Array<{
+			text: string;
+			fontFamilies: string[];
+			status: "primary" | "fallback";
+		}> = [{ text, fontFamilies: ["Noto Sans SC"], status: "primary" }];
 		const store = createFancyTextModel(
 			"fancy-text-2",
 			{
-				text: "中文🙂",
+				text,
 			},
 			runtime,
 		);
+		mocks.resolveRenderContext.mockImplementation(async () => ({
+			fontProvider: { registerFont: vi.fn() },
+			primaryTypeface: { id: "primary-typeface" },
+			runPlan: currentRunPlan,
+			primaryFamily: "Noto Sans SC",
+		}));
 		await store.getState().init();
-
-		mocks.setRunPlan("中文🙂", [
-			{ text: "中文", fontFamilies: ["Noto Sans SC"] },
-			{ text: "🙂", fontFamilies: ["Noto Sans SC", "Noto Color Emoji"] },
-		]);
-		mocks.emitRegistryUpdate();
+		currentRunPlan = [
+			{ text: "中文", fontFamilies: ["Noto Sans SC"], status: "primary" },
+			{
+				text: "🙂",
+				fontFamilies: ["Noto Sans SC", "Noto Color Emoji"],
+				status: "fallback",
+			},
+		];
+		mocks.emitRevision();
 
 		await waitForCondition(() => {
 			return (
@@ -227,7 +269,6 @@ describe("FancyText model", () => {
 					addText: ReturnType<typeof vi.fn>;
 			  }
 			| undefined;
-
 		expect(builder?.pushStyle).toHaveBeenNthCalledWith(
 			1,
 			expect.objectContaining({
@@ -244,8 +285,13 @@ describe("FancyText model", () => {
 		expect(builder?.addText).toHaveBeenNthCalledWith(2, "🙂");
 	});
 
-	it("unknown 或 pending 字符不会提前 fallback", async () => {
-		mocks.setRunPlan("🧪", [{ text: "🧪", fontFamilies: ["Noto Sans SC"] }]);
+	it("unknown/pending 字符不会提前 fallback", async () => {
+		mocks.resolveRenderContext.mockImplementation(async (text: string) => ({
+			fontProvider: { registerFont: vi.fn() },
+			primaryTypeface: { id: "primary-typeface" },
+			runPlan: [{ text, fontFamilies: ["Noto Sans SC"], status: "primary" }],
+			primaryFamily: "Noto Sans SC",
+		}));
 		const store = createFancyTextModel(
 			"fancy-text-3",
 			{
@@ -268,18 +314,39 @@ describe("FancyText model", () => {
 		);
 	});
 
-	it("epoch 竞争下会保留最新文本的构建结果", async () => {
-		let resolveFirstProvider:
-			| ((provider: { registerFont: ReturnType<typeof vi.fn> }) => void)
+	it("epoch 竞争下保留最新文本构建结果", async () => {
+		let resolveFirstContext:
+			| ((value: {
+					fontProvider: { registerFont: ReturnType<typeof vi.fn> };
+					primaryTypeface: { id: string };
+					runPlan: Array<{
+						text: string;
+						fontFamilies: string[];
+						status: "primary";
+					}>;
+					primaryFamily: "Noto Sans SC";
+			  }) => void)
 			| null = null;
-		const firstProviderPromise = new Promise<{
-			registerFont: ReturnType<typeof vi.fn>;
+		const firstContextPromise = new Promise<{
+			fontProvider: { registerFont: ReturnType<typeof vi.fn> };
+			primaryTypeface: { id: string };
+			runPlan: Array<{
+				text: string;
+				fontFamilies: string[];
+				status: "primary";
+			}>;
+			primaryFamily: "Noto Sans SC";
 		}>((resolve) => {
-			resolveFirstProvider = resolve;
+			resolveFirstContext = resolve;
 		});
-		mocks.getFontProvider
-			.mockImplementationOnce(() => firstProviderPromise)
-			.mockResolvedValue({ registerFont: vi.fn() });
+		mocks.resolveRenderContext
+			.mockImplementationOnce(() => firstContextPromise)
+			.mockImplementation(async (text: string) => ({
+				fontProvider: { registerFont: vi.fn() },
+				primaryTypeface: { id: "primary-typeface" },
+				runPlan: [{ text, fontFamilies: ["Noto Sans SC"], status: "primary" }],
+				primaryFamily: "Noto Sans SC",
+			}));
 
 		const store = createFancyTextModel(
 			"fancy-text-4",
@@ -290,7 +357,17 @@ describe("FancyText model", () => {
 		);
 		const initPromise = store.getState().init();
 		store.getState().setProps({ text: "second" });
-		resolveFirstProvider?.({ registerFont: vi.fn() });
+		if (!resolveFirstContext) {
+			throw new Error("resolveFirstContext is not initialized");
+		}
+		resolveFirstContext({
+			fontProvider: { registerFont: vi.fn() },
+			primaryTypeface: { id: "primary-typeface" },
+			runPlan: [
+				{ text: "first", fontFamilies: ["Noto Sans SC"], status: "primary" },
+			],
+			primaryFamily: "Noto Sans SC",
+		});
 		await initPromise;
 
 		await waitForCondition(() => {

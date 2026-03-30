@@ -4,12 +4,94 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";
 import { __resetTextFontProviderCacheForTests, createTextModel } from "./model";
 
-const mocks = vi.hoisted(() => ({
-	dataFromURI: vi.fn(),
-	makeFreeTypeFaceFromData: vi.fn(),
-	makeTypefaceFontProvider: vi.fn(),
-	paragraphBuilderMake: vi.fn(),
-	skiaColor: vi.fn((value: string) => value),
+const mocks = vi.hoisted(() => {
+	const revisionListeners = new Set<() => void>();
+	const runPlanByText = new Map<
+		string,
+		Array<{
+			text: string;
+			fontFamilies: string[];
+			status: "primary" | "fallback";
+		}>
+	>();
+	let paragraphId = 0;
+	const paragraphs: Array<{ id: string; dispose: ReturnType<typeof vi.fn> }> =
+		[];
+	return {
+		resolveRenderContext: vi.fn(async (text: string) => ({
+			fontProvider: { registerFont: vi.fn() },
+			primaryTypeface: null,
+			runPlan: runPlanByText.get(text) ?? [
+				{
+					text,
+					fontFamilies: ["Noto Sans SC"],
+					status: "primary" as const,
+				},
+			],
+			primaryFamily: "Noto Sans SC",
+		})),
+		subscribeRevision: vi.fn((listener: () => void) => {
+			revisionListeners.add(listener);
+			return () => {
+				revisionListeners.delete(listener);
+			};
+		}),
+		resetTypographyFacadeForTests: vi.fn(() => {
+			revisionListeners.clear();
+			runPlanByText.clear();
+		}),
+		emitRevision: () => {
+			for (const listener of [...revisionListeners]) {
+				listener();
+			}
+		},
+		setRunPlan: (
+			text: string,
+			runPlan: Array<{
+				text: string;
+				fontFamilies: string[];
+				status: "primary" | "fallback";
+			}>,
+		) => {
+			runPlanByText.set(text, runPlan);
+		},
+		paragraphBuilderMake: vi.fn(() => {
+			const paragraph = {
+				id: `paragraph-${paragraphId++}`,
+				dispose: vi.fn(),
+			};
+			paragraphs.push(paragraph);
+			const builder = {
+				pushStyle: vi.fn(() => builder),
+				addText: vi.fn(() => builder),
+				pop: vi.fn(() => builder),
+				build: vi.fn(() => paragraph),
+				dispose: vi.fn(),
+			};
+			return builder;
+		}),
+		skiaColor: vi.fn((value: string) => value),
+		paragraphs,
+		clearState: () => {
+			revisionListeners.clear();
+			runPlanByText.clear();
+			paragraphs.length = 0;
+			paragraphId = 0;
+			mocks.resolveRenderContext.mockClear();
+			mocks.subscribeRevision.mockClear();
+			mocks.resetTypographyFacadeForTests.mockClear();
+			mocks.paragraphBuilderMake.mockClear();
+			mocks.skiaColor.mockClear();
+		},
+	};
+});
+
+vi.mock("@/typography/textTypographyFacade", () => ({
+	__resetTextTypographyFacadeForTests: mocks.resetTypographyFacadeForTests,
+	textTypographyFacade: {
+		resolveRenderContext: mocks.resolveRenderContext,
+		subscribeRevision: mocks.subscribeRevision,
+	},
 }));
 
 vi.mock("react-skia-lite", () => ({
@@ -22,15 +104,6 @@ vi.mock("react-skia-lite", () => ({
 		End: 5,
 	},
 	Skia: {
-		Data: {
-			fromURI: mocks.dataFromURI,
-		},
-		Typeface: {
-			MakeFreeTypeFaceFromData: mocks.makeFreeTypeFaceFromData,
-		},
-		TypefaceFontProvider: {
-			Make: mocks.makeTypefaceFontProvider,
-		},
 		ParagraphBuilder: {
 			Make: mocks.paragraphBuilderMake,
 		},
@@ -71,34 +144,27 @@ describe("Text model", () => {
 	const runtime = createTestEditorRuntime("text-model-test");
 
 	beforeEach(() => {
-		vi.clearAllMocks();
-		__resetTextFontProviderCacheForTests();
-
-		mocks.dataFromURI.mockResolvedValue({ id: "font-data" });
-		mocks.makeFreeTypeFaceFromData.mockReturnValue({ id: "roboto-typeface" });
-		mocks.makeTypefaceFontProvider.mockImplementation(() => ({
-			registerFont: vi.fn(),
+		mocks.clearState();
+		mocks.resolveRenderContext.mockImplementation(async (text: string) => ({
+			fontProvider: { registerFont: vi.fn() },
+			primaryTypeface: null,
+			runPlan: [
+				{
+					text,
+					fontFamilies: ["Noto Sans SC"],
+					status: "primary",
+				},
+			],
+			primaryFamily: "Noto Sans SC",
 		}));
-		mocks.paragraphBuilderMake.mockImplementation(() => {
-			const paragraph = {
-				dispose: vi.fn(),
-			};
-			const builder = {
-				pushStyle: vi.fn(() => builder),
-				addText: vi.fn(() => builder),
-				pop: vi.fn(() => builder),
-				build: vi.fn(() => paragraph),
-				dispose: vi.fn(),
-			};
-			return builder;
-		});
+		__resetTextFontProviderCacheForTests();
 	});
 
 	afterEach(() => {
 		vi.unstubAllGlobals();
 	});
 
-	it("init 会加载 Roboto provider 并构建 paragraph", async () => {
+	it("init 会通过 facade 构建 run-based paragraph", async () => {
 		const store = createTextModel(
 			"text-1",
 			{
@@ -106,19 +172,21 @@ describe("Text model", () => {
 			},
 			runtime,
 		);
-
 		await store.getState().init();
-		const provider = mocks.makeTypefaceFontProvider.mock.results[0]?.value as
-			| { registerFont: ReturnType<typeof vi.fn> }
-			| undefined;
 
-		expect(mocks.dataFromURI).toHaveBeenCalledWith("/Roboto-Medium.ttf");
-		expect(mocks.makeFreeTypeFaceFromData).toHaveBeenCalled();
-		expect(provider?.registerFont).toHaveBeenCalledWith(
-			{ id: "roboto-typeface" },
-			"Roboto",
+		expect(mocks.resolveRenderContext).toHaveBeenCalledWith("Hello Text");
+		const builder = mocks.paragraphBuilderMake.mock.results[0]?.value as
+			| {
+					pushStyle: ReturnType<typeof vi.fn>;
+					addText: ReturnType<typeof vi.fn>;
+			  }
+			| undefined;
+		expect(builder?.pushStyle).toHaveBeenCalledWith(
+			expect.objectContaining({
+				fontFamilies: ["Noto Sans SC"],
+			}),
 		);
-		expect(store.getState().internal.paragraph).toBeTruthy();
+		expect(builder?.addText).toHaveBeenCalledWith("Hello Text");
 		expect(store.getState().internal.isReady).toBe(true);
 		expect(store.getState().constraints.hasError).toBe(false);
 	});
@@ -151,26 +219,34 @@ describe("Text model", () => {
 		expect(store.getState().internal.paragraph).toBeTruthy();
 	});
 
-	it("字体加载失败时会回退到默认字体并继续渲染", async () => {
-		mocks.dataFromURI.mockRejectedValueOnce(new Error("font not found"));
+	it("字体 revision 更新会触发重建", async () => {
 		const store = createTextModel(
 			"text-3",
 			{
-				text: "fallback",
+				text: "中文🙂",
 			},
 			runtime,
 		);
-
 		await store.getState().init();
-
-		expect(store.getState().internal.paragraph).toBeTruthy();
-		expect(store.getState().internal.isReady).toBe(true);
-		expect(store.getState().constraints.hasError).toBe(false);
+		const rebuildCallCount = mocks.resolveRenderContext.mock.calls.length;
+		mocks.emitRevision();
+		await waitForCondition(() => {
+			return mocks.resolveRenderContext.mock.calls.length > rebuildCallCount;
+		});
 	});
 
-	it("dispose 后不会应用异步加载结果", async () => {
-		const deferred = createDeferred<{ id: string }>();
-		mocks.dataFromURI.mockReturnValueOnce(deferred.promise);
+	it("waitForReady 会等待当前重建周期完成", async () => {
+		const deferred = createDeferred<{
+			fontProvider: { registerFont: ReturnType<typeof vi.fn> };
+			primaryTypeface: null;
+			runPlan: Array<{
+				text: string;
+				fontFamilies: string[];
+				status: "primary";
+			}>;
+			primaryFamily: "Noto Sans SC";
+		}>();
+		mocks.resolveRenderContext.mockImplementationOnce(() => deferred.promise);
 		const store = createTextModel(
 			"text-4",
 			{
@@ -178,13 +254,31 @@ describe("Text model", () => {
 			},
 			runtime,
 		);
-
 		const initPromise = store.getState().init();
-		store.getState().dispose();
-		deferred.resolve({ id: "font-data" });
-		await initPromise;
+		let readyResolved = false;
+		const readyPromise = store
+			.getState()
+			.waitForReady?.()
+			.then(() => {
+				readyResolved = true;
+			});
+		await Promise.resolve();
+		expect(readyResolved).toBe(false);
 
-		expect(store.getState().internal.paragraph).toBeNull();
-		expect(store.getState().internal.isReady).toBe(false);
+		deferred.resolve({
+			fontProvider: { registerFont: vi.fn() },
+			primaryTypeface: null,
+			runPlan: [
+				{
+					text: "slow",
+					fontFamilies: ["Noto Sans SC"],
+					status: "primary",
+				},
+			],
+			primaryFamily: "Noto Sans SC",
+		});
+		await initPromise;
+		await readyPromise;
+		expect(readyResolved).toBe(true);
 	});
 });
