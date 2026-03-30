@@ -289,16 +289,16 @@ afterEach(() => {
 
 describe("FontRegistry", () => {
 	it("本地子集已覆盖字符时不会发起网络请求", async () => {
-		await fontRegistry.ensureCoverage({ text: "花" });
+		await fontRegistry.ensureCoverage({ text: "D" });
 
 		expect(mocks.fromURI).toHaveBeenCalledWith(
-			"/fonts/NotoSansSC-Base-400.woff2",
+			"/fonts/Inter-Latin-wght-normal.woff2",
 		);
 		expect(mocks.fetchMock).not.toHaveBeenCalled();
-		expect(fontRegistry.getParagraphRunPlan("花")).toEqual([
+		expect(fontRegistry.getParagraphRunPlan("D")).toEqual([
 			{
-				text: "花",
-				fontFamilies: ["Noto Sans SC"],
+				text: "D",
+				fontFamilies: ["Inter"],
 				status: "primary",
 			},
 		]);
@@ -332,7 +332,7 @@ describe("FontRegistry", () => {
 	});
 
 	it("主字体子集拉取成功且 glyph 可用时保持主字体渲染", async () => {
-		mocks.familyRuleByName.set("Noto Sans SC", (char) => char === "测");
+		mocks.familyRuleByName.set("Inter", (char) => char === "测");
 
 		await fontRegistry.ensureCoverage({ text: "测" });
 
@@ -340,11 +340,12 @@ describe("FontRegistry", () => {
 		expect(runPlan).toHaveLength(1);
 		expect(runPlan[0]?.text).toBe("测");
 		expect(runPlan[0]?.status).toBe("primary");
-		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Noto Sans SC")).toBe(true);
+		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Inter")).toBe(true);
 		expect(pickGoogleCssCalls()).toHaveLength(1);
 	});
 
 	it("emoji 字符会优先使用 Apple fallback family", async () => {
+		mocks.familyRuleByName.set("Inter", () => false);
 		mocks.familyRuleByName.set("Noto Sans SC", () => false);
 		mocks.familyRuleByName.set("Noto Sans", () => false);
 		mocks.familyRuleByName.set("Noto Sans JP", () => false);
@@ -360,11 +361,11 @@ describe("FontRegistry", () => {
 		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Apple Color Emoji")).toBe(
 			true,
 		);
-		expect(runPlan[0]?.fontFamilies[1]).toBe("Noto Sans SC");
+		expect(runPlan[0]?.fontFamilies[1]).toBe("Inter");
 	});
 
 	it("主字体请求失败时 emoji 仍然优先走 Apple fallback", async () => {
-		mocks.cssFailureFamilies.add("Noto Sans SC");
+		mocks.cssFailureFamilies.add("Inter");
 		mocks.familyRuleByName.set("Noto Color Emoji", (char) => char === "🙂");
 
 		await fontRegistry.ensureCoverage({ text: "🙂" });
@@ -376,12 +377,27 @@ describe("FontRegistry", () => {
 		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Apple Color Emoji")).toBe(
 			true,
 		);
-		expect(runPlan[0]?.fontFamilies[1]).toBe("Noto Sans SC");
+		expect(runPlan[0]?.fontFamilies[1]).toBe("Inter");
 		expect(pickGoogleCssCalls()).toHaveLength(1);
 	});
 
+	it("主字体请求失败时中文会降级到 Noto Sans SC fallback", async () => {
+		mocks.cssFailureFamilies.add("Inter");
+		mocks.familyRuleByName.set("Noto Sans SC", (char) => char === "测");
+
+		await fontRegistry.ensureCoverage({ text: "测" });
+
+		const runPlan = fontRegistry.getParagraphRunPlan("测");
+		expect(runPlan).toHaveLength(1);
+		expect(runPlan[0]?.text).toBe("测");
+		expect(runPlan[0]?.status).toBe("fallback");
+		expect(runPlan[0]?.fontFamilies[0]).toBe("Inter");
+		expect(runPlan[0]?.fontFamilies[1]?.startsWith("Noto Sans SC")).toBe(true);
+		expect(pickGoogleCssCalls()).toHaveLength(2);
+	});
+
 	it("主字体已支持 emoji 时仍会优先选择 Apple family", async () => {
-		mocks.familyRuleByName.set("Noto Sans SC", (char) => char === "🙂");
+		mocks.familyRuleByName.set("Inter", (char) => char === "🙂");
 		mocks.familyRuleByName.set("Apple Color Emoji", (char) => char === "🙂");
 
 		await fontRegistry.ensureCoverage({ text: "🙂" });
@@ -393,11 +409,11 @@ describe("FontRegistry", () => {
 		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Apple Color Emoji")).toBe(
 			true,
 		);
-		expect(runPlan[0]?.fontFamilies[1]?.startsWith("Noto Sans SC")).toBe(true);
+		expect(runPlan[0]?.fontFamilies[1]?.startsWith("Inter")).toBe(true);
 	});
 
 	it("IndexedDB 命中后刷新可直接恢复 coverage 且不重复下载", async () => {
-		mocks.familyRuleByName.set("Noto Sans SC", (char) => char === "测");
+		mocks.familyRuleByName.set("Inter", (char) => char === "测");
 		await fontRegistry.ensureCoverage({ text: "测" });
 		expect(pickGoogleCssCalls()).toHaveLength(1);
 		expect(mocks.dbRecords.size).toBeGreaterThan(0);
@@ -410,6 +426,6 @@ describe("FontRegistry", () => {
 		expect(runPlan).toHaveLength(1);
 		expect(runPlan[0]?.text).toBe("测");
 		expect(runPlan[0]?.status).toBe("primary");
-		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Noto Sans SC")).toBe(true);
+		expect(runPlan[0]?.fontFamilies[0]?.startsWith("Inter")).toBe(true);
 	});
 });

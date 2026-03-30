@@ -6,9 +6,12 @@ import {
 	type SkTypefaceFontProvider,
 } from "react-skia-lite";
 
-const PRIMARY_FONT_FAMILY = "Noto Sans SC";
+const PRIMARY_FONT_FAMILY = "Inter";
 const PRIMARY_FONT_WEIGHT = 400;
-const PRIMARY_LOCAL_SUBSET_URI = "/fonts/NotoSansSC-Base-400.woff2";
+const PRIMARY_LOCAL_SUBSET_URI = "/fonts/Inter-Latin-wght-normal.woff2";
+const SECONDARY_FONT_FAMILY = "Noto Sans SC";
+const SECONDARY_FONT_WEIGHT = 400;
+const SECONDARY_LOCAL_SUBSET_URI = "/fonts/NotoSansSC-Base-400.woff2";
 const APPLE_EMOJI_FAMILY = "Apple Color Emoji";
 const APPLE_EMOJI_LOCAL_URI = "/fonts/AppleColorEmoji-Linux.ttf";
 const COVERAGE_DEBOUNCE_MS = 120;
@@ -31,6 +34,11 @@ const PRIMARY_FONT_DESCRIPTOR: FontFamilyDescriptor = {
 	weight: PRIMARY_FONT_WEIGHT,
 };
 
+const SECONDARY_FONT_DESCRIPTOR: FontFamilyDescriptor = {
+	family: SECONDARY_FONT_FAMILY,
+	weight: SECONDARY_FONT_WEIGHT,
+};
+
 const APPLE_EMOJI_DESCRIPTOR: FontFamilyDescriptor = {
 	family: APPLE_EMOJI_FAMILY,
 	weight: null,
@@ -38,6 +46,7 @@ const APPLE_EMOJI_DESCRIPTOR: FontFamilyDescriptor = {
 
 const FALLBACK_FONT_DESCRIPTORS: readonly FontFamilyDescriptor[] = [
 	APPLE_EMOJI_DESCRIPTOR,
+	{ family: SECONDARY_FONT_FAMILY, weight: 400 },
 	{ family: "Noto Sans", weight: 400 },
 	{ family: "Noto Sans JP", weight: 400 },
 	{ family: "Noto Sans KR", weight: 400 },
@@ -234,6 +243,7 @@ class FontRegistry {
 	private providerPromise: Promise<SkTypefaceFontProvider | null> | null = null;
 	private bootstrapPromise: Promise<void> | null = null;
 	private localSubsetLoaded = false;
+	private localSecondarySubsetLoaded = false;
 	private localAppleEmojiLoaded = false;
 
 	private readonly primaryTypefaces: LoadedTypefaceEntry[] = [];
@@ -353,6 +363,32 @@ class FontRegistry {
 						familyName: registeredFamily,
 					});
 					this.localSubsetLoaded = true;
+					hasStateChanged = true;
+				}
+			}
+			if (!this.localSecondarySubsetLoaded) {
+				const typeface = await this.loadTypefaceFromUri(
+					SECONDARY_LOCAL_SUBSET_URI,
+				);
+				if (typeface) {
+					const registeredFamily = buildRegisteredFamilyName(
+						SECONDARY_FONT_DESCRIPTOR,
+						"local-bootstrap",
+						true,
+					);
+					provider.registerFont(typeface, registeredFamily);
+					const familyTypefaces =
+						this.fallbackTypefacesByFamily.get(SECONDARY_FONT_FAMILY) ?? [];
+					familyTypefaces.push({
+						typeface,
+						familyName: registeredFamily,
+					});
+					this.fallbackTypefacesByFamily.set(
+						SECONDARY_FONT_FAMILY,
+						familyTypefaces,
+					);
+					this.getUnsupportedSetForFallbackFamily(SECONDARY_FONT_FAMILY).clear();
+					this.localSecondarySubsetLoaded = true;
 					hasStateChanged = true;
 				}
 			}
@@ -826,6 +862,12 @@ class FontRegistry {
 				chunkText,
 			);
 			if (!loadedSubset) {
+				for (const codePoint of chunk) {
+					if (!this.unsupportedByPrimary.has(codePoint)) {
+						this.unsupportedByPrimary.add(codePoint);
+						hasStateChanged = true;
+					}
+				}
 				continue;
 			}
 			for (const codePoint of loadedSubset.codePoints) {
@@ -1105,6 +1147,7 @@ class FontRegistry {
 		this.providerPromise = null;
 		this.bootstrapPromise = null;
 		this.localSubsetLoaded = false;
+		this.localSecondarySubsetLoaded = false;
 		this.localAppleEmojiLoaded = false;
 		this.isFlushingCoverage = false;
 		this.fontCacheDbPromise = null;

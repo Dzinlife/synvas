@@ -32,11 +32,14 @@ import {
 } from "./canvasNodeLabelUtils";
 
 const LABEL_FONT_SIZE_PX = 12;
-const LABEL_LINE_HEIGHT_MULTIPLIER = 1.2;
+const LABEL_LINE_HEIGHT_MULTIPLIER = 1;
 const LABEL_LINE_HEIGHT_PX = LABEL_FONT_SIZE_PX * LABEL_LINE_HEIGHT_MULTIPLIER;
 const LABEL_TEXT_HEIGHT_PX = Math.ceil(LABEL_LINE_HEIGHT_PX);
+const LABEL_TEXT_CLIP_PADDING_TOP_PX = 0;
+const LABEL_TEXT_CLIP_PADDING_BOTTOM_PX = 1;
 const LABEL_TEXT_COLOR = "rgba(255,255,255,0.92)";
-const LABEL_GAP_PX = 6;
+const LABEL_LINE_HEIGHT_SAMPLE_TEXT = "Hg国";
+const LABEL_GAP_PX = 5;
 const LABEL_DIMMED_OPACITY = 0.45;
 const LABEL_MIN_VISIBLE_WIDTH_PX = 24;
 const LABEL_TEXT_ELLIPSIS = "…";
@@ -226,12 +229,16 @@ export const CanvasNodeLabelLayer = ({
 	const labelCoverageText = useMemo(() => {
 		if (labelCandidates.length <= 0) return "";
 		// 覆盖集只关心字符集合，不需要换行分隔，避免注入控制字符。
-		const labelText = labelCandidates.map((candidate) => candidate.text).join("");
+		const labelText = labelCandidates
+			.map((candidate) => candidate.text)
+			.join("");
 		// 省略号由 paragraph 在布局阶段注入，需提前纳入覆盖集，避免 glyph 缺失。
-		return `${labelText}${LABEL_TEXT_ELLIPSIS}`;
+		// line-height 使用样本文字测量，样本字符也要进入覆盖集。
+		return `${labelText}${LABEL_TEXT_ELLIPSIS}${LABEL_LINE_HEIGHT_SAMPLE_TEXT}`;
 	}, [labelCandidates]);
 	const ellipsisFontFamilies = useMemo(() => {
-		const ellipsisRunPlan = fontRegistry.getParagraphRunPlan(LABEL_TEXT_ELLIPSIS);
+		const ellipsisRunPlan =
+			fontRegistry.getParagraphRunPlan(LABEL_TEXT_ELLIPSIS);
 		// 缩放会改变截断位置，需保证所有 run 都能回退到可渲染省略号的字体链。
 		return collectRunPlanFamilies(ellipsisRunPlan);
 	}, [fontRegistryRevision]);
@@ -251,6 +258,36 @@ export const CanvasNodeLabelLayer = ({
 		paint.setAntiAlias(true);
 		return paint;
 	}, []);
+	const measuredLabelContentHeight = useMemo(() => {
+		void fontRegistryRevision;
+		if (!fontProvider) return LABEL_TEXT_HEIGHT_PX;
+		try {
+			const sampleParagraph = buildLabelParagraph({
+				text: LABEL_LINE_HEIGHT_SAMPLE_TEXT,
+				runPlan: fontRegistry.getParagraphRunPlan(
+					LABEL_LINE_HEIGHT_SAMPLE_TEXT,
+				),
+				fontProvider,
+				ellipsisFontFamilies,
+			});
+			try {
+				sampleParagraph.layout(1_024);
+				const sampleHeight = Math.max(
+					1,
+					Math.ceil(sampleParagraph.getHeight()),
+				);
+				return Math.max(LABEL_TEXT_HEIGHT_PX, sampleHeight);
+			} finally {
+				disposeParagraph(sampleParagraph);
+			}
+		} catch (error) {
+			console.warn(
+				"[CanvasNodeLabelLayer] Failed to measure label sample height:",
+				error,
+			);
+			return LABEL_TEXT_HEIGHT_PX;
+		}
+	}, [ellipsisFontFamilies, fontProvider, fontRegistryRevision]);
 	const paragraphCacheByNodeIdRef = useRef<
 		Map<string, LabelParagraphCacheEntry>
 	>(new Map());
@@ -460,12 +497,31 @@ export const CanvasNodeLabelLayer = ({
 			if (!paragraph) {
 				continue;
 			}
-			const labelY = frame.y - LABEL_GAP_PX - LABEL_TEXT_HEIGHT_PX;
+			let paragraphHeight = LABEL_TEXT_HEIGHT_PX;
+			try {
+				paragraph.layout(frameWidthPx);
+				paragraphHeight = Math.max(1, Math.ceil(paragraph.getHeight()));
+			} catch (error) {
+				console.warn(
+					"[CanvasNodeLabelLayer] Failed to layout label paragraph:",
+					error,
+				);
+				continue;
+			}
+			const labelContentHeight = Math.max(
+				measuredLabelContentHeight,
+				paragraphHeight,
+			);
+			const labelClipHeight =
+				labelContentHeight +
+				LABEL_TEXT_CLIP_PADDING_TOP_PX +
+				LABEL_TEXT_CLIP_PADDING_BOTTOM_PX;
+			const labelY = frame.y - LABEL_GAP_PX - labelClipHeight;
 			const labelRect = {
 				x: frame.x,
 				y: labelY,
 				width: frameWidthPx,
-				height: LABEL_TEXT_HEIGHT_PX,
+				height: labelClipHeight,
 			};
 			const requiresDimLayer = candidate.opacity < 0.999;
 			if (requiresDimLayer) {
@@ -473,15 +529,14 @@ export const CanvasNodeLabelLayer = ({
 				canvas.saveLayer(alphaPaint, labelRect, null);
 			}
 			try {
-				paragraph.layout(frameWidthPx);
-				const paragraphHeight = Math.max(1, paragraph.getHeight());
 				const verticalOffset = Math.max(
 					0,
-					(LABEL_TEXT_HEIGHT_PX - paragraphHeight) / 2,
+					(labelContentHeight - paragraphHeight) / 2,
 				);
+				const textY = labelY + LABEL_TEXT_CLIP_PADDING_TOP_PX + verticalOffset;
 				canvas.save();
 				canvas.clipRect(labelRect, ClipOp.Intersect, true);
-				paragraph.paint(canvas, frame.x, labelY + verticalOffset);
+				paragraph.paint(canvas, frame.x, textY);
 				canvas.restore();
 				hasVisibleLabel = true;
 			} catch (error) {
@@ -515,6 +570,7 @@ export const CanvasNodeLabelLayer = ({
 		height,
 		labelCandidates,
 		layoutByNodeId,
+		measuredLabelContentHeight,
 		pruneParagraphCache,
 		viewport,
 		width,

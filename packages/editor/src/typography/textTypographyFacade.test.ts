@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("./fontRegistry", () => ({
-	FONT_REGISTRY_PRIMARY_FAMILY: "Noto Sans SC",
+	FONT_REGISTRY_PRIMARY_FAMILY: "Inter",
 	fontRegistry: {
 		ensureCoverage: mocks.ensureCoverage,
 		getFontProvider: mocks.getFontProvider,
@@ -60,7 +60,7 @@ describe("textTypographyFacade", () => {
 			return [
 				{
 					text,
-					fontFamilies: ["Noto Sans SC"],
+					fontFamilies: ["Inter"],
 					status: "primary",
 				},
 			];
@@ -102,11 +102,11 @@ describe("textTypographyFacade", () => {
 			runPlan: [
 				{
 					text: "中文🙂",
-					fontFamilies: ["Noto Sans SC"],
+					fontFamilies: ["Inter"],
 					status: "primary",
 				},
 			],
-			primaryFamily: "Noto Sans SC",
+			primaryFamily: "Inter",
 		});
 	});
 

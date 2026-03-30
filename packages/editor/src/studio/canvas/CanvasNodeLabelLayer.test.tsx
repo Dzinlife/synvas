@@ -241,9 +241,21 @@ describe("CanvasNodeLabelLayer", () => {
 		const lastStyle = paragraphBuilderStyles.at(-1);
 		expect(lastStyle?.maxLines).toBe(1);
 		expect(lastStyle?.ellipsis).toBe("…");
-		expect(fontRegistryMock.ensureCoverage).toHaveBeenCalledWith({
-			text: "abcdef…",
-		});
+		expect(fontRegistryMock.ensureCoverage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				text: expect.stringContaining("abcdef"),
+			}),
+		);
+		expect(fontRegistryMock.ensureCoverage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				text: expect.stringContaining("…"),
+			}),
+		);
+		expect(fontRegistryMock.ensureCoverage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				text: expect.stringContaining("Hg国"),
+			}),
+		);
 		expect(
 			paragraphInstances.some(
 				(paragraph) => paragraph.paint.mock.calls.length > 0,
