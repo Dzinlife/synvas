@@ -16,6 +16,7 @@ import {
 	type SkParagraph,
 	type SkPicture,
 	type SkTypefaceFontProvider,
+	useDerivedValue,
 	useSharedValue,
 } from "react-skia-lite";
 import {
@@ -27,6 +28,7 @@ import {
 	type CanvasCameraState,
 	type CanvasNodeLayoutState,
 	isCanvasScreenRectVisible,
+	resolveCanvasCameraScreenOffset,
 	resolveCanvasNodeLayoutScreenFrame,
 	resolveCanvasViewportRect,
 } from "./canvasNodeLabelUtils";
@@ -43,6 +45,15 @@ const LABEL_GAP_PX = 5;
 const LABEL_DIMMED_OPACITY = 0.45;
 const LABEL_MIN_VISIBLE_WIDTH_PX = 24;
 const LABEL_TEXT_ELLIPSIS = "…";
+const LABEL_PAN_COMPENSATION_ZOOM_EPSILON = 1e-6;
+const LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON = 1e-4;
+
+type LabelPanCompensationTransform = Array<
+	{ translateX: number } | { translateY: number }
+>;
+
+const LABEL_PAN_COMPENSATION_IDENTITY_TRANSFORM: LabelPanCompensationTransform =
+	[{ translateX: 0 }, { translateY: 0 }];
 
 let labelListenerSeed = 74_001;
 
@@ -124,6 +135,25 @@ const setPictureSharedValue = (
 		return;
 	}
 	(picture as { value: SkPicture }).value = nextPicture;
+};
+
+const setCameraSnapshotSharedValue = (
+	cameraSnapshot: SharedValue<CanvasCameraState>,
+	nextCamera: CanvasCameraState,
+) => {
+	const modify = (
+		cameraSnapshot as {
+			modify?: (
+				modifier: (value: CanvasCameraState) => CanvasCameraState,
+				forceUpdate?: boolean,
+			) => void;
+		}
+	).modify;
+	if (typeof modify === "function") {
+		modify(() => nextCamera, true);
+		return;
+	}
+	(cameraSnapshot as { value: CanvasCameraState }).value = nextCamera;
 };
 
 const disposeParagraph = (paragraph: SkParagraph | null | undefined) => {
@@ -237,6 +267,7 @@ export const CanvasNodeLabelLayer = ({
 		return `${labelText}${LABEL_TEXT_ELLIPSIS}${LABEL_LINE_HEIGHT_SAMPLE_TEXT}`;
 	}, [labelCandidates]);
 	const ellipsisFontFamilies = useMemo(() => {
+		void fontRegistryRevision;
 		const ellipsisRunPlan =
 			fontRegistry.getParagraphRunPlan(LABEL_TEXT_ELLIPSIS);
 		// 缩放会改变截断位置，需保证所有 run 都能回退到可渲染省略号的字体链。
@@ -253,6 +284,29 @@ export const CanvasNodeLabelLayer = ({
 		return createEmptyPicture();
 	}, []);
 	const picture = useSharedValue<SkPicture>(emptyPicture);
+	const pictureCameraSnapshot = useSharedValue<CanvasCameraState>(camera.value);
+	const picturePanCompensationTransform =
+		useDerivedValue<LabelPanCompensationTransform>(() => {
+			const liveCamera = camera.value;
+			const snapshotCamera = pictureCameraSnapshot.value;
+			if (
+				Math.abs(liveCamera.zoom - snapshotCamera.zoom) >
+				LABEL_PAN_COMPENSATION_ZOOM_EPSILON
+			) {
+				return LABEL_PAN_COMPENSATION_IDENTITY_TRANSFORM;
+			}
+			const liveOffset = resolveCanvasCameraScreenOffset(liveCamera);
+			const snapshotOffset = resolveCanvasCameraScreenOffset(snapshotCamera);
+			const translateX = liveOffset.x - snapshotOffset.x;
+			const translateY = liveOffset.y - snapshotOffset.y;
+			if (
+				Math.abs(translateX) <= LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON &&
+				Math.abs(translateY) <= LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON
+			) {
+				return LABEL_PAN_COMPENSATION_IDENTITY_TRANSFORM;
+			}
+			return [{ translateX }, { translateY }];
+		});
 	const alphaPaint = useMemo(() => {
 		const paint = Skia.Paint();
 		paint.setAntiAlias(true);
@@ -453,6 +507,7 @@ export const CanvasNodeLabelLayer = ({
 			return;
 		}
 		setPictureSharedValue(picture, nextPicture);
+		setCameraSnapshotSharedValue(pictureCameraSnapshot, camera.value);
 		enqueuePictureDisposal(previousPicture);
 	});
 
@@ -707,7 +762,9 @@ export const CanvasNodeLabelLayer = ({
 
 	return (
 		<Group zIndex={999_999} pointerEvents="none">
-			<Picture picture={picture} pointerEvents="none" />
+			<Group transform={picturePanCompensationTransform} pointerEvents="none">
+				<Picture picture={picture} pointerEvents="none" />
+			</Group>
 		</Group>
 	);
 };

@@ -12,6 +12,7 @@ const {
 	paragraphInstances,
 	pictureInstances,
 	paintInstances,
+	groupRenderProps,
 	fontRegistryMock,
 } = vi.hoisted(() => {
 	type ParagraphInstance = {
@@ -37,6 +38,7 @@ const {
 			setAlphaf: ReturnType<typeof vi.fn>;
 			dispose: ReturnType<typeof vi.fn>;
 		}>,
+		groupRenderProps: [] as Array<Record<string, unknown>>,
 		fontRegistryMock: {
 			getFontProvider: vi.fn().mockResolvedValue({ id: "provider" }),
 			ensureCoverage: vi.fn().mockResolvedValue(undefined),
@@ -82,7 +84,13 @@ vi.mock("react-skia-lite", () => ({
 	ClipOp: {
 		Intersect: 1,
 	},
-	Group: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+	Group: ({
+		children,
+		...props
+	}: { children?: React.ReactNode } & Record<string, unknown>) => {
+		groupRenderProps.push(props);
+		return <>{children}</>;
+	},
 	Picture: () => null,
 	useSharedValue: <T,>(value: T) => {
 		const sharedValue = {
@@ -93,6 +101,18 @@ vi.mock("react-skia-lite", () => ({
 			},
 		};
 		return sharedValue;
+	},
+	useDerivedValue: <T,>(updater: () => T) => {
+		return {
+			get value() {
+				return updater();
+			},
+			set value(_next: T) {},
+			_isSharedValue: true as const,
+			modify: (modifier: (currentValue: T) => T, _forceUpdate?: boolean) => {
+				void modifier(updater());
+			},
+		};
 	},
 	Skia: {
 		Color: (value: string) => value,
@@ -181,6 +201,46 @@ const createSharedValue = <T,>(value: T) => {
 	return sharedValue;
 };
 
+const resolveSharedTransform = (
+	transform: unknown,
+): Array<{ translateX?: number; translateY?: number }> => {
+	if (Array.isArray(transform)) {
+		return transform as Array<{ translateX?: number; translateY?: number }>;
+	}
+	if (
+		transform &&
+		typeof transform === "object" &&
+		"value" in transform &&
+		Array.isArray((transform as { value: unknown }).value)
+	) {
+		return (
+			transform as {
+				value: Array<{ translateX?: number; translateY?: number }>;
+			}
+		).value;
+	}
+	return [];
+};
+
+const resolveLatestLabelPanCompensation = (): { x: number; y: number } => {
+	const transform = [...groupRenderProps]
+		.reverse()
+		.map((props) => props.transform)
+		.find((candidate) => candidate !== undefined);
+	const operations = resolveSharedTransform(transform);
+	let x = 0;
+	let y = 0;
+	for (const operation of operations) {
+		if (Number.isFinite(operation.translateX)) {
+			x = Number(operation.translateX);
+		}
+		if (Number.isFinite(operation.translateY)) {
+			y = Number(operation.translateY);
+		}
+	}
+	return { x, y };
+};
+
 const createVideoNode = (
 	patch: Partial<VideoCanvasNode> = {},
 ): VideoCanvasNode => ({
@@ -218,6 +278,7 @@ describe("CanvasNodeLabelLayer", () => {
 		paragraphInstances.length = 0;
 		pictureInstances.length = 0;
 		paintInstances.length = 0;
+		groupRenderProps.length = 0;
 		fontRegistryMock.reset();
 	});
 
@@ -332,6 +393,62 @@ describe("CanvasNodeLabelLayer", () => {
 				(paragraph) => paragraph.paint.mock.calls.length === 0,
 			),
 		).toBe(true);
+	});
+
+	it("pan 发生时会输出非零平移补偿", async () => {
+		const camera = createSharedValue({ x: 0, y: 0, zoom: 1 });
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={camera}
+				getNodeLayout={() =>
+					createSharedValue({ x: 0, y: 0, width: 120, height: 60 })
+				}
+				nodes={[createVideoNode({ name: "pan-compensation" })]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(paragraphBuilderStyles.length).toBeGreaterThan(0);
+		});
+
+		act(() => {
+			camera.value = { x: 36, y: -18, zoom: 1 };
+		});
+
+		const compensation = resolveLatestLabelPanCompensation();
+		expect(compensation.x).toBeCloseTo(36, 3);
+		expect(compensation.y).toBeCloseTo(-18, 3);
+		expect(Math.abs(compensation.x)).toBeGreaterThan(0.001);
+		expect(Math.abs(compensation.y)).toBeGreaterThan(0.001);
+	});
+
+	it("zoom 变化时平移补偿保持 identity", async () => {
+		const camera = createSharedValue({ x: 0, y: 0, zoom: 1 });
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={camera}
+				getNodeLayout={() =>
+					createSharedValue({ x: 0, y: 0, width: 120, height: 60 })
+				}
+				nodes={[createVideoNode({ name: "zoom-identity" })]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(paragraphBuilderStyles.length).toBeGreaterThan(0);
+		});
+
+		act(() => {
+			camera.value = { x: 36, y: -18, zoom: 1.25 };
+		});
+
+		const compensation = resolveLatestLabelPanCompensation();
+		expect(compensation.x).toBeCloseTo(0, 6);
+		expect(compensation.y).toBeCloseTo(0, 6);
 	});
 
 	it("picture 和 paragraph 在文本替换与卸载时会 dispose", async () => {
