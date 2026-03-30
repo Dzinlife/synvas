@@ -63,6 +63,7 @@ export interface NodeFitCameraInput {
 	stageWidth: number;
 	stageHeight: number;
 	safeInsets: CameraSafeInsets;
+	minZoom?: number;
 }
 
 export interface NodePanCameraInput {
@@ -133,6 +134,7 @@ export const buildNodeFitCamera = ({
 	stageWidth,
 	stageHeight,
 	safeInsets,
+	minZoom,
 }: NodeFitCameraInput): CameraState => {
 	const safeNodeWidth = Math.max(1, Math.abs(node.width));
 	const safeNodeHeight = Math.max(1, Math.abs(node.height));
@@ -141,7 +143,7 @@ export const buildNodeFitCamera = ({
 	const availableHeight = Math.max(1, viewport.height - FOCUS_VIEW_PADDING * 2);
 	const zoomX = availableWidth / safeNodeWidth;
 	const zoomY = availableHeight / safeNodeHeight;
-	const nextZoom = clampZoom(Math.min(zoomX, zoomY));
+	const nextZoom = clampZoom(Math.min(zoomX, zoomY), { minZoom });
 	const safeZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
 	const worldCenterX = node.x + node.width / 2;
 	const worldCenterY = node.y + node.height / 2;

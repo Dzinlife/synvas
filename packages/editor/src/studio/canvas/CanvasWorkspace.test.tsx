@@ -1780,6 +1780,43 @@ describe("CanvasWorkspace", () => {
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
+	it("focus 大尺寸节点时允许缩放低于 0.2，避免超出可视约束", async () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: project.canvas.nodes.map((node) =>
+							node.id === "node-scene-1"
+								? {
+										...node,
+										x: 0,
+										y: 0,
+										width: 12000,
+										height: 3200,
+									}
+								: node,
+						),
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		await waitFor(() => {
+			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
+		});
+		await waitFor(() => {
+			const zoom =
+				useCanvasCameraStore.getState().camera.zoom ?? 1;
+			expect(zoom).toBeLessThan(0.2);
+		});
+	});
+
 	it("初始 active node 会渲染同位同尺寸 overlay", () => {
 		render(<CanvasWorkspace />);
 		const overlay = screen.getByTestId("canvas-active-node-overlay");

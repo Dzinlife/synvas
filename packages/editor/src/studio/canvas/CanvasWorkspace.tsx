@@ -1926,6 +1926,7 @@ const CanvasWorkspace = () => {
 			stageWidth: stageSize.width,
 			stageHeight: stageSize.height,
 			safeInsets: cameraSafeInsets,
+			minZoom: dynamicMinZoom,
 		});
 		const currentCamera = getCamera();
 		if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
@@ -1933,6 +1934,7 @@ const CanvasWorkspace = () => {
 	}, [
 		applySmoothCameraWithCullLock,
 		cameraSafeInsets,
+		dynamicMinZoom,
 		focusedNode,
 		focusedNodeId,
 		stageSize.height,
@@ -3919,23 +3921,25 @@ const CanvasWorkspace = () => {
 				stageWidth,
 				stageHeight,
 				safeInsets: cameraSafeInsets,
-				});
-				const currentCamera = getCamera();
-				if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
-				applySmoothCameraWithCullLock(nextCamera);
-			},
-			[
-				applySmoothCameraWithCullLock,
-				cameraSafeInsets,
-				commitSelectedNodeIds,
-				focusedNodeId,
-				getCamera,
-				isCanvasInteractionLocked,
-				setFocusedNode,
-				stageSize.height,
-				stageSize.width,
-			],
-		);
+				minZoom: dynamicMinZoom,
+			});
+			const currentCamera = getCamera();
+			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+			applySmoothCameraWithCullLock(nextCamera);
+		},
+		[
+			applySmoothCameraWithCullLock,
+			cameraSafeInsets,
+			commitSelectedNodeIds,
+			dynamicMinZoom,
+			focusedNodeId,
+			getCamera,
+			isCanvasInteractionLocked,
+			setFocusedNode,
+			stageSize.height,
+			stageSize.width,
+		],
+	);
 
 	const handleSidebarNodeSelect = useCallback(
 		(node: CanvasNode) => {
@@ -3948,17 +3952,17 @@ const CanvasWorkspace = () => {
 				camera: currentCamera,
 				stageWidth: stageSize.width,
 				stageHeight: stageSize.height,
-					safeInsets: cameraSafeInsets,
-					paddingPx: SIDEBAR_VIEW_PADDING_PX,
-				});
-				if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
-				applySmoothCameraWithCullLock(nextCamera);
-			},
-			[
-				applySmoothCameraWithCullLock,
-				cameraSafeInsets,
-				getCamera,
-				handleNodeActivate,
+				safeInsets: cameraSafeInsets,
+				paddingPx: SIDEBAR_VIEW_PADDING_PX,
+			});
+			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+			applySmoothCameraWithCullLock(nextCamera);
+		},
+		[
+			applySmoothCameraWithCullLock,
+			cameraSafeInsets,
+			getCamera,
+			handleNodeActivate,
 			isSidebarFocusMode,
 			stageSize.height,
 			stageSize.width,
