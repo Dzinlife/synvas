@@ -12,6 +12,10 @@ export interface TextTypographyRenderContext {
 	primaryFamily: string;
 }
 
+export interface TextTypographyResolveOptions {
+	fallbackChain?: string[];
+}
+
 export type TextTypographyRevisionListener = () => void;
 
 const queueMicrotaskSafe = (task: () => void) => {
@@ -83,15 +87,21 @@ class TextTypographyFacade {
 
 	async resolveRenderContext(
 		text: string,
+		options?: TextTypographyResolveOptions,
 	): Promise<TextTypographyRenderContext> {
 		const normalizedText = typeof text === "string" ? text : "";
 		try {
-			await fontRegistry.ensureCoverage({ text: normalizedText });
+			await fontRegistry.ensureCoverage({
+				text: normalizedText,
+				fallbackChain: options?.fallbackChain,
+			});
 		} catch (error) {
 			console.warn("[TextTypographyFacade] ensureCoverage failed:", error);
 		}
 		const fontProvider = await fontRegistry.getFontProvider();
-		const runPlan = fontRegistry.getParagraphRunPlan(normalizedText);
+		const runPlan = fontRegistry.getParagraphRunPlan(normalizedText, {
+			fallbackChain: options?.fallbackChain,
+		});
 		const primaryTypeface = fontRegistry.getPrimaryTypeface();
 		return {
 			fontProvider,

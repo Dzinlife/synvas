@@ -92,9 +92,14 @@ describe("textTypographyFacade", () => {
 
 	it("resolveRenderContext 会封装底层字体调用", async () => {
 		const context = await textTypographyFacade.resolveRenderContext("中文🙂");
-		expect(mocks.ensureCoverage).toHaveBeenCalledWith({ text: "中文🙂" });
+		expect(mocks.ensureCoverage).toHaveBeenCalledWith({
+			text: "中文🙂",
+			fallbackChain: undefined,
+		});
 		expect(mocks.getFontProvider).toHaveBeenCalledTimes(1);
-		expect(mocks.getParagraphRunPlan).toHaveBeenCalledWith("中文🙂");
+		expect(mocks.getParagraphRunPlan).toHaveBeenCalledWith("中文🙂", {
+			fallbackChain: undefined,
+		});
 		expect(mocks.getPrimaryTypeface).toHaveBeenCalledTimes(1);
 		expect(context).toEqual({
 			fontProvider: { registerFont: expect.any(Function) },
@@ -107,6 +112,19 @@ describe("textTypographyFacade", () => {
 				},
 			],
 			primaryFamily: "Inter",
+		});
+	});
+
+	it("resolveRenderContext 会透传 fallbackChain", async () => {
+		await textTypographyFacade.resolveRenderContext("ABC", {
+			fallbackChain: ["My Latin", "Inter"],
+		});
+		expect(mocks.ensureCoverage).toHaveBeenCalledWith({
+			text: "ABC",
+			fallbackChain: ["My Latin", "Inter"],
+		});
+		expect(mocks.getParagraphRunPlan).toHaveBeenCalledWith("ABC", {
+			fallbackChain: ["My Latin", "Inter"],
 		});
 	});
 

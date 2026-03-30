@@ -174,7 +174,9 @@ describe("Text model", () => {
 		);
 		await store.getState().init();
 
-		expect(mocks.resolveRenderContext).toHaveBeenCalledWith("Hello Text");
+		expect(mocks.resolveRenderContext).toHaveBeenCalledWith("Hello Text", {
+			fallbackChain: undefined,
+		});
 		const builder = mocks.paragraphBuilderMake.mock.results[0]?.value as
 			| {
 					pushStyle: ReturnType<typeof vi.fn>;

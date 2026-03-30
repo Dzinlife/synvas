@@ -211,7 +211,9 @@ describe("FancyText model", () => {
 			  }
 			| undefined;
 
-		expect(mocks.resolveRenderContext).toHaveBeenCalledWith("Hello world");
+		expect(mocks.resolveRenderContext).toHaveBeenCalledWith("Hello world", {
+			fallbackChain: undefined,
+		});
 		expect(builder?.pushStyle).toHaveBeenCalledWith(
 			expect.objectContaining({
 				fontFamilies: ["Noto Sans SC"],

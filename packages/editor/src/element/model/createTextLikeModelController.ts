@@ -42,6 +42,7 @@ export interface CreateTextLikeModelControllerOptions<
 		runPlan: TextTypographyRunPlan[];
 		primaryTypeface: SkTypeface | null;
 	}) => Partial<Internal>;
+	resolveFallbackChain?: (props: Props) => string[] | undefined;
 	disposeExtraInternal?: (internal: Internal) => void;
 	disposeBuiltExtraInternal?: (internal: Partial<Internal>) => void;
 }
@@ -119,8 +120,12 @@ export const createTextLikeModelController = <
 			ReturnType<typeof textTypographyFacade.resolveRenderContext>
 		>;
 		try {
+			const fallbackChain = options.resolveFallbackChain?.(normalizedProps);
 			renderContext = await textTypographyFacade.resolveRenderContext(
 				normalizedProps.text,
+				{
+					fallbackChain,
+				},
 			);
 		} catch (error) {
 			if (disposed || currentEpoch !== rebuildEpoch) {
