@@ -1,11 +1,10 @@
 import type { TimelineElement } from "core/element/types";
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { useModelSelectorSafe } from "@/element/model";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { getTransformSize } from "@/element/transform";
-import { useTimelineStoreApi } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { framesToTimecode } from "@/utils/timecode";
 import {
 	useElements,
@@ -51,9 +50,6 @@ const ElementSettingsPanel: React.FC = () => {
 	const { selectedElement, selectedElementId } = useSelectedElement();
 	const { setElements } = useElements();
 	const { fps } = useFps();
-	const timelineStore = useTimelineStoreApi();
-	const pendingTextReflowTxnIdRef = useRef<string | null>(null);
-	const lastSelectedElementIdRef = useRef<string | null>(null);
 
 	const durationFrames = useMemo(() => {
 		if (!selectedElement) return 0;
@@ -128,29 +124,9 @@ const ElementSettingsPanel: React.FC = () => {
 					};
 				}),
 			);
-			if (shouldUseTextReflow && selectedTransform) {
-				pendingTextReflowTxnIdRef.current =
-					timelineStore.getState().lastCommittedOtTxnId;
-				return;
-			}
-			pendingTextReflowTxnIdRef.current = null;
 		},
-		[
-			selectedElementId,
-			selectedTransform,
-			setElements,
-			shouldUseTextReflow,
-			timelineStore,
-		],
+		[selectedElementId, setElements],
 	);
-
-	useEffect(() => {
-		if (lastSelectedElementIdRef.current === selectedElementId) {
-			return;
-		}
-		lastSelectedElementIdRef.current = selectedElementId ?? null;
-		pendingTextReflowTxnIdRef.current = null;
-	}, [selectedElementId]);
 
 	useEffect(() => {
 		if (!selectedElementId) return;
@@ -161,8 +137,6 @@ const ElementSettingsPanel: React.FC = () => {
 			paragraph: textParagraph,
 			baseWidth: selectedTransform.baseSize.width,
 		});
-		const pendingTxnId = pendingTextReflowTxnIdRef.current;
-		pendingTextReflowTxnIdRef.current = null;
 		if (reflowHeight === null) return;
 		if (
 			Math.abs(selectedTransform.baseSize.height - reflowHeight) <=
@@ -194,7 +168,7 @@ const ElementSettingsPanel: React.FC = () => {
 				});
 				return didChange ? nextElements : prev;
 			},
-			pendingTxnId ? { txnId: pendingTxnId } : { history: false },
+			{ history: false },
 		);
 	}, [
 		isModelLoading,
