@@ -1,14 +1,21 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SkiaPointerEvent } from "react-skia-lite";
 import {
 	DashPathEffect,
 	Group,
-	Image,
 	Line,
+	Paragraph,
 	Rect,
 	RoundedRect,
+	Skia,
+	type SkParagraph,
+	type SkTypefaceFontProvider,
 } from "react-skia-lite";
-import { useSkiaUiTextSprites } from "@/studio/canvas/skia-text";
+import {
+	FONT_REGISTRY_PRIMARY_FAMILY,
+	fontRegistry,
+	type RunPlan,
+} from "@/typography/fontRegistry";
 import type { FocusFrame, FocusRect } from "./focusSceneCoordinates";
 import type {
 	FocusTransformHandle,
@@ -45,17 +52,83 @@ export interface FocusSceneSkiaLayerProps {
 	onLayerPointerLeave: () => void;
 }
 
+interface FocusLabelRenderItem {
+	label: FocusSceneLabelItem;
+	text: string;
+	paragraph: SkParagraph | null;
+	layoutWidth: number;
+	textWidth: number;
+	textHeight: number;
+}
+
 const HANDLE_SIZE_PX = FOCUS_SCENE_CORNER_HANDLE_SIZE_PX;
 const LABEL_FONT_SIZE_PX = 12;
 const LABEL_HORIZONTAL_PADDING_PX = 12;
 const LABEL_VERTICAL_PADDING_PX = 4;
 const LABEL_GAP_PX = 20;
 const LABEL_TEXT_COLOR = "rgba(239,68,68,1)";
-const LABEL_CANVAS_TEXT_PADDING_PX = 1;
 const LABEL_LINE_HEIGHT_MULTIPLIER = 1.2;
 const LABEL_FONT_WEIGHT = 300;
-const LABEL_FONT_FAMILY =
-	'-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif';
+const LABEL_PARAGRAPH_LAYOUT_WIDTH = 4096;
+
+const disposeParagraph = (paragraph: SkParagraph | null | undefined) => {
+	if (!paragraph) return;
+	try {
+		paragraph.dispose();
+	} catch {}
+};
+
+const buildFocusLabelParagraph = ({
+	text,
+	runPlan,
+	fontProvider,
+}: {
+	text: string;
+	runPlan: RunPlan[];
+	fontProvider: SkTypefaceFontProvider | null;
+}): SkParagraph => {
+	const paragraphStyle = {
+		maxLines: 1,
+	};
+	const baseStyle = {
+		color: Skia.Color(LABEL_TEXT_COLOR),
+		fontSize: LABEL_FONT_SIZE_PX,
+		heightMultiplier: LABEL_LINE_HEIGHT_MULTIPLIER,
+		fontStyle: {
+			weight: LABEL_FONT_WEIGHT,
+		},
+		...(fontProvider ? { fontFamilies: [FONT_REGISTRY_PRIMARY_FAMILY] } : {}),
+	};
+	const builder = fontProvider
+		? Skia.ParagraphBuilder.Make(paragraphStyle, fontProvider)
+		: Skia.ParagraphBuilder.Make(paragraphStyle);
+	try {
+		if (runPlan.length <= 0) {
+			builder.pushStyle(baseStyle).addText(text).pop();
+			return builder.build();
+		}
+		for (const run of runPlan) {
+			if (!run.text) continue;
+			builder
+				.pushStyle({
+					...baseStyle,
+					...(fontProvider
+						? {
+								fontFamilies:
+									run.fontFamilies.length > 0
+										? run.fontFamilies
+										: [FONT_REGISTRY_PRIMARY_FAMILY],
+							}
+						: {}),
+				})
+				.addText(run.text)
+				.pop();
+		}
+		return builder.build();
+	} finally {
+		builder.dispose();
+	}
+};
 
 const normalizeLabelRotationDeg = (rotationDeg: number): number => {
 	let normalizedRotation = rotationDeg % 90;
@@ -113,35 +186,124 @@ export const FocusSceneSkiaLayer = ({
 	onLayerPointerUp,
 	onLayerPointerLeave,
 }: FocusSceneSkiaLayerProps) => {
-	const labelTextRequests = useMemo(
-		() =>
-			labelItems.map((label) => ({
-				slotKey: label.id,
-				text: `${Math.round(label.canvasWidth)} × ${Math.round(label.canvasHeight)}`,
-				style: {
-					fontFamily: LABEL_FONT_FAMILY,
-					fontSizePx: LABEL_FONT_SIZE_PX,
-					fontWeight: LABEL_FONT_WEIGHT,
-					lineHeightPx: LABEL_FONT_SIZE_PX * LABEL_LINE_HEIGHT_MULTIPLIER,
-					color: LABEL_TEXT_COLOR,
-					paddingPx: LABEL_CANVAS_TEXT_PADDING_PX,
-				},
-			})),
-		[labelItems],
-	);
-	const labelSprites = useSkiaUiTextSprites(labelTextRequests);
-
-	const labelRenderItems = useMemo(() => {
-		return labelItems.map((label, index) => {
-			const sprite = labelSprites[index];
-			return {
-				label,
-				image: sprite?.image ?? null,
-				textWidth: sprite?.textWidth ?? LABEL_FONT_SIZE_PX * 2,
-				textHeight: sprite?.textHeight ?? LABEL_FONT_SIZE_PX,
-			};
+	const [fontProvider, setFontProvider] =
+		useState<SkTypefaceFontProvider | null>(null);
+	const [fontRegistryRevision, setFontRegistryRevision] = useState(0);
+	const labelTexts = useMemo(() => {
+		return labelItems.map((label) => {
+			return `${Math.round(label.canvasWidth)} × ${Math.round(label.canvasHeight)}`;
 		});
-	}, [labelItems, labelSprites]);
+	}, [labelItems]);
+	const labelCoverageText = useMemo(() => {
+		return labelTexts.join("\n");
+	}, [labelTexts]);
+
+	useEffect(() => {
+		let disposed = false;
+		void fontRegistry
+			.getFontProvider()
+			.then((provider) => {
+				if (disposed) return;
+				setFontProvider(provider);
+			})
+			.catch((error) => {
+				console.warn(
+					"[FocusSceneSkiaLayer] Failed to initialize font provider:",
+					error,
+				);
+			});
+		return () => {
+			disposed = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		const unsubscribe = fontRegistry.subscribe(() => {
+			setFontRegistryRevision((prev) => prev + 1);
+			void fontRegistry
+				.getFontProvider()
+				.then((provider) => {
+					setFontProvider(provider);
+				})
+				.catch((error) => {
+					console.warn(
+						"[FocusSceneSkiaLayer] Failed to refresh font provider:",
+						error,
+					);
+				});
+		});
+		return () => {
+			unsubscribe();
+		};
+	}, []);
+
+	useEffect(() => {
+		if (!labelCoverageText) return;
+		void fontRegistry
+			.ensureCoverage({ text: labelCoverageText })
+			.catch((error) => {
+				console.warn(
+					"[FocusSceneSkiaLayer] Failed to ensure label font coverage:",
+					error,
+				);
+			});
+	}, [labelCoverageText]);
+
+	const labelRenderItems = useMemo<FocusLabelRenderItem[]>(() => {
+		void fontRegistryRevision;
+		if (!fontProvider) {
+			return labelItems.map((label, index) => {
+				return {
+					label,
+					text: labelTexts[index] ?? "",
+					paragraph: null,
+					layoutWidth: LABEL_PARAGRAPH_LAYOUT_WIDTH,
+					textWidth: LABEL_FONT_SIZE_PX * 2,
+					textHeight: LABEL_FONT_SIZE_PX,
+				};
+			});
+		}
+		return labelItems.map((label, index) => {
+			const text = labelTexts[index] ?? "";
+			try {
+				const paragraph = buildFocusLabelParagraph({
+					text,
+					runPlan: fontRegistry.getParagraphRunPlan(text),
+					fontProvider,
+				});
+				paragraph.layout(LABEL_PARAGRAPH_LAYOUT_WIDTH);
+				return {
+					label,
+					text,
+					paragraph,
+					layoutWidth: LABEL_PARAGRAPH_LAYOUT_WIDTH,
+					textWidth: Math.max(1, Math.ceil(paragraph.getLongestLine())),
+					textHeight: Math.max(1, Math.ceil(paragraph.getHeight())),
+				};
+			} catch (error) {
+				console.warn(
+					"[FocusSceneSkiaLayer] Failed to build label paragraph:",
+					error,
+				);
+				return {
+					label,
+					text,
+					paragraph: null,
+					layoutWidth: LABEL_PARAGRAPH_LAYOUT_WIDTH,
+					textWidth: LABEL_FONT_SIZE_PX * 2,
+					textHeight: LABEL_FONT_SIZE_PX,
+				};
+			}
+		});
+	}, [fontProvider, fontRegistryRevision, labelItems, labelTexts]);
+
+	useEffect(() => {
+		return () => {
+			for (const item of labelRenderItems) {
+				disposeParagraph(item.paragraph);
+			}
+		};
+	}, [labelRenderItems]);
 
 	if (width <= 0 || height <= 0) return null;
 
@@ -328,7 +490,7 @@ export const FocusSceneSkiaLayer = ({
 					</Group>
 				)}
 				{labelRenderItems.map((item) => {
-					const { label, image, textWidth, textHeight } = item;
+					const { label, paragraph, textWidth, textHeight } = item;
 					const badgeWidth = textWidth + LABEL_HORIZONTAL_PADDING_PX * 2;
 					const badgeHeight = textHeight + LABEL_VERTICAL_PADDING_PX * 2;
 					const normalizedRotationDeg = normalizeLabelRotationDeg(
@@ -371,14 +533,12 @@ export const FocusSceneSkiaLayer = ({
 								color="rgba(239,68,68,0.7)"
 								pointerEvents="none"
 							/>
-							{image && (
-								<Image
-									image={image}
+							{paragraph && (
+								<Paragraph
+									paragraph={paragraph}
 									x={-textWidth / 2}
 									y={-textHeight / 2}
-									width={textWidth}
-									height={textHeight}
-									fit="fill"
+									width={item.layoutWidth}
 									pointerEvents="none"
 								/>
 							)}

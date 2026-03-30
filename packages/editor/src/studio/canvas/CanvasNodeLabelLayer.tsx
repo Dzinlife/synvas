@@ -12,13 +12,17 @@ import {
 	Group,
 	Picture,
 	type SharedValue,
-	type SkFont,
 	Skia,
-	type SkPaint,
+	type SkParagraph,
 	type SkPicture,
-	type SkTypeface,
+	type SkTypefaceFontProvider,
 	useSharedValue,
 } from "react-skia-lite";
+import {
+	FONT_REGISTRY_PRIMARY_FAMILY,
+	fontRegistry,
+	type RunPlan,
+} from "@/typography/fontRegistry";
 import {
 	type CanvasCameraState,
 	type CanvasNodeLayoutState,
@@ -36,11 +40,8 @@ const LABEL_GAP_PX = 6;
 const LABEL_DIMMED_OPACITY = 0.45;
 const LABEL_MIN_VISIBLE_WIDTH_PX = 24;
 const LABEL_TEXT_ELLIPSIS = "…";
-const LABEL_FONT_URI = "/Roboto-Medium.ttf";
 
 let labelListenerSeed = 74_001;
-let sharedLabelTypeface: SkTypeface | null = null;
-let sharedLabelTypefacePromise: Promise<SkTypeface | null> | null = null;
 
 interface CanvasNodeLabelLayerProps {
 	width: number;
@@ -58,15 +59,38 @@ interface CanvasNodeLabelCandidate {
 	opacity: number;
 }
 
-interface LabelMeasureCacheEntry {
+interface LabelParagraphCacheEntry {
 	text: string;
-	fontVersion: number;
-	segments: string[];
-	cumulativeAdvances: number[];
-	fullAdvance: number;
-	lastWidthKey: number | null;
-	lastRenderedText: string;
+	fontRevision: number;
+	paragraph: SkParagraph;
 }
+
+const appendFontFamilies = (
+	baseFontFamilies: string[],
+	extraFontFamilies: string[],
+): string[] => {
+	const merged: string[] = [];
+	const seen = new Set<string>();
+	for (const family of [...baseFontFamilies, ...extraFontFamilies]) {
+		if (!family || seen.has(family)) continue;
+		seen.add(family);
+		merged.push(family);
+	}
+	return merged;
+};
+
+const collectRunPlanFamilies = (runPlan: RunPlan[]): string[] => {
+	const merged: string[] = [];
+	const seen = new Set<string>();
+	for (const run of runPlan) {
+		for (const family of run.fontFamilies) {
+			if (!family || seen.has(family)) continue;
+			seen.add(family);
+			merged.push(family);
+		}
+	}
+	return merged;
+};
 
 interface ListenerCapableSharedValue<T = unknown> {
 	value: T;
@@ -99,149 +123,70 @@ const setPictureSharedValue = (
 	(picture as { value: SkPicture }).value = nextPicture;
 };
 
-const resolveFallbackTextAdvance = (text: string): number => {
-	return Math.max(0, Array.from(text).length * (LABEL_FONT_SIZE_PX * 0.6));
-};
-
-const loadLabelTypeface = async (): Promise<SkTypeface | null> => {
-	if (sharedLabelTypeface) return sharedLabelTypeface;
-	if (!sharedLabelTypefacePromise) {
-		sharedLabelTypefacePromise = (async () => {
-			try {
-				const dataFactory = (
-					Skia as {
-						Data?: { fromURI?: (uri: string) => Promise<unknown> };
-					}
-				).Data;
-				const typefaceFactory = (
-					Skia as {
-						Typeface?: {
-							MakeFreeTypeFaceFromData?: (data: unknown) => SkTypeface | null;
-						};
-					}
-				).Typeface;
-				if (
-					typeof dataFactory?.fromURI !== "function" ||
-					typeof typefaceFactory?.MakeFreeTypeFaceFromData !== "function"
-				) {
-					return null;
-				}
-				const fontData = await dataFactory.fromURI(LABEL_FONT_URI);
-				sharedLabelTypeface =
-					typefaceFactory.MakeFreeTypeFaceFromData(fontData) ?? null;
-				return sharedLabelTypeface;
-			} catch (error) {
-				console.warn(
-					"[CanvasNodeLabelLayer] Failed to load label font:",
-					error,
-				);
-				return null;
-			}
-		})();
-	}
-	return sharedLabelTypefacePromise;
-};
-
-const useCanvasNodeLabelTypeface = (): SkTypeface | null => {
-	const [typeface, setTypeface] = useState<SkTypeface | null>(() => {
-		return sharedLabelTypeface;
-	});
-	useEffect(() => {
-		let cancelled = false;
-		void loadLabelTypeface().then((loadedTypeface) => {
-			if (cancelled || !loadedTypeface) return;
-			setTypeface(loadedTypeface);
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-	return typeface;
-};
-
-const measureTextAdvance = (
-	font: SkFont,
-	text: string,
-	paint: SkPaint,
-): number => {
-	if (!text) return 0;
+const disposeParagraph = (paragraph: SkParagraph | null | undefined) => {
+	if (!paragraph) return;
 	try {
-		const glyphIds = font.getGlyphIDs(text);
-		if (glyphIds.length === 0) return 0;
-		const widths = font.getGlyphWidths(glyphIds, paint);
-		let total = 0;
-		for (const width of widths) {
-			total += width;
-		}
-		return Math.max(0, total);
-	} catch {
-		return resolveFallbackTextAdvance(text);
-	}
+		paragraph.dispose();
+	} catch {}
 };
 
-const buildMeasureCacheEntry = (
-	font: SkFont,
-	text: string,
-	paint: SkPaint,
-	fontVersion: number,
-): LabelMeasureCacheEntry => {
-	const segments = Array.from(text);
-	const cumulativeAdvances = [0];
-	let runningAdvance = 0;
-	for (const segment of segments) {
-		runningAdvance += measureTextAdvance(font, segment, paint);
-		cumulativeAdvances.push(runningAdvance);
-	}
-	return {
-		text,
-		fontVersion,
-		segments,
-		cumulativeAdvances,
-		fullAdvance: runningAdvance,
-		lastWidthKey: null,
-		lastRenderedText: "",
+const buildLabelParagraph = ({
+	text,
+	runPlan,
+	fontProvider,
+	ellipsisFontFamilies,
+}: {
+	text: string;
+	runPlan: RunPlan[];
+	fontProvider: SkTypefaceFontProvider | null;
+	ellipsisFontFamilies: string[];
+}): SkParagraph => {
+	const paragraphStyle = {
+		maxLines: 1,
+		ellipsis: LABEL_TEXT_ELLIPSIS,
 	};
-};
-
-const resolveEllipsizedLabelText = (
-	entry: LabelMeasureCacheEntry,
-	maxWidthPx: number,
-	ellipsisAdvancePx: number,
-): string => {
-	const widthKey = Math.max(0, Math.floor(maxWidthPx));
-	if (entry.lastWidthKey === widthKey) {
-		return entry.lastRenderedText;
-	}
-	if (entry.fullAdvance <= widthKey) {
-		entry.lastWidthKey = widthKey;
-		entry.lastRenderedText = entry.text;
-		return entry.text;
-	}
-	if (ellipsisAdvancePx <= 0 || widthKey < ellipsisAdvancePx) {
-		entry.lastWidthKey = widthKey;
-		entry.lastRenderedText = "";
-		return "";
-	}
-	const availableWidth = widthKey - ellipsisAdvancePx;
-	let low = 0;
-	let high = entry.segments.length;
-	while (low < high) {
-		const mid = Math.ceil((low + high) / 2);
-		const advance = entry.cumulativeAdvances[mid] ?? Number.POSITIVE_INFINITY;
-		if (advance <= availableWidth) {
-			low = mid;
-			continue;
+	const baseFontFamilies = appendFontFamilies(
+		[FONT_REGISTRY_PRIMARY_FAMILY],
+		ellipsisFontFamilies,
+	);
+	const baseStyle = {
+		color: Skia.Color(LABEL_TEXT_COLOR),
+		fontSize: LABEL_FONT_SIZE_PX,
+		heightMultiplier: LABEL_LINE_HEIGHT_MULTIPLIER,
+		...(fontProvider ? { fontFamilies: baseFontFamilies } : {}),
+	};
+	const builder = fontProvider
+		? Skia.ParagraphBuilder.Make(paragraphStyle, fontProvider)
+		: Skia.ParagraphBuilder.Make(paragraphStyle);
+	try {
+		if (runPlan.length <= 0) {
+			builder.pushStyle(baseStyle).addText(text).pop();
+			return builder.build();
 		}
-		high = mid - 1;
+		for (const run of runPlan) {
+			if (!run.text) continue;
+			const runFontFamilies = appendFontFamilies(
+				run.fontFamilies.length > 0
+					? run.fontFamilies
+					: [FONT_REGISTRY_PRIMARY_FAMILY],
+				ellipsisFontFamilies,
+			);
+			builder
+				.pushStyle({
+					...baseStyle,
+					...(fontProvider
+						? {
+								fontFamilies: runFontFamilies,
+							}
+						: {}),
+				})
+				.addText(run.text)
+				.pop();
+		}
+		return builder.build();
+	} finally {
+		builder.dispose();
 	}
-	const visibleCount = Math.max(0, low);
-	const nextText =
-		visibleCount <= 0
-			? LABEL_TEXT_ELLIPSIS
-			: `${entry.segments.slice(0, visibleCount).join("")}${LABEL_TEXT_ELLIPSIS}`;
-	entry.lastWidthKey = widthKey;
-	entry.lastRenderedText = nextText;
-	return nextText;
 };
 
 export const CanvasNodeLabelLayer = ({
@@ -252,7 +197,9 @@ export const CanvasNodeLabelLayer = ({
 	nodes,
 	focusedNodeId,
 }: CanvasNodeLabelLayerProps) => {
-	const labelTypeface = useCanvasNodeLabelTypeface();
+	const [fontProvider, setFontProvider] =
+		useState<SkTypefaceFontProvider | null>(null);
+	const [fontRegistryRevision, setFontRegistryRevision] = useState(0);
 	const viewport = useMemo(() => {
 		return resolveCanvasViewportRect(width, height);
 	}, [height, width]);
@@ -276,6 +223,17 @@ export const CanvasNodeLabelLayer = ({
 				return candidate !== null;
 			});
 	}, [focusedNodeId, height, nodes, width]);
+	const labelCoverageText = useMemo(() => {
+		if (labelCandidates.length <= 0) return "";
+		const labelText = labelCandidates.map((candidate) => candidate.text).join("\n");
+		// 省略号由 paragraph 在布局阶段注入，需提前纳入覆盖集，避免 glyph 缺失。
+		return `${labelText}${LABEL_TEXT_ELLIPSIS}`;
+	}, [labelCandidates]);
+	const ellipsisFontFamilies = useMemo(() => {
+		const ellipsisRunPlan = fontRegistry.getParagraphRunPlan(LABEL_TEXT_ELLIPSIS);
+		// 缩放会改变截断位置，需保证所有 run 都能回退到可渲染省略号的字体链。
+		return collectRunPlanFamilies(ellipsisRunPlan);
+	}, [fontRegistryRevision]);
 	const layoutByNodeId = useMemo(() => {
 		const map = new Map<string, SharedValue<CanvasNodeLayoutState> | null>();
 		for (const candidate of labelCandidates) {
@@ -287,42 +245,70 @@ export const CanvasNodeLabelLayer = ({
 		return createEmptyPicture();
 	}, []);
 	const picture = useSharedValue<SkPicture>(emptyPicture);
-	const textPaint = useMemo(() => {
-		const paint = Skia.Paint();
-		paint.setAntiAlias(true);
-		paint.setColor(Skia.Color(LABEL_TEXT_COLOR));
-		return paint;
-	}, []);
 	const alphaPaint = useMemo(() => {
 		const paint = Skia.Paint();
 		paint.setAntiAlias(true);
 		return paint;
 	}, []);
-	const textFont = useMemo(() => {
-		const font = Skia.Font(labelTypeface ?? undefined, LABEL_FONT_SIZE_PX);
-		font.setLinearMetrics(true);
-		font.setSubpixel(true);
-		return font;
-	}, [labelTypeface]);
-	const textFontVersion = labelTypeface ? 1 : 0;
-	const ellipsisAdvancePx = useMemo(() => {
-		return measureTextAdvance(textFont, LABEL_TEXT_ELLIPSIS, textPaint);
-	}, [textFont, textPaint]);
-	const baselineOffsetPx = useMemo(() => {
-		const metrics = textFont.getMetrics();
-		const textHeight = Math.max(1, metrics.descent - metrics.ascent);
-		return (
-			-metrics.ascent + Math.max(0, (LABEL_TEXT_HEIGHT_PX - textHeight) / 2)
-		);
-	}, [textFont]);
-	const measureCacheByNodeIdRef = useRef<Map<string, LabelMeasureCacheEntry>>(
-		new Map(),
-	);
+	const paragraphCacheByNodeIdRef = useRef<
+		Map<string, LabelParagraphCacheEntry>
+	>(new Map());
 	const rebuildFrameRef = useRef<number | null>(null);
 	const rebuildTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const deferredDisposeFrameRef = useRef<number | null>(null);
 	const deferredDisposeQueueRef = useRef<SkPicture[]>([]);
 	const lifecycleEpochRef = useRef(0);
+
+	useEffect(() => {
+		let disposed = false;
+		void fontRegistry
+			.getFontProvider()
+			.then((provider) => {
+				if (disposed) return;
+				setFontProvider(provider);
+			})
+			.catch((error) => {
+				console.warn(
+					"[CanvasNodeLabelLayer] Failed to initialize font provider:",
+					error,
+				);
+			});
+		return () => {
+			disposed = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		const unsubscribe = fontRegistry.subscribe(() => {
+			setFontRegistryRevision((prev) => prev + 1);
+			void fontRegistry
+				.getFontProvider()
+				.then((provider) => {
+					setFontProvider(provider);
+				})
+				.catch((error) => {
+					console.warn(
+						"[CanvasNodeLabelLayer] Failed to refresh font provider:",
+						error,
+					);
+				});
+		});
+		return () => {
+			unsubscribe();
+		};
+	}, []);
+
+	useEffect(() => {
+		if (!labelCoverageText) return;
+		void fontRegistry
+			.ensureCoverage({ text: labelCoverageText })
+			.catch((error) => {
+				console.warn(
+					"[CanvasNodeLabelLayer] Failed to ensure label font coverage:",
+					error,
+				);
+			});
+	}, [labelCoverageText]);
 
 	const flushDeferredPictureDisposal = useEffectEvent(() => {
 		const pending = deferredDisposeQueueRef.current;
@@ -377,31 +363,49 @@ export const CanvasNodeLabelLayer = ({
 		},
 	);
 
-	const pruneMeasureCache = useEffectEvent((activeNodeIdSet: Set<string>) => {
-		for (const nodeId of measureCacheByNodeIdRef.current.keys()) {
+	const pruneParagraphCache = useEffectEvent((activeNodeIdSet: Set<string>) => {
+		for (const [nodeId, entry] of paragraphCacheByNodeIdRef.current.entries()) {
 			if (activeNodeIdSet.has(nodeId)) continue;
-			measureCacheByNodeIdRef.current.delete(nodeId);
+			disposeParagraph(entry.paragraph);
+			paragraphCacheByNodeIdRef.current.delete(nodeId);
 		}
 	});
 
-	const ensureMeasureEntry = useEffectEvent(
-		(nodeId: string, text: string): LabelMeasureCacheEntry => {
-			const cachedEntry = measureCacheByNodeIdRef.current.get(nodeId);
+	const ensureParagraph = useEffectEvent(
+		(nodeId: string, text: string): SkParagraph | null => {
+			if (!fontProvider || !text) return null;
+			const cachedEntry = paragraphCacheByNodeIdRef.current.get(nodeId);
 			if (
 				cachedEntry &&
 				cachedEntry.text === text &&
-				cachedEntry.fontVersion === textFontVersion
+				cachedEntry.fontRevision === fontRegistryRevision
 			) {
-				return cachedEntry;
+				return cachedEntry.paragraph;
 			}
-			const nextEntry = buildMeasureCacheEntry(
-				textFont,
-				text,
-				textPaint,
-				textFontVersion,
-			);
-			measureCacheByNodeIdRef.current.set(nodeId, nextEntry);
-			return nextEntry;
+			if (cachedEntry) {
+				disposeParagraph(cachedEntry.paragraph);
+				paragraphCacheByNodeIdRef.current.delete(nodeId);
+			}
+			try {
+				const paragraph = buildLabelParagraph({
+					text,
+					runPlan: fontRegistry.getParagraphRunPlan(text),
+					fontProvider,
+					ellipsisFontFamilies,
+				});
+				paragraphCacheByNodeIdRef.current.set(nodeId, {
+					text,
+					fontRevision: fontRegistryRevision,
+					paragraph,
+				});
+				return paragraph;
+			} catch (error) {
+				console.warn(
+					"[CanvasNodeLabelLayer] Failed to build label paragraph:",
+					error,
+				);
+				return null;
+			}
 		},
 	);
 
@@ -415,11 +419,17 @@ export const CanvasNodeLabelLayer = ({
 	});
 
 	const rebuildPicture = useCallback(() => {
+		void fontRegistryRevision;
 		const activeNodeIdSet = new Set(
 			labelCandidates.map((candidate) => candidate.nodeId),
 		);
-		pruneMeasureCache(activeNodeIdSet);
-		if (width <= 0 || height <= 0 || labelCandidates.length === 0) {
+		pruneParagraphCache(activeNodeIdSet);
+		if (
+			width <= 0 ||
+			height <= 0 ||
+			labelCandidates.length === 0 ||
+			!fontProvider
+		) {
 			commitPicture(emptyPicture);
 			return;
 		}
@@ -445,13 +455,8 @@ export const CanvasNodeLabelLayer = ({
 			if (!isVisibleByWidth || !isCanvasScreenRectVisible(frame, viewport)) {
 				continue;
 			}
-			const measureEntry = ensureMeasureEntry(candidate.nodeId, candidate.text);
-			const renderedText = resolveEllipsizedLabelText(
-				measureEntry,
-				frameWidthPx,
-				ellipsisAdvancePx,
-			);
-			if (!renderedText) {
+			const paragraph = ensureParagraph(candidate.nodeId, candidate.text);
+			if (!paragraph) {
 				continue;
 			}
 			const labelY = frame.y - LABEL_GAP_PX - LABEL_TEXT_HEIGHT_PX;
@@ -466,20 +471,27 @@ export const CanvasNodeLabelLayer = ({
 				alphaPaint.setAlphaf(candidate.opacity);
 				canvas.saveLayer(alphaPaint, labelRect, null);
 			}
-			canvas.save();
-			canvas.clipRect(labelRect, ClipOp.Intersect, true);
-			canvas.drawText(
-				renderedText,
-				frame.x,
-				labelY + baselineOffsetPx,
-				textPaint,
-				textFont,
-			);
-			canvas.restore();
+			try {
+				paragraph.layout(frameWidthPx);
+				const paragraphHeight = Math.max(1, paragraph.getHeight());
+				const verticalOffset = Math.max(
+					0,
+					(LABEL_TEXT_HEIGHT_PX - paragraphHeight) / 2,
+				);
+				canvas.save();
+				canvas.clipRect(labelRect, ClipOp.Intersect, true);
+				paragraph.paint(canvas, frame.x, labelY + verticalOffset);
+				canvas.restore();
+				hasVisibleLabel = true;
+			} catch (error) {
+				console.warn(
+					"[CanvasNodeLabelLayer] Failed to paint label paragraph:",
+					error,
+				);
+			}
 			if (requiresDimLayer) {
 				canvas.restore();
 			}
-			hasVisibleLabel = true;
 		}
 
 		const nextPicture = recorder.finishRecordingAsPicture();
@@ -493,18 +505,16 @@ export const CanvasNodeLabelLayer = ({
 		commitPicture(nextPicture);
 	}, [
 		alphaPaint,
-		baselineOffsetPx,
 		camera,
 		commitPicture,
-		ellipsisAdvancePx,
 		emptyPicture,
-		ensureMeasureEntry,
+		ensureParagraph,
+		fontRegistryRevision,
+		fontProvider,
 		height,
 		labelCandidates,
 		layoutByNodeId,
-		pruneMeasureCache,
-		textFont,
-		textPaint,
+		pruneParagraphCache,
 		viewport,
 		width,
 	]);
@@ -604,7 +614,10 @@ export const CanvasNodeLabelLayer = ({
 				cancelScheduledRebuild();
 				cancelDeferredPictureDisposal();
 				flushDeferredPictureDisposal();
-				measureCacheByNodeIdRef.current.clear();
+				for (const entry of paragraphCacheByNodeIdRef.current.values()) {
+					disposeParagraph(entry.paragraph);
+				}
+				paragraphCacheByNodeIdRef.current.clear();
 				const currentPicture = picture.value;
 				if (currentPicture !== emptyPicture) {
 					try {
@@ -615,13 +628,7 @@ export const CanvasNodeLabelLayer = ({
 					emptyPicture.dispose();
 				} catch {}
 				try {
-					textPaint.dispose();
-				} catch {}
-				try {
 					alphaPaint.dispose();
-				} catch {}
-				try {
-					textFont.dispose();
 				} catch {}
 			};
 			setTimeout(() => {
@@ -635,8 +642,6 @@ export const CanvasNodeLabelLayer = ({
 		emptyPicture,
 		flushDeferredPictureDisposal,
 		picture,
-		textFont,
-		textPaint,
 	]);
 
 	if (width <= 0 || height <= 0 || labelCandidates.length === 0) {
