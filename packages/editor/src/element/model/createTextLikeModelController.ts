@@ -57,6 +57,22 @@ export const createTextLikeModelController = <
 	let unsubscribeTypographyRevision: (() => void) | null = null;
 	let store!: ComponentModelStore<Props, Internal>;
 
+	const hasSameProps = (left: Props, right: Props): boolean => {
+		const keys = new Set([
+			...Object.keys(left as Record<string, unknown>),
+			...Object.keys(right as Record<string, unknown>),
+		]);
+		for (const key of keys) {
+			if (
+				(left as Record<string, unknown>)[key] !==
+				(right as Record<string, unknown>)[key]
+			) {
+				return false;
+			}
+		}
+		return true;
+	};
+
 	const setLoadingState = () => {
 		store.setState((state) => ({
 			...state,
@@ -192,10 +208,14 @@ export const createTextLikeModelController = <
 			setProps: (partial) => {
 				const result = options.validateProps(partial);
 				if (!result.valid) return result;
+				const currentProps = get().props;
 				const nextProps = options.normalizeProps({
-					...get().props,
+					...currentProps,
 					...partial,
 				});
+				if (hasSameProps(currentProps, nextProps)) {
+					return result;
+				}
 				set((state) => ({
 					...state,
 					props: nextProps,

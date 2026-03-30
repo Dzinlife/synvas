@@ -644,7 +644,9 @@ class FontRegistry {
 			}
 			this.coverageDebounceTimer = setTimeout(() => {
 				this.coverageDebounceTimer = null;
-				void this.flushCoverageNow();
+				void this.flushCoverageNow().catch((error) => {
+					console.warn("[FontRegistry] Coverage flush failed:", error);
+				});
 			}, COVERAGE_DEBOUNCE_MS);
 		});
 	}

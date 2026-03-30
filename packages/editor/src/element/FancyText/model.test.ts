@@ -314,6 +314,31 @@ describe("FancyText model", () => {
 		);
 	});
 
+	it("setProps 归一化后无变化时不会触发重建", async () => {
+		const store = createFancyTextModel(
+			"fancy-text-noop",
+			{
+				text: "same",
+				fontSize: 48,
+				color: "#FFFFFF",
+				textAlign: "left",
+				lineHeight: 1.2,
+				locale: "zh-CN",
+				highlightColor: "#F59E0B",
+				waveRadius: 48,
+				waveTranslateY: 8,
+				waveScale: 0.16,
+			},
+			runtime,
+		);
+		await store.getState().init();
+		const rebuildCallCount = mocks.resolveRenderContext.mock.calls.length;
+		store.getState().setProps({ text: "same" });
+		store.getState().setProps({ fontSize: 48 });
+		store.getState().setProps({ waveScale: 0.16 });
+		expect(mocks.resolveRenderContext.mock.calls.length).toBe(rebuildCallCount);
+	});
+
 	it("epoch 竞争下保留最新文本构建结果", async () => {
 		let resolveFirstContext:
 			| ((value: {

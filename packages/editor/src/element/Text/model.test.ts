@@ -219,6 +219,26 @@ describe("Text model", () => {
 		expect(store.getState().internal.paragraph).toBeTruthy();
 	});
 
+	it("setProps 归一化后无变化时不会触发重建", async () => {
+		const store = createTextModel(
+			"text-noop",
+			{
+				text: "same",
+				fontSize: 48,
+				color: "#FFFFFF",
+				lineHeight: 1.2,
+				textAlign: "left",
+			},
+			runtime,
+		);
+		await store.getState().init();
+		const rebuildCallCount = mocks.resolveRenderContext.mock.calls.length;
+		store.getState().setProps({ fontSize: 48 });
+		store.getState().setProps({ text: "same" });
+		store.getState().setProps({ lineHeight: 1.2 });
+		expect(mocks.resolveRenderContext.mock.calls.length).toBe(rebuildCallCount);
+	});
+
 	it("字体 revision 更新会触发重建", async () => {
 		const store = createTextModel(
 			"text-3",
