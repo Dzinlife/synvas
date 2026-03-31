@@ -719,6 +719,15 @@ export class StaticTileScheduler {
 			const ty = decoded.ty;
 			const isCovered = this.visibleCoveredKeySet.has(key);
 			if (record && record.state === "READY" && record.image) {
+				if (!isCovered) {
+					// tile 当前无任何输入覆盖时，不应继续复用旧 READY 纹理。
+					record.state = "STALE";
+					this.visibleCoverInfoByKey.set(key, {
+						mode: "NONE",
+						sourceLod: null,
+					});
+					continue;
+				}
 				this.pushDrawRecord(record);
 				this.readyVisibleCount += 1;
 				this.visibleCoverInfoByKey.set(key, {

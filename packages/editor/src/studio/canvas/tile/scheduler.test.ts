@@ -735,7 +735,7 @@ describe("tile scheduler", () => {
 		scheduler.dispose();
 	});
 
-	it("输入临时不覆盖时仍会绘制可见 READY tile", () => {
+	it("输入不覆盖时不会继续绘制旧 READY tile", () => {
 		const scheduler = new StaticTileScheduler({
 			maxTasksPerTick: 8,
 		});
@@ -781,10 +781,15 @@ describe("tile scheduler", () => {
 				debugEnabled: true,
 			}),
 		);
-		expect(uncoveredFrame.drawItems.length).toBeGreaterThan(0);
-		expect(uncoveredFrame.debugItems.some((item) => item.coverMode === "SELF")).toBe(
+		expect(uncoveredFrame.drawItems.length).toBe(0);
+		expect(uncoveredFrame.debugItems.every((item) => item.coverMode === "NONE")).toBe(
 			true,
 		);
+		expect(
+			uncoveredFrame.debugItems.some(
+				(item) => item.hasImage && item.state === "READY",
+			),
+		).toBe(false);
 		expect(uncoveredFrame.fallbackNodeIds.length).toBe(0);
 		scheduler.dispose();
 	});
