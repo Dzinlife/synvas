@@ -238,10 +238,25 @@ export class StaticTileScheduler {
 		const maxTasksPerTick = this.resolveFrameMaxTasksPerTick(
 			input.maxTasksPerTick,
 		);
-		const nextTargetLod = this.resolveTargetLod(input.camera.zoom);
+		const lodTransitionMode = input.lodTransitionMode ?? "follow";
+		const nextTargetLod =
+			lodTransitionMode === "snap"
+				? this.resolveTargetLodDirect(
+						Number.isFinite(input.lodAnchorZoom)
+							? (input.lodAnchorZoom ?? input.camera.zoom)
+							: input.camera.zoom,
+					)
+				: lodTransitionMode === "freeze"
+					? this.targetLod
+					: this.resolveTargetLod(input.camera.zoom);
 		const targetChanged = nextTargetLod !== this.targetLod;
 		this.targetLod = nextTargetLod;
-		const nextComposeLod = this.resolveComposeLod(nextTargetLod);
+		const nextComposeLod =
+			lodTransitionMode === "snap"
+				? nextTargetLod
+				: lodTransitionMode === "freeze"
+					? this.composeLod
+					: this.resolveComposeLod(nextTargetLod);
 		const composeChanged = nextComposeLod !== this.composeLod;
 		this.composeLod = nextComposeLod;
 		if (targetChanged || composeChanged) {
@@ -325,6 +340,12 @@ export class StaticTileScheduler {
 			if (zoomLevel > threshold) return previous;
 		}
 		return rounded;
+	}
+
+	private resolveTargetLodDirect(zoom: number): number {
+		const safeZoom = Math.max(zoom, TILE_CAMERA_EPSILON);
+		const zoomLevel = Math.log2(safeZoom);
+		return clampLod(Math.round(zoomLevel));
 	}
 
 	private resolveComposeLod(targetLod: number): number {

@@ -25,6 +25,8 @@ import {
 	Text,
 	useDerivedValue,
 	useFont,
+	useSharedValue,
+	withTiming,
 } from "react-skia-lite";
 import type { AssetHandle } from "@/assets/AssetStore";
 import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
@@ -62,6 +64,7 @@ import {
 	type TileDrawItem,
 	type TileFrameResult,
 	type TileInput,
+	type TileLodTransition,
 } from "./tile";
 
 export type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
@@ -111,6 +114,7 @@ interface InfiniteSkiaCanvasProps {
 	tileDebugEnabled?: boolean;
 	tileInputMode?: TileInputMode;
 	tileMaxTasksPerTick?: number;
+	tileLodTransition?: TileLodTransition | null;
 	onNodeResize?: (event: CanvasNodeResizeEvent) => void;
 	onSelectionResize?: (event: CanvasSelectionResizeEvent) => void;
 }
@@ -129,6 +133,8 @@ const TILE_DEBUG_TEXT_COLOR = "rgba(255,255,255,0.96)";
 const TILE_DEBUG_LABEL_OFFSET_X = 4;
 const TILE_DEBUG_LABEL_OFFSET_Y = 4;
 const TILE_DRAW_BLEED_TEXEL = 0.5;
+const NODE_HUD_FADE_IN_DURATION_MS = 180;
+const STATIC_TILE_FOCUS_FADE_DURATION_MS = 220;
 
 interface RasterImageCacheEntry {
 	uri: string;
@@ -626,6 +632,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	tileDebugEnabled = false,
 	tileInputMode = "raster",
 	tileMaxTasksPerTick,
+	tileLodTransition = null,
 	onNodeResize,
 	onSelectionResize,
 }) => {
@@ -765,6 +772,32 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			focusEditorLayerState.enabled &&
 			focusEditorLayerState.layerProps,
 	);
+	const isFocusMode = Boolean(focusedNodeId);
+	const shouldRenderNodeLabels =
+		!focusedNodeId && (tileLodTransition?.mode ?? "follow") === "follow";
+	const shouldRenderNodeOverlay =
+		shouldRenderNodeLabels && !disableBaseNodeInteraction;
+	const staticTileOpacity = useSharedValue(isFocusMode ? 0 : 1);
+	const previousFocusModeRef = useRef(isFocusMode);
+	useEffect(() => {
+		const previous = previousFocusModeRef.current;
+		previousFocusModeRef.current = isFocusMode;
+		if (previous === isFocusMode) return;
+		staticTileOpacity.value = withTiming(isFocusMode ? 0 : 1, {
+			duration: STATIC_TILE_FOCUS_FADE_DURATION_MS,
+		});
+	}, [isFocusMode, staticTileOpacity]);
+	const nodeHudOpacity = useSharedValue(shouldRenderNodeLabels ? 1 : 0);
+	useEffect(() => {
+		if (!shouldRenderNodeLabels) {
+			nodeHudOpacity.value = 0;
+			return;
+		}
+		nodeHudOpacity.value = 0;
+		nodeHudOpacity.value = withTiming(1, {
+			duration: NODE_HUD_FADE_IN_DURATION_MS,
+		});
+	}, [nodeHudOpacity, shouldRenderNodeLabels]);
 
 	const handleFocusLayerChange = useCallback(
 		(next: CanvasNodeFocusEditorLayerState) => {
@@ -1215,6 +1248,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					typeof performance !== "undefined" ? performance.now() : Date.now(),
 				debugEnabled: tileDebugEnabled,
 				maxTasksPerTick: tileMaxTasksPerTick,
+				lodTransitionMode: tileLodTransition?.mode,
+				lodAnchorZoom: tileLodTransition?.zoom,
 			});
 			latestTileFrameResultRef.current = frameResult;
 			staticTileDrawItems = frameResult.drawItems;
@@ -1241,11 +1276,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					height={height}
 					uniforms={animatedGridUniforms}
 					/>
-					<Group transform={animatedCameraTransform}>
-						<StaticTileLayer drawItems={staticTileDrawItems} />
-						{tileDebugEnabled && (
-							<TileDebugLayer
-							debugItems={tileDebugItems}
+						<Group transform={animatedCameraTransform}>
+							<Group opacity={staticTileOpacity}>
+								<StaticTileLayer drawItems={staticTileDrawItems} />
+							</Group>
+							{tileDebugEnabled && (
+								<TileDebugLayer
+								debugItems={tileDebugItems}
 								cameraZoom={camera.value.zoom}
 							/>
 						)}
@@ -1276,28 +1313,32 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							);
 						})}
 					</Group>
-				<CanvasNodeLabelLayer
-					width={width}
-					height={height}
-					camera={animatedCamera}
-					getNodeLayout={getNodeLayoutValue}
-					nodes={renderNodes}
-					focusedNodeId={focusedNodeId}
-				/>
-				{!disableBaseNodeInteraction && !focusedNodeId && (
-					<CanvasNodeOverlayLayer
-						width={width}
-						height={height}
-						activeNode={activeNode}
-						getNodeLayout={getNodeLayoutValue}
-						selectedNodes={selectedNodes}
-						hoverNode={hoverNode}
-						marqueeRectScreen={marqueeRectScreen}
-						snapGuidesScreen={snapGuidesScreen}
-						camera={animatedCamera}
-						onNodeResize={handleOverlayNodeResize}
-						onSelectionResize={onSelectionResize}
-					/>
+				{shouldRenderNodeLabels && (
+					<Group opacity={nodeHudOpacity}>
+						<CanvasNodeLabelLayer
+							width={width}
+							height={height}
+							camera={animatedCamera}
+							getNodeLayout={getNodeLayoutValue}
+							nodes={renderNodes}
+							focusedNodeId={focusedNodeId}
+						/>
+						{shouldRenderNodeOverlay && (
+							<CanvasNodeOverlayLayer
+								width={width}
+								height={height}
+								activeNode={activeNode}
+								getNodeLayout={getNodeLayoutValue}
+								selectedNodes={selectedNodes}
+								hoverNode={hoverNode}
+								marqueeRectScreen={marqueeRectScreen}
+								snapGuidesScreen={snapGuidesScreen}
+								camera={animatedCamera}
+								onNodeResize={handleOverlayNodeResize}
+								onSelectionResize={onSelectionResize}
+							/>
+						)}
+					</Group>
 				)}
 				{focusLayerEnabled &&
 					FocusEditorLayer &&
@@ -1325,20 +1366,25 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			snapGuidesScreen,
 			staticTileSnapshot,
 			supportsTilePipeline,
-			tileTick,
-			tileDebugEnabled,
-			tileMaxTasksPerTick,
-			runtimeManager,
-			scenes,
-			selectedNodes,
-			FocusEditorLayer,
-			width,
-			animatedCamera,
-		animatedCameraTransform,
-			animatedGridUniforms,
-			camera,
-			getLatestNodeById,
-		]);
+				tileTick,
+				tileDebugEnabled,
+				tileLodTransition,
+				tileMaxTasksPerTick,
+					runtimeManager,
+					scenes,
+					shouldRenderNodeOverlay,
+					shouldRenderNodeLabels,
+					selectedNodes,
+					FocusEditorLayer,
+					width,
+					animatedCamera,
+					animatedCameraTransform,
+					animatedGridUniforms,
+					camera,
+					getLatestNodeById,
+					nodeHudOpacity,
+					staticTileOpacity,
+			]);
 
 	if (width <= 0 || height <= 0) return null;
 

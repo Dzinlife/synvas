@@ -113,6 +113,13 @@ export interface TileSchedulerStats {
 	composeLod: number;
 }
 
+export type TileLodTransitionMode = "follow" | "freeze" | "snap";
+
+export interface TileLodTransition {
+	mode: TileLodTransitionMode;
+	zoom?: number;
+}
+
 export interface TileFrameResult {
 	drawItems: TileDrawItem[];
 	debugItems: TileDebugItem[];
@@ -128,4 +135,6 @@ export interface TileSchedulerFrameInput {
 	nowMs: number;
 	debugEnabled?: boolean;
 	maxTasksPerTick?: number;
+	lodTransitionMode?: TileLodTransitionMode;
+	lodAnchorZoom?: number;
 }

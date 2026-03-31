@@ -103,6 +103,8 @@ const createFrameInput = (
 		nowMs: number;
 		debugEnabled: boolean;
 		maxTasksPerTick: number;
+		lodTransitionMode: "follow" | "freeze" | "snap";
+		lodAnchorZoom: number;
 	}>,
 ) => {
 	return {
@@ -118,6 +120,8 @@ const createFrameInput = (
 			(typeof performance !== "undefined" ? performance.now() : Date.now()),
 		debugEnabled: input?.debugEnabled ?? false,
 		maxTasksPerTick: input?.maxTasksPerTick,
+		lodTransitionMode: input?.lodTransitionMode,
+		lodAnchorZoom: input?.lodAnchorZoom,
 	};
 };
 
@@ -329,6 +333,65 @@ describe("tile scheduler", () => {
 		expect(farZoom1.stats.targetLod).toBeLessThanOrEqual(-5);
 		expect(farZoom1.stats.composeLod).toBe(-1);
 		expect(farZoom2.stats.composeLod).toBe(-2);
+		scheduler.dispose();
+	});
+
+	it("freeze 模式会在动画期间锁住 target/compose LOD", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 0,
+		});
+		scheduler.setInputs([
+			createRasterInput({
+				left: -4096,
+				top: -4096,
+				right: 4096,
+				bottom: 4096,
+			}),
+		]);
+		const baseFrame = scheduler.beginFrame(
+			createFrameInput({
+				zoom: 1,
+			}),
+		);
+		const freezeFrame = scheduler.beginFrame(
+			createFrameInput({
+				zoom: 0.02,
+				lodTransitionMode: "freeze",
+			}),
+		);
+		expect(baseFrame.stats.targetLod).toBe(0);
+		expect(baseFrame.stats.composeLod).toBe(0);
+		expect(freezeFrame.stats.targetLod).toBe(0);
+		expect(freezeFrame.stats.composeLod).toBe(0);
+		scheduler.dispose();
+	});
+
+	it("snap 模式会按 anchor zoom 一次对齐目标 LOD", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 0,
+		});
+		scheduler.setInputs([
+			createRasterInput({
+				left: -4096,
+				top: -4096,
+				right: 4096,
+				bottom: 4096,
+			}),
+		]);
+		scheduler.beginFrame(
+			createFrameInput({
+				zoom: 1,
+			}),
+		);
+		const snapFrame = scheduler.beginFrame(
+			createFrameInput({
+				zoom: 1,
+				lodTransitionMode: "snap",
+				lodAnchorZoom: 0.02,
+			}),
+		);
+		expect(snapFrame.stats.targetLod).toBe(-6);
+		expect(snapFrame.stats.composeLod).toBe(-6);
 		scheduler.dispose();
 	});
 

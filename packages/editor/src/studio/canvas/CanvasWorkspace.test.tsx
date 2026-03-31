@@ -94,6 +94,7 @@ interface MockInfiniteSkiaCanvasProps {
 	tileDebugEnabled?: boolean;
 	tileInputMode?: "raster" | "picture";
 	tileMaxTasksPerTick?: number;
+	tileLodTransition?: { mode: "follow" | "freeze" | "snap"; zoom?: number } | null;
 	focusedNodeId?: string | null;
 	hoveredNodeId?: string | null;
 	selectedNodeIds?: string[];
@@ -1564,7 +1565,7 @@ describe("CanvasWorkspace", () => {
 		expect(firstProps?.width).toBe(1200);
 		expect(firstProps?.height).toBe(800);
 
-		doubleClickNodeAt(80, 80);
+		doubleClickNodeAt(600, 400);
 		const secondProps = infiniteSkiaCanvasPropsMock.mock.calls.at(-1)?.[0] as
 			| { width: number; height: number }
 			| undefined;
@@ -2764,6 +2765,145 @@ describe("CanvasWorkspace", () => {
 		if (!afterPanCamera) return;
 		expect(afterPanCamera).toEqual(beforePanCamera);
 		expect(getLatestInfiniteSkiaCanvasProps().suspendHover).toBe(true);
+	});
+
+	it("进入 focus 的 smooth 动画会锁定 tile LOD 过渡为 freeze", async () => {
+		render(<CanvasWorkspace />);
+		doubleClickNodeAt(80, 80);
+		await waitFor(() => {
+			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
+		});
+		await waitFor(() => {
+			expect(getLatestInfiniteSkiaCanvasProps().tileLodTransition?.mode).toBe(
+				"freeze",
+			);
+		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().suspendHover).toBe(false);
+		expect(getLatestInfiniteSkiaCanvasProps().tileLodTransition?.mode).toBe(
+			"freeze",
+		);
+	});
+
+	it("退出 focus 未触发半缩放约束时保持 freeze 并恢复 pre-focus camera", async () => {
+		render(<CanvasWorkspace />);
+		const workspace = screen.getByTestId("canvas-workspace");
+		for (let index = 0; index < 40; index += 1) {
+			fireEvent.wheel(workspace, {
+				deltaY: 80,
+				ctrlKey: true,
+				clientX: 600,
+				clientY: 400,
+			});
+		}
+		const preFocusCamera = getLatestInfiniteSkiaCanvasProps().camera?.value;
+		expect(preFocusCamera).toBeTruthy();
+		if (!preFocusCamera) return;
+		expect(preFocusCamera.zoom).toBeLessThanOrEqual(0.11);
+
+		act(() => {
+			useProjectStore.getState().setFocusedNode("node-scene-1");
+		});
+		await waitFor(() => {
+			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
+		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+
+		fireEvent.keyDown(window, { key: "Escape" });
+		await waitFor(() => {
+			expect(getLatestInfiniteSkiaCanvasProps().suspendHover).toBe(true);
+		});
+		await waitFor(() => {
+			expect(getLatestInfiniteSkiaCanvasProps().tileLodTransition?.mode).toBe(
+				"freeze",
+			);
+		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+		const settled = useCanvasCameraStore.getState().camera;
+		expect(settled.x).toBeCloseTo(preFocusCamera.x, 3);
+		expect(settled.y).toBeCloseTo(preFocusCamera.y, 3);
+		expect(settled.zoom).toBeCloseTo(preFocusCamera.zoom, 3);
+	});
+
+	it("退出 focus 触发半缩放约束时使用 snap 并保持 pre-focus 视口中心", async () => {
+		render(<CanvasWorkspace />);
+		const workspace = screen.getByTestId("canvas-workspace");
+		fireEvent.wheel(workspace, {
+			deltaX: 180,
+			deltaY: -120,
+		});
+		for (let index = 0; index < 3; index += 1) {
+			fireEvent.wheel(workspace, {
+				deltaY: -80,
+				ctrlKey: true,
+				clientX: 600,
+				clientY: 400,
+			});
+		}
+		const preFocusCamera = getLatestInfiniteSkiaCanvasProps().camera?.value;
+		expect(preFocusCamera).toBeTruthy();
+		if (!preFocusCamera) return;
+		expect(preFocusCamera.zoom).toBeGreaterThan(1);
+		expect(Math.abs(preFocusCamera.x) + Math.abs(preFocusCamera.y)).toBeGreaterThan(
+			0.001,
+		);
+		const preFocusCenter = {
+			x: mockDOMRect.width / Math.max(preFocusCamera.zoom, 1e-6) / 2 - preFocusCamera.x,
+			y:
+				mockDOMRect.height / Math.max(preFocusCamera.zoom, 1e-6) / 2 -
+				preFocusCamera.y,
+		};
+
+		act(() => {
+			useProjectStore.getState().setFocusedNode("node-scene-1");
+		});
+		await waitFor(() => {
+			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
+		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+		const focusZoom = useCanvasCameraStore.getState().camera.zoom;
+		const expectedExitZoom = Math.min(preFocusCamera.zoom, focusZoom * 0.5);
+
+		fireEvent.keyDown(window, { key: "Escape" });
+		await waitFor(() => {
+			expect(getLatestInfiniteSkiaCanvasProps().suspendHover).toBe(true);
+		});
+		await waitFor(() => {
+			const transition = getLatestInfiniteSkiaCanvasProps().tileLodTransition;
+			expect(transition?.mode).toBe("snap");
+			expect(transition?.zoom).toBeCloseTo(expectedExitZoom, 4);
+		});
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 280);
+			});
+		});
+
+		const settled = useCanvasCameraStore.getState().camera;
+		expect(settled.zoom).toBeCloseTo(expectedExitZoom, 3);
+		expect(settled.zoom).toBeLessThanOrEqual(focusZoom * 0.5 + 1e-6);
+		const settledCenter = {
+			x: mockDOMRect.width / Math.max(settled.zoom, 1e-6) / 2 - settled.x,
+			y: mockDOMRect.height / Math.max(settled.zoom, 1e-6) / 2 - settled.y,
+		};
+		expect(settledCenter.x).toBeCloseTo(preFocusCenter.x, 3);
+		expect(settledCenter.y).toBeCloseTo(preFocusCenter.y, 3);
 	});
 
 	it("未完成的 smooth 动画会被新的 smooth 动画覆盖", async () => {

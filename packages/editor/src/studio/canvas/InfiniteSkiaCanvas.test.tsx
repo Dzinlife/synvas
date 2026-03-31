@@ -393,6 +393,26 @@ const getStaticTileLayerElement = (
 	);
 };
 
+const getStaticTileOpacityGroupElement = (
+	tree: React.ReactNode,
+): AnyElement | null => {
+	return (
+		collectElements(tree, (element) => {
+			if (element.type !== "group") return false;
+			const props = getElementProps<{
+				opacity?: { _isSharedValue?: boolean; value?: number };
+				children?: React.ReactNode;
+			}>(element);
+			if (!props?.opacity?._isSharedValue) return false;
+			return (
+				collectElements(props.children ?? null, (child) => {
+					return resolveComponentNames(child.type).includes("StaticTileLayer");
+				}).length > 0
+			);
+		})[0] ?? null
+	);
+};
+
 const getTileDebugLayerElement = (tree: React.ReactNode): AnyElement | null => {
 	return (
 		collectElements(tree, (element) => {
@@ -760,6 +780,123 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(overlayElement).toBeNull();
 	});
 
+	it("focus 状态下不挂载 CanvasNodeLabelLayer", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[createVideoNode("node-a", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId="node-a"
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		expect(hasNamedComponent(tree, "CanvasNodeLabelLayer")).toBe(false);
+	});
+
+	it("focus 进出场会驱动 StaticTileLayer 透明度动画", async () => {
+		const node = createVideoNode("node-a", 0);
+		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
+		const { rerender } = render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={camera}
+				nodes={[node]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			const opacityGroup = getStaticTileOpacityGroupElement(getLatestRenderTree());
+			expect(opacityGroup).toBeTruthy();
+			const opacity = getElementProps<{
+				opacity?: { _isSharedValue?: boolean; value?: number };
+			}>(opacityGroup)?.opacity;
+			expect(opacity?._isSharedValue).toBe(true);
+			expect(opacity?.value).toBeCloseTo(1, 6);
+		});
+
+		rerender(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={camera}
+				nodes={[node]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId="node-a"
+			/>,
+		);
+		await waitFor(() => {
+			const opacity = getElementProps<{
+				opacity?: { value?: number };
+			}>(getStaticTileOpacityGroupElement(getLatestRenderTree()))?.opacity;
+			expect(opacity?.value).toBeCloseTo(0, 6);
+		});
+
+		rerender(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={camera}
+				nodes={[node]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			const opacity = getElementProps<{
+				opacity?: { value?: number };
+			}>(getStaticTileOpacityGroupElement(getLatestRenderTree()))?.opacity;
+			expect(opacity?.value).toBeCloseTo(1, 6);
+		});
+	});
+
+	it("LOD freeze 过渡期间不挂载 CanvasNodeLabelLayer", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={800}
+				height={600}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[createVideoNode("node-a", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId="node-a"
+				selectedNodeIds={["node-a"]}
+				focusedNodeId={null}
+				tileLodTransition={{ mode: "freeze" }}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const tree = getLatestRenderTree();
+		expect(hasNamedComponent(tree, "CanvasNodeLabelLayer")).toBe(false);
+	});
+
 	it("不渲染基础节点交互层", async () => {
 		render(
 			<InfiniteSkiaCanvas
@@ -1031,7 +1168,7 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
-	it("tileMaxTasksPerTick 会透传给 scheduler.beginFrame", async () => {
+	it("tile 调度参数会透传给 scheduler.beginFrame", async () => {
 		tilePipelineMockState.enabled = true;
 		const beginFrameSpy = vi.spyOn(StaticTileScheduler.prototype, "beginFrame");
 		try {
@@ -1058,6 +1195,7 @@ describe("InfiniteSkiaCanvas", () => {
 					selectedNodeIds={[]}
 					focusedNodeId={null}
 					tileMaxTasksPerTick={TILE_MAX_TASKS_PER_TICK_DRAG}
+					tileLodTransition={{ mode: "snap", zoom: 0.5 }}
 				/>,
 			);
 			await waitFor(() => {
@@ -1066,8 +1204,28 @@ describe("InfiniteSkiaCanvas", () => {
 			expect(
 				beginFrameSpy.mock.calls.some((call) => {
 					return (
-						(call[0] as { maxTasksPerTick?: number } | undefined)
-							?.maxTasksPerTick === TILE_MAX_TASKS_PER_TICK_DRAG
+						(
+							call[0] as
+								| {
+										maxTasksPerTick?: number;
+										lodTransitionMode?: string;
+										lodAnchorZoom?: number;
+								  }
+								| undefined
+						)?.maxTasksPerTick === TILE_MAX_TASKS_PER_TICK_DRAG
+					);
+				}),
+			).toBe(true);
+			expect(
+				beginFrameSpy.mock.calls.some((call) => {
+					const input = call[0] as
+						| {
+								lodTransitionMode?: string;
+								lodAnchorZoom?: number;
+						  }
+						| undefined;
+					return (
+						input?.lodTransitionMode === "snap" && input.lodAnchorZoom === 0.5
 					);
 				}),
 			).toBe(true);

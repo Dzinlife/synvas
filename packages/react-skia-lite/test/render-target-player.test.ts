@@ -49,6 +49,7 @@ const createCanvas = () => ({
 	clear: vi.fn(),
 	drawImage: vi.fn(),
 	drawImageRect: vi.fn(),
+	drawPicture: vi.fn(),
 	drawPaint: vi.fn(),
 	saveLayer: vi.fn(),
 	restore: vi.fn(),
@@ -280,6 +281,52 @@ describe("RenderTarget player", () => {
 		expect(makeOffscreenMock).toHaveBeenCalledTimes(1);
 		expect(targetCanvas.saveLayer).toHaveBeenCalledTimes(1);
 		expect(rootCanvas.drawImageRect).toHaveBeenCalledTimes(1);
+	});
+
+	it("DrawPicture 会走 saveLayer 以应用 group opacity", () => {
+		vi.mocked(getSkiaRenderBackend).mockReturnValue({
+			bundle: "webgl",
+			kind: "webgl",
+		});
+
+		const rootCanvas = createCanvas();
+		const skia = {
+			Paint: vi.fn(() => createPaint()),
+			Color: vi.fn((color: string) => color),
+			Surface: {
+				MakeOffscreen: vi.fn(() => null),
+			},
+			ImageFilter: {
+				MakeColorFilter: vi.fn(),
+			},
+		} as never;
+		const picture = { id: "picture-1" };
+		const commands = [
+			{
+				type: CommandType.SavePaint,
+				props: { opacity: 0.25 },
+				standalone: false,
+			},
+			{
+				type: CommandType.DrawPicture,
+				props: {
+					picture,
+				},
+			},
+			{
+				type: CommandType.RestorePaint,
+			},
+		];
+
+		replay(createDrawingContext(skia, [], rootCanvas as never), commands as never);
+
+		expect(rootCanvas.drawPicture).toHaveBeenCalledWith(picture);
+		expect(rootCanvas.saveLayer).toHaveBeenCalledTimes(1);
+		const layerPaint = rootCanvas.saveLayer.mock.calls[0]?.[0] as
+			| { getAlphaf?: () => number }
+			| undefined;
+		expect(layerPaint?.getAlphaf?.()).toBeCloseTo(0.25, 6);
+		expect(rootCanvas.restore).toHaveBeenCalledTimes(1);
 	});
 
 	it("RenderTarget surface 在回放之间会复用", () => {

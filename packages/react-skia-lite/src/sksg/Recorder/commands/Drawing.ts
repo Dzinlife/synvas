@@ -309,7 +309,13 @@ export const drawParagraph = (ctx: DrawingContext, props: ParagraphProps) => {
 export const drawPicture = (ctx: DrawingContext, props: PictureProps) => {
   "worklet";
   const { picture } = props;
-  ctx.canvas.drawPicture(picture);
+  // drawPicture API 不接收 paint；用 saveLayer 才能让 group opacity/paint 生效。
+  ctx.canvas.saveLayer(ctx.paint);
+  try {
+    ctx.canvas.drawPicture(picture);
+  } finally {
+    ctx.canvas.restore();
+  }
 };
 
 export const drawAtlas = (ctx: DrawingContext, props: AtlasProps) => {
