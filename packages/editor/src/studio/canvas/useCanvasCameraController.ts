@@ -4,6 +4,7 @@ import { useSharedValue } from "react-skia-lite";
 import {
 	CAMERA_SMOOTH_DURATION_MS,
 	type ApplyCameraOptions,
+	type CameraStoreSyncMode,
 	type CameraState,
 	easeOutCubic,
 	isCameraAlmostEqual,
@@ -27,6 +28,7 @@ interface CameraAnimationState {
 	from: CameraState;
 	to: CameraState;
 	startTime: number | null;
+	storeSync: CameraStoreSyncMode;
 }
 
 export const useCanvasCameraController = ({
@@ -44,11 +46,15 @@ export const useCanvasCameraController = ({
 		isAnimatingRef.current = isAnimating;
 		onAnimationStateChange?.(isAnimating);
 	});
-	const writeCamera = useEffectEvent((nextCamera: CameraState) => {
-		cameraRef.current = nextCamera;
-		cameraSharedValue.value = nextCamera;
-		onChange(nextCamera);
-	});
+	const writeCamera = useEffectEvent(
+		(nextCamera: CameraState, options?: { emitStore?: boolean }) => {
+			cameraRef.current = nextCamera;
+			cameraSharedValue.value = nextCamera;
+			if (options?.emitStore ?? true) {
+				onChange(nextCamera);
+			}
+		},
+	);
 	const stopAnimationFrame = useEffectEvent(() => {
 		const frameId = animationFrameRef.current;
 		if (frameId === null) return;
@@ -84,8 +90,13 @@ export const useCanvasCameraController = ({
 			animationState.to,
 			easedProgress,
 		);
-		writeCamera(nextCamera);
+		writeCamera(nextCamera, {
+			emitStore: animationState.storeSync === "frame",
+		});
 		if (rawProgress >= 1) {
+			if (animationState.storeSync === "settle") {
+				onChange(animationState.to);
+			}
 			animationStateRef.current = null;
 			animationFrameRef.current = null;
 			setCameraAnimating(false);
@@ -132,6 +143,7 @@ export const useCanvasCameraController = ({
 				from: fromCamera,
 				to: nextCamera,
 				startTime: null,
+				storeSync: options?.storeSync ?? "frame",
 			};
 			setCameraAnimating(true);
 			animationFrameRef.current = window.requestAnimationFrame(runAnimationFrame);

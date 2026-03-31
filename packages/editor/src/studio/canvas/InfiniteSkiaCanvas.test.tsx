@@ -873,6 +873,63 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
+	it("focus 期间会暂停 tile tick 调度，退出后恢复", async () => {
+		tilePipelineMockState.enabled = true;
+		const beginFrameSpy = vi.spyOn(StaticTileScheduler.prototype, "beginFrame");
+		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
+		const sceneNode = {
+			...createSceneNode("node-scene", 0),
+			thumbnail: {
+				assetId: "scene-thumb",
+				sourceSignature: "scene-v1",
+				frame: 0,
+				generatedAt: 1,
+				version: 1 as const,
+			},
+		};
+		const baseProps = {
+			width: 256,
+			height: 144,
+			camera,
+			nodes: [sceneNode],
+			scenes: emptyScenes,
+			assets: [createImageAsset("scene-thumb")],
+			activeNodeId: null,
+			selectedNodeIds: [] as string[],
+		};
+		try {
+			const { rerender } = render(
+				<InfiniteSkiaCanvas {...baseProps} focusedNodeId={null} />,
+			);
+			await waitFor(() => {
+				expect(beginFrameSpy).toHaveBeenCalled();
+			});
+			const beforeFocusCalls = beginFrameSpy.mock.calls.length;
+
+			rerender(<InfiniteSkiaCanvas {...baseProps} focusedNodeId="node-scene" />);
+			await waitFor(() => {
+				expect(rootRenderSpy).toHaveBeenCalled();
+			});
+			const focusedCalls = beginFrameSpy.mock.calls.length;
+			expect(focusedCalls).toBe(beforeFocusCalls);
+
+			act(() => {
+				camera.value = { x: 48, y: -24, zoom: 1.25 };
+			});
+			await act(async () => {
+				await Promise.resolve();
+			});
+			expect(beginFrameSpy.mock.calls.length).toBe(focusedCalls);
+
+			rerender(<InfiniteSkiaCanvas {...baseProps} focusedNodeId={null} />);
+			await waitFor(() => {
+				expect(beginFrameSpy.mock.calls.length).toBeGreaterThan(focusedCalls);
+			});
+		} finally {
+			beginFrameSpy.mockRestore();
+		}
+	});
+
 	it("LOD freeze 过渡期间不挂载 CanvasNodeLabelLayer", async () => {
 		render(
 			<InfiniteSkiaCanvas

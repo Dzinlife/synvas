@@ -297,6 +297,7 @@ type CanvasGraphHistoryEntry = ClipboardCanvasGraphHistoryEntry;
 type PendingCameraCullUpdateKind = "pan" | "immediate" | "smooth";
 type SmoothCameraApplyOptions = {
 	tileLodTransition?: TileLodTransition | null;
+	cameraStoreSync?: "frame" | "settle";
 };
 
 interface CanvasViewportWorldRect {
@@ -915,6 +916,7 @@ const CanvasWorkspace = () => {
 	);
 	const observedCameraStateRef = useRef<CameraState>(initialCameraRef.current);
 	const observedStageSizeRef = useRef(stageSize);
+	const wasCameraAnimatingRef = useRef(false);
 	const pendingCameraCullUpdateKindRef =
 		useRef<PendingCameraCullUpdateKind | null>(null);
 	const panCullPendingCameraRef = useRef<CameraState | null>(null);
@@ -1077,7 +1079,9 @@ const CanvasWorkspace = () => {
 			);
 			updateTileLodTransition(options?.tileLodTransition ?? null);
 			pendingCameraCullUpdateKindRef.current = "smooth";
-			applyCamera(nextCamera);
+			applyCamera(nextCamera, {
+				storeSync: options?.cameraStoreSync ?? "frame",
+			});
 		},
 	);
 		const handleCameraStoreCameraChange = useEffectEvent(
@@ -1105,6 +1109,14 @@ const CanvasWorkspace = () => {
 	useEffect(() => {
 		renderCullModeRef.current = renderCullState.mode;
 	}, [renderCullState.mode]);
+	useEffect(() => {
+		const wasAnimating = wasCameraAnimatingRef.current;
+		wasCameraAnimatingRef.current = isCameraAnimating;
+		if (isCameraAnimating) return;
+		if (!wasAnimating) return;
+		if (renderCullModeRef.current !== "locked") return;
+		commitLiveCullCamera(getCamera());
+	}, [commitLiveCullCamera, getCamera, isCameraAnimating]);
 	useEffect(() => {
 		observedCameraStateRef.current = getCanvasCamera();
 		return useCanvasCameraStore.subscribe((state) => {
@@ -2025,6 +2037,7 @@ const CanvasWorkspace = () => {
 				if (!isCameraAlmostEqual(currentCamera, nextCamera)) {
 					applySmoothCameraWithCullLock(nextCamera, {
 						tileLodTransition: nextLodTransition,
+						cameraStoreSync: "settle",
 					});
 				}
 			}
@@ -2054,6 +2067,7 @@ const CanvasWorkspace = () => {
 		if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
 		applySmoothCameraWithCullLock(nextCamera, {
 			tileLodTransition: { mode: "freeze" },
+			cameraStoreSync: "settle",
 		});
 	}, [
 		applySmoothCameraWithCullLock,
@@ -5110,6 +5124,7 @@ const CanvasWorkspace = () => {
 			/>
 
 			<CanvasWorkspaceOverlay
+				cameraSharedValue={cameraSharedValue}
 				toolbarLeftOffset={toolbarLeftOffset}
 				toolbarTopOffset={toolbarTopOffset}
 				onCreateScene={handleCreateScene}

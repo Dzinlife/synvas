@@ -155,6 +155,51 @@ describe("useCanvasCameraController", () => {
 		expect(onAnimationStateChange).toHaveBeenLastCalledWith(false);
 	});
 
+	it("smooth camera 在 settle 模式下只在结束时写回 store", () => {
+		const onChange = vi.fn();
+		const onAnimationStateChange = vi.fn();
+		let controller: UseCanvasCameraControllerResult | null = null;
+
+		render(
+			<CameraControllerProbe
+				camera={{ x: 0, y: 0, zoom: 1 }}
+				onChange={onChange}
+				onAnimationStateChange={onAnimationStateChange}
+				onReady={(api) => {
+					controller = api;
+				}}
+			/>,
+		);
+
+		act(() => {
+			controller?.applyCamera(
+				{ x: 120, y: -48, zoom: 1.5 },
+				{ storeSync: "settle" },
+			);
+		});
+
+		expect(controller).not.toBeNull();
+		if (!controller) return;
+		expect(onChange).not.toHaveBeenCalled();
+		expect(onAnimationStateChange).toHaveBeenCalledWith(true);
+
+		act(() => {
+			vi.advanceTimersByTime(120);
+		});
+		expect(onChange).not.toHaveBeenCalled();
+		expect(controller.cameraSharedValue.value.zoom).toBeGreaterThan(1);
+		expect(controller.cameraSharedValue.value.zoom).toBeLessThan(1.5);
+
+		act(() => {
+			vi.advanceTimersByTime(180);
+		});
+
+		expect(onChange).toHaveBeenCalledTimes(1);
+		expect(onChange).toHaveBeenLastCalledWith({ x: 120, y: -48, zoom: 1.5 });
+		expect(controller.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
+		expect(onAnimationStateChange).toHaveBeenLastCalledWith(false);
+	});
+
 	it("smooth 动画期间会忽略 instant 输入", () => {
 		const onChange = vi.fn();
 		let controller: UseCanvasCameraControllerResult | null = null;

@@ -3,7 +3,7 @@ import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { Bug, PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import { AnimatePresence, motion, usePresence } from "motion/react";
 import type React from "react";
-import { useCallback, useContext, useEffect, useMemo } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { getOwner, releaseOwner, subscribeOwnerChange } from "@/audio/owner";
 import { SnapIcon } from "@/components/icons";
@@ -28,7 +28,10 @@ import {
 	resolveCanvasNodeLayoutWorldRect,
 	resolveCanvasWorldRectScreenFrame,
 } from "./canvasNodeLabelUtils";
-import type { ResolvedCanvasDrawerOptions } from "./canvasWorkspaceUtils";
+import type {
+	CameraState,
+	ResolvedCanvasDrawerOptions,
+} from "./canvasWorkspaceUtils";
 import type { TileInputMode } from "./InfiniteSkiaCanvas";
 
 const SCENE_OWNER_PREFIX = "scene:";
@@ -51,7 +54,17 @@ interface DrawerViewData {
 	) => boolean;
 }
 
+interface OverlayCameraSharedValue {
+	value: CameraState;
+	addListener?: (
+		listenerId: number,
+		listener: (camera: CameraState) => void,
+	) => void;
+	removeListener?: (listenerId: number) => void;
+}
+
 interface CanvasWorkspaceOverlayProps {
+	cameraSharedValue?: OverlayCameraSharedValue;
 	toolbarLeftOffset: number;
 	toolbarTopOffset: number;
 	onCreateScene: () => void;
@@ -194,14 +207,56 @@ const CameraZoomBadge = () => {
 
 interface ActiveNodeToolbarOverlayProps {
 	node: CanvasNode;
+	cameraSharedValue?: OverlayCameraSharedValue;
 	children: React.ReactNode;
 }
 
 const ActiveNodeToolbarOverlay = ({
 	node,
+	cameraSharedValue,
 	children,
 }: ActiveNodeToolbarOverlayProps) => {
-	const camera = useCanvasCameraStore((state) => state.camera);
+	const storeCamera = useCanvasCameraStore((state) => state.camera);
+	const [camera, setCamera] = useState(() => {
+		return cameraSharedValue?.value ?? storeCamera;
+	});
+	const cameraListenerIdRef = useRef(81001 + Math.floor(Math.random() * 100000));
+	const setCameraIfChanged = useCallback((next: CameraState) => {
+		setCamera((prev) => {
+			if (
+				prev.x === next.x &&
+				prev.y === next.y &&
+				prev.zoom === next.zoom
+			) {
+				return prev;
+			}
+			return next;
+		});
+	}, []);
+	useEffect(() => {
+		if (!cameraSharedValue) {
+			return;
+		}
+		setCameraIfChanged(cameraSharedValue.value);
+		const addListener = cameraSharedValue.addListener;
+		const removeListener = cameraSharedValue.removeListener;
+		if (
+			typeof addListener !== "function" ||
+			typeof removeListener !== "function"
+		) {
+			return;
+		}
+		const listenerId = cameraListenerIdRef.current;
+		addListener(listenerId, (next) => {
+			setCameraIfChanged(next);
+		});
+		return () => {
+			removeListener(listenerId);
+		};
+	}, [cameraSharedValue, setCameraIfChanged]);
+	useEffect(() => {
+		setCameraIfChanged(storeCamera);
+	}, [setCameraIfChanged, storeCamera]);
 	const overlayFrame = useMemo(() => {
 		return resolveCanvasWorldRectScreenFrame(
 			resolveCanvasNodeLayoutWorldRect(node),
@@ -235,6 +290,7 @@ const ActiveNodeToolbarOverlay = ({
 };
 
 const CanvasWorkspaceOverlay = ({
+	cameraSharedValue,
 	toolbarLeftOffset,
 	toolbarTopOffset,
 	onCreateScene,
@@ -370,6 +426,7 @@ const CanvasWorkspaceOverlay = ({
 					<ActiveNodeToolbarOverlay
 						key={`active-node-overlay:${activeNode.id}`}
 						node={activeNode}
+						cameraSharedValue={cameraSharedValue}
 					>
 						<ActiveNodeToolbar
 							node={activeNode}

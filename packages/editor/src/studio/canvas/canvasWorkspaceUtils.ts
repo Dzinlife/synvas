@@ -42,9 +42,11 @@ export interface CanvasWorldBounds {
 }
 
 export type CameraTransitionMode = "smooth" | "instant";
+export type CameraStoreSyncMode = "frame" | "settle";
 
 export interface ApplyCameraOptions {
 	transition?: CameraTransitionMode;
+	storeSync?: CameraStoreSyncMode;
 }
 
 export interface ClampZoomOptions {

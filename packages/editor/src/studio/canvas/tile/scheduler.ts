@@ -153,6 +153,7 @@ export class StaticTileScheduler {
 	}
 
 	setInputs(inputs: TileInput[]): void {
+		if (this.inputs === inputs) return;
 		if (inputs.length <= 0 && this.inputs.length > 0) {
 			this.clearReadyTiles();
 			this.bumpQueueEpoch();
