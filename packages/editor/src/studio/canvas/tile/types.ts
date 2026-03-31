@@ -59,6 +59,7 @@ export interface TileRecord {
 	image: SkImage | null;
 	lastUsedTick: number;
 	lastRenderedEpoch: number;
+	lastRenderedInputSignature: string;
 }
 
 export interface RenderTask {

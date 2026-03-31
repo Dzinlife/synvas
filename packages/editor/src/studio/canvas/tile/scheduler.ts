@@ -89,6 +89,12 @@ const clampLod = (lod: number): number => {
 	return Math.max(TILE_LOD_MIN, Math.min(TILE_LOD_MAX, Math.round(lod)));
 };
 
+const TILE_INPUT_SIGNATURE_SCALE = 1000;
+
+const quantizeSignatureValue = (value: number): number => {
+	return Math.round(value * TILE_INPUT_SIGNATURE_SCALE);
+};
+
 export class StaticTileScheduler {
 	private readonly frameBudgetMs: number;
 
@@ -384,6 +390,7 @@ export class StaticTileScheduler {
 			record.state = "EMPTY";
 			record.queued = false;
 			record.lastRenderedEpoch = 0;
+			record.lastRenderedInputSignature = "";
 		}
 	}
 
@@ -405,9 +412,33 @@ export class StaticTileScheduler {
 			image: null,
 			lastUsedTick: this.tick,
 			lastRenderedEpoch: 0,
+			lastRenderedInputSignature: "",
 		};
 		this.tileByKey.set(key, record);
 		return record;
+	}
+
+	private buildTileInputSignature(
+		tileRect: TileAabb,
+		candidateInputs: TileInput[],
+	): string {
+		if (candidateInputs.length <= 0) return "";
+		const segments: string[] = [];
+		for (const input of candidateInputs) {
+			if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
+			segments.push(
+				[
+					input.id,
+					input.nodeId,
+					input.epoch,
+					quantizeSignatureValue(input.aabb.left),
+					quantizeSignatureValue(input.aabb.top),
+					quantizeSignatureValue(input.aabb.right),
+					quantizeSignatureValue(input.aabb.bottom),
+				].join(":"),
+			);
+		}
+		return segments.join("|");
 	}
 
 	private resolveVisibleKeys(input: TileSchedulerFrameInput): void {
@@ -484,7 +515,24 @@ export class StaticTileScheduler {
 		for (const key of this.visibleCoveredKeySet) {
 			const record = this.ensureTileRecord(key);
 			record.lastUsedTick = this.tick;
-			if (record.state === "READY" && record.image) continue;
+			const tileRect = createTileAabb(
+				record.worldLeft,
+				record.worldTop,
+				record.worldLeft + record.worldSize,
+				record.worldTop + record.worldSize,
+			);
+			const candidateInputs = this.queryInputsByRect(tileRect);
+			const nextInputSignature = this.buildTileInputSignature(
+				tileRect,
+				candidateInputs,
+			);
+			if (record.state === "READY" && record.image) {
+				if (record.lastRenderedInputSignature === nextInputSignature) {
+					continue;
+				}
+				// 输入覆盖集合变化后，即使 tile 仍被覆盖，也要重绘清理旧内容残留。
+				record.state = "STALE";
+			}
 			if (record.queued || record.state === "RENDERING") continue;
 			const task = this.taskPool.acquire();
 			task.key = key;
@@ -587,6 +635,10 @@ export class StaticTileScheduler {
 			canvas.scale(worldToPixel, worldToPixel);
 			canvas.translate(-tileRect.left, -tileRect.top);
 			const candidateInputs = this.queryInputsByRect(tileRect);
+			const inputSignature = this.buildTileInputSignature(
+				tileRect,
+				candidateInputs,
+			);
 			for (const input of candidateInputs) {
 				if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
 				if (input.kind === "picture") {
@@ -629,6 +681,7 @@ export class StaticTileScheduler {
 			record.image = image;
 			record.state = "READY";
 			record.lastRenderedEpoch = this.queueEpoch;
+			record.lastRenderedInputSignature = inputSignature;
 		} catch {
 			record.state = "STALE";
 		} finally {
@@ -867,6 +920,7 @@ export class StaticTileScheduler {
 			disposeImage(record.image);
 			record.image = null;
 			record.state = "EMPTY";
+			record.lastRenderedInputSignature = "";
 			removeCount -= 1;
 		}
 	}

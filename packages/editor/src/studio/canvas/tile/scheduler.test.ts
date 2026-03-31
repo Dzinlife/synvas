@@ -135,6 +135,32 @@ const warmScheduler = (
 	}
 };
 
+const findTileRecord = (
+	scheduler: StaticTileScheduler,
+	rect: { left: number; top: number; size: number },
+) => {
+	const internal = scheduler as unknown as {
+		tileByKey: Map<
+			number,
+			{
+				worldLeft: number;
+				worldTop: number;
+				worldSize: number;
+				image: unknown;
+			}
+		>;
+	};
+	return (
+		[...internal.tileByKey.values()].find((record) => {
+			return (
+				record.worldLeft === rect.left &&
+				record.worldTop === rect.top &&
+				record.worldSize === rect.size
+			);
+		}) ?? null
+	);
+};
+
 describe("tile scheduler", () => {
 	beforeEach(() => {
 		makeOffscreenSpy.mockClear();
@@ -791,6 +817,67 @@ describe("tile scheduler", () => {
 			),
 		).toBe(false);
 		expect(uncoveredFrame.fallbackNodeIds.length).toBe(0);
+		scheduler.dispose();
+	});
+
+	it("覆盖输入变更后即使旧 tile 仍有元素，也会触发一次重绘", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 1,
+		});
+		const staticInput = createRasterInput({
+			id: 1,
+			nodeId: "node-static",
+			left: 32,
+			top: 32,
+			right: 220,
+			bottom: 220,
+		});
+		const movingInputInOldTile = createRasterInput({
+			id: 2,
+			nodeId: "node-moving",
+			left: 240,
+			top: 32,
+			right: 420,
+			bottom: 220,
+		});
+		scheduler.setInputs([staticInput, movingInputInOldTile]);
+		warmScheduler(scheduler, 20, {
+			stageWidth: 512,
+			stageHeight: 512,
+			zoom: 1,
+		});
+		const oldTileRecordBefore = findTileRecord(scheduler, {
+			left: 0,
+			top: 0,
+			size: 512,
+		});
+		expect(oldTileRecordBefore?.image).toBeTruthy();
+		const oldTileImageBefore = oldTileRecordBefore?.image ?? null;
+		const movingInputInNewTile = createRasterInput({
+			id: 2,
+			nodeId: "node-moving",
+			left: 1700,
+			top: 32,
+			right: 1880,
+			bottom: 220,
+		});
+		scheduler.setInputs([staticInput, movingInputInNewTile]);
+		scheduler.beginFrame(
+			createFrameInput({
+				stageWidth: 512,
+				stageHeight: 512,
+				zoom: 1,
+				maxTasksPerTick: 1,
+				debugEnabled: true,
+			}),
+		);
+		const oldTileRecordAfter = findTileRecord(scheduler, {
+			left: 0,
+			top: 0,
+			size: 512,
+		});
+		expect(oldTileRecordAfter?.image).toBeTruthy();
+		expect(oldTileRecordAfter?.image).not.toBe(oldTileImageBefore);
 		scheduler.dispose();
 	});
 });
