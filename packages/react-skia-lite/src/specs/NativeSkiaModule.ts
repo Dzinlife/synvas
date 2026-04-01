@@ -7,6 +7,16 @@ export type ISkiaViewApiWeb = ISkiaViewApi & {
 	views: Record<string, SkiaPictureViewHandle>;
 	deferedPictures: Record<string, SkPicture>;
 	registerView(nativeId: string, view: SkiaPictureViewHandle): void;
+	unregisterView(nativeId: string): void;
+};
+
+const disposePictureIfPossible = (picture: SkPicture | undefined) => {
+	if (!picture || typeof picture.dispose !== "function") {
+		return;
+	}
+	try {
+		picture.dispose();
+	} catch {}
 };
 
 export const SkiaViewApi = {
@@ -16,18 +26,35 @@ export const SkiaViewApi = {
 	web: true,
 	registerView(nativeId: string, view: SkiaPictureViewHandle) {
 		// Maybe a picture for this view was already set
-		if (this.deferedPictures[nativeId]) {
-			view.setPicture(this.deferedPictures[nativeId] as SkPicture);
+		const deferredPicture = this.deferedPictures[nativeId];
+		if (deferredPicture) {
+			view.setPicture(deferredPicture);
+			delete this.deferedPictures[nativeId];
 		}
 		this.views[nativeId] = view;
+	},
+	unregisterView(nativeId: string) {
+		delete this.views[nativeId];
+		const deferredPicture = this.deferedPictures[nativeId];
+		if (!deferredPicture) {
+			return;
+		}
+		delete this.deferedPictures[nativeId];
+		disposePictureIfPossible(deferredPicture);
 	},
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	setJsiProperty(nativeId: number, name: string, value: any) {
 		if (name === "picture") {
-			if (!this.views[`${nativeId}`]) {
-				this.deferedPictures[`${nativeId}`] = value;
+			const id = `${nativeId}`;
+			const view = this.views[id];
+			if (!view) {
+				const previousDeferredPicture = this.deferedPictures[id];
+				if (previousDeferredPicture && previousDeferredPicture !== value) {
+					disposePictureIfPossible(previousDeferredPicture);
+				}
+				this.deferedPictures[id] = value;
 			} else {
-				this.views[`${nativeId}`].setPicture(value);
+				view.setPicture(value);
 			}
 		}
 	},

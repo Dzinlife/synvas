@@ -379,6 +379,9 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 			measure,
 			measureInWindow,
 		} as SkiaPictureViewHandle);
+		return () => {
+			SkiaViewApi.unregisterView?.(nativeID);
+		};
 	}, [
 		setPicture,
 		getSize,
