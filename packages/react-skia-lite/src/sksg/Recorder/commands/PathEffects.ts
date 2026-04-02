@@ -1,4 +1,4 @@
-import { enumKey, processPath } from "../../../dom/nodes";
+import { enumKey, isStringPathDef, processPath } from "../../../dom/nodes";
 import { NodeType } from "../../../dom/types";
 import type {
   CornerPathEffectProps,
@@ -31,11 +31,18 @@ const declarePath2DPathEffect = (
   "worklet";
   const { matrix } = props;
   const path = processPath(ctx.Skia, props.path);
-  const pe = ctx.Skia.PathEffect.MakePath2D(matrix, path);
-  if (pe === null) {
-    throw new Error("Path2DPathEffect: invalid path");
+  const shouldDisposePath = isStringPathDef(props.path);
+  try {
+    const pe = ctx.Skia.PathEffect.MakePath2D(matrix, path);
+    if (pe === null) {
+      throw new Error("Path2DPathEffect: invalid path");
+    }
+    ctx.pathEffects.push(pe);
+  } finally {
+    if (shouldDisposePath) {
+      ctx.queueDispose(path);
+    }
   }
-  ctx.pathEffects.push(pe);
 };
 
 const declareDashPathEffect = (
@@ -92,16 +99,23 @@ const declarePath1DPathEffect = (
   "worklet";
   const { advance, phase, style } = props;
   const path = processPath(ctx.Skia, props.path);
-  const pe = ctx.Skia.PathEffect.MakePath1D(
-    path,
-    advance,
-    phase,
-    Path1DEffectStyle[enumKey(style)]
-  );
-  if (pe === null) {
-    throw new Error("Path1DPathEffect: could not create path effect");
+  const shouldDisposePath = isStringPathDef(props.path);
+  try {
+    const pe = ctx.Skia.PathEffect.MakePath1D(
+      path,
+      advance,
+      phase,
+      Path1DEffectStyle[enumKey(style)]
+    );
+    if (pe === null) {
+      throw new Error("Path1DPathEffect: could not create path effect");
+    }
+    ctx.pathEffects.push(pe);
+  } finally {
+    if (shouldDisposePath) {
+      ctx.queueDispose(path);
+    }
   }
-  ctx.pathEffects.push(pe);
 };
 
 export const isPushPathEffect = (
@@ -140,7 +154,10 @@ export const composePathEffects = (ctx: DrawingContext) => {
   if (ctx.pathEffects.length > 1) {
     const outer = ctx.pathEffects.pop()!;
     const inner = ctx.pathEffects.pop()!;
-    ctx.pathEffects.push(ctx.Skia.PathEffect.MakeCompose(outer, inner));
+    const composed = ctx.Skia.PathEffect.MakeCompose(outer, inner);
+    ctx.pathEffects.push(composed);
+    ctx.queueDispose(outer);
+    ctx.queueDispose(inner);
   }
 };
 

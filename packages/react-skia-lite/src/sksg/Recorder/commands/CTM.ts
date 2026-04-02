@@ -1,5 +1,6 @@
 import {
   isPathDef,
+  isStringPathDef,
   processPath,
   processTransformProps2,
 } from "../../../dom/nodes";
@@ -13,13 +14,16 @@ const computeClip = (
   clip: ClipDef | undefined
 ):
   | undefined
-  | { clipPath: SkPath }
+  | { clipPath: SkPath; shouldDisposeClipPath: boolean }
   | { clipRect: SkRect }
   | { clipRRect: SkRRect } => {
   "worklet";
   if (clip) {
     if (isPathDef(clip)) {
-      return { clipPath: processPath(Skia, clip) };
+      return {
+        clipPath: processPath(Skia, clip),
+        shouldDisposeClipPath: isStringPathDef(clip),
+      };
     } else if (isRRect(clip)) {
       return { clipRRect: clip };
     } else {
@@ -85,7 +89,11 @@ export const saveCTM = (ctx: DrawingContext, props: CTMProps) => {
     }
   }
   if (m3) {
-    canvas.concat(m3);
+    try {
+      canvas.concat(m3);
+    } finally {
+      ctx.queueDispose(m3);
+    }
   }
   if (clip) {
     if ("clipRect" in clip) {
@@ -93,7 +101,13 @@ export const saveCTM = (ctx: DrawingContext, props: CTMProps) => {
     } else if ("clipRRect" in clip) {
       canvas.clipRRect(clip.clipRRect, op, true);
     } else {
-      canvas.clipPath(clip.clipPath, op, true);
+      try {
+        canvas.clipPath(clip.clipPath, op, true);
+      } finally {
+        if (clip.shouldDisposeClipPath) {
+          ctx.queueDispose(clip.clipPath);
+        }
+      }
     }
   }
 };

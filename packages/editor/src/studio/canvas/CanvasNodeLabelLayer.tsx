@@ -114,8 +114,14 @@ interface ListenerCapableSharedValue<T = unknown> {
 
 const createEmptyPicture = (): SkPicture => {
 	const recorder = Skia.PictureRecorder();
-	recorder.beginRecording();
-	return recorder.finishRecordingAsPicture();
+	let canvas: ReturnType<typeof recorder.beginRecording> | null = null;
+	try {
+		canvas = recorder.beginRecording();
+		return recorder.finishRecordingAsPicture();
+	} finally {
+		(canvas as { dispose?: () => void } | null)?.dispose?.();
+		recorder.dispose?.();
+	}
 };
 
 const setPictureSharedValue = (
@@ -528,92 +534,98 @@ export const CanvasNodeLabelLayer = ({
 		}
 
 		const recorder = Skia.PictureRecorder();
-		const canvas = recorder.beginRecording({
-			x: 0,
-			y: 0,
-			width: Math.max(1, width),
-			height: Math.max(1, height),
-		});
-		const cameraState = camera.value;
-		let hasVisibleLabel = false;
+		let recordingCanvas: ReturnType<typeof recorder.beginRecording> | null = null;
+		try {
+			recordingCanvas = recorder.beginRecording({
+				x: 0,
+				y: 0,
+				width: Math.max(1, width),
+				height: Math.max(1, height),
+			});
+			const cameraState = camera.value;
+			let hasVisibleLabel = false;
 
-		for (const candidate of labelCandidates) {
-			const layout = layoutByNodeId.get(candidate.nodeId);
-			const frame = resolveCanvasNodeLayoutScreenFrame(
-				layout?.value ?? candidate.node,
-				cameraState,
-			);
-			const frameWidthPx = Math.max(0, Math.floor(frame.width));
-			const isVisibleByWidth = frameWidthPx >= LABEL_MIN_VISIBLE_WIDTH_PX;
-			if (!isVisibleByWidth || !isCanvasScreenRectVisible(frame, viewport)) {
-				continue;
-			}
-			const paragraph = ensureParagraph(candidate.nodeId, candidate.text);
-			if (!paragraph) {
-				continue;
-			}
-			let paragraphHeight = LABEL_TEXT_HEIGHT_PX;
-			try {
-				paragraph.layout(frameWidthPx);
-				paragraphHeight = Math.max(1, Math.ceil(paragraph.getHeight()));
-			} catch (error) {
-				console.warn(
-					"[CanvasNodeLabelLayer] Failed to layout label paragraph:",
-					error,
+			for (const candidate of labelCandidates) {
+				const layout = layoutByNodeId.get(candidate.nodeId);
+				const frame = resolveCanvasNodeLayoutScreenFrame(
+					layout?.value ?? candidate.node,
+					cameraState,
 				);
-				continue;
-			}
-			const labelContentHeight = Math.max(
-				measuredLabelContentHeight,
-				paragraphHeight,
-			);
-			const labelClipHeight =
-				labelContentHeight +
-				LABEL_TEXT_CLIP_PADDING_TOP_PX +
-				LABEL_TEXT_CLIP_PADDING_BOTTOM_PX;
-			const labelY = frame.y - LABEL_GAP_PX - labelClipHeight;
-			const labelRect = {
-				x: frame.x,
-				y: labelY,
-				width: frameWidthPx,
-				height: labelClipHeight,
-			};
-			const requiresDimLayer = candidate.opacity < 0.999;
-			if (requiresDimLayer) {
-				alphaPaint.setAlphaf(candidate.opacity);
-				canvas.saveLayer(alphaPaint, labelRect, null);
-			}
-			try {
-				const verticalOffset = Math.max(
-					0,
-					(labelContentHeight - paragraphHeight) / 2,
+				const frameWidthPx = Math.max(0, Math.floor(frame.width));
+				const isVisibleByWidth = frameWidthPx >= LABEL_MIN_VISIBLE_WIDTH_PX;
+				if (!isVisibleByWidth || !isCanvasScreenRectVisible(frame, viewport)) {
+					continue;
+				}
+				const paragraph = ensureParagraph(candidate.nodeId, candidate.text);
+				if (!paragraph) {
+					continue;
+				}
+				let paragraphHeight = LABEL_TEXT_HEIGHT_PX;
+				try {
+					paragraph.layout(frameWidthPx);
+					paragraphHeight = Math.max(1, Math.ceil(paragraph.getHeight()));
+				} catch (error) {
+					console.warn(
+						"[CanvasNodeLabelLayer] Failed to layout label paragraph:",
+						error,
+					);
+					continue;
+				}
+				const labelContentHeight = Math.max(
+					measuredLabelContentHeight,
+					paragraphHeight,
 				);
-				const textY = labelY + LABEL_TEXT_CLIP_PADDING_TOP_PX + verticalOffset;
-				canvas.save();
-				canvas.clipRect(labelRect, ClipOp.Intersect, true);
-				paragraph.paint(canvas, frame.x, textY);
-				canvas.restore();
-				hasVisibleLabel = true;
-			} catch (error) {
-				console.warn(
-					"[CanvasNodeLabelLayer] Failed to paint label paragraph:",
-					error,
-				);
+				const labelClipHeight =
+					labelContentHeight +
+					LABEL_TEXT_CLIP_PADDING_TOP_PX +
+					LABEL_TEXT_CLIP_PADDING_BOTTOM_PX;
+				const labelY = frame.y - LABEL_GAP_PX - labelClipHeight;
+				const labelRect = {
+					x: frame.x,
+					y: labelY,
+					width: frameWidthPx,
+					height: labelClipHeight,
+				};
+				const requiresDimLayer = candidate.opacity < 0.999;
+				if (requiresDimLayer) {
+					alphaPaint.setAlphaf(candidate.opacity);
+					recordingCanvas.saveLayer(alphaPaint, labelRect, null);
+				}
+				try {
+					const verticalOffset = Math.max(
+						0,
+						(labelContentHeight - paragraphHeight) / 2,
+					);
+					const textY = labelY + LABEL_TEXT_CLIP_PADDING_TOP_PX + verticalOffset;
+					recordingCanvas.save();
+					recordingCanvas.clipRect(labelRect, ClipOp.Intersect, true);
+					paragraph.paint(recordingCanvas, frame.x, textY);
+					recordingCanvas.restore();
+					hasVisibleLabel = true;
+				} catch (error) {
+					console.warn(
+						"[CanvasNodeLabelLayer] Failed to paint label paragraph:",
+						error,
+					);
+				}
+				if (requiresDimLayer) {
+					recordingCanvas.restore();
+				}
 			}
-			if (requiresDimLayer) {
-				canvas.restore();
-			}
-		}
 
-		const nextPicture = recorder.finishRecordingAsPicture();
-		if (!hasVisibleLabel) {
-			try {
-				nextPicture.dispose();
-			} catch {}
-			commitPicture(emptyPicture);
-			return;
+			const nextPicture = recorder.finishRecordingAsPicture();
+			if (!hasVisibleLabel) {
+				try {
+					nextPicture.dispose();
+				} catch {}
+				commitPicture(emptyPicture);
+				return;
+			}
+			commitPicture(nextPicture);
+		} finally {
+			(recordingCanvas as { dispose?: () => void } | null)?.dispose?.();
+			recorder.dispose?.();
 		}
-		commitPicture(nextPicture);
 	}, [
 		alphaPaint,
 		camera,

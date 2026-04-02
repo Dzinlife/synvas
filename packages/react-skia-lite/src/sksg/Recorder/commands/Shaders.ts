@@ -42,13 +42,17 @@ const declareShader = (
 	"worklet";
 	const { source, uniforms, ...transform } = props;
 	const m3 = ctx.Skia.Matrix();
-	processTransformProps(m3, transform);
-	const shader = source.makeShaderWithChildren(
-		processUniforms(source, uniforms),
-		ctx.shaders.splice(0, children),
-		m3,
-	);
-	ctx.shaders.push(shader);
+	try {
+		processTransformProps(m3, transform);
+		const shader = source.makeShaderWithChildren(
+			processUniforms(source, uniforms),
+			ctx.shaders.splice(0, children),
+			m3,
+		);
+		ctx.shaders.push(shader);
+	} finally {
+		ctx.queueDispose(m3);
+	}
 };
 
 const declareColorShader = (ctx: DrawingContext, props: ColorProps) => {
@@ -85,18 +89,22 @@ const declareTwoPointConicalGradientShader = (
 		ctx.Skia,
 		props,
 	);
-	const shader = ctx.Skia.Shader.MakeTwoPointConicalGradient(
-		start,
-		startR,
-		end,
-		endR,
-		colors,
-		positions,
-		mode,
-		localMatrix,
-		flags,
-	);
-	ctx.shaders.push(shader);
+	try {
+		const shader = ctx.Skia.Shader.MakeTwoPointConicalGradient(
+			start,
+			startR,
+			end,
+			endR,
+			colors,
+			positions,
+			mode,
+			localMatrix,
+			flags,
+		);
+		ctx.shaders.push(shader);
+	} finally {
+		ctx.queueDispose(localMatrix);
+	}
 };
 
 const declareRadialGradientShader = (
@@ -109,16 +117,20 @@ const declareRadialGradientShader = (
 		ctx.Skia,
 		props,
 	);
-	const shader = ctx.Skia.Shader.MakeRadialGradient(
-		c,
-		r,
-		colors,
-		positions,
-		mode,
-		localMatrix,
-		flags,
-	);
-	ctx.shaders.push(shader);
+	try {
+		const shader = ctx.Skia.Shader.MakeRadialGradient(
+			c,
+			r,
+			colors,
+			positions,
+			mode,
+			localMatrix,
+			flags,
+		);
+		ctx.shaders.push(shader);
+	} finally {
+		ctx.queueDispose(localMatrix);
+	}
 };
 
 const declareSweepGradientShader = (
@@ -131,18 +143,22 @@ const declareSweepGradientShader = (
 		ctx.Skia,
 		props,
 	);
-	const shader = ctx.Skia.Shader.MakeSweepGradient(
-		c.x,
-		c.y,
-		colors,
-		positions,
-		mode,
-		localMatrix,
-		flags,
-		start,
-		end,
-	);
-	ctx.shaders.push(shader);
+	try {
+		const shader = ctx.Skia.Shader.MakeSweepGradient(
+			c.x,
+			c.y,
+			colors,
+			positions,
+			mode,
+			localMatrix,
+			flags,
+			start,
+			end,
+		);
+		ctx.shaders.push(shader);
+	} finally {
+		ctx.queueDispose(localMatrix);
+	}
 };
 
 const declareLinearGradientShader = (
@@ -155,16 +171,20 @@ const declareLinearGradientShader = (
 		ctx.Skia,
 		props,
 	);
-	const shader = ctx.Skia.Shader.MakeLinearGradient(
-		start,
-		end,
-		colors,
-		positions ?? null,
-		mode,
-		localMatrix,
-		flags,
-	);
-	ctx.shaders.push(shader);
+	try {
+		const shader = ctx.Skia.Shader.MakeLinearGradient(
+			start,
+			end,
+			colors,
+			positions ?? null,
+			mode,
+			localMatrix,
+			flags,
+		);
+		ctx.shaders.push(shader);
+	} finally {
+		ctx.queueDispose(localMatrix);
+	}
 };
 
 const declareTurbulenceShader = (
@@ -193,38 +213,43 @@ const declareImageShader = (ctx: DrawingContext, props: ImageShaderProps) => {
 
 	const rct = getRect(ctx.Skia, imageShaderProps);
 	const m3 = ctx.Skia.Matrix();
-	if (rct) {
-		const rects = fitRects(
-			fit,
-			{ x: 0, y: 0, width: image.width(), height: image.height() },
-			rct,
-		);
-		const [x, y, sx, sy] = rect2rect(rects.src, rects.dst);
-		m3.translate(x.translateX, y.translateY);
-		m3.scale(sx.scaleX, sy.scaleY);
-	}
 	const lm = ctx.Skia.Matrix();
-	lm.concat(m3);
-	processTransformProps(lm, imageShaderProps);
-	let shader: SkShader;
-	if (sampling && isCubicSampling(sampling)) {
-		shader = image.makeShaderCubic(
-			TileMode[enumKey(tx)],
-			TileMode[enumKey(ty)],
-			sampling.B,
-			sampling.C,
-			lm,
-		);
-	} else {
-		shader = image.makeShaderCubic(
-			TileMode[enumKey(tx)],
-			TileMode[enumKey(ty)],
-			sampling?.filter ?? FilterMode.Linear,
-			sampling?.mipmap ?? MipmapMode.None,
-			lm,
-		);
+	try {
+		if (rct) {
+			const rects = fitRects(
+				fit,
+				{ x: 0, y: 0, width: image.width(), height: image.height() },
+				rct,
+			);
+			const [x, y, sx, sy] = rect2rect(rects.src, rects.dst);
+			m3.translate(x.translateX, y.translateY);
+			m3.scale(sx.scaleX, sy.scaleY);
+		}
+		lm.concat(m3);
+		processTransformProps(lm, imageShaderProps);
+		let shader: SkShader;
+		if (sampling && isCubicSampling(sampling)) {
+			shader = image.makeShaderCubic(
+				TileMode[enumKey(tx)],
+				TileMode[enumKey(ty)],
+				sampling.B,
+				sampling.C,
+				lm,
+			);
+		} else {
+			shader = image.makeShaderCubic(
+				TileMode[enumKey(tx)],
+				TileMode[enumKey(ty)],
+				sampling?.filter ?? FilterMode.Linear,
+				sampling?.mipmap ?? MipmapMode.None,
+				lm,
+			);
+		}
+		ctx.shaders.push(shader);
+	} finally {
+		ctx.queueDispose(lm);
+		ctx.queueDispose(m3);
 	}
-	ctx.shaders.push(shader);
 };
 
 const declareBlend = (ctx: DrawingContext, props: BlendProps) => {

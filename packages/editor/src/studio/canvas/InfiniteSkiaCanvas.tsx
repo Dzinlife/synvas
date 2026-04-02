@@ -13,6 +13,7 @@ import {
 import {
 	Canvas,
 	type CanvasRef,
+	flushSkiaDisposals,
 	Group,
 	Image,
 	markSkiaRuntimeActivity,
@@ -703,6 +704,31 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const tilePipelineDisposedRef = useRef(false);
 	const tileTickPausedRef = useRef(isFocusMode);
 	const latestTileFrameResultRef = useRef<TileFrameResult | null>(null);
+	const previousTileProjectIdRef = useRef<string | null>(currentProjectId);
+	const resetTilePipelineResources = useCallback(
+		(options?: { flushDisposals?: boolean }) => {
+			tileSchedulerRef.current?.reset({ disposeTiming: "immediate" });
+			for (const entry of rasterCacheRef.current.values()) {
+				entry.handle?.release();
+			}
+			for (const entry of tileInputCacheRef.current.values()) {
+				disposeTileInput(entry.input);
+			}
+			rasterCacheRef.current.clear();
+			nodeRasterUriRef.current.clear();
+			tileNodeAabbRef.current.clear();
+			tileNodeSourceSignatureRef.current.clear();
+			tileInputEpochRef.current.clear();
+			tileInputCacheRef.current.clear();
+			tileInputIdRef.current.clear();
+			nextTileInputIdRef.current = 1;
+			latestTileFrameResultRef.current = null;
+			if (options?.flushDisposals === false) return;
+			// 切项目允许同步做重回收，避免旧项目资源跨项目滞留。
+			flushSkiaDisposals();
+		},
+		[],
+	);
 	const getNodeLayoutValue = useCallback((nodeId: string) => {
 		return nodeLayoutValuesRef.current.get(nodeId) ?? null;
 	}, []);
@@ -901,6 +927,24 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 	useEffect(() => {
 		if (!supportsTilePipeline) return;
+		const previousProjectId = previousTileProjectIdRef.current;
+		previousTileProjectIdRef.current = currentProjectId;
+		if (!previousProjectId || !currentProjectId) return;
+		if (previousProjectId === currentProjectId) return;
+		resetTilePipelineResources();
+		setRasterCacheVersion((prev) => prev + 1);
+		if (!tileTickPausedRef.current) {
+			scheduleTileTick();
+		}
+	}, [
+		currentProjectId,
+		resetTilePipelineResources,
+		scheduleTileTick,
+		supportsTilePipeline,
+	]);
+
+	useEffect(() => {
+		if (!supportsTilePipeline) return;
 		const nextNodeRasterUri = new Map<string, string | null>();
 		const requiredUris = new Set<string>();
 		for (const node of tileNodes) {
@@ -982,21 +1026,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 	useEffect(() => {
 		return () => {
-			for (const entry of rasterCacheRef.current.values()) {
-				entry.handle?.release();
-			}
-			for (const entry of tileInputCacheRef.current.values()) {
-				disposeTileInput(entry.input);
-			}
-			rasterCacheRef.current.clear();
-			nodeRasterUriRef.current.clear();
-			tileNodeAabbRef.current.clear();
-			tileNodeSourceSignatureRef.current.clear();
-			tileInputEpochRef.current.clear();
-			tileInputCacheRef.current.clear();
-			tileInputIdRef.current.clear();
+			resetTilePipelineResources({ flushDisposals: false });
 		};
-	}, []);
+	}, [resetTilePipelineResources]);
 
 	useLayoutEffect(() => {
 		const nextNodeIds = new Set<string>();

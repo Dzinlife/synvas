@@ -4,6 +4,11 @@ import { Bug, PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import { AnimatePresence, motion, usePresence } from "motion/react";
 import type React from "react";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+	getSkiaResourceTrackerConfig,
+	getSkiaResourceTrackerStorageKey,
+	setSkiaResourceTrackerConfig,
+} from "react-skia-lite";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { getOwner, releaseOwner, subscribeOwnerChange } from "@/audio/owner";
 import { SnapIcon } from "@/components/icons";
@@ -121,6 +126,8 @@ const ACTIVE_NODE_OVERLAY_PRESENCE_TRANSITION = {
 const RIGHT_PANEL_EXIT_DURATION_MS = Math.round(
 	RIGHT_PANEL_PRESENCE_TRANSITION.duration * 1000,
 );
+const SKIA_RESOURCE_TRACKER_DEFAULT_SAMPLE_LIMIT = 3;
+const SKIA_RESOURCE_TRACKER_DEBUG_SAMPLE_LIMIT = 200;
 const IS_JSDOM_ENV =
 	typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent);
 interface AnimatedRightPanelProps {
@@ -347,6 +354,15 @@ const CanvasWorkspaceOverlay = ({
 	const setCanvasSnapEnabled = useProjectStore(
 		(state) => state.setCanvasSnapEnabled,
 	);
+	const [skiaResourceTrackerDebugEnabled, setSkiaResourceTrackerDebugEnabled] =
+		useState(() => {
+			const config = getSkiaResourceTrackerConfig();
+			return (
+				config.enabled &&
+				config.captureStacks &&
+				config.autoProjectSwitchSnapshot
+			);
+		});
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
@@ -416,6 +432,50 @@ const CanvasWorkspaceOverlay = ({
 		});
 		return unsubscribe;
 	}, [pauseBlurredSceneOwnerPlayback]);
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		const handleStorage = (event: StorageEvent) => {
+			if (event.key !== getSkiaResourceTrackerStorageKey()) return;
+			const config = getSkiaResourceTrackerConfig();
+			setSkiaResourceTrackerDebugEnabled(
+				config.enabled &&
+					config.captureStacks &&
+					config.autoProjectSwitchSnapshot,
+			);
+		};
+		window.addEventListener("storage", handleStorage);
+		return () => {
+			window.removeEventListener("storage", handleStorage);
+		};
+	}, []);
+	const handleToggleSkiaResourceTrackerDebug = useCallback(() => {
+		if (skiaResourceTrackerDebugEnabled) {
+			setSkiaResourceTrackerConfig({
+				enabled: false,
+				captureStacks: false,
+				autoProjectSwitchSnapshot: false,
+				sampleLimitPerType: SKIA_RESOURCE_TRACKER_DEFAULT_SAMPLE_LIMIT,
+			});
+			if (typeof window !== "undefined") {
+				try {
+					window.localStorage.removeItem(getSkiaResourceTrackerStorageKey());
+				} catch {}
+			}
+			setSkiaResourceTrackerDebugEnabled(false);
+			return;
+		}
+		const nextConfig = setSkiaResourceTrackerConfig({
+			enabled: true,
+			captureStacks: true,
+			autoProjectSwitchSnapshot: true,
+			sampleLimitPerType: SKIA_RESOURCE_TRACKER_DEBUG_SAMPLE_LIMIT,
+		});
+		setSkiaResourceTrackerDebugEnabled(
+			nextConfig.enabled &&
+				nextConfig.captureStacks &&
+				nextConfig.autoProjectSwitchSnapshot,
+		);
+	}, [skiaResourceTrackerDebugEnabled]);
 
 	const DrawerComponent = resolvedDrawer?.Drawer;
 
@@ -482,6 +542,23 @@ const CanvasWorkspaceOverlay = ({
 						<span className="flex items-center gap-1">
 							<Bug className="size-3" />
 							<span>Tile 调试</span>
+						</span>
+					</button>
+					<button
+						type="button"
+						onClick={handleToggleSkiaResourceTrackerDebug}
+						aria-label="Skia 资源追踪"
+						aria-pressed={skiaResourceTrackerDebugEnabled}
+						data-testid="canvas-skia-resource-tracker-toggle"
+						className={`rounded px-2 py-1 transition ${
+							skiaResourceTrackerDebugEnabled
+								? "bg-white/10 text-amber-300 hover:bg-white/20"
+								: "bg-white/5 text-white/55 hover:bg-white/10"
+						}`}
+					>
+						<span className="flex items-center gap-1">
+							<Bug className="size-3" />
+							<span>Skia 追踪</span>
 						</span>
 					</button>
 					<button

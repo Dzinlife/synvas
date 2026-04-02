@@ -139,19 +139,25 @@ export class SkiaSGRoot {
 
 	getPicture() {
 		const recorder = this.Skia.PictureRecorder();
-		const canvas = recorder.beginRecording();
-		const retainedResources = this.drawOnCanvas(canvas, {
-			retainResources: true,
-		});
-		const picture = recorder.finishRecordingAsPicture();
-		if (retainedResources.length > 0) {
-			attachDisposeCleanup(picture, () => {
-				for (const cleanup of retainedResources) {
-					cleanup();
-				}
+		let canvas: SkCanvas | null = null;
+		try {
+			canvas = recorder.beginRecording();
+			const retainedResources = this.drawOnCanvas(canvas, {
+				retainResources: true,
 			});
+			const picture = recorder.finishRecordingAsPicture();
+			if (retainedResources.length > 0) {
+				attachDisposeCleanup(picture, () => {
+					for (const cleanup of retainedResources) {
+						cleanup();
+					}
+				});
+			}
+			return picture;
+		} finally {
+			(canvas as { dispose?: () => void } | null)?.dispose?.();
+			recorder.dispose?.();
 		}
-		return picture;
 	}
 
 	unmount() {

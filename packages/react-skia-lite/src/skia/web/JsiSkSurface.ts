@@ -4,7 +4,6 @@ import type { SkCanvas, SkImage, SkRect, SkSurface } from "../types";
 
 import {
   HostObject,
-  runAttachedDisposeCleanups,
   SKIA_DISPOSE_SYMBOL,
 } from "./Host";
 import { JsiSkCanvas } from "./JsiSkCanvas";
@@ -17,6 +16,7 @@ export class JsiSkSurface
   implements SkSurface
 {
   private cleanup?: () => void;
+  private canvas: JsiSkCanvas | null = null;
 
   private setSurfaceCurrentContextIfNeeded(ref: Surface | null | undefined) {
     if (!ref || typeof ref !== "object") {
@@ -42,6 +42,9 @@ export class JsiSkSurface
   }
 
   [SKIA_DISPOSE_SYMBOL]() {
+    const canvas = this.canvas;
+    this.canvas = null;
+    canvas?.dispose?.();
     const ref = this.ref;
     this.ref = null as unknown as Surface;
     try {
@@ -52,7 +55,7 @@ export class JsiSkSurface
         ref.delete();
       }
     } finally {
-      runAttachedDisposeCleanups(this);
+      super[SKIA_DISPOSE_SYMBOL]();
       this.cleanup?.();
       this.cleanup = undefined;
     }
@@ -71,7 +74,14 @@ export class JsiSkSurface
   }
 
   getCanvas(): SkCanvas {
-    return new JsiSkCanvas(this.CanvasKit, this.ref.getCanvas());
+    if (this.canvas && this.canvas.ref) {
+      return this.canvas;
+    }
+    const nextCanvas = new JsiSkCanvas(this.CanvasKit, this.ref.getCanvas(), {
+      ownsRef: false,
+    });
+    this.canvas = nextCanvas;
+    return nextCanvas;
   }
 
   asImage(bounds?: SkRect): SkImage | null {

@@ -23,7 +23,10 @@ export class JsiSkPictureRecorder
         bounds
           ? JsiSkRect.fromValue(this.CanvasKit, bounds)
           : Float32Array.of(0, 0, 2_000_000, 2_000_000)
-      )
+      ),
+      {
+        ownsRef: false,
+      }
     );
   }
 

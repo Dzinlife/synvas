@@ -712,6 +712,7 @@ const mockDOMRect = {
 	left: 0,
 	toJSON: () => ({}),
 } as DOMRect;
+const SKIA_RESOURCE_TRACKER_STORAGE_KEY = "ai-nle:skia-resource-tracker:v1";
 
 vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
 	() => mockDOMRect,
@@ -4212,6 +4213,33 @@ describe("CanvasWorkspace", () => {
 		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("picture");
 		fireEvent.click(screen.getByTestId("canvas-tile-input-mode-toggle"));
 		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("raster");
+	});
+
+	it("toolbar 的 Skia 追踪按钮会写入并删除 localStorage 配置", () => {
+		window.localStorage.removeItem(SKIA_RESOURCE_TRACKER_STORAGE_KEY);
+		render(<CanvasWorkspace />);
+		const toggle = screen.getByTestId("canvas-skia-resource-tracker-toggle");
+		expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+		fireEvent.click(toggle);
+		const rawConfig = window.localStorage.getItem(
+			SKIA_RESOURCE_TRACKER_STORAGE_KEY,
+		);
+		expect(rawConfig).not.toBeNull();
+		const parsedConfig = JSON.parse(rawConfig ?? "{}");
+		expect(parsedConfig).toEqual({
+			enabled: true,
+			captureStacks: true,
+			autoProjectSwitchSnapshot: true,
+			sampleLimitPerType: 200,
+		});
+		expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+		fireEvent.click(toggle);
+		expect(
+			window.localStorage.getItem(SKIA_RESOURCE_TRACKER_STORAGE_KEY),
+		).toBeNull();
+		expect(toggle.getAttribute("aria-pressed")).toBe("false");
 	});
 
 	it("node-drag 手势期间会提升 tile 任务上限，结束后恢复默认值", () => {

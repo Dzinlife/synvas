@@ -88,8 +88,14 @@ const getTrackIndexForElement = (element: TimelineElement): number => {
 
 const createEmptyPicture = (): SkPicture => {
 	const recorder = Skia.PictureRecorder();
-	recorder.beginRecording();
-	return recorder.finishRecordingAsPicture();
+	let canvas: ReturnType<typeof recorder.beginRecording> | null = null;
+	try {
+		canvas = recorder.beginRecording();
+		return recorder.finishRecordingAsPicture();
+	} finally {
+		(canvas as { dispose?: () => void } | null)?.dispose?.();
+		recorder.dispose?.();
+	}
 };
 
 export const SceneNodeSkiaRenderer: React.FC<

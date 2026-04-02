@@ -15,6 +15,7 @@ import {
   StrokeCap,
   StrokeJoin,
 } from "../../skia/types";
+import { scheduleSkiaDispose } from "../../skia/web/resourceLifecycle";
 import { getSkiaRenderBackend } from "../../skia/web/renderBackend";
 
 export type ActiveRenderTarget = {
@@ -193,6 +194,49 @@ export const createDrawingContext = (
     return resources;
   };
 
+  const queueDispose = (
+    target: {
+      dispose?: () => void;
+      delete?: () => void;
+    } | null | undefined
+  ) => {
+    if (!target) return;
+    scheduleSkiaDispose(target, { timing: "animationFrame" });
+  };
+
+  const queueDisposeMany = (
+    targets: Array<{
+      dispose?: () => void;
+      delete?: () => void;
+    }>
+  ) => {
+    for (const target of targets) {
+      queueDispose(target);
+    }
+  };
+
+  const composeHostObjects = <
+    T extends {
+      dispose?: () => void;
+      delete?: () => void;
+    }
+  >(
+    values: T[],
+    compose: (outer: T, inner: T) => T
+  ): { result: T; temporaries: T[] } => {
+    if (values.length <= 0) {
+      throw new Error("No host object to compose");
+    }
+    let result = values[values.length - 1];
+    const temporaries: T[] = [];
+    for (let index = values.length - 2; index >= 0; index -= 1) {
+      const next = compose(values[index], result);
+      temporaries.push(next);
+      result = next;
+    }
+    return { result, temporaries };
+  };
+
   const createBackdropPaint = () => {
     const paint = getCurrentPaint().copy();
     paint.setAlphaf(paint.getAlphaf() * getOpacity());
@@ -325,39 +369,62 @@ export const createDrawingContext = (
   const materializePaint = () => {
     // Color Filters
     if (colorFilters.length > 0) {
-      getCurrentPaint().setColorFilter(
-        colorFilters.reduceRight((inner, outer) =>
-          inner ? Skia.ColorFilter.MakeCompose(outer, inner) : outer
-        )
-      );
+      const pendingColorFilters = colorFilters.splice(0);
+      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> = [];
+      try {
+        const { result, temporaries: createdTemporaries } = composeHostObjects(
+          pendingColorFilters,
+          (outer, inner) => Skia.ColorFilter.MakeCompose(outer, inner)
+        );
+        temporaries = createdTemporaries;
+        getCurrentPaint().setColorFilter(result);
+      } finally {
+        queueDisposeMany(temporaries);
+        queueDisposeMany(pendingColorFilters);
+      }
     }
     // Shaders
     if (shaders.length > 0) {
-      getCurrentPaint().setShader(shaders[shaders.length - 1]);
+      const pendingShaders = shaders.splice(0);
+      try {
+        getCurrentPaint().setShader(pendingShaders[pendingShaders.length - 1]);
+      } finally {
+        queueDisposeMany(pendingShaders);
+      }
     }
     // Image Filters
     if (imageFilters.length > 0) {
-      getCurrentPaint().setImageFilter(
-        imageFilters.reduceRight((inner, outer) =>
-          inner ? Skia.ImageFilter.MakeCompose(outer, inner) : outer
-        )
-      );
+      const pendingImageFilters = imageFilters.splice(0);
+      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> = [];
+      try {
+        const { result, temporaries: createdTemporaries } = composeHostObjects(
+          pendingImageFilters,
+          (outer, inner) => Skia.ImageFilter.MakeCompose(outer, inner)
+        );
+        temporaries = createdTemporaries;
+        getCurrentPaint().setImageFilter(result);
+      } finally {
+        queueDisposeMany(temporaries);
+        queueDisposeMany(pendingImageFilters);
+      }
     }
 
     // Path Effects
     if (pathEffects.length > 0) {
-      getCurrentPaint().setPathEffect(
-        pathEffects.reduceRight((inner, outer) =>
-          inner ? Skia.PathEffect.MakeCompose(outer, inner) : outer
-        )
-      );
+      const pendingPathEffects = pathEffects.splice(0);
+      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> = [];
+      try {
+        const { result, temporaries: createdTemporaries } = composeHostObjects(
+          pendingPathEffects,
+          (outer, inner) => Skia.PathEffect.MakeCompose(outer, inner)
+        );
+        temporaries = createdTemporaries;
+        getCurrentPaint().setPathEffect(result);
+      } finally {
+        queueDisposeMany(temporaries);
+        queueDisposeMany(pendingPathEffects);
+      }
     }
-
-    // Clear arrays
-    colorFilters.length = 0;
-    shaders.length = 0;
-    imageFilters.length = 0;
-    pathEffects.length = 0;
   };
 
   // Return an object containing the Skia reference, the canvas, and the methods
@@ -388,6 +455,8 @@ export const createDrawingContext = (
     setOpacity,
     retainResource,
     takeRetainedResources,
+    queueDispose,
+    queueDisposeMany,
   };
 };
 

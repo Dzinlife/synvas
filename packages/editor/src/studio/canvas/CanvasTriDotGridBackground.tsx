@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
+	createSkiaResourceScope,
 	Rect,
 	Shader,
 	Skia,
@@ -204,13 +205,25 @@ export const CanvasTriDotGridBackground = ({
 	camera,
 	uniforms,
 }: CanvasTriDotGridBackgroundProps) => {
+	const resourceScopeRef = useRef(createSkiaResourceScope());
 	const shaderSource = useMemo(() => {
 		try {
-			return Skia.RuntimeEffect.Make(TRI_DOT_GRID_SHADER_CODE);
+			const runtimeEffect = Skia.RuntimeEffect.Make(TRI_DOT_GRID_SHADER_CODE);
+			if (runtimeEffect) {
+				resourceScopeRef.current.track(runtimeEffect);
+			}
+			return runtimeEffect;
 		} catch (error) {
 			console.error("Failed to create canvas tri dot grid shader:", error);
 			return null;
 		}
+	}, []);
+	useEffect(() => {
+		return () => {
+			resourceScopeRef.current.disposeAll({
+				timing: "immediate",
+			});
+		};
 	}, []);
 	const resolvedUniforms = useMemo(() => {
 		if (uniforms) {

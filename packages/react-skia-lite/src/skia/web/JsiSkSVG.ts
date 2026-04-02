@@ -23,5 +23,6 @@ export class JsiSkSVG
     if (this.ref.parentNode) {
       this.ref.parentNode.removeChild(this.ref);
     }
+    super[SKIA_DISPOSE_SYMBOL]();
   }
 }

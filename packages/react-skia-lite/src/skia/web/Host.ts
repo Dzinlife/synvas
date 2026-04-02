@@ -1,6 +1,10 @@
 import type { CanvasKit, EmbindEnum, EmbindEnumEntity } from "canvaskit-wasm";
 
 import type { SkJSIInstance } from "../types";
+import {
+	registerTrackedSkiaHostObject,
+	unregisterTrackedSkiaHostObject,
+} from "./resourceTracker";
 
 const disposedNativeRefs = new WeakSet<object>();
 const disposeCleanupSymbol = Symbol("skia-dispose-cleanup");
@@ -57,6 +61,7 @@ export abstract class BaseHostObject<T, N extends string>
 		super(CanvasKit);
 		this.ref = ref;
 		this.__typename__ = typename;
+		registerTrackedSkiaHostObject(this);
 	}
 
 	dispose() {
@@ -70,10 +75,12 @@ export abstract class BaseHostObject<T, N extends string>
 	[SKIA_DISPOSE_SYMBOL](): void {
 		const currentRef = this.ref as unknown;
 		if (!currentRef || typeof currentRef !== "object") {
+			unregisterTrackedSkiaHostObject(this);
 			runAttachedDisposeCleanups(this);
 			return;
 		}
 		if (disposedNativeRefs.has(currentRef)) {
+			unregisterTrackedSkiaHostObject(this);
 			runAttachedDisposeCleanups(this);
 			return;
 		}
@@ -86,6 +93,7 @@ export abstract class BaseHostObject<T, N extends string>
 			}
 		} catch {
 		} finally {
+			unregisterTrackedSkiaHostObject(this);
 			runAttachedDisposeCleanups(this);
 		}
 	}

@@ -1,6 +1,7 @@
 import {
   enumKey,
   fitRects,
+  isStringPathDef,
   processCircle,
   processColor,
   processPath,
@@ -132,39 +133,46 @@ export const drawDiffRect = (ctx: DrawingContext, props: DiffRectProps) => {
 export const drawTextPath = (ctx: DrawingContext, props: TextPathProps) => {
   "worklet";
   const path = processPath(ctx.Skia, props.path);
+  const shouldDisposePath = isStringPathDef(props.path);
   const { font, initialOffset } = props;
-  if (font) {
-    let { text } = props;
-    const ids = font.getGlyphIDs(text);
-    const widths = font.getGlyphWidths(ids);
-    const rsx: SkRSXform[] = [];
-    const meas = ctx.Skia.ContourMeasureIter(path, false, 1);
-    let cont = meas.next();
-    let dist = initialOffset;
-    for (let i = 0; i < text.length && cont; i++) {
-      const width = widths[i];
-      dist += width / 2;
-      if (dist > cont.length()) {
-        // jump to next contour
-        cont = meas.next();
-        if (!cont) {
-          // We have come to the end of the path - terminate the string
-          // right here.
-          text = text.substring(0, i);
-          break;
+  try {
+    if (font) {
+      let { text } = props;
+      const ids = font.getGlyphIDs(text);
+      const widths = font.getGlyphWidths(ids);
+      const rsx: SkRSXform[] = [];
+      const meas = ctx.Skia.ContourMeasureIter(path, false, 1);
+      let cont = meas.next();
+      let dist = initialOffset;
+      for (let i = 0; i < text.length && cont; i++) {
+        const width = widths[i];
+        dist += width / 2;
+        if (dist > cont.length()) {
+          // jump to next contour
+          cont = meas.next();
+          if (!cont) {
+            // We have come to the end of the path - terminate the string
+            // right here.
+            text = text.substring(0, i);
+            break;
+          }
+          dist = width / 2;
         }
-        dist = width / 2;
+        // Gives us the (x, y) coordinates as well as the cos/sin of the tangent
+        // line at that position.
+        const [p, t] = cont.getPosTan(dist);
+        const adjustedX = p.x - (width / 2) * t.x;
+        const adjustedY = p.y - (width / 2) * t.y;
+        rsx.push(ctx.Skia.RSXform(t.x, t.y, adjustedX, adjustedY));
+        dist += width / 2;
       }
-      // Gives us the (x, y) coordinates as well as the cos/sin of the tangent
-      // line at that position.
-      const [p, t] = cont.getPosTan(dist);
-      const adjustedX = p.x - (width / 2) * t.x;
-      const adjustedY = p.y - (width / 2) * t.y;
-      rsx.push(ctx.Skia.RSXform(t.x, t.y, adjustedX, adjustedY));
-      dist += width / 2;
+      const derived = ctx.Skia.TextBlob.MakeFromRSXform(text, rsx, font);
+      ctx.canvas.drawTextBlob(derived, 0, 0, ctx.paint);
     }
-    const derived = ctx.Skia.TextBlob.MakeFromRSXform(text, rsx, font);
-    ctx.canvas.drawTextBlob(derived, 0, 0, ctx.paint);
+  } finally {
+    if (shouldDisposePath) {
+      ctx.queueDispose(path);
+    }
   }
 };
 
@@ -225,17 +233,28 @@ export const drawPath = (ctx: DrawingContext, props: PathProps) => {
   const willMutatePath =
     hasStartOffset || hasEndOffset || hasStrokeOptions || hasFillType;
   const pristinePath = processPath(ctx.Skia, pathProps.path);
+  const shouldDisposePristinePath = isStringPathDef(pathProps.path);
   const path = willMutatePath ? pristinePath.copy() : pristinePath;
-  if (hasFillType) {
-    path.setFillType(FillType[enumKey(fillType)]);
+  const shouldDisposePath = willMutatePath || shouldDisposePristinePath;
+  try {
+    if (hasFillType) {
+      path.setFillType(FillType[enumKey(fillType)]);
+    }
+    if (hasStrokeOptions) {
+      path.stroke(stroke);
+    }
+    if (hasStartOffset || hasEndOffset) {
+      path.trim(start, end, false);
+    }
+    ctx.canvas.drawPath(path, ctx.paint);
+  } finally {
+    if (shouldDisposePath) {
+      ctx.queueDispose(path);
+    }
+    if (willMutatePath && shouldDisposePristinePath && pristinePath !== path) {
+      ctx.queueDispose(pristinePath);
+    }
   }
-  if (hasStrokeOptions) {
-    path.stroke(stroke);
-  }
-  if (hasStartOffset || hasEndOffset) {
-    path.trim(start, end, false);
-  }
-  ctx.canvas.drawPath(path, ctx.paint);
 };
 
 export const drawRect = (ctx: DrawingContext, props: RectProps) => {

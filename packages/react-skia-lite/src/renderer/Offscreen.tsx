@@ -6,22 +6,29 @@ import { SkiaSGRoot } from "../sksg/Reconciler";
 
 export const drawAsPicture = async (element: ReactElement, bounds?: SkRect) => {
 	const recorder = Skia.PictureRecorder();
-	const canvas = recorder.beginRecording(bounds);
-	const root = new SkiaSGRoot(Skia);
-	await root.render(element);
-	const retainedResources = root.drawOnCanvas(canvas, {
-		retainResources: true,
-	});
-	const picture = recorder.finishRecordingAsPicture();
-	if (retainedResources.length > 0) {
-		attachDisposeCleanup(picture, () => {
-			for (const cleanup of retainedResources) {
-				cleanup();
-			}
+	let canvas: ReturnType<typeof recorder.beginRecording> | null = null;
+	let root: SkiaSGRoot | null = null;
+	try {
+		canvas = recorder.beginRecording(bounds);
+		root = new SkiaSGRoot(Skia);
+		await root.render(element);
+		const retainedResources = root.drawOnCanvas(canvas, {
+			retainResources: true,
 		});
+		const picture = recorder.finishRecordingAsPicture();
+		if (retainedResources.length > 0) {
+			attachDisposeCleanup(picture, () => {
+				for (const cleanup of retainedResources) {
+					cleanup();
+				}
+			});
+		}
+		return picture;
+	} finally {
+		root?.unmount();
+		(canvas as { dispose?: () => void } | null)?.dispose?.();
+		recorder.dispose?.();
 	}
-	root.unmount();
-	return picture;
 };
 
 export const drawAsImage = async (element: ReactElement, size: SkSize) => {

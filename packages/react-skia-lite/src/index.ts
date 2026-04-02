@@ -14,6 +14,23 @@ export * from "./skia";
 export { JsiSkImage } from "./skia/web/JsiSkImage";
 export { JsiSkSurface } from "./skia/web/JsiSkSurface";
 export { makeImageFromTextureSourceDirect } from "./skia/web/makeTextureSourceImage";
+export {
+	captureTrackedSkiaHostObjectsSnapshot,
+	diffTrackedSkiaHostObjectSnapshots,
+	getSkiaResourceTrackerConfig,
+	getSkiaResourceTrackerStorageKey,
+	getTrackedSkiaHostObjectCount,
+	getTrackedSkiaHostObjectStats,
+	setSkiaResourceTrackerConfig,
+} from "./skia/web/resourceTracker";
+export type {
+	CaptureTrackedSkiaHostObjectSnapshotOptions,
+	SkiaResourceTrackerConfig,
+	TrackedSkiaHostObjectSample,
+	TrackedSkiaHostObjectSnapshot,
+	TrackedSkiaHostObjectSnapshotDiff,
+	TrackedSkiaHostObjectStats,
+} from "./skia/web/resourceTracker";
 export * from "./skia/web/resourceLifecycle";
 export * from "./skia/web/surfaceFactory";
 export * from "./skia/web/webgpuReadback";

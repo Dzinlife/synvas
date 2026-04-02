@@ -1,4 +1,5 @@
 import {
+	scheduleSkiaDispose,
 	Skia,
 	type SkTypeface,
 	type SkTypefaceFontProvider,
@@ -246,11 +247,28 @@ const DEFAULT_FALLBACK_CHAIN = [
 	APPLE_EMOJI_FAMILY,
 ];
 
+const scheduleDisposableRelease = (target: unknown) => {
+	if (!target || typeof target !== "object") return;
+	const disposable = target as {
+		dispose?: (() => void) | undefined;
+		delete?: (() => void) | undefined;
+	};
+	if (
+		typeof disposable.dispose !== "function" &&
+		typeof disposable.delete !== "function"
+	) {
+		return;
+	}
+	scheduleSkiaDispose(disposable, { timing: "manual" });
+};
+
 class FontRegistry {
 	private listeners = new Set<() => void>();
 	private provider: SkTypefaceFontProvider | null = null;
 	private providerPromise: Promise<SkTypefaceFontProvider | null> | null = null;
 	private primaryTypeface: SkTypeface | null = null;
+	private providerEpoch = 0;
+	private readonly registeredTypefaces = new Set<SkTypeface>();
 
 	private readonly definitionsById = new Map<string, FontDefinition>();
 	private readonly definitionsByFamily = new Map<string, FontDefinition[]>();
@@ -332,9 +350,15 @@ class FontRegistry {
 	}
 
 	private resetProviderState() {
+		for (const typeface of this.registeredTypefaces) {
+			scheduleDisposableRelease(typeface);
+		}
+		this.registeredTypefaces.clear();
+		scheduleDisposableRelease(this.provider);
 		this.provider = null;
 		this.providerPromise = null;
 		this.primaryTypeface = null;
+		this.providerEpoch += 1;
 		this.loadedDefinitionIds.clear();
 		this.loadInflightByDefinitionId.clear();
 	}
@@ -395,7 +419,17 @@ class FontRegistry {
 				typeof dataFactory?.fromBytes === "function"
 					? dataFactory.fromBytes(new Uint8Array(bytes))
 					: bytes;
-			return typefaceFactory.MakeFreeTypeFaceFromData(fontData) ?? null;
+			try {
+				return typefaceFactory.MakeFreeTypeFaceFromData(fontData) ?? null;
+			} finally {
+				scheduleSkiaDispose(
+					fontData as {
+						dispose?: (() => void) | undefined;
+						delete?: (() => void) | undefined;
+					},
+					{ timing: "animationFrame" },
+				);
+			}
 		} catch (error) {
 			console.warn(
 				"[FontRegistry] Failed to create typeface from bytes:",
@@ -423,17 +457,29 @@ class FontRegistry {
 			return false;
 		}
 		const requestPromise = (async () => {
+			const startEpoch = this.providerEpoch;
 			try {
 				const provider = await this.ensureProvider();
 				if (!provider) {
 					return false;
 				}
+				if (startEpoch !== this.providerEpoch) {
+					return false;
+				}
 				const bytes = await this.fetchFontBytes(definition.source.url);
+				if (startEpoch !== this.providerEpoch) {
+					return false;
+				}
 				const typeface = this.createTypefaceFromBytes(bytes);
 				if (!typeface) {
 					return false;
 				}
+				if (startEpoch !== this.providerEpoch) {
+					scheduleDisposableRelease(typeface);
+					return false;
+				}
 				provider.registerFont(typeface, definition.family);
+				this.registeredTypefaces.add(typeface);
 				this.loadedDefinitionIds.add(definition.id);
 				if (
 					this.primaryTypeface === null &&

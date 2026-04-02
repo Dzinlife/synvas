@@ -38,6 +38,7 @@ import {
 import {
   getEnum,
   HostObject,
+  SKIA_DISPOSE_SYMBOL,
   setCurrentCanvasKitContextIfNeeded,
 } from "./Host";
 import { JsiSkPaint } from "./JsiSkPaint";
@@ -58,8 +59,26 @@ export class JsiSkCanvas
   extends HostObject<Canvas, "Canvas">
   implements SkCanvas
 {
-  constructor(CanvasKit: CanvasKit, ref: Canvas) {
+  private readonly ownsRef: boolean;
+
+  constructor(
+    CanvasKit: CanvasKit,
+    ref: Canvas,
+    options?: {
+      ownsRef?: boolean;
+    }
+  ) {
     super(CanvasKit, ref, "Canvas");
+    this.ownsRef = options?.ownsRef ?? true;
+  }
+
+  [SKIA_DISPOSE_SYMBOL](): void {
+    if (this.ownsRef) {
+      super[SKIA_DISPOSE_SYMBOL]();
+      return;
+    }
+    this.ref = null as unknown as Canvas;
+    super[SKIA_DISPOSE_SYMBOL]();
   }
 
   drawRect(rect: SkRect, paint: SkPaint) {

@@ -10,7 +10,7 @@ export class JsiSkRRect
   implements SkRRect
 {
   [SKIA_DISPOSE_SYMBOL]() {
-    // nothing to do here, RRect is a Float32Array
+    super[SKIA_DISPOSE_SYMBOL]();
   }
 
   static fromValue(CanvasKit: CanvasKit, rect: InputRRect) {

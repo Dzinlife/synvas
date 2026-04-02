@@ -12,6 +12,14 @@ import {
 	useRef,
 	useState,
 } from "react";
+import type { TrackedSkiaHostObjectSnapshot } from "react-skia-lite";
+import {
+	captureTrackedSkiaHostObjectsSnapshot,
+	diffTrackedSkiaHostObjectSnapshots,
+	flushSkiaDisposals,
+	getSkiaDisposalStats,
+	getSkiaResourceTrackerConfig,
+} from "react-skia-lite";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
@@ -323,6 +331,7 @@ const DOUBLE_TAP_MAX_DISTANCE_PX = 24;
 const TAP_MOVE_THRESHOLD_PX = 3;
 const FOCUS_EXIT_MIN_ZOOM_RATIO = 0.5;
 const FOCUS_TILE_LOD_TRANSITION: TileLodTransition = { mode: "freeze" };
+const SKIA_RESOURCE_TRACKER_LOG_TAG = "[skia-resource-tracker]";
 const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
 	import.meta.env.DEV &&
 	(import.meta.env as Record<string, unknown>)
@@ -890,6 +899,9 @@ const CanvasWorkspace = () => {
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const preFocusCameraCenterRef = useRef<{ x: number; y: number } | null>(null);
 	const focusCameraZoomRef = useRef<number | null>(null);
+	const previousProjectIdRef = useRef<string | null>(currentProjectId);
+	const previousSkiaResourceSnapshotRef =
+		useRef<TrackedSkiaHostObjectSnapshot | null>(null);
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
 	const nodeDragSessionRef = useRef<NodeDragSession | null>(null);
 	const nodeResizeSessionRef = useRef<NodeResizeSession | null>(null);
@@ -1105,6 +1117,96 @@ const CanvasWorkspace = () => {
 	});
 	useEffect(() => {
 		syncCameraFromStore();
+	}, [currentProjectId]);
+	useEffect(() => {
+		const previousProjectId = previousProjectIdRef.current;
+		previousProjectIdRef.current = currentProjectId;
+		const didProjectSwitch =
+			Boolean(previousProjectId) &&
+			Boolean(currentProjectId) &&
+			previousProjectId !== currentProjectId;
+		if (didProjectSwitch) {
+			// 切项目允许做重清理，先把全局回收队列冲刷干净。
+			flushSkiaDisposals();
+		}
+		const trackerConfig = getSkiaResourceTrackerConfig();
+		const isAutoSnapshotEnabled =
+			trackerConfig.enabled && trackerConfig.autoProjectSwitchSnapshot;
+		if (!currentProjectId || !isAutoSnapshotEnabled) {
+			previousSkiaResourceSnapshotRef.current = null;
+			return;
+		}
+		const sampleLimitPerType = Math.max(1, trackerConfig.sampleLimitPerType);
+		if (!previousProjectId || previousProjectId === currentProjectId) {
+			previousSkiaResourceSnapshotRef.current =
+				captureTrackedSkiaHostObjectsSnapshot({
+					includeSamples: true,
+					sampleLimitPerType,
+				});
+			return;
+		}
+		let cancelled = false;
+		let firstFrameId: number | null = null;
+		let secondFrameId: number | null = null;
+		const beforeSnapshot =
+			previousSkiaResourceSnapshotRef.current ??
+			captureTrackedSkiaHostObjectsSnapshot({
+				includeSamples: true,
+				sampleLimitPerType,
+			});
+		const captureAndReportResourceDiff = () => {
+			if (cancelled) return;
+			// 自动采样前再冲刷一次，避免把“已入队未执行”的对象误判成泄漏。
+			flushSkiaDisposals();
+			const afterSnapshot = captureTrackedSkiaHostObjectsSnapshot({
+				includeSamples: true,
+				sampleLimitPerType,
+			});
+			const snapshotDiff = diffTrackedSkiaHostObjectSnapshots(
+				beforeSnapshot,
+				afterSnapshot,
+			);
+			previousSkiaResourceSnapshotRef.current = afterSnapshot;
+			if (snapshotDiff.totalDelta <= 0) {
+				return;
+			}
+			const increasedTypeSamples = Object.fromEntries(
+				snapshotDiff.increasedTypes.map((item) => [
+					item.type,
+					afterSnapshot.samplesByType?.[item.type] ?? [],
+				]),
+			);
+			console.warn(`${SKIA_RESOURCE_TRACKER_LOG_TAG} project switch resource delta`, {
+				fromProjectId: previousProjectId,
+				toProjectId: currentProjectId,
+				beforeTotal: beforeSnapshot.total,
+				afterTotal: afterSnapshot.total,
+				totalDelta: snapshotDiff.totalDelta,
+				byTypeDelta: snapshotDiff.byTypeDelta,
+				increasedTypeSamples,
+				disposalQueueStats: getSkiaDisposalStats(),
+			});
+		};
+		if (typeof window === "undefined") {
+			captureAndReportResourceDiff();
+			return () => {
+				cancelled = true;
+			};
+		}
+		firstFrameId = window.requestAnimationFrame(() => {
+			secondFrameId = window.requestAnimationFrame(() => {
+				captureAndReportResourceDiff();
+			});
+		});
+		return () => {
+			cancelled = true;
+			if (firstFrameId !== null) {
+				window.cancelAnimationFrame(firstFrameId);
+			}
+			if (secondFrameId !== null) {
+				window.cancelAnimationFrame(secondFrameId);
+			}
+		};
 	}, [currentProjectId]);
 	useEffect(() => {
 		renderCullModeRef.current = renderCullState.mode;

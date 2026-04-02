@@ -80,34 +80,35 @@ export const renderNodeToPicture = (
 			hasRenderTarget
 		) {
 			root.drawOnCanvas(canvas);
-			return recorder.finishRecordingAsPicture();
-		}
-
-		// BackdropFilter 会读取当前画布内容；先在独立 raster surface 上重放一遍，
-		// 再把结果录回 picture，避免外层 overlay 污染 scene。
-		const surface = Skia.Surface.Make(size.width, size.height);
-		if (!surface) {
-			root.drawOnCanvas(canvas);
-			return recorder.finishRecordingAsPicture();
-		}
-		try {
-			const surfaceCanvas = surface.getCanvas();
-			surfaceCanvas.clear(Skia.Color("transparent"));
-			root.drawOnCanvas(surfaceCanvas);
-			surface.flush();
-			const image = surface.asImage?.() ?? surface.makeImageSnapshot();
-			try {
-				canvas.drawImage(image, 0, 0);
-			} finally {
-				image.dispose?.();
+		} else {
+			// BackdropFilter 会读取当前画布内容；先在独立 raster surface 上重放一遍，
+			// 再把结果录回 picture，避免外层 overlay 污染 scene。
+			const surface = Skia.Surface.Make(size.width, size.height);
+			if (!surface) {
+				root.drawOnCanvas(canvas);
+			} else {
+				try {
+					const surfaceCanvas = surface.getCanvas();
+					surfaceCanvas.clear(Skia.Color("transparent"));
+					root.drawOnCanvas(surfaceCanvas);
+					surface.flush();
+					const image = surface.asImage?.() ?? surface.makeImageSnapshot();
+					try {
+						canvas.drawImage(image, 0, 0);
+					} finally {
+						image.dispose?.();
+					}
+				} finally {
+					surface.dispose?.();
+				}
 			}
-		} finally {
-			surface.dispose?.();
 		}
+		return recorder.finishRecordingAsPicture();
 	} finally {
 		root.unmount();
+		(canvas as { dispose?: () => void }).dispose?.();
+		recorder.dispose?.();
 	}
-	return recorder.finishRecordingAsPicture();
 };
 
 export const renderNodeToImage = (

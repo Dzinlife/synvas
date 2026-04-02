@@ -47,6 +47,8 @@ interface TileCoverInfo {
 	sourceLod: number | null;
 }
 
+type TileResourceDisposeTiming = "immediate" | "idle";
+
 interface TileInputSpatialItem {
 	minX: number;
 	minY: number;
@@ -82,7 +84,19 @@ const scheduleImageDispose = (
 	image: { dispose?: (() => void) | undefined } | null | undefined,
 ) => {
 	if (!image) return;
-	scheduleSkiaDispose(image, { timing: "manual" });
+	// 切项目后图块会集中失效，使用 idle 回收可避免 manual 队列长时间滞留。
+	scheduleSkiaDispose(image, { timing: "idle" });
+};
+
+const disposeTileImageByTiming = (
+	image: { dispose?: (() => void) | undefined } | null | undefined,
+	timing: TileResourceDisposeTiming,
+) => {
+	if (timing === "immediate") {
+		disposeImage(image);
+		return;
+	}
+	scheduleImageDispose(image);
 };
 
 const resolveNowMs = (): number => {
@@ -320,11 +334,16 @@ export class StaticTileScheduler {
 	}
 
 	dispose(): void {
+		this.reset({ disposeTiming: "immediate" });
+		try {
+			this.imagePaint.dispose?.();
+		} catch {}
+	}
+
+	reset(options?: { disposeTiming?: TileResourceDisposeTiming }): void {
+		const disposeTiming = options?.disposeTiming ?? "immediate";
 		this.clearTaskQueue();
-		for (const record of this.tileByKey.values()) {
-			disposeImage(record.image);
-			record.image = null;
-		}
+		this.clearReadyTiles(disposeTiming);
 		this.tileByKey.clear();
 		for (const surface of this.surfaces) {
 			try {
@@ -332,11 +351,25 @@ export class StaticTileScheduler {
 			} catch {}
 		}
 		this.surfaces.length = 0;
+		this.inputs = [];
 		this.inputSpatialIndex.clear();
 		this.inputQueryScratch.length = 0;
-		try {
-			this.imagePaint.dispose?.();
-		} catch {}
+		this.visibleKeys.length = 0;
+		this.visibleKeySet.clear();
+		this.visibleCoveredKeySet.clear();
+		this.visibleFallbackKeySet.clear();
+		this.visibleCoverInfoByKey.clear();
+		this.drawSourceKeySet.clear();
+		this.drawItems.length = 0;
+		this.debugItems.length = 0;
+		this.fallbackNodeIdSet.clear();
+		this.fallbackNodeIds.length = 0;
+		this.missingVisibleCount = 0;
+		this.readyVisibleCount = 0;
+		this.coverFallbackCount = 0;
+		this.targetLod = TILE_LOD_BASE;
+		this.composeLod = TILE_LOD_BASE;
+		this.queueEpoch += 1;
 	}
 
 	private resolveTargetLod(zoom: number): number {
@@ -390,9 +423,11 @@ export class StaticTileScheduler {
 		this.clearTaskQueue();
 	}
 
-	private clearReadyTiles(): void {
+	private clearReadyTiles(
+		disposeTiming: TileResourceDisposeTiming = "idle",
+	): void {
 		for (const record of this.tileByKey.values()) {
-			scheduleImageDispose(record.image);
+			disposeTileImageByTiming(record.image, disposeTiming);
 			record.image = null;
 			record.state = "EMPTY";
 			record.queued = false;
@@ -612,7 +647,7 @@ export class StaticTileScheduler {
 
 	private releaseSurface(surface: SkSurface): void {
 		if (this.surfaces.length >= TILE_SURFACE_POOL_SIZE) {
-			scheduleSkiaDispose(surface, { timing: "manual" });
+			scheduleSkiaDispose(surface, { timing: "idle" });
 			return;
 		}
 		this.surfaces.push(surface);

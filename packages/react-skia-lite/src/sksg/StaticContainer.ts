@@ -113,19 +113,25 @@ export class StaticContainer extends Container {
 			return;
 		}
 		const rec = this.Skia.PictureRecorder();
-		const canvas = rec.beginRecording();
-		const retainedResources = this.drawOnCanvas(canvas, {
-			retainResources: true,
-		});
-		const picture = rec.finishRecordingAsPicture();
-		if (retainedResources.length > 0) {
-			attachDisposeCleanup(picture, () => {
-				for (const cleanup of retainedResources) {
-					cleanup();
-				}
+		let canvas: SkCanvas | null = null;
+		try {
+			canvas = rec.beginRecording();
+			const retainedResources = this.drawOnCanvas(canvas, {
+				retainResources: true,
 			});
+			const picture = rec.finishRecordingAsPicture();
+			if (retainedResources.length > 0) {
+				attachDisposeCleanup(picture, () => {
+					for (const cleanup of retainedResources) {
+						cleanup();
+					}
+				});
+			}
+			SkiaViewApi.setJsiProperty(this.nativeId, "picture", picture);
+		} finally {
+			(canvas as { dispose?: () => void } | null)?.dispose?.();
+			rec.dispose?.();
 		}
-		SkiaViewApi.setJsiProperty(this.nativeId, "picture", picture);
 	}
 
 	private syncAnimationSubscriptions(animationValues: Set<SharedValue<unknown>>) {

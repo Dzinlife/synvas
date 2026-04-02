@@ -59,6 +59,10 @@ vi.mock("react-skia-lite", () => {
 				MakeOffscreen: makeOffscreenSpy,
 			},
 		},
+		scheduleSkiaDispose: vi.fn((target: { dispose?: () => void } | null) => {
+			target?.dispose?.();
+			return 1;
+		}),
 	};
 });
 

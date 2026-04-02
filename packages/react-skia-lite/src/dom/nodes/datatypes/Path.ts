@@ -14,6 +14,11 @@ export const processPath = (Skia: Skia, rawPath: PathDef) => {
   return path;
 };
 
+export const isStringPathDef = (rawPath: PathDef): rawPath is string => {
+  "worklet";
+  return typeof rawPath === "string";
+};
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const isPathDef = (def: any): def is PathDef => {
   "worklet";

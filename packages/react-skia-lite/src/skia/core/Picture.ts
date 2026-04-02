@@ -14,11 +14,17 @@ export const createPicture = (
 ) => {
   "worklet";
   const recorder = Skia.PictureRecorder();
-  let bounds: undefined | SkRect;
-  if (rect) {
-    bounds = isRect(rect) ? rect : Skia.XYWHRect(0, 0, rect.width, rect.height);
+  let canvas: SkCanvas | null = null;
+  try {
+    let bounds: undefined | SkRect;
+    if (rect) {
+      bounds = isRect(rect) ? rect : Skia.XYWHRect(0, 0, rect.width, rect.height);
+    }
+    canvas = recorder.beginRecording(bounds);
+    cb(canvas);
+    return recorder.finishRecordingAsPicture();
+  } finally {
+    (canvas as { dispose?: () => void } | null)?.dispose?.();
+    recorder.dispose?.();
   }
-  const canvas = recorder.beginRecording(bounds);
-  cb(canvas);
-  return recorder.finishRecordingAsPicture();
 };
