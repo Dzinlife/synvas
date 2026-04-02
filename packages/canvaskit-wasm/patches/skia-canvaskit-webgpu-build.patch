@@ -90,7 +90,7 @@ index 59c6249..bbcba1e 100644
  #ifdef CK_ENABLE_WEBGL
  
  // Set the pixel format based on the colortype.
-@@ -367,71 +432,521 @@ sk_sp<SkSurface> MakeRenderTarget(sk_sp<GrDirectContext> dContext, SimpleImageIn
+@@ -367,71 +432,570 @@ sk_sp<SkSurface> MakeRenderTarget(sk_sp<GrDirectContext> dContext, SimpleImageIn
  
  #ifdef CK_ENABLE_WEBGPU
  
@@ -219,6 +219,83 @@ index 59c6249..bbcba1e 100644
 +            return;
 +        }
 +        fContext->checkAsyncWorkCompletion();
++    }
++
++    void freeGpuResources() {
++        if (!fContext && !fRecorder) {
++            return;
++        }
++        if (fRecorder) {
++            fRecorder->freeGpuResources();
++        }
++        if (fContext) {
++            fContext->freeGpuResources();
++        }
++    }
++
++    void performDeferredCleanup(double msNotUsed) {
++        if (!fContext && !fRecorder) {
++            return;
++        }
++        if (!(msNotUsed >= 0)) {
++            msNotUsed = 0;
++        }
++        const auto duration = std::chrono::milliseconds(static_cast<int64_t>(msNotUsed));
++        if (fRecorder) {
++            fRecorder->performDeferredCleanup(duration);
++        }
++        if (fContext) {
++            fContext->performDeferredCleanup(duration);
++        }
++    }
++
++    double currentBudgetedBytes() const {
++        double total = 0;
++        if (fRecorder) {
++            total += static_cast<double>(fRecorder->currentBudgetedBytes());
++        }
++        if (fContext) {
++            total += static_cast<double>(fContext->currentBudgetedBytes());
++        }
++        return total;
++    }
++
++    double currentPurgeableBytes() const {
++        double total = 0;
++        if (fRecorder) {
++            total += static_cast<double>(fRecorder->currentPurgeableBytes());
++        }
++        if (fContext) {
++            total += static_cast<double>(fContext->currentPurgeableBytes());
++        }
++        return total;
++    }
++
++    double maxBudgetedBytes() const {
++        size_t maxBudget = 0;
++        if (fRecorder) {
++            maxBudget = std::max(maxBudget, fRecorder->maxBudgetedBytes());
++        }
++        if (fContext) {
++            maxBudget = std::max(maxBudget, fContext->maxBudgetedBytes());
++        }
++        return static_cast<double>(maxBudget);
++    }
++
++    void setMaxBudgetedBytes(double bytes) {
++        if (!fContext && !fRecorder) {
++            return;
++        }
++        if (!(bytes >= 0)) {
++            bytes = 0;
++        }
++        const size_t safeBytes = static_cast<size_t>(bytes);
++        if (fRecorder) {
++            fRecorder->setMaxBudgetedBytes(safeBytes);
++        }
++        if (fContext) {
++            fContext->setMaxBudgetedBytes(safeBytes);
++        }
 +    }
 +
 +    bool readSurfacePixelsAsync(sk_sp<SkSurface> surface,
@@ -679,7 +756,7 @@ index 59c6249..bbcba1e 100644
      constant("webgl", true);
      function("_MakeOnScreenGLSurface",
               select_overload<sk_sp<SkSurface>(
-@@ -1141,7 +1769,20 @@ EMSCRIPTEN_BINDINGS(Skia) {
+@@ -1141,7 +1769,26 @@ EMSCRIPTEN_BINDINGS(Skia) {
  
  #ifdef CK_ENABLE_WEBGPU
      constant("webgpu", true);
@@ -687,6 +764,12 @@ index 59c6249..bbcba1e 100644
 +    class_<WebGPUDeviceContext>("WebGPUDeviceContext")
 +            .function("_submit", &WebGPUDeviceContext::submit)
 +            .function("_checkAsyncWorkCompletion", &WebGPUDeviceContext::checkAsyncWorkCompletion)
++            .function("_freeGpuResources", &WebGPUDeviceContext::freeGpuResources)
++            .function("_performDeferredCleanup", &WebGPUDeviceContext::performDeferredCleanup)
++            .function("_currentBudgetedBytes", &WebGPUDeviceContext::currentBudgetedBytes)
++            .function("_currentPurgeableBytes", &WebGPUDeviceContext::currentPurgeableBytes)
++            .function("_maxBudgetedBytes", &WebGPUDeviceContext::maxBudgetedBytes)
++            .function("_setMaxBudgetedBytes", &WebGPUDeviceContext::setMaxBudgetedBytes)
 +            .function("_readSurfacePixelsAsync", &WebGPUDeviceContext::readSurfacePixelsAsync)
 +            .function("_readSurfacePixelsYUV420Async",
 +                      &WebGPUDeviceContext::readSurfacePixelsYUV420Async);

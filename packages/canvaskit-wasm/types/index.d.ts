@@ -750,6 +750,12 @@ export interface SkImagesFactory {
 export interface WebGPUDeviceContext extends EmbindObject<"WebGPUDeviceContext"> {
     submit(syncToCpu?: boolean): boolean;
     checkAsyncWorkCompletion(): void;
+    freeGpuResources(): void;
+    performDeferredCleanup(msNotUsed?: number): void;
+    currentBudgetedBytes(): number;
+    currentPurgeableBytes(): number;
+    maxBudgetedBytes(): number;
+    setMaxBudgetedBytes(bytes: number): void;
     ReadSurfacePixelsAsync(surface: Surface, dstImageInfo: ImageInfo, srcRect?: InputIRect,
                            rescaleGamma?: RescaleGamma,
                            rescaleMode?: RescaleMode): Promise<AsyncReadResult | null>;

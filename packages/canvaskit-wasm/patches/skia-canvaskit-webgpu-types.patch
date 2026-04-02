@@ -22,7 +22,7 @@ index 99bcc75..4d4f681 100644
      if (!img) return;
      const dOne = img.encodeToBytes(); // $ExpectType Uint8Array | null
      const dTwo = img.encodeToBytes(CK.ImageFormat.JPEG, 97);
-@@ -1056,16 +1043,50 @@ function verticesTests(CK: CanvasKit) {
+@@ -1056,17 +1043,51 @@ function verticesTests(CK: CanvasKit) {
      const id = vertices.uniqueID(); // $ExpectType number
  }
  
@@ -141,7 +141,7 @@ index 892a27e..eec6a4c 100644
      /**
       * Deletes the associated WebGLContext. Function not available on the CPU version.
       * @param ctx
-@@ -692,10 +675,89 @@ export interface GrDirectContext extends EmbindObject<"GrDirectContext"> {
+@@ -692,10 +675,95 @@ export interface GrDirectContext extends EmbindObject<"GrDirectContext"> {
      setResourceCacheLimitBytes(bytes: number): void;
  }
  
@@ -222,6 +222,12 @@ index 892a27e..eec6a4c 100644
 +export interface WebGPUDeviceContext extends EmbindObject<"WebGPUDeviceContext"> {
 +    submit(syncToCpu?: boolean): boolean;
 +    checkAsyncWorkCompletion(): void;
++    freeGpuResources(): void;
++    performDeferredCleanup(msNotUsed?: number): void;
++    currentBudgetedBytes(): number;
++    currentPurgeableBytes(): number;
++    maxBudgetedBytes(): number;
++    setMaxBudgetedBytes(bytes: number): void;
 +    ReadSurfacePixelsAsync(surface: Surface, dstImageInfo: ImageInfo, srcRect?: InputIRect,
 +                           rescaleGamma?: RescaleGamma,
 +                           rescaleMode?: RescaleMode): Promise<AsyncReadResult | null>;

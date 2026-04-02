@@ -107,8 +107,15 @@ type InternalWebGPUSurface = Surface & {
 
 type InternalWebGPUDeviceContext = WebGPUDeviceContext & {
 	_device?: GPUDevice;
+	__graphiteResourceApiAvailable__?: boolean;
 	_submit?: (syncToCpu?: boolean) => boolean;
 	_checkAsyncWorkCompletion?: () => void;
+	_freeGpuResources?: () => void;
+	_performDeferredCleanup?: (msNotUsed?: number) => void;
+	_currentBudgetedBytes?: () => number;
+	_currentPurgeableBytes?: () => number;
+	_maxBudgetedBytes?: () => number;
+	_setMaxBudgetedBytes?: (bytes: number) => void;
 	_readSurfacePixelsAsync?: (
 		surface: Surface,
 		dstImageInfo: ImageInfo,
@@ -446,6 +453,148 @@ const normalizeWebGPUCanvasOptions = (opts?: WebGPUCanvasOptions) => {
 	};
 };
 
+const normalizeNonNegativeNumber = (
+	value: number | undefined,
+	fallback = 0,
+) => {
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+		return fallback;
+	}
+	return value;
+};
+
+const patchWebGPUDeviceContextApi = (context: InternalWebGPUDeviceContext) => {
+	const originalSubmit =
+		typeof context.submit === "function" ? context.submit.bind(context) : null;
+	const internalSubmit =
+		typeof context._submit === "function" ? context._submit.bind(context) : null;
+	context.submit = (syncToCpu?: boolean) =>
+		internalSubmit?.(syncToCpu) ?? originalSubmit?.(syncToCpu) ?? false;
+
+	const originalCheck =
+		typeof context.checkAsyncWorkCompletion === "function"
+			? context.checkAsyncWorkCompletion.bind(context)
+			: null;
+	const internalCheck =
+		typeof context._checkAsyncWorkCompletion === "function"
+			? context._checkAsyncWorkCompletion.bind(context)
+			: null;
+	context.checkAsyncWorkCompletion = () => {
+		if (internalCheck) {
+			internalCheck();
+			return;
+		}
+		originalCheck?.();
+	};
+
+	const originalFree =
+		typeof context.freeGpuResources === "function"
+			? context.freeGpuResources.bind(context)
+			: null;
+	const internalFree =
+		typeof context._freeGpuResources === "function"
+			? context._freeGpuResources.bind(context)
+			: null;
+	context.freeGpuResources = () => {
+		if (internalFree) {
+			internalFree();
+			return;
+		}
+		originalFree?.();
+	};
+
+	const originalDeferredCleanup =
+		typeof context.performDeferredCleanup === "function"
+			? context.performDeferredCleanup.bind(context)
+			: null;
+	const internalDeferredCleanup =
+		typeof context._performDeferredCleanup === "function"
+			? context._performDeferredCleanup.bind(context)
+			: null;
+	context.performDeferredCleanup = (msNotUsed?: number) => {
+		const safeMs = normalizeNonNegativeNumber(msNotUsed, 0);
+		if (internalDeferredCleanup) {
+			internalDeferredCleanup(safeMs);
+			return;
+		}
+		originalDeferredCleanup?.(safeMs);
+	};
+
+	const originalCurrentBudgetedBytes =
+		typeof context.currentBudgetedBytes === "function"
+			? context.currentBudgetedBytes.bind(context)
+			: null;
+	const internalCurrentBudgetedBytes =
+		typeof context._currentBudgetedBytes === "function"
+			? context._currentBudgetedBytes.bind(context)
+			: null;
+	context.currentBudgetedBytes = () =>
+		normalizeNonNegativeNumber(
+			internalCurrentBudgetedBytes?.() ?? originalCurrentBudgetedBytes?.(),
+			0,
+		);
+
+	const originalCurrentPurgeableBytes =
+		typeof context.currentPurgeableBytes === "function"
+			? context.currentPurgeableBytes.bind(context)
+			: null;
+	const internalCurrentPurgeableBytes =
+		typeof context._currentPurgeableBytes === "function"
+			? context._currentPurgeableBytes.bind(context)
+			: null;
+	context.currentPurgeableBytes = () =>
+		normalizeNonNegativeNumber(
+			internalCurrentPurgeableBytes?.() ?? originalCurrentPurgeableBytes?.(),
+			0,
+		);
+
+	const originalMaxBudgetedBytes =
+		typeof context.maxBudgetedBytes === "function"
+			? context.maxBudgetedBytes.bind(context)
+			: null;
+	const internalMaxBudgetedBytes =
+		typeof context._maxBudgetedBytes === "function"
+			? context._maxBudgetedBytes.bind(context)
+			: null;
+	context.maxBudgetedBytes = () =>
+		normalizeNonNegativeNumber(
+			internalMaxBudgetedBytes?.() ?? originalMaxBudgetedBytes?.(),
+			0,
+		);
+
+	const originalSetMaxBudgetedBytes =
+		typeof context.setMaxBudgetedBytes === "function"
+			? context.setMaxBudgetedBytes.bind(context)
+			: null;
+	const internalSetMaxBudgetedBytes =
+		typeof context._setMaxBudgetedBytes === "function"
+			? context._setMaxBudgetedBytes.bind(context)
+			: null;
+	context.setMaxBudgetedBytes = (bytes: number) => {
+		const safeBytes = normalizeNonNegativeNumber(bytes, 0);
+		if (internalSetMaxBudgetedBytes) {
+			internalSetMaxBudgetedBytes(safeBytes);
+			return;
+		}
+		originalSetMaxBudgetedBytes?.(safeBytes);
+	};
+
+	context.__graphiteResourceApiAvailable__ = Boolean(
+		internalFree ||
+			internalDeferredCleanup ||
+			internalCurrentBudgetedBytes ||
+			internalCurrentPurgeableBytes ||
+			internalMaxBudgetedBytes ||
+			internalSetMaxBudgetedBytes ||
+			(originalFree &&
+				originalDeferredCleanup &&
+				originalCurrentBudgetedBytes &&
+				originalCurrentPurgeableBytes &&
+				originalMaxBudgetedBytes &&
+				originalSetMaxBudgetedBytes),
+	);
+};
+
 const getPreferredCanvasFormat = () => {
 	if (typeof navigator?.gpu?.getPreferredCanvasFormat === "function") {
 		return navigator.gpu.getPreferredCanvasFormat();
@@ -753,10 +902,7 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 			return null;
 		}
 		context._device = device;
-		context.submit = (syncToCpu?: boolean) => context._submit?.(syncToCpu) ?? false;
-		context.checkAsyncWorkCompletion = () => {
-			context._checkAsyncWorkCompletion?.();
-		};
+		patchWebGPUDeviceContextApi(context);
 		context.ReadSurfacePixelsAsync = (
 			surface,
 			dstImageInfo,
@@ -1067,6 +1213,7 @@ export const installCanvasKitWebGPU = (canvasKit: CanvasKit) => {
 		internalCanvasKit.MakeGPUDeviceContext = (device) => {
 			const context = originalMakeGPUDeviceContext(device);
 			if (context) {
+				patchWebGPUDeviceContextApi(context as InternalWebGPUDeviceContext);
 				internalCanvasKit._defaultWebGPUDeviceContext = context;
 			}
 			return context;

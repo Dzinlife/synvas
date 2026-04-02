@@ -34,5 +34,6 @@ export type {
 export * from "./skia/web/resourceLifecycle";
 export * from "./skia/web/surfaceFactory";
 export * from "./skia/web/webgpuReadback";
+export * from "./skia/web/webgpuResourceCache";
 export * from "./sksg";
 export * from "./WithSkiaWeb";

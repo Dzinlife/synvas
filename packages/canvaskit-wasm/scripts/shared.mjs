@@ -227,16 +227,20 @@ const applyGitPatch = (name, targetPatchFile, isAlreadyApplied) => {
 		console.log(`${name} patch already applied.`);
 		return;
 	}
-	const forwardCheck = spawnSync("git", ["-C", skiaDir, "apply", "--check", targetPatchFile], {
-		stdio: "ignore",
-	});
+	const forwardCheck = spawnSync(
+		"git",
+		["-C", skiaDir, "apply", "--check", "--recount", targetPatchFile],
+		{
+			stdio: "ignore",
+		},
+	);
 	if (forwardCheck.status === 0) {
-		run("git", ["-C", skiaDir, "apply", targetPatchFile]);
+		run("git", ["-C", skiaDir, "apply", "--recount", targetPatchFile]);
 		return;
 	}
 	const reverseCheck = spawnSync(
 		"git",
-		["-C", skiaDir, "apply", "--reverse", "--check", targetPatchFile],
+		["-C", skiaDir, "apply", "--reverse", "--check", "--recount", targetPatchFile],
 		{ stdio: "ignore" },
 	);
 	if (reverseCheck.status === 0) {
@@ -244,6 +248,31 @@ const applyGitPatch = (name, targetPatchFile, isAlreadyApplied) => {
 		return;
 	}
 	throw new Error(`Failed to apply ${name} patch. Please inspect the checkout state.`);
+};
+
+const hasCanvasKitWebGPUBuildPatch = () => {
+	const bindings = readFileSync(
+		path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
+		"utf8",
+	);
+	return (
+		bindings.includes('class WebGPUDeviceContext {') &&
+		bindings.includes('"_SkSurfaces_RenderTarget"') &&
+		bindings.includes('"_SkImages_PromiseTextureFrom"') &&
+		bindings.includes("canvaskit_import_webgpu_texture") &&
+		bindings.includes("void freeGpuResources()") &&
+		bindings.includes("void performDeferredCleanup(double msNotUsed)") &&
+		bindings.includes("double currentBudgetedBytes() const") &&
+		bindings.includes("double currentPurgeableBytes() const") &&
+		bindings.includes("double maxBudgetedBytes() const") &&
+		bindings.includes("void setMaxBudgetedBytes(double bytes)") &&
+		bindings.includes('"_freeGpuResources"') &&
+		bindings.includes('"_performDeferredCleanup"') &&
+		bindings.includes('"_currentBudgetedBytes"') &&
+		bindings.includes('"_currentPurgeableBytes"') &&
+		bindings.includes('"_maxBudgetedBytes"') &&
+		bindings.includes('"_setMaxBudgetedBytes"')
+	);
 };
 
 export const applySkiaPatch = () => {
@@ -309,28 +338,7 @@ export const applySkiaPatch = () => {
 		);
 	});
 	applyGitPatch("CanvasKit WebGPU build", canvasKitWebGPUBuildPatchFile, () => {
-		return (
-			readFileSync(
-				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
-				"utf8",
-			).includes('class WebGPUDeviceContext {') &&
-			readFileSync(
-				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
-				"utf8",
-			).includes('"_SkSurfaces_RenderTarget"') &&
-			readFileSync(
-				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
-				"utf8",
-			).includes('"_SkImages_PromiseTextureFrom"') &&
-			readFileSync(
-				path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
-				"utf8",
-			).includes("canvaskit_import_webgpu_texture") &&
-				readFileSync(
-					path.join(skiaDir, "modules", "canvaskit", "canvaskit_bindings.cpp"),
-					"utf8",
-				).includes("canvaskit_import_webgpu_texture")
-			);
+		return hasCanvasKitWebGPUBuildPatch();
 	});
 	applyGitPatch("CanvasKit WebGPU Ganesh guard", canvasKitWebGPUGaneshGuardPatchFile, () => {
 		return readFileSync(

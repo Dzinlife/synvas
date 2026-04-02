@@ -16,6 +16,7 @@ import type { TrackedSkiaHostObjectSnapshot } from "react-skia-lite";
 import {
 	captureTrackedSkiaHostObjectsSnapshot,
 	diffTrackedSkiaHostObjectSnapshots,
+	flushSkiaWebGPUResourceCache,
 	flushSkiaDisposals,
 	getSkiaDisposalStats,
 	getSkiaResourceTrackerConfig,
@@ -1128,6 +1129,11 @@ const CanvasWorkspace = () => {
 		if (didProjectSwitch) {
 			// 切项目允许做重清理，先把全局回收队列冲刷干净。
 			flushSkiaDisposals();
+			// WebGPU 侧的 Graphite 资源缓存也在切项目时同步执行一次重清理。
+			flushSkiaWebGPUResourceCache({
+				cleanupOlderThanMs: 0,
+				freeGpuResources: true,
+			});
 		}
 		const trackerConfig = getSkiaResourceTrackerConfig();
 		const isAutoSnapshotEnabled =
