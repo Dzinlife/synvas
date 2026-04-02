@@ -14,6 +14,7 @@ import {
 	createSkiaCanvasSurface,
 	invalidateSkiaWebGPUCanvasContext,
 } from "../skia/web/surfaceFactory";
+import { createSkiaResourceScope } from "../skia/web/resourceLifecycle";
 import { SkiaViewApi } from "./api";
 import { SkiaViewNativeId } from "./SkiaViewNativeId";
 import type { SkiaPictureViewNativeProps } from "./types";
@@ -220,8 +221,7 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	const redrawRequestsRef = useRef(0);
 	const requestIdRef = useRef<number | null>(null);
 	const pictureRef = useRef<SkPicture | null>(null);
-	const deferredDisposePicturesRef = useRef<SkPicture[]>([]);
-	const deferredDisposeFrameRef = useRef<number | null>(null);
+	const pictureResourceScopeRef = useRef(createSkiaResourceScope());
 
 	const { picture, onLayout } = props;
 
@@ -257,19 +257,13 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	const setPicture = useCallback(
 		(newPicture: SkPicture) => {
 			const previousPicture = pictureRef.current;
+			pictureResourceScopeRef.current.track(newPicture);
 			pictureRef.current = newPicture;
 			redraw();
 			if (previousPicture && previousPicture !== newPicture) {
-				deferredDisposePicturesRef.current.push(previousPicture);
-				if (deferredDisposeFrameRef.current === null) {
-					deferredDisposeFrameRef.current = requestAnimationFrame(() => {
-						deferredDisposeFrameRef.current = null;
-						const pictures = deferredDisposePicturesRef.current.splice(0);
-						for (const picture of pictures) {
-							picture.dispose?.();
-						}
-					});
-				}
+				pictureResourceScopeRef.current.release(previousPicture, {
+					timing: "animationFrame",
+				});
 			}
 		},
 		[redraw],
@@ -404,16 +398,10 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 				cancelAnimationFrame(requestIdRef.current);
 				requestIdRef.current = null;
 			}
-			if (deferredDisposeFrameRef.current !== null) {
-				cancelAnimationFrame(deferredDisposeFrameRef.current);
-				deferredDisposeFrameRef.current = null;
-			}
-			const deferredPictures = deferredDisposePicturesRef.current.splice(0);
-			for (const picture of deferredPictures) {
-				picture.dispose?.();
-			}
-			pictureRef.current?.dispose?.();
 			pictureRef.current = null;
+			pictureResourceScopeRef.current.disposeAll({
+				timing: "immediate",
+			});
 			if (renderer.current) {
 				renderer.current.dispose();
 				renderer.current = null;

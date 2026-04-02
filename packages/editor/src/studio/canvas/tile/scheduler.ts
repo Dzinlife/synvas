@@ -1,4 +1,4 @@
-import { Skia, type SkSurface } from "react-skia-lite";
+import { scheduleSkiaDispose, Skia, type SkSurface } from "react-skia-lite";
 import RBush from "rbush";
 import {
 	TILE_CAMERA_EPSILON,
@@ -76,6 +76,13 @@ const disposeImage = (
 	try {
 		image.dispose?.();
 	} catch {}
+};
+
+const scheduleImageDispose = (
+	image: { dispose?: (() => void) | undefined } | null | undefined,
+) => {
+	if (!image) return;
+	scheduleSkiaDispose(image, { timing: "manual" });
 };
 
 const resolveNowMs = (): number => {
@@ -385,7 +392,7 @@ export class StaticTileScheduler {
 
 	private clearReadyTiles(): void {
 		for (const record of this.tileByKey.values()) {
-			disposeImage(record.image);
+			scheduleImageDispose(record.image);
 			record.image = null;
 			record.state = "EMPTY";
 			record.queued = false;
@@ -605,9 +612,7 @@ export class StaticTileScheduler {
 
 	private releaseSurface(surface: SkSurface): void {
 		if (this.surfaces.length >= TILE_SURFACE_POOL_SIZE) {
-			try {
-				surface.dispose?.();
-			} catch {}
+			scheduleSkiaDispose(surface, { timing: "manual" });
 			return;
 		}
 		this.surfaces.push(surface);
@@ -677,7 +682,7 @@ export class StaticTileScheduler {
 				record.state = "STALE";
 				return;
 			}
-			disposeImage(record.image);
+			scheduleImageDispose(record.image);
 			record.image = image;
 			record.state = "READY";
 			record.lastRenderedEpoch = this.queueEpoch;
@@ -917,7 +922,7 @@ export class StaticTileScheduler {
 		let removeCount = totalReadyCount - this.maxReadyTiles;
 		for (const record of evictableReadyRecords) {
 			if (removeCount <= 0) break;
-			disposeImage(record.image);
+			scheduleImageDispose(record.image);
 			record.image = null;
 			record.state = "EMPTY";
 			record.lastRenderedInputSignature = "";

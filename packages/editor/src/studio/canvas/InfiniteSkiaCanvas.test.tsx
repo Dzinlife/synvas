@@ -221,6 +221,14 @@ vi.mock("react-skia-lite", async () => {
 				leading: 0,
 			}),
 		}),
+		scheduleSkiaDispose: () => 0,
+		markSkiaRuntimeActivity: () => {},
+		getSkiaDisposalStats: () => ({
+			pendingAnimationFrame: 0,
+			pendingIdle: 0,
+			pendingManual: 0,
+		}),
+		drainSkiaDisposals: () => 0,
 		Skia: skiaMock,
 	};
 });
