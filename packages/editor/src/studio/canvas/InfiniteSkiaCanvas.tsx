@@ -948,7 +948,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const nextNodeRasterUri = new Map<string, string | null>();
 		const requiredUris = new Set<string>();
 		for (const node of tileNodes) {
-			const latestNode = getLatestNodeById(node.id) ?? node;
+			// 这里直接使用当帧 tileNodes，避免读取 ref 带来一帧滞后。
+			const latestNode = node;
 			if (!isTileRasterNodeType(latestNode) || latestNode.id === activeNodeId) {
 				nextNodeRasterUri.set(latestNode.id, null);
 				continue;
@@ -1017,7 +1018,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		};
 	}, [
 		activeNodeId,
-		getLatestNodeById,
 		tileNodes,
 		resolveNodeRasterUri,
 		scheduleTileTick,
@@ -1059,7 +1059,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const nextTileNodeIdSet = new Set<string>();
 		for (const node of tileNodes) {
 			nextTileNodeIdSet.add(node.id);
-			if (!isTileRasterNodeType(node) || node.id === activeNodeId) {
+			if (!isTileRasterNodeType(node)) {
 				const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 				if (oldAabb) {
 					scheduler.markDirtyRect(oldAabb);
@@ -1069,9 +1069,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				}
 				continue;
 			}
-			const scene =
-				node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
-			const sourceSignature = resolveTileNodeSourceSignature(node, scene);
 			const nextAabb = resolveNodeWorldAabb(node);
 			const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 			if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
@@ -1079,6 +1076,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				tileNodeAabbRef.current.set(node.id, nextAabb);
 				shouldTick = true;
 			}
+			if (node.id === activeNodeId) {
+				tileNodeSourceSignatureRef.current.delete(node.id);
+				continue;
+			}
+			const scene =
+				node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
+			const sourceSignature = resolveTileNodeSourceSignature(node, scene);
 			const prevSignature = tileNodeSourceSignatureRef.current.get(node.id);
 			if (prevSignature !== sourceSignature) {
 				tileNodeSourceSignatureRef.current.set(node.id, sourceSignature);
@@ -1122,7 +1126,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const inputByNodeId = new Map<string, TileInput>();
 		const visitedNodeIds = new Set<string>();
 		for (const node of tileNodes) {
-			const latestNode = getLatestNodeById(node.id) ?? node;
+			// 这里直接使用当帧 tileNodes，避免 undo/redo 与拖拽时 tile 输入落后一帧。
+			const latestNode = node;
 			if (!isTileRasterNodeType(latestNode) || latestNode.id === activeNodeId) {
 				continue;
 			}
@@ -1260,7 +1265,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		};
 	}, [
 		activeNodeId,
-		getLatestNodeById,
 		rasterCacheVersion,
 		resolveNodeRasterUri,
 		resolveTileInputId,

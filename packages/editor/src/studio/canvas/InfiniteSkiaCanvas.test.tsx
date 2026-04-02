@@ -1337,6 +1337,157 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(firstLiveNodeIds).not.toContain("node-scene");
 	});
 
+	it("active raster 节点 layout 变化会标记 tile 脏区", async () => {
+		tilePipelineMockState.enabled = true;
+		const dirtyUnionSpy = vi.spyOn(
+			StaticTileScheduler.prototype,
+			"markDirtyUnion",
+		);
+		try {
+			const activeNodeId = "node-active";
+			const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
+			const { rerender } = render(
+				<InfiniteSkiaCanvas
+					width={256}
+					height={256}
+					camera={camera}
+					nodes={[createVideoNode(activeNodeId, 0)]}
+					scenes={emptyScenes}
+					assets={[]}
+					activeNodeId={activeNodeId}
+					selectedNodeIds={[activeNodeId]}
+					focusedNodeId={null}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(rootRenderSpy).toHaveBeenCalled();
+			});
+			dirtyUnionSpy.mockClear();
+
+			rerender(
+				<InfiniteSkiaCanvas
+					width={256}
+					height={256}
+					camera={camera}
+					nodes={[
+						createVideoNode(activeNodeId, 0, {
+							x: 180,
+							y: 140,
+							updatedAt: 2,
+						}),
+					]}
+					scenes={emptyScenes}
+					assets={[]}
+					activeNodeId={activeNodeId}
+					selectedNodeIds={[activeNodeId]}
+					focusedNodeId={null}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(dirtyUnionSpy).toHaveBeenCalled();
+			});
+			const lastCall = dirtyUnionSpy.mock.calls.at(-1);
+			expect(lastCall?.[1]).toMatchObject({
+				left: 180,
+				top: 140,
+				right: 340,
+				bottom: 230,
+			});
+		} finally {
+			dirtyUnionSpy.mockRestore();
+		}
+	});
+
+	it("tile 输入会使用当帧节点位置，不会滞后一帧", async () => {
+		tilePipelineMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		try {
+			const nodeId = "node-scene-latest-aabb";
+			const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
+			const { rerender } = render(
+				<InfiniteSkiaCanvas
+					width={256}
+					height={256}
+					camera={camera}
+					nodes={[
+						{
+							...createSceneNode(nodeId, 0),
+							thumbnail: {
+								assetId: "scene-thumb-latest-aabb",
+								sourceSignature: "scene-latest-aabb-v1",
+								frame: 0,
+								generatedAt: 1,
+								version: 1 as const,
+							},
+						},
+					]}
+					scenes={emptyScenes}
+					assets={[createImageAsset("scene-thumb-latest-aabb")]}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					focusedNodeId={null}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(setInputsSpy).toHaveBeenCalled();
+			});
+			setInputsSpy.mockClear();
+
+			rerender(
+				<InfiniteSkiaCanvas
+					width={256}
+					height={256}
+					camera={camera}
+					nodes={[
+						{
+							...createSceneNode(nodeId, 0),
+							x: 180,
+							y: 140,
+							thumbnail: {
+								assetId: "scene-thumb-latest-aabb",
+								sourceSignature: "scene-latest-aabb-v1",
+								frame: 0,
+								generatedAt: 1,
+								version: 1 as const,
+							},
+						},
+					]}
+					scenes={emptyScenes}
+					assets={[createImageAsset("scene-thumb-latest-aabb")]}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					focusedNodeId={null}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(setInputsSpy).toHaveBeenCalled();
+			});
+			const lastCall = setInputsSpy.mock.calls.at(-1);
+			const inputs = (lastCall?.[0] ?? []) as Array<{
+				nodeId: string;
+				aabb: {
+					left: number;
+					top: number;
+					right: number;
+					bottom: number;
+				};
+			}>;
+			const targetInput = inputs.find((item) => item.nodeId === nodeId);
+			expect(targetInput?.aabb).toMatchObject({
+				left: 180,
+				top: 140,
+				right: 500,
+				bottom: 320,
+			});
+		} finally {
+			setInputsSpy.mockRestore();
+		}
+	});
+
 	it("tile 输入会使用 tileSourceNodes，而不是仅依赖 nodes(cull 子集)", async () => {
 		tilePipelineMockState.enabled = true;
 		const nodeInRender = {

@@ -257,7 +257,7 @@ export class StaticTileScheduler {
 			if (!isTileAabbIntersected(tileRect, rect)) continue;
 			record.state = "STALE";
 		}
-		this.bumpQueueEpoch();
+		// 拖拽/吸附会高频标脏；这里不提升 queueEpoch，避免已入队任务被反复作废导致长期不重绘。
 	}
 
 	beginFrame(input: TileSchedulerFrameInput): TileFrameResult {
