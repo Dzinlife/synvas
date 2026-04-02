@@ -1,6 +1,7 @@
 import type {
 	CanvasKit,
 	GrDirectContext,
+	Surface,
 	WebGPUCanvasContext,
 	WebGPUDeviceContext,
 } from "canvaskit-wasm";
@@ -25,15 +26,10 @@ const webgpuCanvasContextCache = new WeakMap<
 	CanvasElement,
 	CachedWebGPUCanvasContext
 >();
+let trackedWebGLSurfaceContext: unknown | null = null;
 
 const normalizeOffscreenPixelRatio = (value: number) => {
 	return Math.min(4, Math.max(1, value));
-};
-
-const releaseWebGLCanvasContext = (canvas: CanvasElement) => {
-	const context = canvas.getContext("webgl2") as WebGL2RenderingContext | null;
-	const loseContext = context?.getExtension("WEBGL_lose_context");
-	loseContext?.loseContext();
 };
 
 const resolveOffscreenPixelRatio = (pixelRatio?: number) => {
@@ -69,6 +65,29 @@ const setCanvasDisplayP3IfPossible = (canvas: CanvasElement) => {
 	if (context) {
 		context.drawingBufferColorSpace = "display-p3";
 	}
+};
+
+const trackWebGLSurfaceContext = (surface: Surface) => {
+	const contextHandle = (surface as Surface & { _context?: unknown })._context;
+	if (contextHandle === undefined || contextHandle === null) {
+		return () => {};
+	}
+	trackedWebGLSurfaceContext = contextHandle;
+	return () => {
+		if (trackedWebGLSurfaceContext === contextHandle) {
+			trackedWebGLSurfaceContext = null;
+		}
+	};
+};
+
+const tryActivateTrackedWebGLSurfaceContext = (CanvasKit: CanvasKit) => {
+	if (trackedWebGLSurfaceContext === null) {
+		return;
+	}
+	const canvasKitWithContext = CanvasKit as CanvasKit & {
+		setCurrentContext?: (context: unknown) => boolean;
+	};
+	canvasKitWithContext.setCurrentContext?.(trackedWebGLSurfaceContext);
 };
 
 const getOrCreateWebGPUCanvasContext = (
@@ -108,7 +127,12 @@ const getCurrentWebGLGrContext = (CanvasKit: CanvasKit) => {
 	const canvasKit = CanvasKit as CanvasKit & {
 		getCurrentGrDirectContext?: () => GrDirectContext | null;
 	};
-	const currentContext = canvasKit.getCurrentGrDirectContext?.();
+	let currentContext = canvasKit.getCurrentGrDirectContext?.();
+	if (!currentContext) {
+		// 尝试恢复主画布 context，避免离屏 surface 落到独立 GL context。
+		tryActivateTrackedWebGLSurfaceContext(CanvasKit);
+		currentContext = canvasKit.getCurrentGrDirectContext?.();
+	}
 	if (!currentContext) {
 		return null;
 	}
@@ -152,8 +176,9 @@ export const createSkiaCanvasSurface = (
 		if (!surface) {
 			return null;
 		}
+		const detachTrackedContext = trackWebGLSurfaceContext(surface);
 		return new JsiSkSurface(CanvasKit, surface, () => {
-			releaseWebGLCanvasContext(canvas);
+			detachTrackedContext();
 		});
 	}
 	const surface = CanvasKit.MakeSWCanvasSurface(canvas);
@@ -215,50 +240,6 @@ export const createSkiaOffscreenSurface = (
 				);
 			}
 		}
-	}
-	if (
-		backend.kind === "webgl" &&
-		typeof OffscreenCanvas !== "undefined" &&
-		typeof CanvasKit.GetWebGLContext === "function" &&
-		typeof CanvasKit.MakeWebGLContext === "function" &&
-		typeof CanvasKit.MakeRenderTarget === "function"
-	) {
-		const canvas = new OffscreenCanvas(targetWidth, targetHeight);
-		const contextHandle = CanvasKit.GetWebGLContext(canvas);
-		const grContext = CanvasKit.MakeWebGLContext(contextHandle);
-		if (!grContext) {
-			if (typeof CanvasKit.deleteContext === "function") {
-				CanvasKit.deleteContext(contextHandle);
-			}
-			return null;
-		}
-		const surface = CanvasKit.MakeRenderTarget(
-			grContext,
-			targetWidth,
-			targetHeight,
-		);
-		if (!surface) {
-			try {
-				grContext.delete();
-			} catch {}
-			if (typeof CanvasKit.deleteContext === "function") {
-				CanvasKit.deleteContext(contextHandle);
-			}
-			releaseWebGLCanvasContext(canvas);
-			return null;
-		}
-		return applyOffscreenCanvasScale(
-			new JsiSkSurface(CanvasKit, surface, () => {
-				try {
-					grContext.delete();
-				} catch {}
-				if (typeof CanvasKit.deleteContext === "function") {
-					CanvasKit.deleteContext(contextHandle);
-				}
-				releaseWebGLCanvasContext(canvas);
-			}),
-			resolvedPixelRatio,
-		);
 	}
 	const surface = CanvasKit.MakeSurface(targetWidth, targetHeight);
 	if (!surface) {
