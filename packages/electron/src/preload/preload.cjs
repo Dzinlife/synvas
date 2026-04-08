@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
-contextBridge.exposeInMainWorld("aiNleElectron", {
+contextBridge.exposeInMainWorld("synvasElectron", {
 	platform: process.platform,
 	webUtils: {
 		getPathForFile: (file) => webUtils.getPathForFile(file),

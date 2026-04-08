@@ -22,7 +22,7 @@ const trimToNull = (value: string | null | undefined): string | null => {
 };
 
 export const isElectronEnv = (): boolean => {
-	return typeof window !== "undefined" && "aiNleElectron" in window;
+	return typeof window !== "undefined" && "synvasElectron" in window;
 };
 
 export const detectAssetRuntimeEnvironment = (): AssetRuntimeEnvironment => {
@@ -83,13 +83,13 @@ const getElectronFilePath = (file: File): string | null => {
 	if (typeof window === "undefined") return null;
 	const bridge = (
 		window as Window & {
-			aiNleElectron?: {
+			synvasElectron?: {
 				webUtils?: {
 					getPathForFile?: (file: File) => string | null | undefined;
 				};
 			};
 		}
-	).aiNleElectron;
+	).synvasElectron;
 	const resolved = bridge?.webUtils?.getPathForFile?.(file);
 	return trimToNull(resolved ?? null);
 };

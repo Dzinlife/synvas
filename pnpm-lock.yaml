@@ -182,7 +182,7 @@ importers:
 
   packages/electron:
     dependencies:
-      '@ai-nle/editor':
+      '@synvas/editor':
         specifier: workspace:*
         version: link:../editor
       '@fontsource-variable/inter':
@@ -290,7 +290,7 @@ importers:
 
   packages/web:
     dependencies:
-      '@ai-nle/editor':
+      '@synvas/editor':
         specifier: workspace:*
         version: link:../editor
       '@base-ui/react':

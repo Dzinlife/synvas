@@ -30,7 +30,7 @@ interface ProjectDbSchema extends DBSchema {
 	};
 }
 
-const DB_NAME = "composa";
+const DB_NAME = "synvas";
 const DB_VERSION = 1;
 const PROJECT_STORE = "projects";
 const META_STORE = "meta";

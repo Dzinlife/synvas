@@ -1,4 +1,4 @@
-import appCss from "@nle/editor/styles.css?url";
+import appCss from "@synvas/editor/styles.css?url";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
 
@@ -27,7 +27,7 @@ export const Route = createRootRoute({
 					"width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
 			},
 			{
-				title: "AI NLE",
+				title: "synvas",
 			},
 		],
 		links: [

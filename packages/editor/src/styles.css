@@ -2,8 +2,8 @@
 /* 在 monorepo 中，Tailwind 默认只扫描当前应用目录；这里显式把 editor 包自身的源码加入扫描范围 */
 @source "./**/*.{ts,tsx}";
 /* 同时把宿主工程也加入扫描，避免 Web/Electron 的页面样式缺失 */
-@source "../../ai-nle-web/src/**/*.{ts,tsx}";
-@source "../../ai-nle-electron/src/**/*.{ts,tsx}";
+@source "../../web/src/**/*.{ts,tsx}";
+@source "../../electron/src/**/*.{ts,tsx}";
 @import "tw-animate-css";
 @import "@fontsource/barlow";
 @import "@fontsource-variable/inter";

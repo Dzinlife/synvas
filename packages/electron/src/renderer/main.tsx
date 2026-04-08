@@ -1,8 +1,8 @@
-import EditorApp from "@ai-nle/editor/app";
-import { AsrProvider } from "@ai-nle/editor/asr";
+import EditorApp from "@synvas/editor/app";
+import { AsrProvider } from "@synvas/editor/asr";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import "@ai-nle/editor/styles.css";
+import "@synvas/editor/styles.css";
 import { electronAsrClient } from "./asr/electronAsrClient";
 
 const container = document.getElementById("root");

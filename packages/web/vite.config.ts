@@ -45,7 +45,7 @@ export default defineConfig(() => {
 		resolve: {
 			alias: [
 				{
-					find: "@nle/editor",
+					find: "@synvas/editor",
 					replacement: path.resolve(__dirname, "../editor/src"),
 				},
 				// react-skia-lite 的 dist 目前不完整，这里先统一走源码。

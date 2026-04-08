@@ -1,4 +1,4 @@
-import type { AsrModelSize } from "@ai-nle/editor/asr";
+import type { AsrModelSize } from "@synvas/editor/asr";
 
 export type WhisperWord = {
 	text: string;
@@ -79,7 +79,7 @@ export type WhisperBackend = "gpu" | "cpu" | null;
 
 declare global {
 	interface Window {
-		aiNleElectron?: {
+		synvasElectron?: {
 			platform?: NodeJS.Platform;
 			webUtils?: {
 				getPathForFile?: (file: File) => string | null | undefined;

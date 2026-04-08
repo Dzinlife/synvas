@@ -17,7 +17,7 @@ export type ExternalVideoMetadata = {
 type FileWithPath = File & { path?: string };
 
 const isElectronEnv = (): boolean => {
-	return typeof window !== "undefined" && "aiNleElectron" in window;
+	return typeof window !== "undefined" && "synvasElectron" in window;
 };
 
 export function isVideoFile(file: File): boolean {
@@ -39,13 +39,13 @@ const getElectronFilePath = (file: File): string | null => {
 	if (typeof window === "undefined") return null;
 	const bridge = (
 		window as Window & {
-			aiNleElectron?: {
+			synvasElectron?: {
 				webUtils?: {
 					getPathForFile?: (file: File) => string | null | undefined;
 				};
 			};
 		}
-	).aiNleElectron;
+	).synvasElectron;
 	const resolved = bridge?.webUtils?.getPathForFile?.(file);
 	if (typeof resolved !== "string") return null;
 	const trimmed = resolved.trim();

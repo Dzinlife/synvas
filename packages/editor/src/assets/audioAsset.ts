@@ -47,7 +47,7 @@ const OPFS_PREFIX = "opfs://";
 const FILE_PREFIX = "file://";
 
 const isElectronEnv = (): boolean => {
-	return typeof window !== "undefined" && "aiNleElectron" in window;
+	return typeof window !== "undefined" && "synvasElectron" in window;
 };
 
 const resolveFilePathFromUri = (uri: string): string | null => {
@@ -78,7 +78,7 @@ const getElectronFileBridge = (): {
 	if (typeof window === "undefined") return null;
 	const bridge = (
 		window as Window & {
-			aiNleElectron?: {
+			synvasElectron?: {
 				file?: {
 					stat: (filePath: string) => Promise<{ size: number }>;
 					read: (
@@ -89,7 +89,7 @@ const getElectronFileBridge = (): {
 				};
 			};
 		}
-	).aiNleElectron?.file;
+	).synvasElectron?.file;
 	if (!bridge?.stat || !bridge.read) return null;
 	return bridge;
 };

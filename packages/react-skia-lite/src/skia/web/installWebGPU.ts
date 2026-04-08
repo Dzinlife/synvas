@@ -56,7 +56,7 @@ type InternalSurfacePrototype = Omit<
 	InternalWebGPUSurface,
 	"drawOnce" | "flush" | "requestAnimationFrame"
 > & {
-	__aiNLEWebGPUPatched?: boolean;
+	__synvasWebGPUPatched?: boolean;
 	drawOnce: (
 		callback: (_: Canvas) => void,
 		dirtyRect?: number[],
@@ -312,7 +312,7 @@ type InternalCanvasKitWebGPU = Omit<
 	SkImages?: InternalSkImagesFactory;
 	Surface?: {
 		prototype?: InternalWebGPUSurface & {
-			__aiNLEWebGPUPatched?: boolean;
+			__synvasWebGPUPatched?: boolean;
 		};
 	};
 };
@@ -778,11 +778,11 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 	const surfacePrototype = canvasKit.Surface?.prototype as
 		| InternalSurfacePrototype
 		| undefined;
-	if (!surfacePrototype || surfacePrototype.__aiNLEWebGPUPatched) {
+	if (!surfacePrototype || surfacePrototype.__synvasWebGPUPatched) {
 		return;
 	}
 	if (typeof surfacePrototype.flush !== "function") {
-		surfacePrototype.__aiNLEWebGPUPatched = true;
+		surfacePrototype.__synvasWebGPUPatched = true;
 		return;
 	}
 
@@ -790,7 +790,7 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 		this: InternalWebGPUSurface,
 		dirtyRect?: number[],
 	) => void;
-	surfacePrototype.__aiNLEWebGPUPatched = true;
+	surfacePrototype.__synvasWebGPUPatched = true;
 	surfacePrototype.assignCurrentSwapChainTexture = () => false;
 	surfacePrototype.makeImageFromTextureSource = function (
 		this: InternalWebGPUSurface,

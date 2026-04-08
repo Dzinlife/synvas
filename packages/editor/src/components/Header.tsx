@@ -90,7 +90,7 @@ export default function Header() {
 
 	return (
 		<header className="flex items-center justify-between px-4 py-3 bg-neutral-900 text-neutral-100 border-b border-neutral-800">
-			<div className="text-sm font-semibold tracking-wide">AI NLE</div>
+			<div className="text-sm font-semibold tracking-wide">synvas</div>
 			<div className="flex items-center gap-2">
 				{status === "ready" && (
 					<>

@@ -1,11 +1,11 @@
-# ai-nle Monorepo
+# synvas Monorepo
 
 This is a monorepo using pnpm workspaces and Turborepo.
 
 ## Structure
 
 ```
-ai-nle/
+synvas/
 ├── packages/
 │   ├── core/     # Core Engine
 │   ├── web/      # Web entry (TanStack Start)
@@ -36,8 +36,8 @@ pnpm dev
 Run a specific package:
 
 ```bash
-pnpm --filter ai-nle-web dev
-pnpm --filter ai-nle-electron dev
+pnpm --filter @synvas/web dev
+pnpm --filter @synvas/electron dev
 pnpm --filter react-skia-lite dev
 ```
 
@@ -52,8 +52,8 @@ pnpm build
 Build a specific package:
 
 ```bash
-pnpm --filter ai-nle-web build
-pnpm --filter ai-nle-electron build
+pnpm --filter @synvas/web build
+pnpm --filter @synvas/electron build
 pnpm --filter react-skia-lite build
 ```
 
@@ -75,33 +75,33 @@ pnpm check
 
 ## Packages
 
-### ai-nle-web
+### @synvas/web
 
 Main application built with TanStack Start, React Router, and Tailwind CSS.
 
-### ai-nle-electron
+### @synvas/electron
 
 Electron desktop application that runs ASR with a local `whisper.cpp` CLI (better utilizes local hardware).
 
 Required env vars (pick one):
 
 ```bash
-export AI_NLE_WHISPER_MODEL=/absolute/path/to/ggml-small.bin
+export SYNVAS_WHISPER_MODEL=/absolute/path/to/ggml-small.bin
 # or:
-export AI_NLE_WHISPER_MODEL_TINY=/path/to/ggml-tiny.bin
-export AI_NLE_WHISPER_MODEL_SMALL=/path/to/ggml-small.bin
-export AI_NLE_WHISPER_MODEL_MEDIUM=/path/to/ggml-medium.bin
+export SYNVAS_WHISPER_MODEL_TINY=/path/to/ggml-tiny.bin
+export SYNVAS_WHISPER_MODEL_SMALL=/path/to/ggml-small.bin
+export SYNVAS_WHISPER_MODEL_MEDIUM=/path/to/ggml-medium.bin
 ```
 
 Optional:
 
 ```bash
-export AI_NLE_WHISPER_CLI=whisper-cli
+export SYNVAS_WHISPER_CLI=whisper-cli
 ```
 
 The renderer uses `mediabunny` to export 16kHz mono 16-bit WAV before calling `whisper-cli`.
 
-### ai-nle-editor
+### @synvas/editor
 
 Editor UI + shared logic (used by both web and electron).
 

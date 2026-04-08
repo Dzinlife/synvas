@@ -18,6 +18,6 @@
     "isolatedModules": true,
     "noEmit": false
   },
-  "include": ["src/**/*", "react-native-skia-source-code", "../ai-nle/src/components/progressBlur"],
+  "include": ["src/**/*", "react-native-skia-source-code", "../synvas/src/components/progressBlur"],
   "exclude": ["node_modules", "dist"]
 }

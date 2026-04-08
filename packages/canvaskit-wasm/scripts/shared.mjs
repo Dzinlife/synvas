@@ -17,10 +17,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const packageDir = path.resolve(__dirname, "..");
 export const repoRoot = path.resolve(packageDir, "..", "..");
 export const skiaCommit =
-	process.env.AI_NLE_CANVASKIT_SKIA_COMMIT ??
+	process.env.SYNVAS_CANVASKIT_SKIA_COMMIT ??
 	"a6ccaf95c6e0813f110c7daf884a459161d6de1b";
 export const skiaRepoUrl =
-	process.env.AI_NLE_CANVASKIT_SKIA_REPO ??
+	process.env.SYNVAS_CANVASKIT_SKIA_REPO ??
 	"https://github.com/google/skia.git";
 export const skiaDir = path.join(repoRoot, ".cache", "canvaskit-skia", skiaCommit);
 export const patchFile = path.join(
@@ -95,13 +95,13 @@ export const canvasKitWebGPUDefinePatchFile = path.join(
 );
 export const dockerfileDir = path.join(packageDir, "docker", "canvaskit-emsdk");
 export const dockerBaseImage =
-	process.env.AI_NLE_CANVASKIT_DOCKER_BASE_IMAGE ?? "emscripten/emsdk:5.0.3";
+	process.env.SYNVAS_CANVASKIT_DOCKER_BASE_IMAGE ?? "emscripten/emsdk:5.0.3";
 export const dockerImage =
-	process.env.AI_NLE_CANVASKIT_DOCKER_IMAGE ?? "ai-nle-canvaskit-emsdk:5.0.3";
+	process.env.SYNVAS_CANVASKIT_DOCKER_IMAGE ?? "synvas-canvaskit-emsdk:5.0.3";
 export const dockerPlatform =
-	process.env.AI_NLE_CANVASKIT_DOCKER_PLATFORM ?? "linux/amd64";
+	process.env.SYNVAS_CANVASKIT_DOCKER_PLATFORM ?? "linux/amd64";
 export const dawnBuildNinjaJobs =
-	process.env.AI_NLE_CANVASKIT_DAWN_BUILD_NINJA_JOBS ?? "1";
+	process.env.SYNVAS_CANVASKIT_DAWN_BUILD_NINJA_JOBS ?? "1";
 
 const canvaskitModuleDir = path.join(skiaDir, "modules", "canvaskit");
 const npmBuildDir = path.join(canvaskitModuleDir, "npm_build");
@@ -429,7 +429,7 @@ export const ensureDocker = () => {
 	if (imageCheck.status === 0) {
 		return;
 	}
-	if (process.env.AI_NLE_CANVASKIT_DOCKER_IMAGE) {
+	if (process.env.SYNVAS_CANVASKIT_DOCKER_IMAGE) {
 		throw new Error(
 			`Docker image ${dockerImage} is missing. Pull or build it before running build:docker.`,
 		);

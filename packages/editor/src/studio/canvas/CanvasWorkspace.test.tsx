@@ -712,7 +712,7 @@ const mockDOMRect = {
 	left: 0,
 	toJSON: () => ({}),
 } as DOMRect;
-const SKIA_RESOURCE_TRACKER_STORAGE_KEY = "ai-nle:skia-resource-tracker:v1";
+const SKIA_RESOURCE_TRACKER_STORAGE_KEY = "synvas:skia-resource-tracker:v1";
 
 vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
 	() => mockDOMRect,

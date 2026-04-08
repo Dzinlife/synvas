@@ -37,12 +37,12 @@ describe("imageAsset", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.dataFromBytes.mockImplementation((bytes: Uint8Array) => bytes);
-		delete (window as Window & { aiNleElectron?: unknown }).aiNleElectron;
+		delete (window as Window & { synvasElectron?: unknown }).synvasElectron;
 	});
 
 	afterEach(() => {
 		vi.unstubAllGlobals();
-		delete (window as Window & { aiNleElectron?: unknown }).aiNleElectron;
+		delete (window as Window & { synvasElectron?: unknown }).synvasElectron;
 	});
 
 	it("同 URI 会复用缓存并在最后一个 release 时释放图片", async () => {
@@ -79,10 +79,10 @@ describe("imageAsset", () => {
 		const fetchMock = vi.fn();
 		vi.stubGlobal("fetch", fetchMock);
 
-		const handle = await acquireImageAsset("opfs://ai-nle/images/asset.png");
+		const handle = await acquireImageAsset("opfs://synvas/images/asset.png");
 
 		expect(mocks.resolveProjectOpfsFile).toHaveBeenCalledWith(
-			"opfs://ai-nle/images/asset.png",
+			"opfs://synvas/images/asset.png",
 		);
 		expect(fetchMock).not.toHaveBeenCalled();
 
@@ -97,13 +97,13 @@ describe("imageAsset", () => {
 		const stat = vi.fn(async () => ({ size: 3 }));
 		const read = vi.fn(async () => new Uint8Array([1, 2, 3]));
 		(window as Window & {
-			aiNleElectron?: {
+			synvasElectron?: {
 				file?: {
 					stat: typeof stat;
 					read: typeof read;
 				};
 			};
-		}).aiNleElectron = {
+		}).synvasElectron = {
 			file: {
 				stat,
 				read,
@@ -119,7 +119,7 @@ describe("imageAsset", () => {
 	});
 
 	it("file:// 在 Electron bridge 缺失时会报错", async () => {
-		(window as Window & { aiNleElectron?: object }).aiNleElectron = {};
+		(window as Window & { synvasElectron?: object }).synvasElectron = {};
 		mocks.makeImageFromEncoded.mockReturnValue(createMockImage("unused"));
 
 		await expect(acquireImageAsset("file:///tmp/missing.png")).rejects.toThrow(

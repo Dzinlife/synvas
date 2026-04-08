@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
-contextBridge.exposeInMainWorld("aiNleElectron", {
+contextBridge.exposeInMainWorld("synvasElectron", {
 	platform: process.platform,
 	webUtils: {
 		getPathForFile: (file) => webUtils.getPathForFile(file),

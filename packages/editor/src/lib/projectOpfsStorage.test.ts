@@ -258,9 +258,9 @@ describe("projectOpfsStorage", () => {
 		await expect(listFiles(videoDir)).resolves.toHaveLength(1);
 	});
 
-	it("旧 opfs://ai-nle/... 路径会报错", async () => {
+	it("旧 opfs://synvas/... 路径会报错", async () => {
 		await expect(
-			resolveProjectOpfsFile("opfs://ai-nle/audios/a.mp3"),
+			resolveProjectOpfsFile("opfs://synvas/audios/a.mp3"),
 		).rejects.toThrow("projects/{projectId}");
 	});
 

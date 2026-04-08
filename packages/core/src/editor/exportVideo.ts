@@ -236,7 +236,7 @@ const createOpfsExportTarget = async (): Promise<ExportOutputTarget | null> => {
 
 	try {
 		const root = await getDirectory.call(nav.storage);
-		const exportDir = await root.getDirectoryHandle(".ai-nle-export", {
+		const exportDir = await root.getDirectoryHandle(".synvas-export", {
 			create: true,
 		});
 		const tempName = `timeline-${Date.now()}-${Math.random()

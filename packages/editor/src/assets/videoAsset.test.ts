@@ -62,12 +62,12 @@ const createMockImage = (width: number, height: number, id: string) =>
 describe("videoAsset", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		delete (window as Window & { aiNleElectron?: unknown }).aiNleElectron;
+		delete (window as Window & { synvasElectron?: unknown }).synvasElectron;
 	});
 
 	afterEach(() => {
 		vi.unstubAllGlobals();
-		delete (window as Window & { aiNleElectron?: unknown }).aiNleElectron;
+		delete (window as Window & { synvasElectron?: unknown }).synvasElectron;
 	});
 
 	it("超过字节预算时会回收最旧的视频帧", async () => {

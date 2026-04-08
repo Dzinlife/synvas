@@ -55,7 +55,7 @@ const ensureElectronInstalled = async () => {
 		const pkgJsonPath = require.resolve("electron/package.json");
 		const installScript = path.join(path.dirname(pkgJsonPath), "install.js");
 
-		console.log("[ai-nle-electron] Electron 二进制未安装，开始执行下载脚本...");
+		console.log("[synvas-electron] Electron 二进制未安装，开始执行下载脚本...");
 
 		await new Promise((resolve, reject) => {
 			const child = spawn(process.execPath, [installScript], {

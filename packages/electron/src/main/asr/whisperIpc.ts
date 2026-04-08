@@ -8,8 +8,8 @@ import type { ReadableStream } from "node:stream/web";
 import { app, ipcMain } from "electron";
 
 const DEFAULT_MODEL = "large-v3-turbo";
-const KEEP_TMP = process.env.AI_NLE_KEEP_WHISPER_TMP === "1";
-const DEBUG = process.env.AI_NLE_WHISPER_DEBUG === "1";
+const KEEP_TMP = process.env.SYNVAS_KEEP_WHISPER_TMP === "1";
+const DEBUG = process.env.SYNVAS_WHISPER_DEBUG === "1";
 
 const MODEL_URL_BY_SIZE: Record<string, string> = {
 	"large-v3-turbo":
@@ -75,7 +75,7 @@ const normalizeModel = (modelSize: string): string =>
 	modelSize === DEFAULT_MODEL ? modelSize : DEFAULT_MODEL;
 
 const resolveModelPath = (modelSize: string): string => {
-	const candidate = process.env.AI_NLE_WHISPER_MODEL;
+	const candidate = process.env.SYNVAS_WHISPER_MODEL;
 	if (candidate) return candidate;
 	return getDefaultModelPath(normalizeModel(modelSize));
 };
@@ -101,15 +101,15 @@ const getWhisperCliUrlKey = (): string =>
 	`${process.platform}_${process.arch}`.toLowerCase();
 
 const resolveWhisperCliDownloadUrl = (): string | null => {
-	const direct = process.env.AI_NLE_WHISPER_CLI_DOWNLOAD_URL;
+	const direct = process.env.SYNVAS_WHISPER_CLI_DOWNLOAD_URL;
 	if (direct) return direct;
 	const key = getWhisperCliUrlKey();
 	const envKey = key.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-	const perArch = process.env[`AI_NLE_WHISPER_CLI_DOWNLOAD_URL_${envKey}`];
+	const perArch = process.env[`SYNVAS_WHISPER_CLI_DOWNLOAD_URL_${envKey}`];
 	if (perArch) return perArch;
 	const fromList = WHISPER_CLI_BINARY_URLS[key];
 	if (fromList) return fromList;
-	const base = process.env.AI_NLE_WHISPER_CLI_DOWNLOAD_BASE;
+	const base = process.env.SYNVAS_WHISPER_CLI_DOWNLOAD_BASE;
 	if (!base) return null;
 	const fileName = getWhisperCliDownloadFileName();
 	if (!fileName) return null;
@@ -133,7 +133,7 @@ const getInstalledCliPath = (whisperDir: string): string | null => {
 };
 
 const resolveWhisperCli = async (): Promise<string | null> => {
-	const envPath = process.env.AI_NLE_WHISPER_CLI;
+	const envPath = process.env.SYNVAS_WHISPER_CLI;
 	if (envPath && (await fileExists(envPath))) return envPath;
 	const whisperDir = getWhisperCppDir();
 	const installed = getInstalledCliPath(whisperDir);
@@ -370,7 +370,7 @@ export const registerWhisperIpc = (): void => {
 			const language = payload?.language;
 
 			const tmpDir = await fs.mkdtemp(
-				path.join(os.tmpdir(), "ai-nle-whisper-"),
+				path.join(os.tmpdir(), "synvas-whisper-"),
 			);
 			logDebug("临时目录", tmpDir);
 			const wavPath = path.join(tmpDir, "audio.wav");

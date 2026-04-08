@@ -21,7 +21,7 @@ const createId = (prefix: string): string => {
 };
 
 const resolveDefaultModel = (): AsrModelSize => {
-	const isElectron = typeof window !== "undefined" && "aiNleElectron" in window;
+	const isElectron = typeof window !== "undefined" && "synvasElectron" in window;
 	return isElectron ? "large-v3-turbo" : "tiny";
 };
 

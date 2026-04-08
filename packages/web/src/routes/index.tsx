@@ -1,4 +1,4 @@
-import { EditorApp } from "@ai-nle/editor";
+import { EditorApp } from "@synvas/editor";
 import { createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({

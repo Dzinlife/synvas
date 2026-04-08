@@ -37,12 +37,12 @@ type LoadSkiaWebOptions = CanvasKitInitOptions & {
 };
 
 type GlobalSkiaMetadata = typeof globalThis & {
-	__AI_NLE_SKIA_BUNDLE__?: SkiaBundleKind;
+	__SYNVAS_SKIA_BUNDLE__?: SkiaBundleKind;
 };
 
 const DEFAULT_SKIA_WEB_BACKEND_PREFERENCE = "auto" as const;
 export const SKIA_WEB_BACKEND_PREFERENCE_STORAGE_KEY =
-	"ai-nle:skia-web-backend";
+	"synvas:skia-web-backend";
 export const SKIA_WEB_BACKEND_QUERY_PARAM = "skiaBackend";
 
 const validPreferences = new Set<SkiaWebBackendPreference>([
@@ -314,7 +314,7 @@ export const LoadSkiaWeb = async (opts?: LoadSkiaWebOptions) => {
 			const { CanvasKit, backend } = await tryResolveCanvasKit(preference, opts);
 			global.CanvasKit = CanvasKit;
 			setSkiaRenderBackend(backend);
-			getGlobalSkiaMetadata().__AI_NLE_SKIA_BUNDLE__ = backend.bundle;
+			getGlobalSkiaMetadata().__SYNVAS_SKIA_BUNDLE__ = backend.bundle;
 			return CanvasKit;
 		})().catch((error) => {
 			ckSharedPromise = undefined as never;
@@ -345,7 +345,7 @@ export const __setSkiaBundleLoadersForTests = (
 };
 
 export const __resetLoadSkiaWebForTests = () => {
-	delete getGlobalSkiaMetadata().__AI_NLE_SKIA_BUNDLE__;
+	delete getGlobalSkiaMetadata().__SYNVAS_SKIA_BUNDLE__;
 	global.CanvasKit = undefined as unknown as CanvasKitType;
 	bundleModuleLoaders = { ...defaultBundleModuleLoaders };
 	bundleWasmUrls = { ...defaultBundleWasmUrls };

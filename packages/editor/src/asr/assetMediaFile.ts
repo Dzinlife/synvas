@@ -46,7 +46,7 @@ const getElectronFileBridge = (): {
 	if (typeof window === "undefined") return null;
 	const bridge = (
 		window as Window & {
-			aiNleElectron?: {
+			synvasElectron?: {
 				file?: {
 					stat: (filePath: string) => Promise<{ size: number }>;
 					read: (
@@ -57,7 +57,7 @@ const getElectronFileBridge = (): {
 				};
 			};
 		}
-	).aiNleElectron?.file;
+	).synvasElectron?.file;
 	if (!bridge?.stat || !bridge.read) return null;
 	return bridge;
 };

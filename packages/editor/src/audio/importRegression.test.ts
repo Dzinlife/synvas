@@ -1,12 +1,26 @@
+import path from "node:path";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+const CURRENT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const EDITOR_SRC_DIR = path.resolve(CURRENT_DIR, "..");
+
 const CORE_FILES = [
-	"/Users/wz/Developer/ai-nle/packages/editor/src/scene-editor/contexts/TimelineContext.tsx",
-	"/Users/wz/Developer/ai-nle/packages/editor/src/scene-editor/audio/TimelineAudioMixManager.tsx",
-	"/Users/wz/Developer/ai-nle/packages/editor/src/element/AudioClip/model.ts",
-	"/Users/wz/Developer/ai-nle/packages/editor/src/element/VideoClip/model.ts",
-	"/Users/wz/Developer/ai-nle/packages/editor/src/scene-editor/components/PreviewLoudnessMeterCanvas.tsx",
+	path.join(
+		EDITOR_SRC_DIR,
+		"scene-editor/contexts/TimelineContext.tsx",
+	),
+	path.join(
+		EDITOR_SRC_DIR,
+		"scene-editor/audio/TimelineAudioMixManager.tsx",
+	),
+	path.join(EDITOR_SRC_DIR, "element/AudioClip/model.ts"),
+	path.join(EDITOR_SRC_DIR, "element/VideoClip/model.ts"),
+	path.join(
+		EDITOR_SRC_DIR,
+		"scene-editor/components/PreviewLoudnessMeterCanvas.tsx",
+	),
 ] as const;
 
 describe("audio import regression", () => {

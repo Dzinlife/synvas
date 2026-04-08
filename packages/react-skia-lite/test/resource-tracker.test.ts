@@ -27,9 +27,9 @@ describe("skia resource tracker", () => {
 		window.localStorage.clear();
 		delete (
 			window as Window & {
-				__AI_NLE_SKIA_RESOURCE_TRACKER__?: unknown;
+				__SYNVAS_SKIA_RESOURCE_TRACKER__?: unknown;
 			}
-		).__AI_NLE_SKIA_RESOURCE_TRACKER__;
+		).__SYNVAS_SKIA_RESOURCE_TRACKER__;
 	});
 
 	it("在无配置时返回默认值（追踪关闭）", async () => {

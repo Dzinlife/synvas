@@ -4,8 +4,8 @@ import type {
 	TranscribeAudioFileOptions,
 	TranscriptSegment,
 	TranscriptWord,
-} from "@ai-nle/editor/asr";
-import { exportWav16kMonoFromFile } from "@ai-nle/editor/asr";
+} from "@synvas/editor/asr";
+import { exportWav16kMonoFromFile } from "@synvas/editor/asr";
 import type { WhisperJsonOutput, WhisperSegment } from "../electron";
 
 type TimedCharRange = {
@@ -149,7 +149,7 @@ const createId = (prefix: string): string => {
 };
 
 const getBridge = () => {
-	const bridge = window.aiNleElectron;
+	const bridge = window.synvasElectron;
 	if (!bridge) {
 		throw new Error("当前不是 Electron 环境，无法使用本地 Whisper 引擎");
 	}

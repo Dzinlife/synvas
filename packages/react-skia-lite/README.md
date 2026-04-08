@@ -16,7 +16,7 @@ import { /* components */ } from 'react-skia-lite';
 
 ## Development
 
-This package is part of the ai-nle monorepo.
+This package is part of the synvas monorepo.
 
 ```bash
 # Build

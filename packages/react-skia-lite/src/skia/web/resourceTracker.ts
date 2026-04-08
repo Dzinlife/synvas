@@ -60,7 +60,7 @@ type TrackedSkiaHostObjectRecord = {
 	creationStack?: string;
 };
 
-const TRACKER_CONFIG_STORAGE_KEY = "ai-nle:skia-resource-tracker:v1";
+const TRACKER_CONFIG_STORAGE_KEY = "synvas:skia-resource-tracker:v1";
 const DEFAULT_SAMPLE_LIMIT_PER_TYPE = 3;
 const MIN_SAMPLE_LIMIT_PER_TYPE = 1;
 const MAX_SAMPLE_LIMIT_PER_TYPE = 200;
@@ -411,10 +411,10 @@ type TrackerWindowApi = {
 const installWindowTrackerApi = () => {
 	if (!hasWindow()) return;
 	const win = window as Window & {
-		__AI_NLE_SKIA_RESOURCE_TRACKER__?: TrackerWindowApi;
+		__SYNVAS_SKIA_RESOURCE_TRACKER__?: TrackerWindowApi;
 	};
-	if (win.__AI_NLE_SKIA_RESOURCE_TRACKER__) return;
-	win.__AI_NLE_SKIA_RESOURCE_TRACKER__ = {
+	if (win.__SYNVAS_SKIA_RESOURCE_TRACKER__) return;
+	win.__SYNVAS_SKIA_RESOURCE_TRACKER__ = {
 		getConfig: () => getSkiaResourceTrackerConfig(),
 		setConfig: (patch) => setSkiaResourceTrackerConfig(patch),
 		getCount: () => getTrackedSkiaHostObjectCount(),

@@ -11,7 +11,7 @@
 
 ```bash
 pnpm install
-pnpm --filter @ai-nle/rife-webgpu-demo start
+pnpm --filter @synvas/rife-webgpu-demo start
 ```
 
 打开浏览器访问终端输出地址（默认是 `http://localhost:3011`）。

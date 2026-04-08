@@ -1,5 +1,5 @@
 {
-  "name": "@ai-nle/rife-webgpu-demo",
+  "name": "@synvas/rife-webgpu-demo",
   "version": "0.1.0",
   "private": true,
   "type": "module",
