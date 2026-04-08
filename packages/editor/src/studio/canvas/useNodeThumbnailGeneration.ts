@@ -304,10 +304,6 @@ export const useNodeThumbnailGeneration = (
 	useEffect(() => {
 		if (!project || !projectId) return;
 		for (const node of project.canvas.nodes) {
-			// scene 节点首帧优先使用已有缩略图，避免后台批量触发首帧解码。
-			if (node.type === "scene" && hasReusableThumbnailAsset(project, node)) {
-				continue;
-			}
 			const definition = getCanvasNodeDefinition(node.type);
 			const capability = definition.thumbnail;
 			if (!capability) continue;
@@ -319,6 +315,14 @@ export const useNodeThumbnailGeneration = (
 			const sourceSignature = capability.getSourceSignature(context);
 			if (!sourceSignature) continue;
 			if (isThumbnailFresh(project, node, sourceSignature)) continue;
+			// scene 节点优先复用同签名缩略图；签名变化时必须触发重生，避免内容更新后仍显示旧图。
+			if (
+				node.type === "scene" &&
+				hasReusableThumbnailAsset(project, node) &&
+				node.thumbnail?.sourceSignature === sourceSignature
+			) {
+				continue;
+			}
 			const taskKey = buildTaskKey(node.id, sourceSignature);
 			if (
 				queuedTaskKeySetRef.current.has(taskKey) ||

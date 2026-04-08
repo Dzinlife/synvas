@@ -93,7 +93,10 @@ const createVideoThumbnailCapability =
 		};
 	};
 
-const createSceneProject = (): StudioProject => ({
+const createSceneProject = (options?: {
+	sceneUpdatedAt?: number;
+	thumbnailSourceSignature?: string;
+}): StudioProject => ({
 	id: "project-scene-1",
 	revision: 0,
 	assets: [
@@ -128,7 +131,8 @@ const createSceneProject = (): StudioProject => ({
 				updatedAt: 1,
 				thumbnail: {
 					assetId: "asset-thumb-1",
-					sourceSignature: "scene-1:1",
+					sourceSignature:
+						options?.thumbnailSourceSignature ?? "scene-1:1",
 					frame: 0,
 					generatedAt: 1,
 					version: 1,
@@ -152,7 +156,7 @@ const createSceneProject = (): StudioProject => ({
 			},
 			posterFrame: 0,
 			createdAt: 1,
-			updatedAt: 2,
+			updatedAt: options?.sceneUpdatedAt ?? 2,
 		},
 	},
 	ui: {
@@ -289,7 +293,7 @@ describe("useNodeThumbnailGeneration", () => {
 		});
 	});
 
-	it("scene 节点已有可用 thumb 时不会后台重生", async () => {
+	it("scene 节点同签名时会复用已有 thumb，不会后台重生", async () => {
 		const capability: CanvasNodeThumbnailCapability<SceneCanvasNode> = {
 			getSourceSignature: vi.fn(() => "scene-1:2"),
 			generate: vi.fn(async () => {
@@ -310,7 +314,10 @@ describe("useNodeThumbnailGeneration", () => {
 		useProjectStore.setState((state) => ({
 			...state,
 			currentProjectId: "project-scene-1",
-			currentProject: createSceneProject(),
+			currentProject: createSceneProject({
+				sceneUpdatedAt: 2,
+				thumbnailSourceSignature: "scene-1:2",
+			}),
 		}));
 
 		render(
@@ -321,9 +328,61 @@ describe("useNodeThumbnailGeneration", () => {
 		);
 
 		await new Promise((resolve) => window.setTimeout(resolve, 30));
-		expect(getCanvasNodeDefinitionMock).not.toHaveBeenCalled();
-		expect(capability.getSourceSignature).not.toHaveBeenCalled();
+		expect(getCanvasNodeDefinitionMock).toHaveBeenCalledWith("scene");
+		expect(capability.getSourceSignature).toHaveBeenCalled();
 		expect(capability.generate).not.toHaveBeenCalled();
 		expect(writeProjectFileToOpfsAtPath).not.toHaveBeenCalled();
+	});
+
+	it("scene 节点内容变化后会触发 thumb 重生", async () => {
+		const capability: CanvasNodeThumbnailCapability<SceneCanvasNode> = {
+			getSourceSignature: vi.fn(() => "scene-1:2"),
+			generate: vi.fn(async () => {
+				return {
+					blob: new Blob(["thumb-scene-1-next"], { type: "image/webp" }),
+					sourceSignature: "scene-1:2",
+					frame: 0,
+					sourceSize: {
+						width: 1920,
+						height: 1080,
+					},
+				};
+			}),
+		};
+		getCanvasNodeDefinitionMock.mockReturnValue({
+			thumbnail: capability,
+		});
+		vi.mocked(writeProjectFileToOpfsAtPath).mockResolvedValue({
+			uri: "opfs://projects/project-scene-1/images/.thumbs/node-node-scene-1.webp",
+			fileName: ".thumbs/node-node-scene-1.webp",
+			hash: "thumb-hash-2",
+		});
+		useProjectStore.setState((state) => ({
+			...state,
+			currentProjectId: "project-scene-1",
+			currentProject: createSceneProject({
+				sceneUpdatedAt: 2,
+				thumbnailSourceSignature: "scene-1:1",
+			}),
+		}));
+
+		render(
+			<HookHarness
+				project={useProjectStore.getState().currentProject}
+				projectId={useProjectStore.getState().currentProjectId}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(capability.generate).toHaveBeenCalledTimes(1);
+		});
+		await waitFor(() => {
+			const project = useProjectStore.getState().currentProject;
+			const node = project?.canvas.nodes.find(
+				(item) => item.id === "node-scene-1",
+			);
+			expect(node?.thumbnail?.sourceSignature).toBe("scene-1:2");
+		});
+		expect(writeProjectFileToOpfsAtPath).toHaveBeenCalledTimes(1);
 	});
 });
