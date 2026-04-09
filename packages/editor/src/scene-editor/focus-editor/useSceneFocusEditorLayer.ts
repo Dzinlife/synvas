@@ -3,7 +3,10 @@ import { useMemo } from "react";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { CameraState } from "@/studio/canvas/canvasWorkspaceUtils";
 import type { FocusSceneSkiaLayerProps } from "./FocusSceneSkiaLayer";
-import { useFocusSceneSkiaInteractions } from "./useFocusSceneSkiaInteractions";
+import {
+	type FocusSceneTextEditingBridgeState,
+	useFocusSceneSkiaInteractions,
+} from "./useFocusSceneSkiaInteractions";
 import { useFocusSceneTimelineElements } from "./useFocusSceneTimelineElements";
 
 interface UseSceneFocusEditorLayerOptions {
@@ -18,6 +21,7 @@ interface UseSceneFocusEditorLayerOptions {
 export interface SceneFocusEditorLayerResult {
 	enabled: boolean;
 	layerProps: FocusSceneSkiaLayerProps | null;
+	bridgeProps: FocusSceneTextEditingBridgeState | null;
 }
 
 export const useSceneFocusEditorLayer = ({
@@ -60,6 +64,8 @@ export const useSceneFocusEditorLayer = ({
 			selectedIds: focusInteractions.selectedIds,
 			hoveredId: focusInteractions.hoveredId,
 			draggingId: focusInteractions.draggingId,
+			editingElementId: focusInteractions.editingElementId,
+			textEditingDecorations: focusInteractions.textEditingDecorations,
 			selectionRectScreen: focusInteractions.selectionRectScreen,
 			snapGuidesScreen: focusInteractions.snapGuidesScreen,
 			selectionFrameScreen: focusInteractions.selectionFrameScreen,
@@ -68,6 +74,7 @@ export const useSceneFocusEditorLayer = ({
 			labelItems: focusInteractions.labelItems,
 			disabled: suspendHover,
 			onLayerPointerDown: focusInteractions.onLayerPointerDown,
+			onLayerDoubleClick: focusInteractions.onLayerDoubleClick,
 			onLayerPointerMove: focusInteractions.onLayerPointerMove,
 			onLayerPointerUp: focusInteractions.onLayerPointerUp,
 			onLayerPointerLeave: focusInteractions.onLayerPointerLeave,
@@ -76,11 +83,13 @@ export const useSceneFocusEditorLayer = ({
 		enabled,
 		focusInteractions.activeHandle,
 		focusInteractions.draggingId,
+		focusInteractions.editingElementId,
 		focusInteractions.elementLayouts,
 		focusInteractions.handleItems,
 		focusInteractions.hoveredId,
 		focusInteractions.labelItems,
 		focusInteractions.onLayerPointerDown,
+		focusInteractions.onLayerDoubleClick,
 		focusInteractions.onLayerPointerLeave,
 		focusInteractions.onLayerPointerMove,
 		focusInteractions.onLayerPointerUp,
@@ -88,13 +97,20 @@ export const useSceneFocusEditorLayer = ({
 		focusInteractions.selectionFrameScreen,
 		focusInteractions.selectionRectScreen,
 		focusInteractions.snapGuidesScreen,
+		focusInteractions.textEditingDecorations,
 		height,
 		suspendHover,
 		width,
 	]);
 
+	const bridgeProps = useMemo<FocusSceneTextEditingBridgeState | null>(() => {
+		if (!enabled) return null;
+		return focusInteractions.textEditingBridgeState;
+	}, [enabled, focusInteractions.textEditingBridgeState]);
+
 	return {
 		enabled,
 		layerProps,
+		bridgeProps,
 	};
 };

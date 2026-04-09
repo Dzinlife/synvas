@@ -24,6 +24,7 @@ import type {
 import { FOCUS_SCENE_CORNER_HANDLE_SIZE_PX } from "./focusSceneHandleGeometry";
 import type {
 	FocusSceneLabelItem,
+	FocusSceneTextEditingDecorations,
 	FocusSnapGuides,
 } from "./useFocusSceneSkiaInteractions";
 
@@ -39,6 +40,8 @@ export interface FocusSceneSkiaLayerProps {
 	selectedIds: string[];
 	hoveredId: string | null;
 	draggingId: string | null;
+	editingElementId: string | null;
+	textEditingDecorations: FocusSceneTextEditingDecorations | null;
 	selectionRectScreen: FocusRect | null;
 	snapGuidesScreen: FocusSnapGuides;
 	selectionFrameScreen: FocusFrame | null;
@@ -47,6 +50,7 @@ export interface FocusSceneSkiaLayerProps {
 	labelItems: FocusSceneLabelItem[];
 	disabled?: boolean;
 	onLayerPointerDown: (event: SkiaPointerEvent) => void;
+	onLayerDoubleClick: (event: SkiaPointerEvent) => void;
 	onLayerPointerMove: (event: SkiaPointerEvent) => void;
 	onLayerPointerUp: (event: SkiaPointerEvent) => void;
 	onLayerPointerLeave: () => void;
@@ -174,6 +178,8 @@ export const FocusSceneSkiaLayer = ({
 	selectedIds,
 	hoveredId,
 	draggingId,
+	editingElementId,
+	textEditingDecorations,
 	selectionRectScreen,
 	snapGuidesScreen,
 	selectionFrameScreen,
@@ -182,6 +188,7 @@ export const FocusSceneSkiaLayer = ({
 	labelItems,
 	disabled = false,
 	onLayerPointerDown,
+	onLayerDoubleClick,
 	onLayerPointerMove,
 	onLayerPointerUp,
 	onLayerPointerLeave,
@@ -189,6 +196,7 @@ export const FocusSceneSkiaLayer = ({
 	const [fontProvider, setFontProvider] =
 		useState<SkTypefaceFontProvider | null>(null);
 	const [fontRegistryRevision, setFontRegistryRevision] = useState(0);
+	const [caretVisible, setCaretVisible] = useState(true);
 	const labelTexts = useMemo(() => {
 		return labelItems.map((label) => {
 			return `${Math.round(label.canvasWidth)} × ${Math.round(label.canvasHeight)}`;
@@ -306,6 +314,20 @@ export const FocusSceneSkiaLayer = ({
 		};
 	}, [labelRenderItems]);
 
+	useEffect(() => {
+		if (!textEditingDecorations?.caretRectLocal || !editingElementId) {
+			setCaretVisible(true);
+			return;
+		}
+		setCaretVisible(true);
+		const timer = window.setInterval(() => {
+			setCaretVisible((previous) => !previous);
+		}, 520);
+		return () => {
+			window.clearInterval(timer);
+		};
+	}, [editingElementId, textEditingDecorations?.caretRectLocal]);
+
 	if (width <= 0 || height <= 0) return null;
 
 	return (
@@ -313,6 +335,7 @@ export const FocusSceneSkiaLayer = ({
 			<Group
 				hitRect={{ x: 0, y: 0, width, height }}
 				onPointerDown={onLayerPointerDown}
+				onDoubleClick={onLayerDoubleClick}
 				onPointerMove={onLayerPointerMove}
 				onPointerUp={onLayerPointerUp}
 				onPointerLeave={onLayerPointerLeave}
@@ -400,96 +423,155 @@ export const FocusSceneSkiaLayer = ({
 						</Group>
 					);
 				})}
-				{selectionFrameScreen && selectedIds.length > 0 && (
+				{textEditingDecorations && (
 					<Group
 						transform={[
-							{ translateX: selectionFrameScreen.cx },
-							{ translateY: selectionFrameScreen.cy },
-							{ rotate: selectionFrameScreen.rotationRad },
+							{ translateX: textEditingDecorations.frameScreen.cx },
+							{ translateY: textEditingDecorations.frameScreen.cy },
+							{ rotate: textEditingDecorations.frameScreen.rotationRad },
 						]}
+						pointerEvents="none"
 					>
 						<Group
 							transform={[
-								{ translateX: -selectionFrameScreen.width / 2 },
-								{ translateY: -selectionFrameScreen.height / 2 },
+								{ translateX: -textEditingDecorations.frameScreen.width / 2 },
+								{ translateY: -textEditingDecorations.frameScreen.height / 2 },
 							]}
+							pointerEvents="none"
 						>
-							{[...handleItems]
-								.sort((left, right) => {
-									return (
-										resolveAnchorHitDrawPriority(left) -
-										resolveAnchorHitDrawPriority(right)
-									);
-								})
-								.map((item) => (
-									<Rect
-										key={`focus-scene-anchor-hit-${item.id}`}
-										x={item.rectLocal.x}
-										y={item.rectLocal.y}
-										width={item.rectLocal.width}
-										height={item.rectLocal.height}
-										color="rgba(0,0,0,0.0001)"
-										cursor={item.cursor}
-									/>
-								))}
-							{handleItems
-								.filter((item) => item.visibleCornerMarker)
-								.map((item) => {
-									const isActive = activeHandle === item.handle;
-									const cornerMarkerX =
-										item.rectLocal.x +
-										(item.rectLocal.width - HANDLE_SIZE_PX) / 2;
-									const cornerMarkerY =
-										item.rectLocal.y +
-										(item.rectLocal.height - HANDLE_SIZE_PX) / 2;
-									return (
-										<Rect
-											key={`focus-scene-corner-marker-${item.id}`}
-											x={cornerMarkerX}
-											y={cornerMarkerY}
-											width={HANDLE_SIZE_PX}
-											height={HANDLE_SIZE_PX}
-											color={isActive ? "rgba(255,0,0,1)" : "rgba(0,0,0,1)"}
-											pointerEvents="none"
-										/>
-									);
-								})}
-							{handleItems
-								.filter((item) => item.visibleCornerMarker)
-								.map((item) => {
-									const cornerMarkerX =
-										item.rectLocal.x +
-										(item.rectLocal.width - HANDLE_SIZE_PX) / 2;
-									const cornerMarkerY =
-										item.rectLocal.y +
-										(item.rectLocal.height - HANDLE_SIZE_PX) / 2;
-									return (
-										<Rect
-											key={`focus-scene-corner-marker-border-${item.id}`}
-											x={cornerMarkerX}
-											y={cornerMarkerY}
-											width={HANDLE_SIZE_PX}
-											height={HANDLE_SIZE_PX}
-											style="stroke"
-											strokeWidth={1}
-											color="rgba(255,255,255,1)"
-											pointerEvents="none"
-										/>
-									);
-								})}
-							<Rect
-								x={0}
-								y={0}
-								width={selectionFrameScreen.width}
-								height={selectionFrameScreen.height}
-								style="stroke"
-								strokeWidth={1}
-								color="rgba(255,0,0,0.7)"
-								pointerEvents="none"
-							/>
+							{textEditingDecorations.selectionRectsLocal.map((rect) => (
+								<Rect
+									key={`focus-scene-text-selection-${rect.x.toFixed(3)}-${rect.y.toFixed(3)}-${rect.width.toFixed(3)}-${rect.height.toFixed(3)}`}
+									x={rect.x}
+									y={rect.y}
+									width={rect.width}
+									height={rect.height}
+									color="rgba(59,130,246,0.35)"
+									pointerEvents="none"
+								/>
+							))}
+							{textEditingDecorations.compositionRectsLocal.map((rect) => (
+								<Rect
+									key={`focus-scene-text-composition-${rect.x.toFixed(3)}-${rect.y.toFixed(3)}-${rect.width.toFixed(3)}-${rect.height.toFixed(3)}`}
+									x={rect.x}
+									y={rect.y + Math.max(rect.height - 1, 0)}
+									width={rect.width}
+									height={1}
+									color="rgba(37,99,235,0.9)"
+									pointerEvents="none"
+								/>
+							))}
+							{textEditingDecorations.caretRectLocal && caretVisible && (
+								<Rect
+									x={textEditingDecorations.caretRectLocal.x}
+									y={textEditingDecorations.caretRectLocal.y}
+									width={Math.max(
+										1,
+										textEditingDecorations.caretRectLocal.width,
+									)}
+									height={Math.max(
+										1,
+										textEditingDecorations.caretRectLocal.height,
+									)}
+									color="rgba(37,99,235,1)"
+									pointerEvents="none"
+								/>
+							)}
 						</Group>
 					</Group>
 				)}
+				{selectionFrameScreen &&
+					selectedIds.length > 0 &&
+					!editingElementId && (
+						<Group
+							transform={[
+								{ translateX: selectionFrameScreen.cx },
+								{ translateY: selectionFrameScreen.cy },
+								{ rotate: selectionFrameScreen.rotationRad },
+							]}
+						>
+							<Group
+								transform={[
+									{ translateX: -selectionFrameScreen.width / 2 },
+									{ translateY: -selectionFrameScreen.height / 2 },
+								]}
+							>
+								{[...handleItems]
+									.sort((left, right) => {
+										return (
+											resolveAnchorHitDrawPriority(left) -
+											resolveAnchorHitDrawPriority(right)
+										);
+									})
+									.map((item) => (
+										<Rect
+											key={`focus-scene-anchor-hit-${item.id}`}
+											x={item.rectLocal.x}
+											y={item.rectLocal.y}
+											width={item.rectLocal.width}
+											height={item.rectLocal.height}
+											color="rgba(0,0,0,0.0001)"
+											cursor={item.cursor}
+										/>
+									))}
+								{handleItems
+									.filter((item) => item.visibleCornerMarker)
+									.map((item) => {
+										const isActive = activeHandle === item.handle;
+										const cornerMarkerX =
+											item.rectLocal.x +
+											(item.rectLocal.width - HANDLE_SIZE_PX) / 2;
+										const cornerMarkerY =
+											item.rectLocal.y +
+											(item.rectLocal.height - HANDLE_SIZE_PX) / 2;
+										return (
+											<Rect
+												key={`focus-scene-corner-marker-${item.id}`}
+												x={cornerMarkerX}
+												y={cornerMarkerY}
+												width={HANDLE_SIZE_PX}
+												height={HANDLE_SIZE_PX}
+												color={isActive ? "rgba(255,0,0,1)" : "rgba(0,0,0,1)"}
+												pointerEvents="none"
+											/>
+										);
+									})}
+								{handleItems
+									.filter((item) => item.visibleCornerMarker)
+									.map((item) => {
+										const cornerMarkerX =
+											item.rectLocal.x +
+											(item.rectLocal.width - HANDLE_SIZE_PX) / 2;
+										const cornerMarkerY =
+											item.rectLocal.y +
+											(item.rectLocal.height - HANDLE_SIZE_PX) / 2;
+										return (
+											<Rect
+												key={`focus-scene-corner-marker-border-${item.id}`}
+												x={cornerMarkerX}
+												y={cornerMarkerY}
+												width={HANDLE_SIZE_PX}
+												height={HANDLE_SIZE_PX}
+												style="stroke"
+												strokeWidth={1}
+												color="rgba(255,255,255,1)"
+												pointerEvents="none"
+											/>
+										);
+									})}
+								<Rect
+									x={0}
+									y={0}
+									width={selectionFrameScreen.width}
+									height={selectionFrameScreen.height}
+									style="stroke"
+									strokeWidth={1}
+									color="rgba(255,0,0,0.7)"
+									pointerEvents="none"
+								/>
+							</Group>
+						</Group>
+					)}
 				{labelRenderItems.map((item) => {
 					const { label, paragraph, textWidth, textHeight } = item;
 					const badgeWidth = textWidth + LABEL_HORIZONTAL_PADDING_PX * 2;

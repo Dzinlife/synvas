@@ -13,6 +13,7 @@ import {
 	createRuntimeProviderWrapper,
 	createTestEditorRuntime,
 } from "@/scene-editor/runtime/testUtils";
+import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import { useFocusSceneSkiaInteractions } from "./useFocusSceneSkiaInteractions";
 
 const CANVAS_SIZE = { width: 1000, height: 1000 };
@@ -156,6 +157,7 @@ const resolveSceneBox = (element: TimelineElement) => {
 };
 
 const setupInteractions = (initialElements: TimelineElement[]) => {
+	useStudioHistoryStore.getState().clear();
 	const runtime = createTestEditorRuntime("focus-scene-interactions-test");
 	const timelineRef = {
 		kind: "scene" as const,
@@ -215,6 +217,84 @@ const mockTextResizeBehavior = () => {
 		}
 		return undefined;
 	});
+};
+
+const createEditableParagraphMock = () => {
+	return {
+		layout: vi.fn(),
+		getHeight: vi.fn(() => 96),
+		getGlyphPositionAtCoordinate: vi.fn((x: number) => {
+			return Math.max(0, Math.round(x / 10));
+		}),
+		getRectsForRange: vi.fn((start: number, end: number) => {
+			const orderedStart = Math.min(start, end);
+			const orderedEnd = Math.max(start, end);
+			return [
+				{
+					x: orderedStart * 10,
+					y: 0,
+					width: Math.max(0, (orderedEnd - orderedStart) * 10),
+					height: 20,
+				},
+			];
+		}),
+		getLineMetrics: vi.fn(() => {
+			return [
+				{
+					startIndex: 0,
+					endIndex: 10_000,
+					endExcludingWhitespaces: 10_000,
+					endIncludingNewline: 10_000,
+					isHardBreak: false,
+					ascent: 16,
+					descent: 4,
+					height: 20,
+					width: 500,
+					left: 0,
+					baseline: 16,
+					lineNumber: 0,
+				},
+			];
+		}),
+		getGlyphInfoAt: vi.fn((index: number) => {
+			if (index < 0 || index > 10_000) return null;
+			return {
+				graphemeLayoutBounds: {
+					x: index * 10,
+					y: 0,
+					width: 10,
+					height: 20,
+				},
+				graphemeClusterTextRange: {
+					start: index,
+					end: index + 1,
+				},
+				dir: 0,
+				isEllipsis: false,
+			};
+		}),
+	};
+};
+
+const registerEditableTextModel = (params: {
+	modelRegistry: ReturnType<typeof setupInteractions>["modelRegistry"];
+	elementId: string;
+	paragraph: ReturnType<typeof createEditableParagraphMock>;
+}) => {
+	const { modelRegistry, elementId, paragraph } = params;
+	const mockModelStore = {
+		subscribe: () => () => {},
+		getState: () =>
+			({
+				internal: {
+					paragraph,
+				},
+				dispose: () => {},
+			}) as unknown,
+		setState: () => {},
+		getInitialState: () => ({}),
+	} as unknown as Parameters<typeof modelRegistry.register>[1];
+	modelRegistry.register(elementId, mockModelStore);
 };
 
 describe("FocusSceneSkiaLayer interactions", () => {
@@ -287,9 +367,8 @@ describe("FocusSceneSkiaLayer interactions", () => {
 
 	it("move 后 undo 不会出现旧选中框", () => {
 		const elementA = createElement("element-a", 200, 200);
-		const { result, timelineStore, syncInteractiveElements } = setupInteractions([
-			elementA,
-		]);
+		const { result, timelineStore, syncInteractiveElements } =
+			setupInteractions([elementA]);
 
 		act(() => {
 			result.current.onLayerPointerDown(createPointerEvent(200, 200));
@@ -1236,5 +1315,224 @@ describe("FocusSceneSkiaLayer interactions", () => {
 		expect(copyCenter.y).toBeCloseTo(320, 2);
 		expect(copyElement.timeline.trackIndex).toBe(1);
 		expect(result.current.selectedIds).toEqual([copyElement.id]);
+	});
+
+	it("双击 Text 元素进入编辑，双击非 Text 不进入", () => {
+		const textElement = createElement(
+			"text-a",
+			260,
+			260,
+			{ width: 120, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+				props: {
+					text: "hello",
+				},
+			},
+		);
+		const imageElement = createElement("image-a", 560, 260);
+		const { result, modelRegistry } = setupInteractions([
+			textElement,
+			imageElement,
+		]);
+		registerEditableTextModel({
+			modelRegistry,
+			elementId: "text-a",
+			paragraph: createEditableParagraphMock(),
+		});
+
+		act(() => {
+			result.current.onLayerDoubleClick(createPointerEvent(560, 260));
+		});
+		expect(result.current.editingElementId).toBe(null);
+
+		act(() => {
+			result.current.onLayerDoubleClick(createPointerEvent(260, 260));
+		});
+		expect(result.current.editingElementId).toBe("text-a");
+		expect(result.current.textEditingBridgeState?.value).toBe("hello");
+	});
+
+	it("编辑中拖拽生成选区，输入会实时回写 text 与 reflow 高度", () => {
+		const textElement = createElement(
+			"text-a",
+			300,
+			300,
+			{ width: 120, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+				props: {
+					text: "hello",
+				},
+			},
+		);
+		const { result, timelineStore, modelRegistry } = setupInteractions([
+			textElement,
+		]);
+		const paragraph = createEditableParagraphMock();
+		paragraph.getHeight.mockReturnValue(132);
+		registerEditableTextModel({
+			modelRegistry,
+			elementId: "text-a",
+			paragraph,
+		});
+
+		act(() => {
+			result.current.onLayerDoubleClick(createPointerEvent(300, 300));
+		});
+		expect(result.current.editingElementId).toBe("text-a");
+
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(260, 300));
+			result.current.onLayerPointerMove(createPointerEvent(320, 300));
+			result.current.onLayerPointerUp(createPointerEvent(320, 300));
+		});
+
+		const currentSelection = result.current.textEditingBridgeState?.selection;
+		expect(currentSelection).toBeTruthy();
+		if (currentSelection) {
+			expect(
+				Math.max(currentSelection.start, currentSelection.end),
+			).toBeGreaterThan(Math.min(currentSelection.start, currentSelection.end));
+		}
+
+		act(() => {
+			result.current.textEditingBridgeState?.onValueChange("hello world", {
+				start: 11,
+				end: 11,
+				direction: "none",
+			});
+		});
+
+		const updatedElement = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "text-a");
+		expect(updatedElement).toBeTruthy();
+		if (!updatedElement?.transform) return;
+		expect((updatedElement.props as { text?: string }).text).toBe(
+			"hello world",
+		);
+		expect(updatedElement.transform.baseSize.height).toBe(132);
+	});
+
+	it("编辑会话提交只产生一条历史记录，取消会回滚且不记历史", () => {
+		const textElement = createElement(
+			"text-a",
+			300,
+			300,
+			{ width: 120, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+				props: {
+					text: "hello",
+				},
+			},
+		);
+		const { result, timelineStore, modelRegistry } = setupInteractions([
+			textElement,
+		]);
+		const paragraph = createEditableParagraphMock();
+		paragraph.getHeight.mockReturnValue(140);
+		registerEditableTextModel({
+			modelRegistry,
+			elementId: "text-a",
+			paragraph,
+		});
+
+		const historyPushSpy = vi.spyOn(useStudioHistoryStore.getState(), "push");
+
+		act(() => {
+			result.current.onLayerDoubleClick(createPointerEvent(300, 300));
+		});
+		act(() => {
+			result.current.textEditingBridgeState?.onValueChange("hello commit", {
+				start: 12,
+				end: 12,
+				direction: "none",
+			});
+		});
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(920, 920));
+		});
+		act(() => {
+			result.current.onLayerPointerUp(createPointerEvent(920, 920));
+		});
+
+		expect(result.current.editingElementId).toBe(null);
+		expect(historyPushSpy).toHaveBeenCalledTimes(1);
+		const committedElement = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "text-a");
+		expect((committedElement?.props as { text?: string })?.text).toBe(
+			"hello commit",
+		);
+
+		act(() => {
+			result.current.onLayerDoubleClick(createPointerEvent(300, 300));
+		});
+		act(() => {
+			result.current.textEditingBridgeState?.onValueChange("will cancel", {
+				start: 11,
+				end: 11,
+				direction: "none",
+			});
+		});
+		act(() => {
+			result.current.textEditingBridgeState?.onCancel();
+		});
+
+		expect(result.current.editingElementId).toBe(null);
+		expect(historyPushSpy).toHaveBeenCalledTimes(1);
+		const cancelledElement = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "text-a");
+		expect((cancelledElement?.props as { text?: string })?.text).toBe(
+			"hello commit",
+		);
+		expect(cancelledElement?.transform?.baseSize.height).toBe(140);
+	});
+
+	it("编辑中不会触发元素拖拽", () => {
+		const textElement = createElement(
+			"text-a",
+			300,
+			300,
+			{ width: 120, height: 80 },
+			{
+				type: "Text",
+				component: "text",
+				props: {
+					text: "drag-guard",
+				},
+			},
+		);
+		const { result, timelineStore, modelRegistry } = setupInteractions([
+			textElement,
+		]);
+		registerEditableTextModel({
+			modelRegistry,
+			elementId: "text-a",
+			paragraph: createEditableParagraphMock(),
+		});
+		const beforeCenter = resolveSceneCenter(textElement);
+
+		act(() => {
+			result.current.onLayerDoubleClick(createPointerEvent(300, 300));
+		});
+		act(() => {
+			result.current.onLayerPointerDown(createPointerEvent(300, 300));
+			result.current.onLayerPointerMove(createPointerEvent(420, 360));
+			result.current.onLayerPointerUp(createPointerEvent(420, 360));
+		});
+
+		const afterElement = timelineStore
+			.getState()
+			.elements.find((item) => item.id === "text-a");
+		const afterCenter = resolveSceneCenter(afterElement ?? textElement);
+		expect(afterCenter.x).toBeCloseTo(beforeCenter.x, 3);
+		expect(afterCenter.y).toBeCloseTo(beforeCenter.y, 3);
 	});
 });

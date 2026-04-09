@@ -14,7 +14,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import type { SkiaPointerEvent } from "react-skia-lite";
+import type { SkiaPointerEvent, SkParagraph } from "react-skia-lite";
 import { transformMetaToRenderLayout } from "@/element/layout";
 import {
 	componentRegistry,
@@ -24,6 +24,20 @@ import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
+import {
+	createTextEditingSession,
+	resolveTextEditingDecorations,
+	resolveTextEditingIndexAtScreenPoint,
+	resolveTextEditingOverlayRect,
+	resolveTextEditingSelectionFromAnchor,
+	type TextEditingSelection,
+	type TextEditingSession,
+	type TextEditingTarget,
+	updateTextEditingSessionComposition,
+	updateTextEditingSessionDraft,
+	updateTextEditingSessionSelection,
+	updateTextEditingSessionTarget,
+} from "@/scene-editor/text-editing";
 import { cloneValue, createCopySeed } from "@/scene-editor/utils/copyUtils";
 import { reflowInsertedElementsOnTracks } from "@/scene-editor/utils/insertedTrackReflow";
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
@@ -97,6 +111,19 @@ const isTextParagraphLike = (value: unknown): value is TextParagraphLike => {
 	);
 };
 
+const isSkParagraphLike = (value: unknown): value is SkParagraph => {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as Partial<SkParagraph>;
+	return (
+		typeof candidate.layout === "function" &&
+		typeof candidate.getHeight === "function" &&
+		typeof candidate.getGlyphPositionAtCoordinate === "function" &&
+		typeof candidate.getRectsForRange === "function" &&
+		typeof candidate.getLineMetrics === "function" &&
+		typeof candidate.getGlyphInfoAt === "function"
+	);
+};
+
 export type FocusSceneLabelItem = {
 	id: string;
 	screenX: number;
@@ -112,6 +139,30 @@ export type FocusSnapGuides = {
 	vertical: number[];
 	horizontal: number[];
 };
+
+export type FocusSceneTextEditingDecorations = {
+	frameScreen: FocusFrame;
+	selectionRectsLocal: FocusRect[];
+	compositionRectsLocal: FocusRect[];
+	caretRectLocal: FocusRect | null;
+};
+
+export interface FocusSceneTextEditingBridgeState {
+	sessionId: string;
+	editingElementId: string;
+	value: string;
+	selection: TextEditingSelection;
+	isComposing: boolean;
+	overlayRectScreen: FocusRect;
+	onValueChange: (value: string, selection: TextEditingSelection) => void;
+	onSelectionChange: (selection: TextEditingSelection) => void;
+	onCompositionStart: (selection: TextEditingSelection) => void;
+	onCompositionUpdate: (selection: TextEditingSelection, data: string) => void;
+	onCompositionEnd: (selection: TextEditingSelection, data: string) => void;
+	onCommit: () => void;
+	onCancel: () => void;
+	onBlur: () => void;
+}
 
 export type { FocusTransformHandle, FocusTransformHandleRenderItem };
 
@@ -182,6 +233,25 @@ type TransformPointerInput = {
 	shiftKey: boolean;
 };
 
+type EditableTextElement = TimelineElement & {
+	type: "Text";
+	transform: TransformMeta;
+	props: {
+		text: string;
+	};
+};
+
+interface TextEditingRestoreSnapshot {
+	id: string;
+	text: string;
+	transform: TransformMeta;
+}
+
+interface TextEditingHistorySession {
+	historySnapshot: TimelineHistorySnapshot | null;
+	restoreSnapshot: TextEditingRestoreSnapshot;
+}
+
 const snapNearInteger = (value: number): number => {
 	const rounded = Math.round(value);
 	if (Math.abs(value - rounded) <= POSITION_INTEGER_SNAP_EPSILON) {
@@ -226,6 +296,32 @@ const isTransformChanged = (
 		prev.scale.x !== next.scale.x ||
 		prev.scale.y !== next.scale.y ||
 		prev.rotation.value !== next.rotation.value
+	);
+};
+
+const isFocusFrameEqual = (left: FocusFrame, right: FocusFrame): boolean => {
+	return (
+		Math.abs(left.cx - right.cx) <= FOCUS_SCENE_EPSILON &&
+		Math.abs(left.cy - right.cy) <= FOCUS_SCENE_EPSILON &&
+		Math.abs(left.width - right.width) <= FOCUS_SCENE_EPSILON &&
+		Math.abs(left.height - right.height) <= FOCUS_SCENE_EPSILON &&
+		Math.abs(left.rotationRad - right.rotationRad) <= FOCUS_SCENE_EPSILON
+	);
+};
+
+const isTextEditingTargetEqual = (
+	left: TextEditingTarget,
+	right: TextEditingTarget,
+): boolean => {
+	return (
+		left.id === right.id &&
+		left.text === right.text &&
+		left.paragraph === right.paragraph &&
+		Math.abs(left.baseSize.width - right.baseSize.width) <=
+			FOCUS_SCENE_EPSILON &&
+		Math.abs(left.baseSize.height - right.baseSize.height) <=
+			FOCUS_SCENE_EPSILON &&
+		isFocusFrameEqual(left.frame, right.frame)
 	);
 };
 
@@ -311,6 +407,15 @@ const hasTransform = (
 	element: TimelineElement | null | undefined,
 ): element is TimelineElement & { transform: TransformMeta } => {
 	return Boolean(element?.transform);
+};
+
+const isEditableTextElement = (
+	element: TimelineElement | null | undefined,
+): element is EditableTextElement => {
+	if (!element || element.type !== "Text" || !hasTransform(element)) {
+		return false;
+	}
+	return typeof (element.props as { text?: unknown })?.text === "string";
 };
 
 const appendUniqueGuideLine = (lines: number[], line: number) => {
@@ -775,6 +880,9 @@ export interface UseFocusSceneSkiaInteractionsResult {
 	selectedIds: string[];
 	hoveredId: string | null;
 	draggingId: string | null;
+	editingElementId: string | null;
+	textEditingDecorations: FocusSceneTextEditingDecorations | null;
+	textEditingBridgeState: FocusSceneTextEditingBridgeState | null;
 	selectionRectScreen: FocusRect | null;
 	snapGuidesScreen: FocusSnapGuides;
 	selectionFrameScreen: FocusFrame | null;
@@ -782,6 +890,7 @@ export interface UseFocusSceneSkiaInteractionsResult {
 	activeHandle: FocusTransformHandle | null;
 	labelItems: FocusSceneLabelItem[];
 	onLayerPointerDown: (event: SkiaPointerEvent) => void;
+	onLayerDoubleClick: (event: SkiaPointerEvent) => void;
 	onLayerPointerMove: (event: SkiaPointerEvent) => void;
 	onLayerPointerUp: (event: SkiaPointerEvent) => void;
 	onLayerPointerLeave: () => void;
@@ -832,10 +941,18 @@ export const useFocusSceneSkiaInteractions = ({
 	const [activeHandle, setActiveHandle] = useState<FocusTransformHandle | null>(
 		null,
 	);
+	const [textEditingSessionState, setTextEditingSessionState] =
+		useState<TextEditingSession | null>(null);
 	const interactionSessionRef = useRef<InteractionSession>(null);
 	const transformPointerInputRef = useRef<TransformPointerInput | null>(null);
 	const selectionFrameOverrideSelectionKeyRef = useRef<string | null>(null);
 	const selectionFrameSceneOverrideRef = useRef<FocusFrame | null>(null);
+	const textEditingSessionRef = useRef<TextEditingSession | null>(null);
+	const textEditingHistorySessionRef = useRef<TextEditingHistorySession | null>(
+		null,
+	);
+	const textEditingSelectionAnchorRef = useRef<number | null>(null);
+	const textEditingPointerSelectingRef = useRef(false);
 	const selectedIdsKey = useMemo(() => {
 		return [...selectedIds].sort().join("|");
 	}, [selectedIds]);
@@ -867,6 +984,10 @@ export const useFocusSceneSkiaInteractions = ({
 	useEffect(() => {
 		selectionFrameSceneOverrideRef.current = selectionFrameSceneOverride;
 	}, [selectionFrameSceneOverride]);
+
+	useEffect(() => {
+		textEditingSessionRef.current = textEditingSessionState;
+	}, [textEditingSessionState]);
 
 	useEffect(() => {
 		if (!timelineStore) return;
@@ -1050,6 +1171,419 @@ export const useFocusSceneSkiaInteractions = ({
 		}
 		return result;
 	}, [ctx, interactiveElements, sourceHeight, sourceWidth]);
+
+	const timelineModelRegistry = useMemo(() => {
+		return resolveTimelineModelRegistry({
+			runtimeManager,
+			timelineStore,
+		});
+	}, [runtimeManager, timelineStore]);
+
+	const resolveTextEditingTargetFromLayout = useCallback(
+		(layout: FocusSceneElementLayout | null): TextEditingTarget | null => {
+			if (!layout) return null;
+			if (!isEditableTextElement(layout.element)) return null;
+			if (!timelineModelRegistry) return null;
+			const modelStore = timelineModelRegistry.get(layout.id);
+			if (!modelStore) return null;
+			const internal = (modelStore.getState() as { internal?: unknown })
+				.internal;
+			if (!internal || typeof internal !== "object") return null;
+			const paragraph = (internal as { paragraph?: unknown }).paragraph;
+			if (!isSkParagraphLike(paragraph)) return null;
+			const baseWidth = Math.max(1, layout.element.transform.baseSize.width);
+			try {
+				paragraph.layout(baseWidth);
+			} catch {
+				// 段落布局失败时跳过编辑态，避免引入不可恢复状态。
+				return null;
+			}
+			return {
+				id: layout.id,
+				text: layout.element.props.text,
+				paragraph,
+				frame: layout.frameScreen,
+				baseSize: {
+					width: layout.element.transform.baseSize.width,
+					height: layout.element.transform.baseSize.height,
+				},
+			};
+		},
+		[timelineModelRegistry],
+	);
+
+	const resolveTextEditingTargetById = useCallback(
+		(elementId: string): TextEditingTarget | null => {
+			const layout =
+				elementLayouts.find((item) => item.id === elementId) ?? null;
+			return resolveTextEditingTargetFromLayout(layout);
+		},
+		[elementLayouts, resolveTextEditingTargetFromLayout],
+	);
+
+	const resolveTextEditingTargetAtPoint = useCallback(
+		(screenPoint: FocusPoint): TextEditingTarget | null => {
+			const hitLayout = resolveTopHitElement(screenPoint, elementLayouts);
+			return resolveTextEditingTargetFromLayout(hitLayout);
+		},
+		[elementLayouts, resolveTextEditingTargetFromLayout],
+	);
+
+	const applyTextEditingDraftToTimeline = useCallback(
+		(elementId: string, nextText: string) => {
+			setElementsWithoutHistory((previousElements) => {
+				let changed = false;
+				const nextElements = previousElements.map((element) => {
+					if (element.id !== elementId) return element;
+					if (!isEditableTextElement(element)) return element;
+					const nextPropsText = nextText;
+					const reflowHeight = resolveTextReflowHeightFromModel({
+						modelRegistry: timelineModelRegistry,
+						elementId,
+						baseWidth: element.transform.baseSize.width,
+					});
+					const nextTransform =
+						reflowHeight !== null &&
+						Math.abs(reflowHeight - element.transform.baseSize.height) >
+							FOCUS_SCENE_EPSILON
+							? {
+									...element.transform,
+									baseSize: {
+										...element.transform.baseSize,
+										height: reflowHeight,
+									},
+								}
+							: element.transform;
+					if (
+						element.props.text === nextPropsText &&
+						nextTransform === element.transform
+					) {
+						return element;
+					}
+					changed = true;
+					return {
+						...element,
+						props:
+							element.props.text === nextPropsText
+								? element.props
+								: {
+										...element.props,
+										text: nextPropsText,
+									},
+						transform: nextTransform,
+					};
+				});
+				return changed ? nextElements : previousElements;
+			});
+		},
+		[setElementsWithoutHistory, timelineModelRegistry],
+	);
+
+	const finishTextEditingSession = useCallback(
+		(mode: "commit" | "cancel") => {
+			const historySession = textEditingHistorySessionRef.current;
+			textEditingHistorySessionRef.current = null;
+			textEditingSelectionAnchorRef.current = null;
+			textEditingPointerSelectingRef.current = false;
+			setTextEditingSessionState(null);
+			if (!historySession) return;
+			if (mode === "cancel") {
+				const { restoreSnapshot } = historySession;
+				setElementsWithoutHistory((previousElements) => {
+					let changed = false;
+					const nextElements = previousElements.map((element) => {
+						if (element.id !== restoreSnapshot.id) return element;
+						if (!isEditableTextElement(element)) return element;
+						const sameText = element.props.text === restoreSnapshot.text;
+						const sameBaseSize =
+							Math.abs(
+								element.transform.baseSize.width -
+									restoreSnapshot.transform.baseSize.width,
+							) <= FOCUS_SCENE_EPSILON &&
+							Math.abs(
+								element.transform.baseSize.height -
+									restoreSnapshot.transform.baseSize.height,
+							) <= FOCUS_SCENE_EPSILON;
+						if (sameText && sameBaseSize) {
+							return element;
+						}
+						changed = true;
+						return {
+							...element,
+							props: {
+								...element.props,
+								text: restoreSnapshot.text,
+							},
+							transform: cloneValue(restoreSnapshot.transform),
+						};
+					});
+					return changed ? nextElements : previousElements;
+				});
+				return;
+			}
+			pushHistorySnapshot(historySession.historySnapshot);
+		},
+		[pushHistorySnapshot, setElementsWithoutHistory],
+	);
+
+	const beginTextEditingSession = useCallback(
+		(target: TextEditingTarget, selection: TextEditingSelection) => {
+			if (!timelineStore) return;
+			const currentSession = textEditingSessionRef.current;
+			if (!currentSession || currentSession.target.id !== target.id) {
+				const sourceElement = timelineStore
+					.getState()
+					.elements.find((element) => element.id === target.id);
+				if (!isEditableTextElement(sourceElement)) return;
+				textEditingHistorySessionRef.current = {
+					historySnapshot: captureHistorySnapshot(),
+					restoreSnapshot: {
+						id: sourceElement.id,
+						text: sourceElement.props.text,
+						transform: cloneValue(sourceElement.transform),
+					},
+				};
+			}
+			interactionSessionRef.current = null;
+			transformPointerInputRef.current = null;
+			setSelectionRectScene(null);
+			setSnapGuidesScene({ vertical: [], horizontal: [] });
+			setDraggingId(null);
+			setActiveHandle(null);
+			applySelectionFrameOverride(null);
+			setSelection([target.id], target.id);
+			setTextEditingSessionState((previousSession) => {
+				if (previousSession && previousSession.target.id === target.id) {
+					const withTarget = updateTextEditingSessionTarget(
+						previousSession,
+						target,
+					);
+					return updateTextEditingSessionSelection(withTarget, selection);
+				}
+				return createTextEditingSession({
+					target,
+					selection,
+				});
+			});
+			textEditingSelectionAnchorRef.current = selection.end;
+		},
+		[
+			applySelectionFrameOverride,
+			captureHistorySnapshot,
+			setSelection,
+			timelineStore,
+		],
+	);
+
+	const beginTextEditingPointerSelection = useCallback(
+		(screenPoint: FocusPoint, extendSelection: boolean) => {
+			const session = textEditingSessionRef.current;
+			if (!session) return;
+			const focusIndex = resolveTextEditingIndexAtScreenPoint(
+				session,
+				screenPoint,
+			);
+			const anchorIndex = extendSelection
+				? (textEditingSelectionAnchorRef.current ?? session.selection.start)
+				: focusIndex;
+			const nextSelection = extendSelection
+				? resolveTextEditingSelectionFromAnchor(anchorIndex, focusIndex)
+				: {
+						start: focusIndex,
+						end: focusIndex,
+						direction: "none" as const,
+					};
+			textEditingSelectionAnchorRef.current = anchorIndex;
+			setTextEditingSessionState((previousSession) => {
+				if (!previousSession) return previousSession;
+				return updateTextEditingSessionSelection(
+					previousSession,
+					nextSelection,
+				);
+			});
+		},
+		[],
+	);
+
+	const handleTextEditingValueChange = useCallback(
+		(value: string, selection: TextEditingSelection) => {
+			const currentSession = textEditingSessionRef.current;
+			if (!currentSession) return;
+			textEditingSelectionAnchorRef.current = selection.end;
+			setTextEditingSessionState((previousSession) => {
+				if (!previousSession) return previousSession;
+				const nextSession = updateTextEditingSessionDraft(previousSession, {
+					draftText: value,
+					selection,
+				});
+				return nextSession;
+			});
+			applyTextEditingDraftToTimeline(currentSession.target.id, value);
+		},
+		[applyTextEditingDraftToTimeline],
+	);
+
+	const handleTextEditingSelectionChange = useCallback(
+		(selection: TextEditingSelection) => {
+			textEditingSelectionAnchorRef.current = selection.end;
+			setTextEditingSessionState((previousSession) => {
+				if (!previousSession) return previousSession;
+				return updateTextEditingSessionSelection(previousSession, selection);
+			});
+		},
+		[],
+	);
+
+	const handleTextEditingCompositionStart = useCallback(
+		(selection: TextEditingSelection) => {
+			textEditingSelectionAnchorRef.current = selection.end;
+			setTextEditingSessionState((previousSession) => {
+				if (!previousSession) return previousSession;
+				const withSelection = updateTextEditingSessionSelection(
+					previousSession,
+					selection,
+				);
+				return updateTextEditingSessionComposition(withSelection, selection);
+			});
+		},
+		[],
+	);
+
+	const handleTextEditingCompositionUpdate = useCallback(
+		(selection: TextEditingSelection, _data?: string) => {
+			textEditingSelectionAnchorRef.current = selection.end;
+			setTextEditingSessionState((previousSession) => {
+				if (!previousSession) return previousSession;
+				const withSelection = updateTextEditingSessionSelection(
+					previousSession,
+					selection,
+				);
+				return updateTextEditingSessionComposition(withSelection, selection);
+			});
+		},
+		[],
+	);
+
+	const handleTextEditingCompositionEnd = useCallback(
+		(selection: TextEditingSelection, _data?: string) => {
+			textEditingSelectionAnchorRef.current = selection.end;
+			setTextEditingSessionState((previousSession) => {
+				if (!previousSession) return previousSession;
+				const withSelection = updateTextEditingSessionSelection(
+					previousSession,
+					selection,
+				);
+				return updateTextEditingSessionComposition(withSelection, null);
+			});
+		},
+		[],
+	);
+
+	const textEditingDecorations =
+		useMemo<FocusSceneTextEditingDecorations | null>(() => {
+			if (!textEditingSessionState) return null;
+			const decorations = resolveTextEditingDecorations(
+				textEditingSessionState,
+			);
+			return {
+				frameScreen: decorations.frame,
+				selectionRectsLocal: decorations.selectionRects.map((rect) => ({
+					x: rect.x,
+					y: rect.y,
+					width: rect.width,
+					height: rect.height,
+				})),
+				compositionRectsLocal: decorations.compositionRects.map((rect) => ({
+					x: rect.x,
+					y: rect.y,
+					width: rect.width,
+					height: rect.height,
+				})),
+				caretRectLocal: decorations.caretRect
+					? {
+							x: decorations.caretRect.x,
+							y: decorations.caretRect.y,
+							width: decorations.caretRect.width,
+							height: decorations.caretRect.height,
+						}
+					: null,
+			};
+		}, [textEditingSessionState]);
+
+	const textEditingBridgeState =
+		useMemo<FocusSceneTextEditingBridgeState | null>(() => {
+			if (!textEditingSessionState) return null;
+			return {
+				sessionId: `focus-text-edit-${textEditingSessionState.target.id}`,
+				editingElementId: textEditingSessionState.target.id,
+				value: textEditingSessionState.draftText,
+				selection: textEditingSessionState.selection,
+				isComposing: textEditingSessionState.mode === "composing",
+				overlayRectScreen: resolveTextEditingOverlayRect(
+					textEditingSessionState.target.frame,
+				),
+				onValueChange: handleTextEditingValueChange,
+				onSelectionChange: handleTextEditingSelectionChange,
+				onCompositionStart: handleTextEditingCompositionStart,
+				onCompositionUpdate: handleTextEditingCompositionUpdate,
+				onCompositionEnd: handleTextEditingCompositionEnd,
+				onCommit: () => {
+					finishTextEditingSession("commit");
+				},
+				onCancel: () => {
+					finishTextEditingSession("cancel");
+				},
+				onBlur: () => {
+					finishTextEditingSession("commit");
+				},
+			};
+		}, [
+			finishTextEditingSession,
+			handleTextEditingCompositionEnd,
+			handleTextEditingCompositionStart,
+			handleTextEditingCompositionUpdate,
+			handleTextEditingSelectionChange,
+			handleTextEditingValueChange,
+			textEditingSessionState,
+		]);
+
+	const editingElementId = textEditingSessionState?.target.id ?? null;
+	const editingDraftText = textEditingSessionState?.draftText ?? null;
+	const editingParagraph = textEditingSessionState?.target.paragraph ?? null;
+
+	useEffect(() => {
+		if (!editingElementId) return;
+		const nextTarget = resolveTextEditingTargetById(editingElementId);
+		if (!nextTarget) {
+			finishTextEditingSession("commit");
+			return;
+		}
+		setTextEditingSessionState((previousSession) => {
+			if (!previousSession || previousSession.target.id !== editingElementId) {
+				return previousSession;
+			}
+			if (isTextEditingTargetEqual(previousSession.target, nextTarget)) {
+				return previousSession;
+			}
+			return updateTextEditingSessionTarget(previousSession, nextTarget);
+		});
+	}, [
+		editingElementId,
+		finishTextEditingSession,
+		resolveTextEditingTargetById,
+	]);
+
+	useEffect(() => {
+		if (!editingElementId || editingDraftText === null || !editingParagraph)
+			return;
+		// 文本段落在 model 异步重建后再回流一次高度，保证编辑中高度实时跟随。
+		applyTextEditingDraftToTimeline(editingElementId, editingDraftText);
+	}, [
+		applyTextEditingDraftToTimeline,
+		editingDraftText,
+		editingElementId,
+		editingParagraph,
+	]);
 
 	const selectionFrameScene = useMemo(() => {
 		if (
@@ -1236,6 +1770,29 @@ export const useFocusSceneSkiaInteractions = ({
 			const metaPressed = event.shiftKey || event.ctrlKey || event.metaKey;
 			const currentElements = timelineStore.getState().elements;
 			const currentSelection = timelineStore.getState().selectedIds;
+			const textEditingSession = textEditingSessionRef.current;
+
+			if (textEditingSession) {
+				const isInsideEditingFrame = isFocusPointInFrame(
+					screenPoint,
+					textEditingSession.target.frame,
+				);
+				if (!isInsideEditingFrame) {
+					finishTextEditingSession("commit");
+				} else {
+					interactionSessionRef.current = null;
+					textEditingPointerSelectingRef.current = true;
+					beginTextEditingPointerSelection(
+						screenPoint,
+						Boolean(event.shiftKey),
+					);
+					setHoveredId(textEditingSession.target.id);
+					setDraggingId(null);
+					setSnapGuidesScene({ vertical: [], horizontal: [] });
+					setActiveHandle(null);
+					return;
+				}
+			}
 
 			if (selectionFrameScreen) {
 				const maybeHandle = resolveFocusTransformHandleAtPoint(
@@ -1431,8 +1988,41 @@ export const useFocusSceneSkiaInteractions = ({
 			captureHistorySnapshot,
 			modelCenterToSceneCenter,
 			applySelectionFrameOverride,
+			beginTextEditingPointerSelection,
+			finishTextEditingSession,
 			setSelection,
 			setElementsWithoutHistory,
+		],
+	);
+
+	const handlePointerDoubleClickInternal = useCallback(
+		(event: SkiaPointerEvent) => {
+			if (disabled || !timelineStore) return;
+			if (width <= 0 || height <= 0) return;
+			if (resolvePointerField(event, "button") !== 0) return;
+			const screenPoint = { x: event.x, y: event.y };
+			const target = resolveTextEditingTargetAtPoint(screenPoint);
+			if (!target) return;
+			const baseSession = createTextEditingSession({
+				target,
+			});
+			const caretIndex = resolveTextEditingIndexAtScreenPoint(
+				baseSession,
+				screenPoint,
+			);
+			beginTextEditingSession(target, {
+				start: caretIndex,
+				end: caretIndex,
+				direction: "none",
+			});
+		},
+		[
+			beginTextEditingSession,
+			disabled,
+			height,
+			resolveTextEditingTargetAtPoint,
+			timelineStore,
+			width,
 		],
 	);
 
@@ -1442,6 +2032,21 @@ export const useFocusSceneSkiaInteractions = ({
 			const screenPoint = { x: event.x, y: event.y };
 			const scenePoint = screenToScenePoint(ctx, screenPoint);
 			const session = interactionSessionRef.current;
+			const textEditingSession = textEditingSessionRef.current;
+
+			if (textEditingSession) {
+				const primaryPressed =
+					(resolvePointerField(event, "buttons") & 1) === 1;
+				if (textEditingPointerSelectingRef.current && primaryPressed) {
+					beginTextEditingPointerSelection(screenPoint, true);
+				}
+				if (!primaryPressed) {
+					textEditingPointerSelectingRef.current = false;
+				}
+				setHoveredId(textEditingSession.target.id);
+				setActiveHandle(null);
+				return;
+			}
 
 			if (!session) {
 				const hitLayout = resolveTopHitElement(screenPoint, elementLayouts);
@@ -2055,6 +2660,7 @@ export const useFocusSceneSkiaInteractions = ({
 		},
 		[
 			applySelectionFrameOverride,
+			beginTextEditingPointerSelection,
 			disabled,
 			ctx,
 			elementLayouts,
@@ -2072,6 +2678,15 @@ export const useFocusSceneSkiaInteractions = ({
 	);
 
 	const handlePointerUpInternal = useCallback(() => {
+		if (textEditingSessionRef.current) {
+			transformPointerInputRef.current = null;
+			textEditingPointerSelectingRef.current = false;
+			setSelectionRectScene(null);
+			setSnapGuidesScene({ vertical: [], horizontal: [] });
+			setDraggingId(null);
+			setActiveHandle(null);
+			return;
+		}
 		const session = interactionSessionRef.current;
 		if (!session) {
 			transformPointerInputRef.current = null;
@@ -2155,6 +2770,10 @@ export const useFocusSceneSkiaInteractions = ({
 	]);
 
 	const handlePointerLeaveInternal = useCallback(() => {
+		if (textEditingSessionRef.current) {
+			// 文本编辑态由输入桥接接管，不在 leave 时打断选区。
+			return;
+		}
 		if (interactionSessionRef.current) {
 			// 拖拽/变换过程中忽略 leave，避免在句柄拖动时被误中断。
 			return;
@@ -2217,12 +2836,16 @@ export const useFocusSceneSkiaInteractions = ({
 		if (disabled || !ctx || !timelineStore) {
 			interactionSessionRef.current = null;
 			transformPointerInputRef.current = null;
+			textEditingPointerSelectingRef.current = false;
+			textEditingSelectionAnchorRef.current = null;
+			textEditingHistorySessionRef.current = null;
 			setHoveredId(null);
 			setDraggingId(null);
 			setSelectionRectScene(null);
 			setSnapGuidesScene({ vertical: [], horizontal: [] });
 			applySelectionFrameOverride(null);
 			setActiveHandle(null);
+			setTextEditingSessionState(null);
 		}
 	}, [applySelectionFrameOverride, disabled, ctx, timelineStore]);
 
@@ -2231,6 +2854,9 @@ export const useFocusSceneSkiaInteractions = ({
 		selectedIds,
 		hoveredId,
 		draggingId,
+		editingElementId,
+		textEditingDecorations,
+		textEditingBridgeState,
 		selectionRectScreen,
 		snapGuidesScreen,
 		selectionFrameScreen,
@@ -2238,6 +2864,7 @@ export const useFocusSceneSkiaInteractions = ({
 		activeHandle,
 		labelItems,
 		onLayerPointerDown: handlePointerDownInternal,
+		onLayerDoubleClick: handlePointerDoubleClickInternal,
 		onLayerPointerMove: handlePointerMoveInternal,
 		onLayerPointerUp: handlePointerUpInternal,
 		onLayerPointerLeave: handlePointerLeaveInternal,

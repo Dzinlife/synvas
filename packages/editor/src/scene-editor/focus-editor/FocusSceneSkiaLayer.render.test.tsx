@@ -56,8 +56,28 @@ vi.mock("react-skia-lite", () => ({
 	Group: ({ children }: { children?: React.ReactNode }) => (
 		<div data-testid="skia-group">{children}</div>
 	),
-	Rect: ({ children }: { children?: React.ReactNode }) => (
-		<div data-testid="skia-rect">{children}</div>
+	Rect: ({
+		children,
+		color,
+		cursor,
+		width,
+		height,
+	}: {
+		children?: React.ReactNode;
+		color?: string;
+		cursor?: string;
+		width?: number;
+		height?: number;
+	}) => (
+		<div
+			data-testid="skia-rect"
+			data-color={color}
+			data-cursor={cursor}
+			data-width={width}
+			data-height={height}
+		>
+			{children}
+		</div>
 	),
 	Line: ({ children }: { children?: React.ReactNode }) => (
 		<div data-testid="skia-line">{children}</div>
@@ -137,6 +157,8 @@ const createBaseProps = () => {
 		selectedIds: [],
 		hoveredId: null,
 		draggingId: null,
+		editingElementId: null,
+		textEditingDecorations: null,
 		selectionRectScreen: null,
 		snapGuidesScreen: {
 			vertical: [],
@@ -158,6 +180,7 @@ const createBaseProps = () => {
 			},
 		],
 		onLayerPointerDown: vi.fn(),
+		onLayerDoubleClick: vi.fn(),
 		onLayerPointerMove: vi.fn(),
 		onLayerPointerUp: vi.fn(),
 		onLayerPointerLeave: vi.fn(),
@@ -198,5 +221,84 @@ describe("FocusSceneSkiaLayer render", () => {
 		expect(backgroundBadge).toBeTruthy();
 		expect(backgroundBadge?.getAttribute("data-width")).toBe("114");
 		expect(backgroundBadge?.getAttribute("data-height")).toBe("24");
+	});
+
+	it("编辑态会绘制 selection/caret/composition 装饰", () => {
+		const props = createBaseProps();
+		render(
+			<FocusSceneSkiaLayer
+				{...props}
+				editingElementId="text-a"
+				textEditingDecorations={{
+					frameScreen: {
+						cx: 320,
+						cy: 240,
+						width: 200,
+						height: 100,
+						rotationRad: 0,
+					},
+					selectionRectsLocal: [{ x: 10, y: 12, width: 40, height: 20 }],
+					compositionRectsLocal: [{ x: 16, y: 36, width: 22, height: 18 }],
+					caretRectLocal: { x: 60, y: 12, width: 1, height: 20 },
+				}}
+			/>,
+		);
+
+		const allRects = screen.getAllByTestId("skia-rect");
+		expect(
+			allRects.some(
+				(node) => node.getAttribute("data-color") === "rgba(59,130,246,0.35)",
+			),
+		).toBe(true);
+		expect(
+			allRects.some(
+				(node) => node.getAttribute("data-color") === "rgba(37,99,235,0.9)",
+			),
+		).toBe(true);
+		expect(
+			allRects.some(
+				(node) => node.getAttribute("data-color") === "rgba(37,99,235,1)",
+			),
+		).toBe(true);
+	});
+
+	it("编辑态不会渲染 transform handle 命中热区", () => {
+		const props = createBaseProps();
+		render(
+			<FocusSceneSkiaLayer
+				{...props}
+				selectedIds={["element-a"]}
+				editingElementId="element-a"
+				selectionFrameScreen={{
+					cx: 320,
+					cy: 240,
+					width: 200,
+					height: 100,
+					rotationRad: 0,
+				}}
+				handleItems={[
+					{
+						id: "h-right",
+						handle: "middle-right",
+						cursor: "ew-resize",
+						screenX: 420,
+						screenY: 240,
+						rectLocal: {
+							x: 196,
+							y: 44,
+							width: 8,
+							height: 12,
+						},
+						visibleCornerMarker: false,
+						kind: "resize-edge",
+					},
+				]}
+			/>,
+		);
+
+		const handleHitRects = screen
+			.getAllByTestId("skia-rect")
+			.filter((node) => node.getAttribute("data-cursor") === "ew-resize");
+		expect(handleHitRects).toHaveLength(0);
 	});
 });

@@ -256,6 +256,7 @@ vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
 		const enabled = Boolean(focusedNode);
 		return {
 			enabled,
+			bridgeProps: null,
 			layerProps: enabled
 				? {
 						width,
@@ -264,6 +265,8 @@ vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
 						selectedIds: focusLayerMockState.selectedIds,
 						hoveredId: null,
 						draggingId: null,
+						editingElementId: null,
+						textEditingDecorations: null,
 						selectionRectScreen: null,
 						snapGuidesScreen: { vertical: [], horizontal: [] },
 						selectionFrameScreen: focusLayerMockState.selectionFrameScreen,
@@ -272,6 +275,7 @@ vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
 						labelItems: [],
 						disabled: suspendHover ?? false,
 						onLayerPointerDown: focusLayerPointerDownSpy,
+						onLayerDoubleClick: vi.fn(),
 						onLayerPointerMove: focusLayerPointerMoveSpy,
 						onLayerPointerUp: focusLayerPointerUpSpy,
 						onLayerPointerLeave: focusLayerPointerLeaveSpy,
@@ -430,9 +434,11 @@ const getTileDebugLayerElement = (tree: React.ReactNode): AnyElement | null => {
 };
 
 const hasNamedComponent = (tree: React.ReactNode, name: string): boolean => {
-	return collectElements(tree, (element) => {
-		return resolveComponentNames(element.type).includes(name);
-	}).length > 0;
+	return (
+		collectElements(tree, (element) => {
+			return resolveComponentNames(element.type).includes(name);
+		}).length > 0
+	);
 };
 
 const createVideoNode = (
@@ -831,7 +837,9 @@ describe("InfiniteSkiaCanvas", () => {
 			expect(rootRenderSpy).toHaveBeenCalled();
 		});
 		await waitFor(() => {
-			const opacityGroup = getStaticTileOpacityGroupElement(getLatestRenderTree());
+			const opacityGroup = getStaticTileOpacityGroupElement(
+				getLatestRenderTree(),
+			);
 			expect(opacityGroup).toBeTruthy();
 			const opacity = getElementProps<{
 				opacity?: { _isSharedValue?: boolean; value?: number };
@@ -914,7 +922,9 @@ describe("InfiniteSkiaCanvas", () => {
 			});
 			const beforeFocusCalls = beginFrameSpy.mock.calls.length;
 
-			rerender(<InfiniteSkiaCanvas {...baseProps} focusedNodeId="node-scene" />);
+			rerender(
+				<InfiniteSkiaCanvas {...baseProps} focusedNodeId="node-scene" />,
+			);
 			await waitFor(() => {
 				expect(rootRenderSpy).toHaveBeenCalled();
 			});
@@ -984,7 +994,9 @@ describe("InfiniteSkiaCanvas", () => {
 
 		const tree = getLatestRenderTree();
 		expect(hasNamedComponent(tree, "CanvasNodeInteractionItem")).toBe(false);
-		expect(hasNamedComponent(tree, "SelectionBoundsInteractionLayer")).toBe(false);
+		expect(hasNamedComponent(tree, "SelectionBoundsInteractionLayer")).toBe(
+			false,
+		);
 		expect(hasNamedComponent(tree, "DragProxyLayer")).toBe(false);
 	});
 
@@ -1147,10 +1159,10 @@ describe("InfiniteSkiaCanvas", () => {
 			await Promise.resolve();
 		});
 
-			expect(rootRenderSpy.mock.calls.length).toBe(initialRenderCount);
+		expect(rootRenderSpy.mock.calls.length).toBe(initialRenderCount);
 
-			const tree = getLatestRenderTree();
-			const nodeItems = getCanvasNodeRenderItems(tree);
+		const tree = getLatestRenderTree();
+		const nodeItems = getCanvasNodeRenderItems(tree);
 		const targetNodeItem = nodeItems.find((nodeItem) => {
 			return (
 				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
@@ -1536,12 +1548,12 @@ describe("InfiniteSkiaCanvas", () => {
 			const calledUris = acquireImageAssetMock.mock.calls.map((call) =>
 				String(call[0] ?? ""),
 			);
-			expect(
-				calledUris.some((uri) => uri.includes("scene-thumb-a.png")),
-			).toBe(true);
-			expect(
-				calledUris.some((uri) => uri.includes("scene-thumb-b.png")),
-			).toBe(true);
+			expect(calledUris.some((uri) => uri.includes("scene-thumb-a.png"))).toBe(
+				true,
+			);
+			expect(calledUris.some((uri) => uri.includes("scene-thumb-b.png"))).toBe(
+				true,
+			);
 		});
 	});
 
@@ -1659,23 +1671,23 @@ describe("InfiniteSkiaCanvas", () => {
 					createImageAsset("thumb-a"),
 					createImageAsset("thumb-b"),
 					createImageAsset("thumb-c"),
-					]}
-					activeNodeId="node-c"
-					selectedNodeIds={["node-a", "node-b", "node-c"]}
-					focusedNodeId={null}
-					hoveredNodeId={null}
-				/>,
-			);
-			await waitFor(() => {
-				expect(rootRenderSpy).toHaveBeenCalled();
-			});
-			const tree = getLatestRenderTree();
-			expect(hasNamedComponent(tree, "SelectionBoundsInteractionLayer")).toBe(
-				false,
-			);
-			expect(hasNamedComponent(tree, "DragProxyLayer")).toBe(false);
-			expect(hasNamedComponent(tree, "CanvasNodeInteractionItem")).toBe(false);
+				]}
+				activeNodeId="node-c"
+				selectedNodeIds={["node-a", "node-b", "node-c"]}
+				focusedNodeId={null}
+				hoveredNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
 		});
+		const tree = getLatestRenderTree();
+		expect(hasNamedComponent(tree, "SelectionBoundsInteractionLayer")).toBe(
+			false,
+		);
+		expect(hasNamedComponent(tree, "DragProxyLayer")).toBe(false);
+		expect(hasNamedComponent(tree, "CanvasNodeInteractionItem")).toBe(false);
+	});
 
 	it("focus scene 模式会抑制普通 node 交互并接管 Focus 层事件", async () => {
 		render(
