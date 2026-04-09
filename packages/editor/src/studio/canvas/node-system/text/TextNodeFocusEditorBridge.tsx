@@ -1,23 +1,21 @@
-import type { SceneNode } from "core/studio/types";
+import type { TextCanvasNode } from "core/studio/types";
 import { useEffect } from "react";
-import type { CanvasNodeFocusEditorBridgeProps } from "@/studio/canvas/node-system/types";
 import { HeadlessTextInputBridge } from "@/studio/canvas/text-editing";
-import { useSceneFocusEditorLayer } from "./useSceneFocusEditorLayer";
+import type { CanvasNodeFocusEditorBridgeProps } from "../types";
+import { useTextNodeFocusEditorLayer } from "./useTextNodeFocusEditorLayer";
 
-export const SceneFocusEditorBridge = ({
+export const TextNodeFocusEditorBridge = ({
 	width,
 	height,
 	camera,
-	runtimeManager,
 	focusedNode,
 	suspendHover = false,
 	onLayerChange,
-}: CanvasNodeFocusEditorBridgeProps<SceneNode>) => {
-	const focusEditor = useSceneFocusEditorLayer({
+}: CanvasNodeFocusEditorBridgeProps<TextCanvasNode>) => {
+	const focusEditor = useTextNodeFocusEditorLayer({
 		width,
 		height,
 		camera,
-		runtimeManager,
 		focusedNode,
 		suspendHover,
 	});
@@ -47,8 +45,10 @@ export const SceneFocusEditorBridge = ({
 			value={focusEditor.bridgeProps.value}
 			selection={focusEditor.bridgeProps.selection}
 			isComposing={focusEditor.bridgeProps.isComposing}
+			isActive={focusEditor.bridgeProps.isActive}
 			canUndo={focusEditor.bridgeProps.canUndo}
 			canRedo={focusEditor.bridgeProps.canRedo}
+			useNativeUndoRedo={true}
 			overlayRect={focusEditor.bridgeProps.overlayRectScreen}
 			onValueChange={focusEditor.bridgeProps.onValueChange}
 			onSelectionChange={focusEditor.bridgeProps.onSelectionChange}

@@ -96,4 +96,25 @@ describe("HeadlessTextInputBridge", () => {
 
 		expect(props.onBlur).toHaveBeenCalledTimes(1);
 	});
+
+	it("Cmd+Arrow 导航会在 keydown 后立即同步 selection", () => {
+		vi.useFakeTimers();
+		const props = createBaseProps();
+		const { container } = render(<HeadlessTextInputBridge {...props} />);
+		const textarea = container.querySelector("textarea");
+		expect(textarea).toBeTruthy();
+		if (!textarea) return;
+		textarea.setSelectionRange(5, 5);
+		fireEvent.keyDown(textarea, {
+			key: "ArrowLeft",
+			metaKey: true,
+		});
+		textarea.setSelectionRange(0, 0);
+		vi.runAllTimers();
+		expect(props.onSelectionChange).toHaveBeenCalledWith({
+			start: 0,
+			end: 0,
+			direction: "none",
+		});
+	});
 });

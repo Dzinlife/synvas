@@ -1355,6 +1355,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						const layout = getNodeLayoutValue(node.id);
 						if (!layout) return null;
 						const latestNode = getLatestNodeById(node.id) ?? node;
+						const renderNode =
+							latestNode.type === "text" ? latestNode : node;
 						const scene =
 							latestNode.type === "scene"
 								? (scenes[latestNode.sceneId] ?? null)
@@ -1366,7 +1368,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						return (
 							<CanvasNodeRenderItem
 								key={`canvas-node-render-${node.id}`}
-								node={node}
+								node={renderNode}
 								layout={layout}
 								scene={scene}
 								asset={asset}

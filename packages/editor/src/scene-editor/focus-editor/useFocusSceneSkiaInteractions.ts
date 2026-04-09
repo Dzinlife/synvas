@@ -24,24 +24,32 @@ import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
-import {
-	createTextEditingSession,
-	resolveTextEditingDecorations,
-	resolveTextEditingIndexAtScreenPoint,
-	resolveTextEditingOverlayRect,
-	resolveTextEditingSelectionFromAnchor,
-	type TextEditingSelection,
-	type TextEditingSession,
-	type TextEditingTarget,
-	updateTextEditingSessionComposition,
-	updateTextEditingSessionDraft,
-	updateTextEditingSessionSelection,
-	updateTextEditingSessionTarget,
-} from "@/scene-editor/text-editing";
 import { cloneValue, createCopySeed } from "@/scene-editor/utils/copyUtils";
 import { reflowInsertedElementsOnTracks } from "@/scene-editor/utils/insertedTrackReflow";
 import { finalizeTimelineElements } from "@/scene-editor/utils/mainTrackMagnet";
 import type { CameraState } from "@/studio/canvas/canvasWorkspaceUtils";
+import {
+	canRedoTextEditingLocalHistory,
+	canUndoTextEditingLocalHistory,
+	clearTextEditingLocalHistory,
+	createTextEditingLocalHistory,
+	createTextEditingSession,
+	pushTextEditingLocalHistory,
+	redoTextEditingLocalHistory,
+	resolveTextEditingDecorations,
+	resolveTextEditingIndexAtScreenPoint,
+	resolveTextEditingOverlayRect,
+	resolveTextEditingSelectionFromAnchor,
+	type TextEditingLocalHistory,
+	type TextEditingSelection,
+	type TextEditingSession,
+	type TextEditingTarget,
+	undoTextEditingLocalHistory,
+	updateTextEditingSessionComposition,
+	updateTextEditingSessionDraft,
+	updateTextEditingSessionSelection,
+	updateTextEditingSessionTarget,
+} from "@/studio/canvas/text-editing";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import {
 	createFocusFrameMatrix,
@@ -153,12 +161,16 @@ export interface FocusSceneTextEditingBridgeState {
 	value: string;
 	selection: TextEditingSelection;
 	isComposing: boolean;
+	canUndo: boolean;
+	canRedo: boolean;
 	overlayRectScreen: FocusRect;
 	onValueChange: (value: string, selection: TextEditingSelection) => void;
 	onSelectionChange: (selection: TextEditingSelection) => void;
 	onCompositionStart: (selection: TextEditingSelection) => void;
 	onCompositionUpdate: (selection: TextEditingSelection, data: string) => void;
 	onCompositionEnd: (selection: TextEditingSelection, data: string) => void;
+	onUndo: () => void;
+	onRedo: () => void;
 	onCommit: () => void;
 	onCancel: () => void;
 	onBlur: () => void;
@@ -250,6 +262,7 @@ interface TextEditingRestoreSnapshot {
 interface TextEditingHistorySession {
 	historySnapshot: TimelineHistorySnapshot | null;
 	restoreSnapshot: TextEditingRestoreSnapshot;
+	localHistory: TextEditingLocalHistory;
 }
 
 const snapNearInteger = (value: number): number => {
@@ -1321,6 +1334,9 @@ export const useFocusSceneSkiaInteractions = ({
 				});
 				return;
 			}
+			historySession.localHistory = clearTextEditingLocalHistory(
+				historySession.localHistory,
+			);
 			pushHistorySnapshot(historySession.historySnapshot);
 		},
 		[pushHistorySnapshot, setElementsWithoutHistory],
@@ -1342,6 +1358,7 @@ export const useFocusSceneSkiaInteractions = ({
 						text: sourceElement.props.text,
 						transform: cloneValue(sourceElement.transform),
 					},
+					localHistory: createTextEditingLocalHistory(),
 				};
 			}
 			interactionSessionRef.current = null;
@@ -1412,6 +1429,18 @@ export const useFocusSceneSkiaInteractions = ({
 			textEditingSelectionAnchorRef.current = selection.end;
 			setTextEditingSessionState((previousSession) => {
 				if (!previousSession) return previousSession;
+				if (previousSession.draftText !== value) {
+					const historySession = textEditingHistorySessionRef.current;
+					if (historySession) {
+						historySession.localHistory = pushTextEditingLocalHistory(
+							historySession.localHistory,
+							{
+								text: previousSession.draftText,
+								selection: previousSession.selection,
+							},
+						);
+					}
+				}
 				const nextSession = updateTextEditingSessionDraft(previousSession, {
 					draftText: value,
 					selection,
@@ -1433,6 +1462,66 @@ export const useFocusSceneSkiaInteractions = ({
 		},
 		[],
 	);
+
+	const handleTextEditingUndo = useCallback(() => {
+		const currentSession = textEditingSessionRef.current;
+		const historySession = textEditingHistorySessionRef.current;
+		if (!currentSession || !historySession) return;
+		const undoResult = undoTextEditingLocalHistory(
+			historySession.localHistory,
+			{
+				text: currentSession.draftText,
+				selection: currentSession.selection,
+			},
+		);
+		const snapshot = undoResult.snapshot;
+		if (!snapshot) return;
+		historySession.localHistory = undoResult.history;
+		textEditingSelectionAnchorRef.current = snapshot.selection.end;
+		setTextEditingSessionState((previousSession) => {
+			if (!previousSession) return previousSession;
+			const withDraft = updateTextEditingSessionDraft(previousSession, {
+				draftText: snapshot.text,
+				selection: snapshot.selection,
+			});
+			return updateTextEditingSessionComposition(withDraft, null);
+		});
+		applyTextEditingDraftToTimeline(currentSession.target.id, snapshot.text);
+	}, [applyTextEditingDraftToTimeline]);
+
+	const handleTextEditingRedo = useCallback(() => {
+		const currentSession = textEditingSessionRef.current;
+		const historySession = textEditingHistorySessionRef.current;
+		if (!currentSession || !historySession) return;
+		const redoResult = redoTextEditingLocalHistory(
+			historySession.localHistory,
+			{
+				text: currentSession.draftText,
+				selection: currentSession.selection,
+			},
+		);
+		const snapshot = redoResult.snapshot;
+		if (!snapshot) return;
+		historySession.localHistory = redoResult.history;
+		textEditingSelectionAnchorRef.current = snapshot.selection.end;
+		setTextEditingSessionState((previousSession) => {
+			if (!previousSession) return previousSession;
+			const withDraft = updateTextEditingSessionDraft(previousSession, {
+				draftText: snapshot.text,
+				selection: snapshot.selection,
+			});
+			return updateTextEditingSessionComposition(withDraft, null);
+		});
+		applyTextEditingDraftToTimeline(currentSession.target.id, snapshot.text);
+	}, [applyTextEditingDraftToTimeline]);
+
+	const textEditingHistoryState = textEditingHistorySessionRef.current;
+	const textEditingCanUndo = textEditingHistoryState
+		? canUndoTextEditingLocalHistory(textEditingHistoryState.localHistory)
+		: false;
+	const textEditingCanRedo = textEditingHistoryState
+		? canRedoTextEditingLocalHistory(textEditingHistoryState.localHistory)
+		: false;
 
 	const handleTextEditingCompositionStart = useCallback(
 		(selection: TextEditingSelection) => {
@@ -1519,6 +1608,8 @@ export const useFocusSceneSkiaInteractions = ({
 				value: textEditingSessionState.draftText,
 				selection: textEditingSessionState.selection,
 				isComposing: textEditingSessionState.mode === "composing",
+				canUndo: textEditingCanUndo,
+				canRedo: textEditingCanRedo,
 				overlayRectScreen: resolveTextEditingOverlayRect(
 					textEditingSessionState.target.frame,
 				),
@@ -1527,6 +1618,8 @@ export const useFocusSceneSkiaInteractions = ({
 				onCompositionStart: handleTextEditingCompositionStart,
 				onCompositionUpdate: handleTextEditingCompositionUpdate,
 				onCompositionEnd: handleTextEditingCompositionEnd,
+				onUndo: handleTextEditingUndo,
+				onRedo: handleTextEditingRedo,
 				onCommit: () => {
 					finishTextEditingSession("commit");
 				},
@@ -1539,11 +1632,15 @@ export const useFocusSceneSkiaInteractions = ({
 			};
 		}, [
 			finishTextEditingSession,
+			handleTextEditingRedo,
 			handleTextEditingCompositionEnd,
 			handleTextEditingCompositionStart,
 			handleTextEditingCompositionUpdate,
 			handleTextEditingSelectionChange,
+			handleTextEditingUndo,
 			handleTextEditingValueChange,
+			textEditingCanRedo,
+			textEditingCanUndo,
 			textEditingSessionState,
 		]);
 

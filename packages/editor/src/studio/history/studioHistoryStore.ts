@@ -1,17 +1,18 @@
+import { createTrackLockedMap } from "core/editor/command/move";
+import { pruneAudioTrackStates } from "core/editor/command/postProcess";
 import {
 	applyTimelineOtCommand,
+	createOtEngine,
+	invertTimelineOtCommand,
+	isTimelineOtCommand,
 	type OtCommand,
 	type OtOpEnvelope,
 	type OtStreamId,
 	type TimelineOtCommand,
 	type TimelineOtIntent,
-	createOtEngine,
-	invertTimelineOtCommand,
-	isTimelineOtCommand,
 	transformTimelineOtCommand,
 } from "core/editor/ot";
-import { createTrackLockedMap } from "core/editor/command/move";
-import { pruneAudioTrackStates } from "core/editor/command/postProcess";
+import type { TimelineTrack } from "core/editor/timeline/types";
 import {
 	DEFAULT_TIMELINE_SETTINGS,
 	loadTimelineFromObject,
@@ -19,7 +20,6 @@ import {
 	type TimelineJSON,
 	type TimelineTrackJSON,
 } from "core/editor/timelineLoader";
-import type { TimelineTrack } from "core/editor/timeline/types";
 import { mergeStudioOtSnapshot } from "core/studio/ot";
 import type {
 	CanvasDocument,
@@ -96,6 +96,13 @@ export type StudioHistoryEntry =
 			focusNodeId?: string | null;
 	  }
 	| {
+			kind: "canvas.node-update";
+			nodeId: string;
+			before: CanvasNode;
+			after: CanvasNode;
+			focusNodeId?: string | null;
+	  }
+	| {
 			kind: "canvas.node-layout.batch";
 			entries: Array<{
 				nodeId: string;
@@ -148,6 +155,7 @@ type StudioHistoryEntryWithMeta = StudioHistoryEntry & {
 type CanvasOtCommand = OtCommand & {
 	id:
 		| "canvas.node-layout"
+		| "canvas.node-update"
 		| "canvas.node-layout.batch"
 		| "canvas.node-create"
 		| "canvas.node-create.batch"
@@ -213,7 +221,7 @@ interface StudioHistoryState {
 const HISTORY_LIMIT = 200;
 const CANVAS_STREAM_ID: OtStreamId = "canvas";
 
-const cloneJson = <T,>(value: T): T => {
+const cloneJson = <T>(value: T): T => {
 	if (typeof structuredClone === "function") {
 		return structuredClone(value);
 	}
@@ -305,7 +313,7 @@ const mergeSceneTimelineBatchEntries = (
 			? {
 					...entry,
 					after: nextEntry.after,
-			  }
+				}
 			: entry,
 	);
 };
@@ -378,8 +386,13 @@ const toEntryWithMeta = (
 	};
 };
 
-const getEntryOpId = (entry: StudioHistoryEntryWithMeta): string | undefined => {
-	if (entry.kind === "scene.timeline" || entry.kind === "scene.timeline.batch") {
+const getEntryOpId = (
+	entry: StudioHistoryEntryWithMeta,
+): string | undefined => {
+	if (
+		entry.kind === "scene.timeline" ||
+		entry.kind === "scene.timeline.batch"
+	) {
 		return entry.opId ?? entry.__otOpId;
 	}
 	return entry.__otOpId;
@@ -411,7 +424,7 @@ const toOtCommand = (entry: StudioHistoryEntry): StudioOtCommand => {
 	};
 };
 
-const trimEntries = <T,>(entries: T[]): T[] => {
+const trimEntries = <T>(entries: T[]): T[] => {
 	if (entries.length <= HISTORY_LIMIT) return entries;
 	return entries.slice(entries.length - HISTORY_LIMIT);
 };
@@ -460,7 +473,8 @@ const insertEntryBySeq = (
 	entries: StudioHistoryEntryWithMeta[],
 	target: StudioHistoryEntryWithMeta,
 ): StudioHistoryEntryWithMeta[] => {
-	if (entries.some((entry) => isSameEntryIdentity(entry, target))) return entries;
+	if (entries.some((entry) => isSameEntryIdentity(entry, target)))
+		return entries;
 	const targetSeq = target.__seq ?? Number.MAX_SAFE_INTEGER;
 	for (let index = 0; index < entries.length; index += 1) {
 		const currentSeq = entries[index]?.__seq ?? Number.MAX_SAFE_INTEGER;
@@ -538,7 +552,10 @@ const mergeGlobalTimelineEntry = (
 	if (!lastEntry) {
 		return [...existing, nextEntry];
 	}
-	if (lastEntry.kind === "scene.timeline" && lastEntry.opId === nextEntry.opId) {
+	if (
+		lastEntry.kind === "scene.timeline" &&
+		lastEntry.opId === nextEntry.opId
+	) {
 		const mergedItems = mergeSceneTimelineBatchEntries(
 			[toSceneTimelineHistoryItem(lastEntry)],
 			toSceneTimelineHistoryItem(nextEntry),
@@ -634,7 +651,10 @@ const normalizeStoredTracks = (
 const stabilizeTimelineAfterOtApply = (params: {
 	elements: TimelineJSON["elements"];
 	tracks: TimelineJSON["tracks"];
-	audioTrackStates: Record<number, { locked: boolean; muted: boolean; solo: boolean }>;
+	audioTrackStates: Record<
+		number,
+		{ locked: boolean; muted: boolean; solo: boolean }
+	>;
 	rippleEditingEnabled: boolean;
 	fps: number;
 	autoAttach: boolean;
@@ -656,13 +676,10 @@ const stabilizeTimelineAfterOtApply = (params: {
 		rippleEditingEnabled,
 		attachments: findAttachments(elements),
 		autoAttach,
-			fps,
-			trackLockedMap,
-		});
-	const reconcileResult = reconcileTracks(
-		finalizedElements,
-		normalizedTracks,
-	);
+		fps,
+		trackLockedMap,
+	});
+	const reconcileResult = reconcileTracks(finalizedElements, normalizedTracks);
 	const nextAudioTrackStates = pruneAudioTrackStates(
 		reconcileResult.elements,
 		audioTrackStates,
@@ -788,7 +805,8 @@ const applyTimelineOtEntry = (
 	}
 	const focusedNodeId = currentProject.ui.focusedNodeId;
 	const focusedNode =
-		currentProject.canvas.nodes.find((node) => node.id === focusedNodeId) ?? null;
+		currentProject.canvas.nodes.find((node) => node.id === focusedNodeId) ??
+		null;
 	if (
 		focusedNode?.type === "scene" &&
 		focusedNode.sceneId === timelineRef.sceneId &&
@@ -862,6 +880,11 @@ const applyEntry = (
 		projectStore.updateCanvasNodeLayout(entry.nodeId, patch);
 		return;
 	}
+	if (entry.kind === "canvas.node-update") {
+		const patch = mode === "undo" ? entry.before : entry.after;
+		projectStore.updateCanvasNode(entry.nodeId, patch as never);
+		return;
+	}
 	if (entry.kind === "canvas.node-layout.batch") {
 		for (const layoutEntry of entry.entries) {
 			const patch = mode === "undo" ? layoutEntry.before : layoutEntry.after;
@@ -887,7 +910,9 @@ const applyEntry = (
 	}
 	if (entry.kind === "canvas.node-create.batch") {
 		if (mode === "undo") {
-			projectStore.removeCanvasGraphBatch(entry.entries.map((item) => item.node.id));
+			projectStore.removeCanvasGraphBatch(
+				entry.entries.map((item) => item.node.id),
+			);
 			return;
 		}
 		projectStore.appendCanvasGraphBatch(entry.entries);
@@ -914,7 +939,9 @@ const applyEntry = (
 			projectStore.appendCanvasGraphBatch(entry.entries);
 			return;
 		}
-		projectStore.removeCanvasGraphBatch(entry.entries.map((item) => item.node.id));
+		projectStore.removeCanvasGraphBatch(
+			entry.entries.map((item) => item.node.id),
+		);
 	}
 };
 
@@ -977,6 +1004,13 @@ const applyEntryToBaselineSnapshot = (
 		const patch = mode === "undo" ? entry.before : entry.after;
 		snapshot.canvas.nodes = snapshot.canvas.nodes.map((node) =>
 			node.id === entry.nodeId ? { ...node, ...patch } : node,
+		);
+		return;
+	}
+	if (entry.kind === "canvas.node-update") {
+		const nextNode = mode === "undo" ? entry.before : entry.after;
+		snapshot.canvas.nodes = snapshot.canvas.nodes.map((node) =>
+			node.id === entry.nodeId ? nextNode : node,
 		);
 		return;
 	}
@@ -1308,7 +1342,7 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 			normalizedEntry.kind === "timeline.ot"
 				? normalizedEntry.txnId
 				: normalizedEntry.kind === "scene.timeline" ||
-					  normalizedEntry.kind === "scene.timeline.batch"
+						normalizedEntry.kind === "scene.timeline.batch"
 					? normalizedEntry.opId
 					: undefined;
 		const intent = resolveEntryIntent(normalizedEntry);
@@ -1316,7 +1350,8 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 			streamId,
 			command: toOtCommand(normalizedEntry),
 			txnId: incomingTxnId,
-			causedBy: normalizedEntry.kind === "timeline.ot" ? normalizedEntry.causedBy : [],
+			causedBy:
+				normalizedEntry.kind === "timeline.ot" ? normalizedEntry.causedBy : [],
 			actorId,
 		});
 		set((state) => {
@@ -1328,10 +1363,15 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 				causedBy: otOp.causedBy,
 				intent,
 			});
-			const nextPast = trimEntries(mergeGlobalTimelineEntry(state.past, nextEntry));
+			const nextPast = trimEntries(
+				mergeGlobalTimelineEntry(state.past, nextEntry),
+			);
 			const nextActorPast = isRootEntry(nextEntry)
 				? trimEntries(
-						mergeGlobalTimelineEntry(state.actorStacks[actorId].past, nextEntry),
+						mergeGlobalTimelineEntry(
+							state.actorStacks[actorId].past,
+							nextEntry,
+						),
 					)
 				: state.actorStacks[actorId].past;
 			const nextActorStacks: Record<LabActorId, ActorHistoryStacks> = {
@@ -1349,7 +1389,10 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 			let baselineCanvas = state.baselineCanvas;
 			let baselineScenes = state.baselineScenes;
 			if (state.past.length === 0) {
-				const baseline = deriveBaselineFromEntry(scopedProject, normalizedEntry);
+				const baseline = deriveBaselineFromEntry(
+					scopedProject,
+					normalizedEntry,
+				);
 				baselineCanvas = baseline.canvas;
 				baselineScenes = baseline.scenes;
 			}
@@ -1386,7 +1429,8 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 
 		set({ isApplying: true });
 		try {
-			const targetOpId = targetEntry.__otOpId ?? getEntryOpId(targetEntry) ?? "";
+			const targetOpId =
+				targetEntry.__otOpId ?? getEntryOpId(targetEntry) ?? "";
 			const closureOpIds = collectCausalClosureOpIds(
 				stateSnapshot.past,
 				targetOpId ? [targetOpId] : [],
@@ -1458,7 +1502,8 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 				options,
 			);
 
-			const activeActorFuture = nextActorStacks[stateSnapshot.activeActorId].future;
+			const activeActorFuture =
+				nextActorStacks[stateSnapshot.activeActorId].future;
 			const flags = recomputeActorFlags(
 				nextActorStacks,
 				stateSnapshot.activeActorId,
@@ -1493,7 +1538,8 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 
 		set({ isApplying: true });
 		try {
-			const targetOpId = targetEntry.__otOpId ?? getEntryOpId(targetEntry) ?? "";
+			const targetOpId =
+				targetEntry.__otOpId ?? getEntryOpId(targetEntry) ?? "";
 			const actorClosures = stateSnapshot.redoClosures[actorId] ?? {};
 			const redoEntries =
 				targetOpId && actorClosures[targetOpId]
@@ -1525,7 +1571,8 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 				...stateSnapshot.actorStacks[actorId].past,
 				targetEntry,
 			]);
-			const nextActorFuture = stateSnapshot.actorStacks[actorId].future.slice(1);
+			const nextActorFuture =
+				stateSnapshot.actorStacks[actorId].future.slice(1);
 			const nextActorStacks: Record<LabActorId, ActorHistoryStacks> = {
 				...stateSnapshot.actorStacks,
 				[actorId]: {
@@ -1548,7 +1595,8 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 				options,
 			);
 
-			const activeActorFuture = nextActorStacks[stateSnapshot.activeActorId].future;
+			const activeActorFuture =
+				nextActorStacks[stateSnapshot.activeActorId].future;
 			const flags = recomputeActorFlags(
 				nextActorStacks,
 				stateSnapshot.activeActorId,

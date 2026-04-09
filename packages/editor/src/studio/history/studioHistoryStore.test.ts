@@ -1,14 +1,15 @@
+import { buildTimelineBatchCommandFromSnapshots } from "core/editor/ot";
 import {
-	buildTimelineBatchCommandFromSnapshots,
-} from "core/editor/ot";
-import { loadTimelineFromObject, type TimelineJSON } from "core/editor/timelineLoader";
+	loadTimelineFromObject,
+	type TimelineJSON,
+} from "core/editor/timelineLoader";
 import type { StudioProject } from "core/studio/types";
 import { framesToTimecode } from "core/utils/timecode";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";
-import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
+import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 import { useStudioHistoryStore } from "./studioHistoryStore";
 
 const createTimeline = (elementsCount: number): TimelineJSON => ({
@@ -374,27 +375,86 @@ describe("studioHistoryStore", () => {
 
 		useStudioHistoryStore.getState().undo();
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.find(
-				(node) => node.id === "node-1",
-			)?.x,
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.find((node) => node.id === "node-1")?.x,
 		).toBe(0);
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.find(
-				(node) => node.id === "node-2",
-			)?.x,
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.find((node) => node.id === "node-2")?.x,
 		).toBe(200);
 
 		useStudioHistoryStore.getState().redo();
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.find(
-				(node) => node.id === "node-1",
-			)?.x,
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.find((node) => node.id === "node-1")?.x,
 		).toBe(120);
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.find(
-				(node) => node.id === "node-2",
-			)?.x,
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.find((node) => node.id === "node-2")?.x,
 		).toBe(360);
+	});
+
+	it("canvas.node-update 可撤销和重做", () => {
+		const textNode = {
+			id: "node-text-1",
+			type: "text" as const,
+			name: "Text 1",
+			x: 320,
+			y: 240,
+			width: 640,
+			height: 160,
+			zIndex: 9,
+			locked: false,
+			hidden: false,
+			text: "before",
+			fontSize: 48,
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		useProjectStore.getState().restoreCanvasNodeForHistory(textNode);
+		const before = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === textNode.id);
+		expect(before?.type).toBe("text");
+		if (!before || before.type !== "text") return;
+		useProjectStore.getState().updateCanvasNode(textNode.id, {
+			text: "after",
+			height: 200,
+		} as never);
+		const after = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === textNode.id);
+		expect(after?.type).toBe("text");
+		if (!after || after.type !== "text") return;
+		useStudioHistoryStore.getState().push({
+			kind: "canvas.node-update",
+			nodeId: textNode.id,
+			before,
+			after,
+			focusNodeId: textNode.id,
+		});
+
+		useStudioHistoryStore.getState().undo();
+		const undoNode = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === textNode.id);
+		expect(undoNode?.type).toBe("text");
+		if (!undoNode || undoNode.type !== "text") return;
+		expect(undoNode.text).toBe("before");
+		expect(undoNode.height).toBe(160);
+
+		useStudioHistoryStore.getState().redo();
+		const redoNode = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === textNode.id);
+		expect(redoNode?.type).toBe("text");
+		if (!redoNode || redoNode.type !== "text") return;
+		expect(redoNode.text).toBe("after");
+		expect(redoNode.height).toBe(200);
 	});
 
 	it("canvas.node-create.batch 可撤销和重做", () => {
@@ -445,9 +505,9 @@ describe("studioHistoryStore", () => {
 
 		useProjectStore.getState().appendCanvasGraphBatch(entries);
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-3",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-3"),
 		).toBe(true);
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-3"],
@@ -455,14 +515,14 @@ describe("studioHistoryStore", () => {
 
 		useStudioHistoryStore.getState().undo();
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-3",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-3"),
 		).toBe(false);
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-4",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-4"),
 		).toBe(false);
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-3"],
@@ -470,14 +530,14 @@ describe("studioHistoryStore", () => {
 
 		useStudioHistoryStore.getState().redo();
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-3",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-3"),
 		).toBe(true);
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-4",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-4"),
 		).toBe(true);
 		expect(
 			useProjectStore.getState().currentProject?.scenes["scene-3"],
@@ -517,7 +577,9 @@ describe("studioHistoryStore", () => {
 
 	it("canvas.node-delete.batch 可撤销和重做", () => {
 		const currentProject = useProjectStore.getState().currentProject;
-		const sceneNode = currentProject?.canvas.nodes.find((item) => item.id === "node-2");
+		const sceneNode = currentProject?.canvas.nodes.find(
+			(item) => item.id === "node-2",
+		);
 		const scene = currentProject?.scenes["scene-2"];
 		const plainNode = {
 			id: "node-4",
@@ -555,38 +617,38 @@ describe("studioHistoryStore", () => {
 			.removeCanvasGraphBatch(entries.map((entry) => entry.node.id));
 
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-2",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-2"),
 		).toBe(false);
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-4",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-4"),
 		).toBe(false);
 
 		useStudioHistoryStore.getState().undo();
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-2",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-2"),
 		).toBe(true);
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-4",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-4"),
 		).toBe(true);
 
 		useStudioHistoryStore.getState().redo();
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-2",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-2"),
 		).toBe(false);
 		expect(
-			useProjectStore.getState().currentProject?.canvas.nodes.some(
-				(node) => node.id === "node-4",
-			),
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-4"),
 		).toBe(false);
 	});
 
@@ -722,10 +784,14 @@ describe("studioHistoryStore", () => {
 		const projectStore = useProjectStore.getState();
 		const beforeScene1 = createTimeline(2);
 		const afterScene1 = createTimeline(1);
-		projectStore.updateSceneTimeline("scene-1", beforeScene1, { txnId: "seed-s1" });
+		projectStore.updateSceneTimeline("scene-1", beforeScene1, {
+			txnId: "seed-s1",
+		});
 
 		useStudioHistoryStore.getState().setActiveActor("user-1");
-		projectStore.updateSceneTimeline("scene-1", afterScene1, { txnId: "u1-del" });
+		projectStore.updateSceneTimeline("scene-1", afterScene1, {
+			txnId: "u1-del",
+		});
 		const scene1Command = buildTimelineBatchCommandFromSnapshots({
 			before: toTimelineOtSnapshot(beforeScene1),
 			after: toTimelineOtSnapshot(afterScene1),
@@ -751,16 +817,23 @@ describe("studioHistoryStore", () => {
 								...element.timeline,
 								start: element.timeline.start + 15,
 								end: element.timeline.end + 15,
-								startTimecode: framesToTimecode(element.timeline.start + 15, 30),
+								startTimecode: framesToTimecode(
+									element.timeline.start + 15,
+									30,
+								),
 								endTimecode: framesToTimecode(element.timeline.end + 15, 30),
 							},
 						}
 					: element,
 			),
 		};
-		projectStore.updateSceneTimeline("scene-2", beforeScene2, { txnId: "seed-s2" });
+		projectStore.updateSceneTimeline("scene-2", beforeScene2, {
+			txnId: "seed-s2",
+		});
 		useStudioHistoryStore.getState().setActiveActor("user-2");
-		projectStore.updateSceneTimeline("scene-2", afterScene2, { txnId: "u2-move" });
+		projectStore.updateSceneTimeline("scene-2", afterScene2, {
+			txnId: "u2-move",
+		});
 		const scene2Command = buildTimelineBatchCommandFromSnapshots({
 			before: toTimelineOtSnapshot(beforeScene2),
 			after: toTimelineOtSnapshot(afterScene2),
@@ -780,9 +853,10 @@ describe("studioHistoryStore", () => {
 
 		const current = useProjectStore.getState().currentProject;
 		expect(current?.scenes["scene-1"].timeline.elements.length).toBe(2);
-		expect(current?.scenes["scene-2"].timeline.elements[0]?.timeline.start).toBe(
-			beforeScene2.elements[0]!.timeline.start + 15,
-		);
+		const beforeStart = beforeScene2.elements[0]?.timeline.start ?? 0;
+		expect(
+			current?.scenes["scene-2"].timeline.elements[0]?.timeline.start,
+		).toBe(beforeStart + 15);
 	});
 
 	it("timeline undo 回放会执行轨道重排，避免主轨重叠", () => {
@@ -794,10 +868,14 @@ describe("studioHistoryStore", () => {
 		};
 		const afterUser2 = moveElementFrames(afterUser1, "element-1", 10, 40);
 
-		projectStore.updateSceneTimeline("scene-1", before, { txnId: "seed-ripple" });
+		projectStore.updateSceneTimeline("scene-1", before, {
+			txnId: "seed-ripple",
+		});
 
 		useStudioHistoryStore.getState().setActiveActor("user-1");
-		projectStore.updateSceneTimeline("scene-1", afterUser1, { txnId: "u1-delete" });
+		projectStore.updateSceneTimeline("scene-1", afterUser1, {
+			txnId: "u1-delete",
+		});
 		const user1Command = buildTimelineBatchCommandFromSnapshots({
 			before: toTimelineOtSnapshot(before),
 			after: toTimelineOtSnapshot(afterUser1),
@@ -813,7 +891,9 @@ describe("studioHistoryStore", () => {
 		});
 
 		useStudioHistoryStore.getState().setActiveActor("user-2");
-		projectStore.updateSceneTimeline("scene-1", afterUser2, { txnId: "u2-move" });
+		projectStore.updateSceneTimeline("scene-1", afterUser2, {
+			txnId: "u2-move",
+		});
 		const user2Command = buildTimelineBatchCommandFromSnapshots({
 			before: toTimelineOtSnapshot(afterUser1),
 			after: toTimelineOtSnapshot(afterUser2),
@@ -832,8 +912,8 @@ describe("studioHistoryStore", () => {
 		useStudioHistoryStore.getState().undo();
 
 		const elements =
-			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline.elements ??
-			[];
+			useProjectStore.getState().currentProject?.scenes["scene-1"].timeline
+				.elements ?? [];
 		const element0 = elements.find((element) => element.id === "element-0");
 		const element1 = elements.find((element) => element.id === "element-1");
 		expect(element0).toBeTruthy();
@@ -861,7 +941,10 @@ describe("studioHistoryStore", () => {
 								...element.timeline,
 								start: element.timeline.start + 20,
 								end: element.timeline.end + 20,
-								startTimecode: framesToTimecode(element.timeline.start + 20, 30),
+								startTimecode: framesToTimecode(
+									element.timeline.start + 20,
+									30,
+								),
 								endTimecode: framesToTimecode(element.timeline.end + 20, 30),
 							},
 						}
@@ -884,8 +967,12 @@ describe("studioHistoryStore", () => {
 			),
 		};
 
-		projectStore.updateSceneTimeline("scene-1", beforeScene1, { txnId: "seed-s1" });
-		projectStore.updateSceneTimeline("scene-2", beforeScene2, { txnId: "seed-s2" });
+		projectStore.updateSceneTimeline("scene-1", beforeScene1, {
+			txnId: "seed-s1",
+		});
+		projectStore.updateSceneTimeline("scene-2", beforeScene2, {
+			txnId: "seed-s2",
+		});
 
 		const persistedProject = JSON.parse(
 			JSON.stringify(useProjectStore.getState().currentProject),
@@ -987,7 +1074,10 @@ describe("studioHistoryStore", () => {
 								...element.timeline,
 								start: element.timeline.start + 20,
 								end: element.timeline.end + 20,
-								startTimecode: framesToTimecode(element.timeline.start + 20, 30),
+								startTimecode: framesToTimecode(
+									element.timeline.start + 20,
+									30,
+								),
 								endTimecode: framesToTimecode(element.timeline.end + 20, 30),
 							},
 						}
@@ -1010,8 +1100,12 @@ describe("studioHistoryStore", () => {
 			),
 		};
 
-		projectStore.updateSceneTimeline("scene-1", beforeScene1, { txnId: "seed-s1" });
-		projectStore.updateSceneTimeline("scene-2", beforeScene2, { txnId: "seed-s2" });
+		projectStore.updateSceneTimeline("scene-1", beforeScene1, {
+			txnId: "seed-s1",
+		});
+		projectStore.updateSceneTimeline("scene-2", beforeScene2, {
+			txnId: "seed-s2",
+		});
 		useStudioHistoryStore.getState().clear();
 
 		useStudioHistoryStore.getState().setActiveActor("user-1");

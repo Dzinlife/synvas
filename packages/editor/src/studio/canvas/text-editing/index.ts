@@ -1,0 +1,36 @@
+export {
+	HeadlessTextInputBridge,
+	type HeadlessTextInputBridgeProps,
+} from "./HeadlessTextInputBridge";
+export {
+	canRedoTextEditingLocalHistory,
+	canUndoTextEditingLocalHistory,
+	clearTextEditingLocalHistory,
+	createTextEditingLocalHistory,
+	pushTextEditingLocalHistory,
+	redoTextEditingLocalHistory,
+	type TextEditingHistorySnapshot,
+	type TextEditingLocalHistory,
+	undoTextEditingLocalHistory,
+} from "./history";
+export {
+	createTextEditingSession,
+	isTextSelectionCollapsed,
+	normalizeTextSelection,
+	resolveTextEditingDecorations,
+	resolveTextEditingIndexAtScreenPoint,
+	resolveTextEditingOverlayRect,
+	resolveTextEditingSelectionFromAnchor,
+	type TextEditingDecorations,
+	type TextEditingFrame,
+	type TextEditingMode,
+	type TextEditingPoint,
+	type TextEditingRect,
+	type TextEditingSelection,
+	type TextEditingSession,
+	type TextEditingTarget,
+	updateTextEditingSessionComposition,
+	updateTextEditingSessionDraft,
+	updateTextEditingSessionSelection,
+	updateTextEditingSessionTarget,
+} from "./session";
