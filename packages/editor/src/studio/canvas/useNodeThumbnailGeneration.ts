@@ -83,17 +83,6 @@ const isThumbnailFresh = (
 	return project.assets.some((asset) => asset.id === thumbnail.assetId);
 };
 
-const hasReusableThumbnailAsset = (
-	project: StudioProject,
-	node: CanvasNode,
-): boolean => {
-	const thumbnail = node.thumbnail;
-	if (!thumbnail) return false;
-	return project.assets.some(
-		(asset) => asset.id === thumbnail.assetId && asset.kind === "image",
-	);
-};
-
 const buildTaskKey = (nodeId: string, sourceSignature: string): string => {
 	return `${nodeId}:${sourceSignature}`;
 };
@@ -315,14 +304,6 @@ export const useNodeThumbnailGeneration = (
 			const sourceSignature = capability.getSourceSignature(context);
 			if (!sourceSignature) continue;
 			if (isThumbnailFresh(project, node, sourceSignature)) continue;
-			// scene 节点优先复用同签名缩略图；签名变化时必须触发重生，避免内容更新后仍显示旧图。
-			if (
-				node.type === "scene" &&
-				hasReusableThumbnailAsset(project, node) &&
-				node.thumbnail?.sourceSignature === sourceSignature
-			) {
-				continue;
-			}
 			const taskKey = buildTaskKey(node.id, sourceSignature);
 			if (
 				queuedTaskKeySetRef.current.has(taskKey) ||

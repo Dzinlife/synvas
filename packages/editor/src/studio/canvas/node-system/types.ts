@@ -5,12 +5,13 @@ import type {
 	StudioProject,
 } from "core/studio/types";
 import type React from "react";
+import type { SkPicture } from "react-skia-lite";
 import type { IngestExternalFileAssetResult } from "@/projects/assetIngest";
-import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type {
 	CanvasNodeCreateInput,
 	EnsureProjectAssetInput,
 } from "@/projects/projectStore";
+import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 
 export interface CanvasNodeSkiaRenderProps<
@@ -139,6 +140,36 @@ export interface CanvasNodeThumbnailCapability<
 	) => Promise<CanvasNodeThumbnailGenerationResult | null>;
 }
 
+export interface CanvasNodeTilePictureCapabilityContext<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	node: TNode;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+	runtimeManager: StudioRuntimeManager;
+}
+
+export interface CanvasNodeTilePictureGenerationResult {
+	picture: SkPicture;
+	sourceWidth: number;
+	sourceHeight: number;
+	dispose?: () => void;
+}
+
+export interface CanvasNodeTilePictureCapability<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	getSourceSignature?: (
+		context: CanvasNodeTilePictureCapabilityContext<TNode>,
+	) => string | null;
+	generate: (
+		context: CanvasNodeTilePictureCapabilityContext<TNode>,
+	) =>
+		| Promise<CanvasNodeTilePictureGenerationResult | null>
+		| CanvasNodeTilePictureGenerationResult
+		| null;
+}
+
 export interface CanvasExternalFileContext {
 	projectId: string;
 	fps: number;
@@ -184,6 +215,7 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	create: (input?: Record<string, unknown>) => CanvasNodeCreateInput;
 	skiaRenderer: React.FC<CanvasNodeSkiaRenderProps<TNode>>;
 	thumbnail?: CanvasNodeThumbnailCapability<TNode>;
+	tilePicture?: CanvasNodeTilePictureCapability<TNode>;
 	focusEditorLayer?: React.ComponentType<unknown>;
 	focusEditorBridge?: React.FC<CanvasNodeFocusEditorBridgeProps<TNode>>;
 	toolbar: React.FC<CanvasNodeToolbarProps<TNode>>;

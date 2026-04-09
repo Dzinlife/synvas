@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import type { StudioProject, VideoCanvasNode } from "core/studio/types";
+import type {
+	AudioCanvasNode,
+	ImageCanvasNode,
+	StudioProject,
+	TextCanvasNode,
+	VideoCanvasNode,
+} from "core/studio/types";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
@@ -23,6 +29,25 @@ const { runtimeManagerMock } = vi.hoisted(() => ({
 }));
 const { acquireImageAssetMock } = vi.hoisted(() => ({
 	acquireImageAssetMock: vi.fn(),
+}));
+const { renderNodeToPictureMock } = vi.hoisted(() => ({
+	renderNodeToPictureMock: vi.fn(() => ({
+		dispose: vi.fn(),
+	})),
+}));
+const { textTilePictureGenerateMock } = vi.hoisted(() => ({
+	textTilePictureGenerateMock: vi.fn(
+		async (context: { node: TextCanvasNode }) => {
+			return {
+				picture: {
+					dispose: vi.fn(),
+				},
+				sourceWidth: Math.max(1, Math.round(Math.abs(context.node.width))),
+				sourceHeight: Math.max(1, Math.round(Math.abs(context.node.height))),
+				dispose: vi.fn(),
+			};
+		},
+	),
 }));
 const {
 	focusLayerPointerDownSpy,
@@ -160,6 +185,28 @@ vi.mock("react-skia-lite", async () => {
 		};
 	};
 	const skiaMock = {
+		Color: (value: string) => value,
+		ParagraphBuilder: {
+			Make: () => {
+				const paragraph = {
+					layout: vi.fn(),
+					dispose: vi.fn(),
+				};
+				return {
+					pushStyle() {
+						return this;
+					},
+					addText() {
+						return this;
+					},
+					pop() {
+						return this;
+					},
+					build: () => paragraph,
+					dispose: vi.fn(),
+				};
+			},
+		},
 		RuntimeEffect: {
 			Make: () => ({ type: "runtime-effect" }),
 		},
@@ -189,6 +236,7 @@ vi.mock("react-skia-lite", async () => {
 		Canvas,
 		Group: "group",
 		Image: "image",
+		Paragraph: "paragraph",
 		Rect: "rect",
 		RoundedRect: "rrect",
 		Text: "text",
@@ -239,6 +287,10 @@ vi.mock("@/scene-editor/runtime/EditorRuntimeProvider", () => ({
 
 vi.mock("@/assets/imageAsset", () => ({
 	acquireImageAsset: acquireImageAssetMock,
+}));
+
+vi.mock("core/editor/preview/renderNodeSnapshot", () => ({
+	renderNodeToPicture: renderNodeToPictureMock,
 }));
 
 vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
@@ -292,9 +344,21 @@ vi.mock("./node-system/registry", async () => {
 	const { SceneFocusEditorBridge } = await import(
 		"@/scene-editor/focus-editor/SceneFocusEditorBridge"
 	);
+	const thumbnailCapability = {
+		getSourceSignature: () => null,
+		generate: async () => null,
+	};
+	const textTilePictureCapability = {
+		getSourceSignature: ({ node }: { node: TextCanvasNode }) =>
+			`${node.id}:${node.updatedAt}:${node.text}`,
+		generate: textTilePictureGenerateMock,
+	};
 	return {
 		getCanvasNodeDefinition: (type: string) => ({
 			skiaRenderer: () => null,
+			thumbnail:
+				type === "scene" || type === "video" ? thumbnailCapability : undefined,
+			tilePicture: type === "text" ? textTilePictureCapability : undefined,
 			focusEditorLayer: type === "scene" ? FocusSceneSkiaLayer : undefined,
 			focusEditorBridge: type === "scene" ? SceneFocusEditorBridge : undefined,
 		}),
@@ -478,6 +542,70 @@ const createSceneNode = (id: string, zIndex: number) => ({
 	sceneId: "scene-1",
 });
 
+const createTextNode = (
+	id: string,
+	zIndex: number,
+	patch: Partial<TextCanvasNode> = {},
+): TextCanvasNode => ({
+	id,
+	type: "text",
+	name: id,
+	text: "Hello",
+	fontSize: 48,
+	x: 20,
+	y: 30,
+	width: 240,
+	height: 120,
+	zIndex,
+	locked: false,
+	hidden: false,
+	createdAt: 1,
+	updatedAt: 1,
+	...patch,
+});
+
+const createAudioNode = (
+	id: string,
+	zIndex: number,
+	patch: Partial<AudioCanvasNode> = {},
+): AudioCanvasNode => ({
+	id,
+	type: "audio",
+	name: id,
+	x: 20,
+	y: 30,
+	width: 240,
+	height: 120,
+	zIndex,
+	locked: false,
+	hidden: false,
+	createdAt: 1,
+	updatedAt: 1,
+	assetId: `${id}-asset`,
+	...patch,
+});
+
+const createImageNode = (
+	id: string,
+	zIndex: number,
+	patch: Partial<ImageCanvasNode> = {},
+): ImageCanvasNode => ({
+	id,
+	type: "image",
+	name: id,
+	x: 20,
+	y: 30,
+	width: 240,
+	height: 120,
+	zIndex,
+	locked: false,
+	hidden: false,
+	createdAt: 1,
+	updatedAt: 1,
+	assetId: `${id}-asset`,
+	...patch,
+});
+
 const createImageAsset = (id: string): StudioProject["assets"][number] => ({
 	id,
 	kind: "image",
@@ -528,6 +656,21 @@ describe("InfiniteSkiaCanvas", () => {
 		rootRenderSpy.mockReset();
 		tilePipelineMockState.enabled = false;
 		acquireImageAssetMock.mockReset();
+		renderNodeToPictureMock.mockReset();
+		textTilePictureGenerateMock.mockReset();
+		textTilePictureGenerateMock.mockImplementation(
+			async (context: { node: TextCanvasNode }) => ({
+				picture: {
+					dispose: vi.fn(),
+				},
+				sourceWidth: Math.max(1, Math.round(Math.abs(context.node.width))),
+				sourceHeight: Math.max(1, Math.round(Math.abs(context.node.height))),
+				dispose: vi.fn(),
+			}),
+		);
+		renderNodeToPictureMock.mockReturnValue({
+			dispose: vi.fn(),
+		});
 		acquireImageAssetMock.mockImplementation(async (uri: string) => {
 			return {
 				asset: {
@@ -1242,6 +1385,146 @@ describe("InfiniteSkiaCanvas", () => {
 					getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id,
 			);
 			expect(liveNodeIds).toEqual(["node-active"]);
+		});
+	});
+
+	it("tile pipeline 不可用时非 active 节点不会走 live 渲染", async () => {
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[
+					createTextNode("node-text", 0),
+					createVideoNode("node-video", 1),
+				]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		const liveNodeIds = getCanvasNodeRenderItems(getLatestRenderTree()).map(
+			(nodeItem) =>
+				getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id,
+		);
+		expect(liveNodeIds).toEqual([]);
+	});
+
+	it("非 active 的 text/audio 会进入 tile picture 输入且不走 live", async () => {
+		tilePipelineMockState.enabled = true;
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[
+					createTextNode("node-text", 0),
+					createAudioNode("node-audio", 1),
+				]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			const staticTileLayerProps = getElementProps<{
+				drawItems?: Array<unknown>;
+			}>(getStaticTileLayerElement(getLatestRenderTree()));
+			expect(staticTileLayerProps?.drawItems?.length ?? 0).toBeGreaterThan(0);
+		});
+		await waitFor(() => {
+			const liveNodeIds = getCanvasNodeRenderItems(getLatestRenderTree()).map(
+				(nodeItem) =>
+					getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id,
+			);
+			expect(liveNodeIds).toEqual([]);
+		});
+		expect(textTilePictureGenerateMock).toHaveBeenCalled();
+		expect(renderNodeToPictureMock).toHaveBeenCalled();
+	});
+
+	it("text 节点会通过 node-system tilePicture capability 生成 tile 输入", async () => {
+		tilePipelineMockState.enabled = true;
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[createTextNode("node-text", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			expect(textTilePictureGenerateMock).toHaveBeenCalled();
+		});
+		expect(renderNodeToPictureMock).not.toHaveBeenCalled();
+		await waitFor(() => {
+			const staticTileLayerProps = getElementProps<{
+				drawItems?: Array<unknown>;
+			}>(getStaticTileLayerElement(getLatestRenderTree()));
+			expect(staticTileLayerProps?.drawItems?.length ?? 0).toBeGreaterThan(0);
+		});
+	});
+
+	it("image 节点存在 legacy thumbnail 时仍只使用主 image asset", async () => {
+		tilePipelineMockState.enabled = true;
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[
+					createImageNode("node-image", 0, {
+						assetId: "image-main",
+						thumbnail: {
+							assetId: "image-thumb",
+							sourceSignature: "legacy-image-thumb",
+							frame: 0,
+							generatedAt: 1,
+							version: 1 as const,
+						},
+					}),
+				]}
+				scenes={emptyScenes}
+				assets={[
+					createImageAsset("image-main"),
+					createImageAsset("image-thumb"),
+				]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			const calledUris = acquireImageAssetMock.mock.calls.map((call) =>
+				String(call[0] ?? ""),
+			);
+			expect(calledUris.some((uri) => uri.includes("image-main.png"))).toBe(
+				true,
+			);
+			expect(calledUris.some((uri) => uri.includes("image-thumb.png"))).toBe(
+				false,
+			);
 		});
 	});
 

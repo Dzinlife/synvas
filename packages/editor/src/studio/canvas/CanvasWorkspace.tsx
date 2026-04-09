@@ -144,7 +144,6 @@ import type {
 	CanvasNodeResizeAnchor,
 	CanvasNodeResizeEvent,
 	CanvasSelectionResizeEvent,
-	TileInputMode,
 } from "./InfiniteSkiaCanvas";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import type { TileLodTransition } from "./tile";
@@ -1719,7 +1718,6 @@ const CanvasWorkspace = () => {
 	const [sidebarTab, setSidebarTab] = useState<CanvasSidebarTab>("nodes");
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 	const [tileDebugEnabled, setTileDebugEnabled] = useState(false);
-	const [tileInputMode, setTileInputMode] = useState<TileInputMode>("raster");
 	const [isTileTaskBoostActive, setIsTileTaskBoostActive] = useState(false);
 	const tileMaxTasksPerTick = isTileTaskBoostActive
 		? TILE_MAX_TASKS_PER_TICK_DRAG
@@ -5224,7 +5222,6 @@ const CanvasWorkspace = () => {
 					snapGuidesScreen={snapGuidesScreen}
 				suspendHover={isCameraAnimating}
 				tileDebugEnabled={tileDebugEnabled}
-				tileInputMode={tileInputMode}
 				tileMaxTasksPerTick={tileMaxTasksPerTick}
 					tileLodTransition={effectiveTileLodTransition}
 				onNodeResize={handleSkiaNodeResize}
@@ -5242,12 +5239,6 @@ const CanvasWorkspace = () => {
 				tileDebugEnabled={tileDebugEnabled}
 				onToggleTileDebug={() => {
 					setTileDebugEnabled((prev) => !prev);
-				}}
-				tileInputMode={tileInputMode}
-				onToggleTileInputMode={() => {
-					setTileInputMode((prev) =>
-						prev === "raster" ? "picture" : "raster",
-					);
 				}}
 				sidebarExpanded={sidebarExpanded}
 				sidebarRect={overlayLayout.sidebarRect}

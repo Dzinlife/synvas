@@ -92,7 +92,6 @@ interface MockInfiniteSkiaCanvasProps {
 		y2: number;
 	} | null;
 	tileDebugEnabled?: boolean;
-	tileInputMode?: "raster" | "picture";
 	tileMaxTasksPerTick?: number;
 	tileLodTransition?: { mode: "follow" | "freeze" | "snap"; zoom?: number } | null;
 	focusedNodeId?: string | null;
@@ -4204,15 +4203,6 @@ describe("CanvasWorkspace", () => {
 		expect(getLatestInfiniteSkiaCanvasProps().tileDebugEnabled).toBe(true);
 		fireEvent.click(screen.getByRole("button", { name: "Tile 调试" }));
 		expect(getLatestInfiniteSkiaCanvasProps().tileDebugEnabled).toBe(false);
-	});
-
-	it("toolbar 的 Tile 输入模式按钮会透传到 InfiniteSkiaCanvas", () => {
-		render(<CanvasWorkspace />);
-		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("raster");
-		fireEvent.click(screen.getByTestId("canvas-tile-input-mode-toggle"));
-		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("picture");
-		fireEvent.click(screen.getByTestId("canvas-tile-input-mode-toggle"));
-		expect(getLatestInfiniteSkiaCanvasProps().tileInputMode).toBe("raster");
 	});
 
 	it("toolbar 的 Skia 追踪按钮会写入并删除 localStorage 配置", () => {

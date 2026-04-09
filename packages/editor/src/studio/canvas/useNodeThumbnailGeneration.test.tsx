@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type {
+	ImageCanvasNode,
 	SceneCanvasNode,
 	StudioProject,
 	VideoCanvasNode,
@@ -163,6 +164,71 @@ const createSceneProject = (options?: {
 		activeSceneId: "scene-1",
 		focusedNodeId: null,
 		activeNodeId: "node-scene-1",
+		canvasSnapEnabled: true,
+		camera: {
+			x: 0,
+			y: 0,
+			zoom: 1,
+		},
+	},
+	createdAt: 1,
+	updatedAt: 1,
+});
+
+const createImageProject = (): StudioProject => ({
+	id: "project-image-1",
+	revision: 0,
+	assets: [
+		{
+			id: "asset-image-1",
+			kind: "image",
+			name: "image.png",
+			locator: {
+				type: "managed",
+				fileName: "image.png",
+			},
+		},
+		{
+			id: "asset-thumb-legacy",
+			kind: "image",
+			name: "legacy-thumb.webp",
+			locator: {
+				type: "managed",
+				fileName: ".thumbs/node-image-1.webp",
+			},
+		},
+	],
+	canvas: {
+		nodes: [
+			{
+				id: "node-image-1",
+				type: "image",
+				assetId: "asset-image-1",
+				name: "Image 1",
+				x: 0,
+				y: 0,
+				width: 1280,
+				height: 720,
+				zIndex: 0,
+				locked: false,
+				hidden: false,
+				createdAt: 1,
+				updatedAt: 1,
+				thumbnail: {
+					assetId: "asset-thumb-legacy",
+					sourceSignature: "legacy-image-thumb",
+					frame: 0,
+					generatedAt: 1,
+					version: 1,
+				},
+			} satisfies ImageCanvasNode,
+		],
+	},
+	scenes: {},
+	ui: {
+		activeSceneId: null,
+		focusedNodeId: null,
+		activeNodeId: "node-image-1",
 		canvasSnapEnabled: true,
 		camera: {
 			x: 0,
@@ -384,5 +450,27 @@ describe("useNodeThumbnailGeneration", () => {
 			expect(node?.thumbnail?.sourceSignature).toBe("scene-1:2");
 		});
 		expect(writeProjectFileToOpfsAtPath).toHaveBeenCalledTimes(1);
+	});
+
+	it("无 thumbnail capability 的 image 节点不会入队生成", async () => {
+		getCanvasNodeDefinitionMock.mockReturnValue({
+			thumbnail: undefined,
+		});
+		useProjectStore.setState((state) => ({
+			...state,
+			currentProjectId: "project-image-1",
+			currentProject: createImageProject(),
+		}));
+
+		render(
+			<HookHarness
+				project={useProjectStore.getState().currentProject}
+				projectId={useProjectStore.getState().currentProjectId}
+			/>,
+		);
+
+		await new Promise((resolve) => window.setTimeout(resolve, 30));
+		expect(getCanvasNodeDefinitionMock).toHaveBeenCalledWith("image");
+		expect(writeProjectFileToOpfsAtPath).not.toHaveBeenCalled();
 	});
 });

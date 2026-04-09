@@ -1,3 +1,4 @@
+import { renderNodeToPicture } from "core/editor/preview/renderNodeSnapshot";
 import type { TimelineAsset } from "core/element/types";
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import type React from "react";
@@ -16,14 +17,14 @@ import {
 	flushSkiaDisposals,
 	Group,
 	Image,
-	markSkiaRuntimeActivity,
 	type Matrix4,
 	makeMutable,
+	markSkiaRuntimeActivity,
 	Rect,
 	type SharedValue,
 	type SkImage,
-	type SkPicture,
 	Skia,
+	type SkPicture,
 	Text,
 	useDerivedValue,
 	useFont,
@@ -55,6 +56,8 @@ import type {
 	CanvasNodeFocusEditorBridgeProps,
 	CanvasNodeFocusEditorLayerState,
 	CanvasNodeSkiaRenderProps,
+	CanvasNodeTilePictureCapability,
+	CanvasNodeTilePictureCapabilityContext,
 } from "./node-system/types";
 import {
 	createTileAabb,
@@ -96,8 +99,6 @@ export interface CanvasMarqueeRectScreen {
 	y2: number;
 }
 
-export type TileInputMode = "raster" | "picture";
-
 interface InfiniteSkiaCanvasProps {
 	width: number;
 	height: number;
@@ -114,7 +115,6 @@ interface InfiniteSkiaCanvasProps {
 	snapGuidesScreen?: CanvasSnapGuidesScreen;
 	suspendHover?: boolean;
 	tileDebugEnabled?: boolean;
-	tileInputMode?: TileInputMode;
 	tileMaxTasksPerTick?: number;
 	tileLodTransition?: TileLodTransition | null;
 	onNodeResize?: (event: CanvasNodeResizeEvent) => void;
@@ -150,43 +150,97 @@ interface RasterImageCacheEntry {
 interface TileInputCacheEntry {
 	epoch: number;
 	sourceSignature: string;
-	mode: TileInputMode;
+	mode: "raster" | "fallback-picture";
 	rasterImage: SkImage | null;
 	input: TileInput | null;
 }
 
+interface TileAsyncPictureCacheEntry {
+	sourceSignature: string;
+	status: "pending" | "ready" | "failed";
+	picture: SkPicture | null;
+	sourceWidth: number;
+	sourceHeight: number;
+	dispose: (() => void) | null;
+	taskId: number;
+}
+
+interface TileAsyncPictureRequest {
+	nodeId: string;
+	sourceSignature: string;
+	capability: CanvasNodeTilePictureCapability<CanvasNode>;
+	context: CanvasNodeTilePictureCapabilityContext<CanvasNode>;
+}
+
+const disposeTileAsyncPictureCacheEntry = (
+	entry: TileAsyncPictureCacheEntry | null | undefined,
+): void => {
+	if (!entry?.dispose) return;
+	try {
+		entry.dispose();
+	} catch {}
+};
+
 const EMPTY_STATIC_TILE_SNAPSHOT: {
 	inputs: TileInput[];
 	inputByNodeId: Map<string, TileInput>;
+	asyncPictureRequests: TileAsyncPictureRequest[];
 } = {
 	inputs: [],
 	inputByNodeId: new Map<string, TileInput>(),
-};
-
-const isTileRasterNodeType = (node: CanvasNode): boolean => {
-	return (
-		node.type === "scene" || node.type === "image" || node.type === "video"
-	);
-};
-
-const isAlwaysLiveNodeType = (node: CanvasNode): boolean => {
-	return node.type === "text" || node.type === "audio";
+	asyncPictureRequests: [],
 };
 
 const resolveTileNodeSourceSignature = (
 	node: CanvasNode,
 	scene: StudioProject["scenes"][string] | null,
+	asset: TimelineAsset | null,
+	thumbnailCapabilityEnabled: boolean,
 ): string => {
-	if (node.type === "scene") {
-		return `scene:${node.sceneId}:${scene?.updatedAt ?? "none"}:${node.thumbnail?.sourceSignature ?? "none"}`;
+	const parts = [node.id, node.type, String(node.updatedAt)];
+	if ("assetId" in node) {
+		const sourceHash =
+			typeof asset?.meta?.hash === "string" ? asset.meta.hash : "none";
+		parts.push(node.assetId || "none", sourceHash);
 	}
-	if (node.type === "image") {
-		return `image:${node.assetId}:${node.thumbnail?.sourceSignature ?? "none"}`;
+	if (thumbnailCapabilityEnabled) {
+		parts.push(node.thumbnail?.sourceSignature ?? "none");
 	}
-	if (node.type === "video") {
-		return `video:${node.assetId}:${node.thumbnail?.sourceSignature ?? "none"}`;
+	if (scene) {
+		parts.push(String(scene.updatedAt));
 	}
-	return `${node.type}:${node.id}`;
+	return parts.join(":");
+};
+
+const hasThumbnailCapability = (node: CanvasNode): boolean => {
+	const definition = getCanvasNodeDefinition(node.type);
+	return Boolean(definition.thumbnail);
+};
+
+const resolveTilePictureCapability = (
+	node: CanvasNode,
+): CanvasNodeTilePictureCapability<CanvasNode> | null => {
+	const definition = getCanvasNodeDefinition(node.type);
+	return (
+		(definition.tilePicture as CanvasNodeTilePictureCapability<CanvasNode>) ??
+		null
+	);
+};
+
+const resolveNodeScene = (
+	node: CanvasNode,
+	scenes: StudioProject["scenes"],
+): StudioProject["scenes"][string] | null => {
+	if (node.type !== "scene") return null;
+	return scenes[node.sceneId] ?? null;
+};
+
+const resolveNodeAsset = (
+	node: CanvasNode,
+	assetById: Map<string, TimelineAsset>,
+): TimelineAsset | null => {
+	if (!("assetId" in node) || !node.assetId) return null;
+	return assetById.get(node.assetId) ?? null;
 };
 
 const resolveSkImageSize = (
@@ -219,43 +273,6 @@ const disposeTileInput = (input: TileInput | null | undefined) => {
 	} catch {}
 };
 
-const createTilePictureFromImage = (
-	image: SkImage,
-	sourceWidth: number,
-	sourceHeight: number,
-): { picture: SkPicture; dispose: () => void } | null => {
-	try {
-		const safeWidth = Math.max(1, Math.round(sourceWidth));
-		const safeHeight = Math.max(1, Math.round(sourceHeight));
-		const recorder = Skia.PictureRecorder();
-		const canvas = recorder.beginRecording({
-			x: 0,
-			y: 0,
-			width: safeWidth,
-			height: safeHeight,
-		});
-		const imageSize = resolveSkImageSize(image, safeWidth, safeHeight);
-		canvas.save();
-		canvas.scale(
-			safeWidth / Math.max(1, imageSize.width),
-			safeHeight / Math.max(1, imageSize.height),
-		);
-		canvas.drawImage(image, 0, 0);
-		canvas.restore();
-		const picture = recorder.finishRecordingAsPicture();
-		return {
-			picture,
-			dispose: () => {
-				try {
-					picture.dispose?.();
-				} catch {}
-			},
-		};
-	} catch {
-		return null;
-	}
-};
-
 const isTileAabbEqual = (left: TileAabb, right: TileAabb): boolean => {
 	return (
 		Math.abs(left.left - right.left) < TILE_AABB_EPSILON &&
@@ -280,17 +297,60 @@ const resolveTileRasterAsset = (
 	node: CanvasNode,
 	assetById: Map<string, TimelineAsset>,
 ): TimelineAsset | null => {
-	if (node.type === "image") {
+	if ("assetId" in node) {
 		const sourceAsset = assetById.get(node.assetId);
 		if (sourceAsset?.kind === "image") {
 			return sourceAsset;
 		}
 	}
+	if (!hasThumbnailCapability(node)) return null;
 	const thumbnailAssetId = node.thumbnail?.assetId ?? null;
 	if (!thumbnailAssetId) return null;
 	const thumbnailAsset = assetById.get(thumbnailAssetId);
 	if (!thumbnailAsset || thumbnailAsset.kind !== "image") return null;
 	return thumbnailAsset;
+};
+
+const createTilePictureFromNodeRenderer = ({
+	node,
+	scene,
+	asset,
+	runtimeManager,
+}: {
+	node: CanvasNode;
+	scene: StudioProject["scenes"][string] | null;
+	asset: TimelineAsset | null;
+	runtimeManager: ReturnType<typeof useStudioRuntimeManager>;
+}): { picture: SkPicture; dispose: () => void } | null => {
+	const definition = getCanvasNodeDefinition(node.type);
+	const Renderer = definition.skiaRenderer as React.ComponentType<
+		CanvasNodeSkiaRenderProps<CanvasNode>
+	>;
+	const sourceWidth = Math.max(1, Math.round(Math.abs(node.width)));
+	const sourceHeight = Math.max(1, Math.round(Math.abs(node.height)));
+	const picture = renderNodeToPicture(
+		<Renderer
+			node={node}
+			scene={scene}
+			asset={asset}
+			isActive={false}
+			isFocused={false}
+			runtimeManager={runtimeManager}
+		/>,
+		{
+			width: sourceWidth,
+			height: sourceHeight,
+		},
+	);
+	if (!picture) return null;
+	return {
+		picture,
+		dispose: () => {
+			try {
+				picture.dispose?.();
+			} catch {}
+		},
+	};
 };
 
 const canUseTilePipeline = (): boolean => {
@@ -632,7 +692,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	snapGuidesScreen = EMPTY_SNAP_GUIDES_SCREEN,
 	suspendHover = false,
 	tileDebugEnabled = false,
-	tileInputMode = "raster",
 	tileMaxTasksPerTick,
 	tileLodTransition = null,
 	onNodeResize,
@@ -680,6 +739,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			layerProps: null,
 		});
 	const [tileTick, setTileTick] = useState(0);
+	const [tileAsyncPictureVersion, setTileAsyncPictureVersion] = useState(0);
 	const [rasterCacheVersion, setRasterCacheVersion] = useState(0);
 	const assetById = useMemo(() => {
 		return new Map(assets.map((asset) => [asset.id, asset]));
@@ -695,6 +755,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const tileNodeSourceSignatureRef = useRef(new Map<string, string>());
 	const tileInputEpochRef = useRef(new Map<string, number>());
 	const tileInputCacheRef = useRef(new Map<string, TileInputCacheEntry>());
+	const tileAsyncPictureCacheRef = useRef(
+		new Map<string, TileAsyncPictureCacheEntry>(),
+	);
+	const tileAsyncPictureTaskIdRef = useRef(0);
 	const tileInputIdRef = useRef(new Map<string, number>());
 	const nextTileInputIdRef = useRef(1);
 	const tileTickRafRef = useRef<number | null>(null);
@@ -714,12 +778,17 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			for (const entry of tileInputCacheRef.current.values()) {
 				disposeTileInput(entry.input);
 			}
+			for (const entry of tileAsyncPictureCacheRef.current.values()) {
+				disposeTileAsyncPictureCacheEntry(entry);
+			}
 			rasterCacheRef.current.clear();
 			nodeRasterUriRef.current.clear();
 			tileNodeAabbRef.current.clear();
 			tileNodeSourceSignatureRef.current.clear();
 			tileInputEpochRef.current.clear();
 			tileInputCacheRef.current.clear();
+			tileAsyncPictureCacheRef.current.clear();
+			tileAsyncPictureTaskIdRef.current = 0;
 			tileInputIdRef.current.clear();
 			nextTileInputIdRef.current = 1;
 			latestTileFrameResultRef.current = null;
@@ -757,7 +826,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, [supportsTilePipeline]);
 	const resolveNodeRasterUri = useCallback(
 		(node: CanvasNode): string | null => {
-			if (!isTileRasterNodeType(node)) return null;
 			const rasterAsset = resolveTileRasterAsset(node, assetById);
 			if (!rasterAsset) return null;
 			return (
@@ -788,13 +856,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		return nodes.find((node) => node.id === focusedNodeId) ?? null;
 	}, [focusedNodeId, nodes]);
 	const liveRenderNodes = useMemo(() => {
-		if (renderNodes.length <= 0) return [];
-		return renderNodes.filter((node) => {
-			const isAlwaysLive =
-				node.id === activeNodeId || isAlwaysLiveNodeType(node);
-			const isNonTileNode = !isTileRasterNodeType(node);
-			return isAlwaysLive || isNonTileNode;
-		});
+		if (!activeNodeId) return [];
+		const activeNodeInRenderTree = renderNodes.find(
+			(node) => node.id === activeNodeId,
+		);
+		if (!activeNodeInRenderTree) return [];
+		return [activeNodeInRenderTree];
 	}, [activeNodeId, renderNodes]);
 	const focusedNodeDefinition = useMemo(() => {
 		if (!focusedNode) return null;
@@ -950,7 +1017,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		for (const node of tileNodes) {
 			// 这里直接使用当帧 tileNodes，避免读取 ref 带来一帧滞后。
 			const latestNode = node;
-			if (!isTileRasterNodeType(latestNode) || latestNode.id === activeNodeId) {
+			if (latestNode.id === activeNodeId) {
 				nextNodeRasterUri.set(latestNode.id, null);
 				continue;
 			}
@@ -1059,16 +1126,24 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const nextTileNodeIdSet = new Set<string>();
 		for (const node of tileNodes) {
 			nextTileNodeIdSet.add(node.id);
-			if (!isTileRasterNodeType(node)) {
+			if (node.id === activeNodeId) {
 				const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 				if (oldAabb) {
 					scheduler.markDirtyRect(oldAabb);
 					tileNodeAabbRef.current.delete(node.id);
-					tileNodeSourceSignatureRef.current.delete(node.id);
 					shouldTick = true;
 				}
+				tileNodeSourceSignatureRef.current.delete(node.id);
 				continue;
 			}
+			const scene = resolveNodeScene(node, scenes);
+			const asset = resolveNodeAsset(node, assetById);
+			const sourceSignature = resolveTileNodeSourceSignature(
+				node,
+				scene,
+				asset,
+				hasThumbnailCapability(node),
+			);
 			const nextAabb = resolveNodeWorldAabb(node);
 			const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 			if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
@@ -1076,13 +1151,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				tileNodeAabbRef.current.set(node.id, nextAabb);
 				shouldTick = true;
 			}
-			if (node.id === activeNodeId) {
-				tileNodeSourceSignatureRef.current.delete(node.id);
-				continue;
-			}
-			const scene =
-				node.type === "scene" ? (scenes[node.sceneId] ?? null) : null;
-			const sourceSignature = resolveTileNodeSourceSignature(node, scene);
 			const prevSignature = tileNodeSourceSignatureRef.current.get(node.id);
 			if (prevSignature !== sourceSignature) {
 				tileNodeSourceSignatureRef.current.set(node.id, sourceSignature);
@@ -1103,7 +1171,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (shouldTick) {
 			scheduleTileTick();
 		}
-	}, [activeNodeId, scenes, scheduleTileTick, supportsTilePipeline, tileNodes]);
+	}, [
+		activeNodeId,
+		assetById,
+		scenes,
+		scheduleTileTick,
+		supportsTilePipeline,
+		tileNodes,
+	]);
 
 	const handleOverlayNodeResize = useCallback(
 		(event: CanvasNodeResizeEvent) => {
@@ -1119,19 +1194,24 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 	const staticTileSnapshot = useMemo(() => {
 		void rasterCacheVersion;
+		void tileAsyncPictureVersion;
 		if (!supportsTilePipeline) {
 			return EMPTY_STATIC_TILE_SNAPSHOT;
 		}
 		const inputs: TileInput[] = [];
 		const inputByNodeId = new Map<string, TileInput>();
+		const asyncPictureRequests: TileAsyncPictureRequest[] = [];
 		const visitedNodeIds = new Set<string>();
 		for (const node of tileNodes) {
 			// 这里直接使用当帧 tileNodes，避免 undo/redo 与拖拽时 tile 输入落后一帧。
 			const latestNode = node;
-			if (!isTileRasterNodeType(latestNode) || latestNode.id === activeNodeId) {
+			if (latestNode.id === activeNodeId) {
 				continue;
 			}
 			visitedNodeIds.add(latestNode.id);
+			const scene = resolveNodeScene(latestNode, scenes);
+			const asset = resolveNodeAsset(latestNode, assetById);
+			const thumbnailCapabilityEnabled = hasThumbnailCapability(latestNode);
 			const uri =
 				nodeRasterUriRef.current.get(latestNode.id) ??
 				resolveNodeRasterUri(latestNode);
@@ -1143,91 +1223,51 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				tileNodeSourceSignatureRef.current.get(latestNode.id) ??
 				resolveTileNodeSourceSignature(
 					latestNode,
-					latestNode.type === "scene"
-						? (scenes[latestNode.sceneId] ?? null)
-						: null,
+					scene,
+					asset,
+					thumbnailCapabilityEnabled,
 				);
 			const cachedEntry = tileInputCacheRef.current.get(latestNode.id);
-			if (!image) {
-				disposeTileInput(cachedEntry?.input);
-				tileInputCacheRef.current.set(latestNode.id, {
-					epoch: cachedEntry?.epoch ?? 0,
-					sourceSignature,
-					mode: tileInputMode,
-					rasterImage: null,
-					input: null,
-				});
-				continue;
-			}
 			const sourceWidth =
-				rasterEntry?.width ?? Math.max(1, Math.round(Math.abs(latestNode.width)));
+				rasterEntry?.width ??
+				Math.max(1, Math.round(Math.abs(latestNode.width)));
 			const sourceHeight =
 				rasterEntry?.height ??
 				Math.max(1, Math.round(Math.abs(latestNode.height)));
+			const fallbackToNodeRendererPicture =
+				!image && !thumbnailCapabilityEnabled;
+			const tilePictureCapability = fallbackToNodeRendererPicture
+				? resolveTilePictureCapability(latestNode)
+				: null;
+			const tilePictureContext: CanvasNodeTilePictureCapabilityContext<CanvasNode> =
+				{
+					node: latestNode,
+					scene,
+					asset,
+					runtimeManager,
+				};
+			const tilePictureSourceSignature =
+				tilePictureCapability?.getSourceSignature?.(tilePictureContext) ??
+				"none";
+			const sourceKey = fallbackToNodeRendererPicture
+				? tilePictureCapability
+					? `${sourceSignature}:fallback-picture:async:${tilePictureSourceSignature}`
+					: `${sourceSignature}:fallback-picture:sync`
+				: sourceSignature;
+			const modeKey: TileInputCacheEntry["mode"] = fallbackToNodeRendererPicture
+				? "fallback-picture"
+				: "raster";
 			let epoch = cachedEntry?.epoch ?? 0;
-			const sourceChanged = cachedEntry?.sourceSignature !== sourceSignature;
-			const modeChanged = cachedEntry?.mode !== tileInputMode;
+			const sourceChanged = cachedEntry?.sourceSignature !== sourceKey;
+			const modeChanged = cachedEntry?.mode !== modeKey;
 			const imageChanged = cachedEntry?.rasterImage !== image;
 			if (!cachedEntry || sourceChanged || modeChanged || imageChanged) {
 				epoch += 1;
 			}
 			const inputId = resolveTileInputId(latestNode.id);
 			const aabb = resolveNodeWorldAabb(latestNode);
-			let input: TileInput;
-			if (tileInputMode === "picture") {
-				const canReusePicture =
-					Boolean(cachedEntry) &&
-					!sourceChanged &&
-					!modeChanged &&
-					!imageChanged &&
-					cachedEntry?.input?.kind === "picture";
-				if (canReusePicture && cachedEntry?.input?.kind === "picture") {
-					input = {
-						kind: "picture",
-						id: inputId,
-						nodeId: latestNode.id,
-						picture: cachedEntry.input.picture,
-						aabb,
-						sourceWidth,
-						sourceHeight,
-						epoch,
-						dispose: cachedEntry.input.dispose,
-					};
-				} else {
-					const pictureInput = createTilePictureFromImage(
-						image,
-						sourceWidth,
-						sourceHeight,
-					);
-					if (cachedEntry?.input?.kind === "picture") {
-						disposeTileInput(cachedEntry.input);
-					}
-					if (pictureInput) {
-						input = {
-							kind: "picture",
-							id: inputId,
-							nodeId: latestNode.id,
-							picture: pictureInput.picture,
-							aabb,
-							sourceWidth,
-							sourceHeight,
-							epoch,
-							dispose: pictureInput.dispose,
-						};
-					} else {
-						input = {
-							kind: "raster",
-							id: inputId,
-							nodeId: latestNode.id,
-							image,
-							aabb,
-							sourceWidth,
-							sourceHeight,
-							epoch,
-						};
-					}
-				}
-			} else {
+			let input: TileInput | null = null;
+			if (image) {
 				if (cachedEntry?.input?.kind === "picture") {
 					disposeTileInput(cachedEntry.input);
 				}
@@ -1241,14 +1281,80 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					sourceHeight,
 					epoch,
 				};
+			} else if (fallbackToNodeRendererPicture) {
+				if (tilePictureCapability) {
+					let asyncPictureEntry =
+						tileAsyncPictureCacheRef.current.get(latestNode.id) ?? null;
+					if (
+						asyncPictureEntry &&
+						asyncPictureEntry.sourceSignature !== sourceKey
+					) {
+						disposeTileAsyncPictureCacheEntry(asyncPictureEntry);
+						tileAsyncPictureCacheRef.current.delete(latestNode.id);
+						asyncPictureEntry = null;
+					}
+					const shouldQueueAsyncPictureRequest = !asyncPictureEntry;
+					if (shouldQueueAsyncPictureRequest) {
+						asyncPictureRequests.push({
+							nodeId: latestNode.id,
+							sourceSignature: sourceKey,
+							capability: tilePictureCapability,
+							context: tilePictureContext,
+						});
+					}
+					if (
+						asyncPictureEntry &&
+						asyncPictureEntry.sourceSignature === sourceKey &&
+						asyncPictureEntry.status === "ready" &&
+						asyncPictureEntry.picture
+					) {
+						input = {
+							kind: "picture",
+							id: inputId,
+							nodeId: latestNode.id,
+							picture: asyncPictureEntry.picture,
+							aabb,
+							sourceWidth: asyncPictureEntry.sourceWidth,
+							sourceHeight: asyncPictureEntry.sourceHeight,
+							epoch,
+							dispose: null,
+						};
+					} else {
+						disposeTileInput(cachedEntry?.input);
+					}
+				} else {
+					disposeTileInput(cachedEntry?.input);
+					const pictureInput = createTilePictureFromNodeRenderer({
+						node: latestNode,
+						scene,
+						asset,
+						runtimeManager,
+					});
+					if (pictureInput) {
+						input = {
+							kind: "picture",
+							id: inputId,
+							nodeId: latestNode.id,
+							picture: pictureInput.picture,
+							aabb,
+							sourceWidth,
+							sourceHeight,
+							epoch,
+							dispose: pictureInput.dispose,
+						};
+					}
+				}
+			} else {
+				disposeTileInput(cachedEntry?.input);
 			}
 			tileInputCacheRef.current.set(latestNode.id, {
 				epoch,
-				sourceSignature,
-				mode: tileInputMode,
+				sourceSignature: sourceKey,
+				mode: modeKey,
 				rasterImage: image,
 				input,
 			});
+			if (!input) continue;
 			inputs.push(input);
 			inputByNodeId.set(latestNode.id, input);
 		}
@@ -1259,19 +1365,125 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			tileInputCacheRef.current.delete(nodeId);
 			tileInputIdRef.current.delete(nodeId);
 		}
+		for (const nodeId of [...tileAsyncPictureCacheRef.current.keys()]) {
+			if (visitedNodeIds.has(nodeId)) continue;
+			const removedEntry = tileAsyncPictureCacheRef.current.get(nodeId);
+			disposeTileAsyncPictureCacheEntry(removedEntry);
+			tileAsyncPictureCacheRef.current.delete(nodeId);
+		}
 		return {
 			inputs,
 			inputByNodeId,
+			asyncPictureRequests,
 		};
 	}, [
 		activeNodeId,
+		assetById,
 		rasterCacheVersion,
 		resolveNodeRasterUri,
 		resolveTileInputId,
+		runtimeManager,
 		scenes,
 		supportsTilePipeline,
+		tileAsyncPictureVersion,
 		tileNodes,
-		tileInputMode,
+	]);
+
+	useEffect(() => {
+		if (!supportsTilePipeline) return;
+		if (staticTileSnapshot.asyncPictureRequests.length <= 0) return;
+		for (const request of staticTileSnapshot.asyncPictureRequests) {
+			const existingEntry =
+				tileAsyncPictureCacheRef.current.get(request.nodeId) ?? null;
+			if (
+				existingEntry &&
+				existingEntry.sourceSignature === request.sourceSignature &&
+				(existingEntry.status === "pending" || existingEntry.status === "ready")
+			) {
+				continue;
+			}
+			const taskId = tileAsyncPictureTaskIdRef.current + 1;
+			tileAsyncPictureTaskIdRef.current = taskId;
+			if (existingEntry) {
+				disposeTileAsyncPictureCacheEntry(existingEntry);
+			}
+			tileAsyncPictureCacheRef.current.set(request.nodeId, {
+				sourceSignature: request.sourceSignature,
+				status: "pending",
+				picture: null,
+				sourceWidth: Math.max(
+					1,
+					Math.round(Math.abs(request.context.node.width)),
+				),
+				sourceHeight: Math.max(
+					1,
+					Math.round(Math.abs(request.context.node.height)),
+				),
+				dispose: null,
+				taskId,
+			});
+			void Promise.resolve(request.capability.generate(request.context))
+				.then((result) => {
+					const latestEntry =
+						tileAsyncPictureCacheRef.current.get(request.nodeId) ?? null;
+					if (
+						!latestEntry ||
+						latestEntry.taskId !== taskId ||
+						latestEntry.sourceSignature !== request.sourceSignature
+					) {
+						try {
+							result?.dispose?.();
+							result?.picture?.dispose?.();
+						} catch {}
+						return;
+					}
+					if (!result?.picture) {
+						latestEntry.status = "failed";
+						setTileAsyncPictureVersion((prev) => prev + 1);
+						scheduleTileTick();
+						return;
+					}
+					latestEntry.status = "ready";
+					latestEntry.picture = result.picture;
+					latestEntry.sourceWidth = Math.max(
+						1,
+						Math.round(result.sourceWidth || latestEntry.sourceWidth),
+					);
+					latestEntry.sourceHeight = Math.max(
+						1,
+						Math.round(result.sourceHeight || latestEntry.sourceHeight),
+					);
+					latestEntry.dispose = () => {
+						try {
+							result.dispose?.();
+						} finally {
+							try {
+								result.picture.dispose?.();
+							} catch {}
+						}
+					};
+					setTileAsyncPictureVersion((prev) => prev + 1);
+					scheduleTileTick();
+				})
+				.catch(() => {
+					const latestEntry =
+						tileAsyncPictureCacheRef.current.get(request.nodeId) ?? null;
+					if (
+						!latestEntry ||
+						latestEntry.taskId !== taskId ||
+						latestEntry.sourceSignature !== request.sourceSignature
+					) {
+						return;
+					}
+					latestEntry.status = "failed";
+					setTileAsyncPictureVersion((prev) => prev + 1);
+					scheduleTileTick();
+				});
+		}
+	}, [
+		scheduleTileTick,
+		staticTileSnapshot.asyncPictureRequests,
+		supportsTilePipeline,
 	]);
 
 	useLayoutEffect(() => {
@@ -1355,8 +1567,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						const layout = getNodeLayoutValue(node.id);
 						if (!layout) return null;
 						const latestNode = getLatestNodeById(node.id) ?? node;
-						const renderNode =
-							latestNode.type === "text" ? latestNode : node;
+						const renderNode = latestNode;
 						const scene =
 							latestNode.type === "scene"
 								? (scenes[latestNode.sceneId] ?? null)
@@ -1417,7 +1628,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		activeNode,
 		activeNodeId,
 		assetById,
-		disableBaseNodeInteraction,
 		getNodeLayoutValue,
 		focusedNodeId,
 		focusEditorLayerState.layerProps,
@@ -1451,6 +1661,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		getLatestNodeById,
 		nodeHudOpacity,
 		staticTileOpacity,
+		renderNodes,
 	]);
 
 	if (width <= 0 || height <= 0) return null;
