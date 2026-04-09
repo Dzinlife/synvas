@@ -58,10 +58,60 @@ const resolveSelectionFromTextarea = (
 ): TextEditingSelection => {
 	const selectionStart = Math.max(0, node.selectionStart ?? 0);
 	const selectionEnd = Math.max(0, node.selectionEnd ?? selectionStart);
+	const directionRaw = node.selectionDirection;
+	const direction =
+		directionRaw === "forward" || directionRaw === "backward"
+			? directionRaw
+			: "none";
+	if (selectionStart === selectionEnd) {
+		return {
+			start: selectionStart,
+			end: selectionEnd,
+			direction: "none",
+		};
+	}
+	if (direction === "backward") {
+		return {
+			start: selectionEnd,
+			end: selectionStart,
+			direction: "backward",
+		};
+	}
 	return {
 		start: selectionStart,
 		end: selectionEnd,
-		direction: "none",
+		direction: direction === "forward" ? "forward" : "none",
+	};
+};
+
+const resolveTextareaSelection = (params: {
+	start: number;
+	end: number;
+	direction: TextEditingSelection["direction"];
+	textLength: number;
+}): {
+	start: number;
+	end: number;
+	direction: "forward" | "backward" | "none";
+} => {
+	const { start: rawStart, end: rawEnd, direction, textLength } = params;
+	const start = Math.max(0, Math.min(rawStart, textLength));
+	const end = Math.max(0, Math.min(rawEnd, textLength));
+	const orderedStart = Math.min(start, end);
+	const orderedEnd = Math.max(start, end);
+	if (orderedStart === orderedEnd) {
+		return {
+			start: orderedStart,
+			end: orderedEnd,
+			direction: "none",
+		};
+	}
+	const isBackward =
+		direction === "backward" || (direction !== "forward" && start > end);
+	return {
+		start: orderedStart,
+		end: orderedEnd,
+		direction: isBackward ? "backward" : "forward",
 	};
 };
 
@@ -89,6 +139,9 @@ export const HeadlessTextInputBridge = ({
 }: HeadlessTextInputBridgeProps) => {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ignoreBlurUntilRef = useRef(0);
+	const modelSelectionStart = selection.start;
+	const modelSelectionEnd = selection.end;
+	const modelSelectionDirection = selection.direction;
 
 	const scheduleSelectionSync = () => {
 		window.setTimeout(() => {
@@ -139,15 +192,29 @@ export const HeadlessTextInputBridge = ({
 		if (node.value !== value) {
 			node.value = value;
 		}
-		const selectionStart = Math.max(0, Math.min(selection.start, value.length));
-		const selectionEnd = Math.max(0, Math.min(selection.end, value.length));
+		const textareaSelection = resolveTextareaSelection({
+			start: modelSelectionStart,
+			end: modelSelectionEnd,
+			direction: modelSelectionDirection,
+			textLength: value.length,
+		});
+		const currentDirectionRaw = node.selectionDirection;
+		const currentDirection =
+			currentDirectionRaw === "forward" || currentDirectionRaw === "backward"
+				? currentDirectionRaw
+				: "none";
 		if (
-			node.selectionStart !== selectionStart ||
-			node.selectionEnd !== selectionEnd
+			node.selectionStart !== textareaSelection.start ||
+			node.selectionEnd !== textareaSelection.end ||
+			currentDirection !== textareaSelection.direction
 		) {
-			node.setSelectionRange(selectionStart, selectionEnd);
+			node.setSelectionRange(
+				textareaSelection.start,
+				textareaSelection.end,
+				textareaSelection.direction,
+			);
 		}
-	}, [selection.end, selection.start, value]);
+	}, [modelSelectionDirection, modelSelectionEnd, modelSelectionStart, value]);
 
 	const style = useMemo<CSSProperties>(() => {
 		return {

@@ -117,4 +117,51 @@ describe("HeadlessTextInputBridge", () => {
 			direction: "none",
 		});
 	});
+
+	it("逆向选区同步到 textarea 时不会被折叠", () => {
+		const props = createBaseProps();
+		const { container } = render(
+			<HeadlessTextInputBridge
+				{...props}
+				selection={{
+					start: 4,
+					end: 1,
+					direction: "backward",
+				}}
+			/>,
+		);
+		const textarea = container.querySelector("textarea");
+		expect(textarea).toBeTruthy();
+		if (!textarea) return;
+		expect(textarea.selectionStart).toBe(1);
+		expect(textarea.selectionEnd).toBe(4);
+	});
+
+	it("从 textarea 读取 backward 选区会还原为内部逆向选区", () => {
+		const props = createBaseProps();
+		const { container } = render(<HeadlessTextInputBridge {...props} />);
+		const textarea = container.querySelector("textarea");
+		expect(textarea).toBeTruthy();
+		if (!textarea) return;
+
+		Object.defineProperty(textarea, "selectionStart", {
+			configurable: true,
+			get: () => 1,
+		});
+		Object.defineProperty(textarea, "selectionEnd", {
+			configurable: true,
+			get: () => 4,
+		});
+		Object.defineProperty(textarea, "selectionDirection", {
+			configurable: true,
+			get: () => "backward",
+		});
+
+		fireEvent.select(textarea);
+		expect(props.onSelectionChange).toHaveBeenCalledWith({
+			start: 4,
+			end: 1,
+			direction: "backward",
+		});
+	});
 });
