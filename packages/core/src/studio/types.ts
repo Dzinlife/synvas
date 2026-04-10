@@ -7,7 +7,13 @@ import type {
 } from "../editor/ot";
 import type { TimelineJSON } from "../editor/timelineLoader";
 
-export type CanvasNodeType = "scene" | "video" | "audio" | "text" | "image";
+export type CanvasNodeType =
+	| "scene"
+	| "video"
+	| "audio"
+	| "text"
+	| "image"
+	| "frame";
 
 export interface CanvasNodeThumbnail {
 	assetId: string;
@@ -21,6 +27,7 @@ export interface CanvasNodeBase {
 	id: string;
 	type: CanvasNodeType;
 	name: string;
+	parentId: string | null;
 	x: number;
 	y: number;
 	width: number;
@@ -61,12 +68,17 @@ export interface ImageCanvasNode extends CanvasNodeBase {
 	assetId: string;
 }
 
+export interface FrameCanvasNode extends CanvasNodeBase {
+	type: "frame";
+}
+
 export type CanvasNode =
 	| SceneCanvasNode
 	| VideoCanvasNode
 	| AudioCanvasNode
 	| TextCanvasNode
-	| ImageCanvasNode;
+	| ImageCanvasNode
+	| FrameCanvasNode;
 
 // 兼容存量命名：scene 仍是一等节点
 export type SceneNode = SceneCanvasNode;

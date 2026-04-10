@@ -176,6 +176,94 @@ describe("studio schema", () => {
 		expect(parsed.ui.canvasSnapEnabled).toBe(true);
 	});
 
+	it("缺失 parentId 时应回填 null", () => {
+		const legacy = createValidProject();
+		const parsed = parseStudioProject(legacy);
+		for (const node of parsed.canvas.nodes) {
+			expect(node.parentId).toBeNull();
+		}
+	});
+
+	it("非法 parentId 与环引用会在加载时修复为 null", () => {
+		const project = createValidProject();
+		project.canvas.nodes.push({
+			id: "node-frame-a",
+			type: "frame",
+			name: "Frame A",
+			parentId: "node-frame-b",
+			x: 0,
+			y: 0,
+			width: 400,
+			height: 300,
+			zIndex: 5,
+			locked: false,
+			hidden: false,
+			createdAt: 2,
+			updatedAt: 2,
+		});
+		project.canvas.nodes.push({
+			id: "node-frame-b",
+			type: "frame",
+			name: "Frame B",
+			parentId: "node-frame-a",
+			x: 20,
+			y: 20,
+			width: 300,
+			height: 200,
+			zIndex: 6,
+			locked: false,
+			hidden: false,
+			createdAt: 2,
+			updatedAt: 2,
+		});
+		project.canvas.nodes.push({
+			id: "node-text-child",
+			type: "text",
+			text: "child",
+			fontSize: 24,
+			name: "Text Child",
+			parentId: "node-2",
+			x: 60,
+			y: 80,
+			width: 120,
+			height: 60,
+			zIndex: 7,
+			locked: false,
+			hidden: false,
+			createdAt: 2,
+			updatedAt: 2,
+		});
+		project.canvas.nodes.push({
+			id: "node-video-orphan",
+			type: "video",
+			assetId: "asset-video-1",
+			name: "Video Orphan",
+			parentId: "node-not-exist",
+			x: 10,
+			y: 10,
+			width: 200,
+			height: 100,
+			zIndex: 8,
+			locked: false,
+			hidden: false,
+			createdAt: 2,
+			updatedAt: 2,
+		});
+		const parsed = parseStudioProject(project);
+		const frameA = parsed.canvas.nodes.find((node) => node.id === "node-frame-a");
+		const frameB = parsed.canvas.nodes.find((node) => node.id === "node-frame-b");
+		const textChild = parsed.canvas.nodes.find(
+			(node) => node.id === "node-text-child",
+		);
+		const orphan = parsed.canvas.nodes.find(
+			(node) => node.id === "node-video-orphan",
+		);
+		expect(frameA?.parentId).toBeNull();
+		expect(frameB?.parentId).toBeNull();
+		expect(textChild?.parentId).toBeNull();
+		expect(orphan?.parentId).toBeNull();
+	});
+
 	it("包含 node thumbnail 字段时应校验通过并保留字段", () => {
 		const project = createValidProject();
 		const target = project.canvas.nodes.find((node) => node.id === "node-2");

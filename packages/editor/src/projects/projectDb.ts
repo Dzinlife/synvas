@@ -81,6 +81,7 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 					type: "scene",
 					sceneId,
 					name: "Scene 1",
+					parentId: null,
 					x: -DEFAULT_SCENE_NODE_WIDTH / 2,
 					y: -DEFAULT_SCENE_NODE_HEIGHT / 2,
 					width: DEFAULT_SCENE_NODE_WIDTH,

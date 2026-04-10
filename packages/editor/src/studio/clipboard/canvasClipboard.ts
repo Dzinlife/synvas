@@ -92,6 +92,10 @@ export const instantiateCanvasClipboardEntries = (options: {
 	const deltaX = options.targetLeft - sourceBounds.left;
 	const deltaY = options.targetTop - sourceBounds.top;
 	const now = Date.now();
+	const targetNodeIdBySourceNodeId = new Map<string, string>();
+	for (const item of orderedEntries) {
+		targetNodeIdBySourceNodeId.set(item.node.id, createCanvasEntityId("node"));
+	}
 
 	return orderedEntries.reduce<CanvasGraphHistoryEntry[]>(
 		(entries, item, index) => {
@@ -100,10 +104,14 @@ export const instantiateCanvasClipboardEntries = (options: {
 			const copyName = sourceNode.name.trim()
 				? `${sourceNode.name}副本`
 				: "副本";
+			const mappedParentId = sourceNode.parentId
+				? (targetNodeIdBySourceNodeId.get(sourceNode.parentId) ?? null)
+				: null;
 			const baseNode = {
 				...sourceNode,
-				id: createCanvasEntityId("node"),
+				id: targetNodeIdBySourceNodeId.get(sourceNode.id) ?? sourceNode.id,
 				name: copyName,
+				parentId: mappedParentId,
 				x: sourceNode.x + deltaX,
 				y: sourceNode.y + deltaY,
 				zIndex: options.existingMaxZIndex + index + 1,

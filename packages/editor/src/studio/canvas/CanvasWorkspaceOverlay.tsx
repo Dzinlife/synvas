@@ -22,6 +22,10 @@ import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvid
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import CanvasNodeDrawerShell from "@/studio/canvas/CanvasNodeDrawerShell";
+import {
+	CANVAS_TOOL_DEFINITIONS,
+	type CanvasToolMode,
+} from "@/studio/canvas/canvasToolMode";
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
 import type { CanvasNodeDrawerProps } from "@/studio/canvas/node-system/types";
 import CanvasSidebar, {
@@ -72,6 +76,8 @@ interface CanvasWorkspaceOverlayProps {
 	toolbarLeftOffset: number;
 	toolbarTopOffset: number;
 	onCreateScene: () => void;
+	toolMode: CanvasToolMode;
+	onToolModeChange: (mode: CanvasToolMode) => void;
 	onZoomIn: () => void;
 	onZoomOut: () => void;
 	onResetView: () => void;
@@ -298,6 +304,8 @@ const CanvasWorkspaceOverlay = ({
 	toolbarLeftOffset,
 	toolbarTopOffset,
 	onCreateScene,
+	toolMode,
+	onToolModeChange,
 	onZoomIn,
 	onZoomOut,
 	onResetView,
@@ -502,6 +510,37 @@ const CanvasWorkspaceOverlay = ({
 					className="absolute z-30 flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur"
 					style={{ left: toolbarLeftOffset, top: toolbarTopOffset }}
 				>
+					<div className="flex items-center gap-1 rounded bg-white/5 p-1">
+						{CANVAS_TOOL_DEFINITIONS.map((tool) => {
+							const Icon = tool.icon;
+							const isActive = toolMode === tool.mode;
+							const disabled = !tool.enabled;
+							return (
+								<button
+									key={tool.mode}
+									type="button"
+									data-testid={`canvas-tool-mode-${tool.mode}`}
+									disabled={disabled}
+									aria-disabled={disabled}
+									aria-pressed={isActive}
+									onClick={() => {
+										if (disabled) return;
+										onToolModeChange(tool.mode);
+									}}
+									className={`flex items-center gap-1 rounded px-2 py-1 transition ${
+										disabled
+											? "cursor-not-allowed bg-white/5 text-white/30"
+											: isActive
+												? "bg-white/20 text-white"
+												: "bg-transparent text-white/70 hover:bg-white/10"
+									}`}
+								>
+									<Icon className="size-3" />
+									<span>{tool.label}</span>
+								</button>
+							);
+						})}
+					</div>
 					<button
 						type="button"
 						onClick={onCreateScene}

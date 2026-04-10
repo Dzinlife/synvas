@@ -239,6 +239,7 @@ export const pickLayout = (node: CanvasNode): CanvasNodeLayoutSnapshot => ({
 	zIndex: node.zIndex,
 	hidden: node.hidden,
 	locked: node.locked,
+	parentId: node.parentId ?? null,
 });
 
 export const resolveCanvasNodeBounds = (
@@ -339,7 +340,8 @@ export const isLayoutEqual = (
 		before.height === after.height &&
 		before.zIndex === after.zIndex &&
 		before.hidden === after.hidden &&
-		before.locked === after.locked
+		before.locked === after.locked &&
+		(before.parentId ?? null) === (after.parentId ?? null)
 	);
 };
 

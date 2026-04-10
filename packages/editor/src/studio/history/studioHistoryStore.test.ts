@@ -699,6 +699,65 @@ describe("studioHistoryStore", () => {
 		).toBeTruthy();
 	});
 
+	it("canvas.frame-create 可撤销和重做 frame 与 parentId 变更", () => {
+		const frameNode = {
+			id: "node-frame-1",
+			type: "frame" as const,
+			name: "Frame 1",
+			x: 120,
+			y: 80,
+			width: 640,
+			height: 360,
+			zIndex: 10,
+			locked: false,
+			hidden: false,
+			parentId: null,
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		useProjectStore.getState().restoreCanvasNodeForHistory(frameNode);
+		useProjectStore.getState().updateCanvasNodeLayoutBatch([
+			{
+				nodeId: "node-2",
+				patch: {
+					parentId: frameNode.id,
+				},
+			},
+		]);
+		useStudioHistoryStore.getState().push({
+			kind: "canvas.frame-create",
+			createdFrame: frameNode,
+			reparentChanges: [
+				{
+					nodeId: "node-2",
+					beforeParentId: null,
+					afterParentId: frameNode.id,
+				},
+			],
+			focusNodeId: frameNode.id,
+		});
+
+		useStudioHistoryStore.getState().undo();
+		const frameAfterUndo = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === frameNode.id);
+		const nodeAfterUndo = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-2");
+		expect(frameAfterUndo).toBeUndefined();
+		expect(nodeAfterUndo?.parentId ?? null).toBeNull();
+
+		useStudioHistoryStore.getState().redo();
+		const frameAfterRedo = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === frameNode.id);
+		const nodeAfterRedo = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-2");
+		expect(frameAfterRedo?.type).toBe("frame");
+		expect(nodeAfterRedo?.parentId ?? null).toBe(frameNode.id);
+	});
+
 	it("切换用户后 canUndo/canRedo 按当前用户历史栈切换", () => {
 		useStudioHistoryStore.getState().setActiveActor("user-1");
 		useStudioHistoryStore.getState().push({

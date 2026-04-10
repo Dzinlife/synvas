@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ensureStudioProjectOt } from "./ot";
-import type { StudioProject } from "./types";
+import type { CanvasNode, StudioProject } from "./types";
 
 const nonEmptyStringSchema = z.string().min(1);
 const finiteNumberSchema = z.number().finite();
@@ -13,6 +13,7 @@ const defaultCamera = {
 const canvasNodeBaseSchema = z.object({
 	id: nonEmptyStringSchema,
 	name: nonEmptyStringSchema,
+	parentId: nonEmptyStringSchema.nullable().default(null),
 	x: finiteNumberSchema,
 	y: finiteNumberSchema,
 	width: z.number().positive(),
@@ -61,6 +62,10 @@ const textNodeSchema = canvasNodeBaseSchema.extend({
 	fontSize: z.number().positive(),
 });
 
+const frameNodeSchema = canvasNodeBaseSchema.extend({
+	type: z.literal("frame"),
+});
+
 const canvasDocumentSchema = z.object({
 	nodes: z.array(
 		z.discriminatedUnion("type", [
@@ -69,9 +74,69 @@ const canvasDocumentSchema = z.object({
 			audioNodeSchema,
 			imageNodeSchema,
 			textNodeSchema,
+			frameNodeSchema,
 		]),
 	),
 });
+
+const repairCanvasNodeParentRelations = (nodes: CanvasNode[]): CanvasNode[] => {
+	if (nodes.length === 0) return nodes;
+	const nodeById = new Map(nodes.map((node) => [node.id, node]));
+	const parentById = new Map<string, string | null>();
+	for (const node of nodes) {
+		const rawParentId = node.parentId ?? null;
+		if (!rawParentId || rawParentId === node.id) {
+			parentById.set(node.id, null);
+			continue;
+		}
+		const parentNode = nodeById.get(rawParentId);
+		if (!parentNode || parentNode.type !== "frame") {
+			parentById.set(node.id, null);
+			continue;
+		}
+		parentById.set(node.id, rawParentId);
+	}
+
+	const cycleNodeIds = new Set<string>();
+	for (const node of nodes) {
+		let currentNodeId: string | null = node.id;
+		const chain: string[] = [];
+		const indexByNodeId = new Map<string, number>();
+		while (currentNodeId) {
+			if (cycleNodeIds.has(currentNodeId)) break;
+			const existingIndex = indexByNodeId.get(currentNodeId);
+			if (existingIndex !== undefined) {
+				for (let index = existingIndex; index < chain.length; index += 1) {
+					const cycleNodeId = chain[index];
+					if (cycleNodeId) {
+						cycleNodeIds.add(cycleNodeId);
+					}
+				}
+				break;
+			}
+			indexByNodeId.set(currentNodeId, chain.length);
+			chain.push(currentNodeId);
+			currentNodeId = parentById.get(currentNodeId) ?? null;
+		}
+	}
+	for (const cycleNodeId of cycleNodeIds) {
+		parentById.set(cycleNodeId, null);
+	}
+
+	let hasChanged = false;
+	const nextNodes = nodes.map((node) => {
+		const nextParentId = parentById.get(node.id) ?? null;
+		if (nextParentId === node.parentId) {
+			return node;
+		}
+		hasChanged = true;
+		return {
+			...node,
+			parentId: nextParentId,
+		};
+	});
+	return hasChanged ? nextNodes : nodes;
+};
 
 const timelineSchema = z.object({
 	fps: z.number().int().positive(),
@@ -214,9 +279,20 @@ const studioProjectSchema = z.object({
 
 export const parseStudioProject = (value: unknown): StudioProject => {
 	const parsed = studioProjectSchema.parse(value) as StudioProject;
-	if (parsed.ot) return parsed;
+	const repairedCanvasNodes = repairCanvasNodeParentRelations(parsed.canvas.nodes);
+	const normalizedProject: StudioProject =
+		repairedCanvasNodes === parsed.canvas.nodes
+			? parsed
+			: {
+					...parsed,
+					canvas: {
+						...parsed.canvas,
+						nodes: repairedCanvasNodes,
+					},
+				};
+	if (normalizedProject.ot) return normalizedProject;
 	return {
-		...parsed,
-		ot: ensureStudioProjectOt(parsed),
+		...normalizedProject,
+		ot: ensureStudioProjectOt(normalizedProject),
 	};
 };

@@ -45,7 +45,14 @@ import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 
 export type CanvasNodeLayoutSnapshot = Pick<
 	CanvasNode,
-	"x" | "y" | "width" | "height" | "zIndex" | "hidden" | "locked"
+	| "x"
+	| "y"
+	| "width"
+	| "height"
+	| "zIndex"
+	| "hidden"
+	| "locked"
+	| "parentId"
 >;
 
 type CanvasGraphHistoryItem = {
@@ -132,6 +139,16 @@ export type StudioHistoryEntry =
 			kind: "canvas.node-delete.batch";
 			entries: CanvasGraphHistoryItem[];
 			focusNodeId?: string | null;
+	  }
+	| {
+			kind: "canvas.frame-create";
+			createdFrame: CanvasNode;
+			reparentChanges: Array<{
+				nodeId: string;
+				beforeParentId: string | null;
+				afterParentId: string | null;
+			}>;
+			focusNodeId?: string | null;
 	  };
 
 export type LabActorId = "user-1" | "user-2" | "user-3" | "user-4";
@@ -160,7 +177,8 @@ type CanvasOtCommand = OtCommand & {
 		| "canvas.node-create"
 		| "canvas.node-create.batch"
 		| "canvas.node-delete"
-		| "canvas.node-delete.batch";
+		| "canvas.node-delete.batch"
+		| "canvas.frame-create";
 };
 
 type StudioNoopOtCommand = OtCommand & {
@@ -942,6 +960,34 @@ const applyEntry = (
 		projectStore.removeCanvasGraphBatch(
 			entry.entries.map((item) => item.node.id),
 		);
+		return;
+	}
+	if (entry.kind === "canvas.frame-create") {
+		if (mode === "undo") {
+			projectStore.removeCanvasNodeForHistory(entry.createdFrame.id);
+			if (entry.reparentChanges.length > 0) {
+				projectStore.updateCanvasNodeLayoutBatch(
+					entry.reparentChanges.map((change) => ({
+						nodeId: change.nodeId,
+						patch: {
+							parentId: change.beforeParentId,
+						},
+					})),
+				);
+			}
+			return;
+		}
+		projectStore.restoreCanvasNodeForHistory(entry.createdFrame);
+		if (entry.reparentChanges.length > 0) {
+			projectStore.updateCanvasNodeLayoutBatch(
+				entry.reparentChanges.map((change) => ({
+					nodeId: change.nodeId,
+					patch: {
+						parentId: change.afterParentId,
+					},
+				})),
+			);
+		}
 	}
 };
 
@@ -1120,6 +1166,51 @@ const applyEntryToBaselineSnapshot = (
 			if (item.node.type !== "scene" || !item.scene) continue;
 			const { [item.scene.id]: _removed, ...rest } = snapshot.scenes;
 			snapshot.scenes = rest;
+		}
+		return;
+	}
+	if (entry.kind === "canvas.frame-create") {
+		if (mode === "undo") {
+			snapshot.canvas.nodes = snapshot.canvas.nodes.filter(
+				(node) => node.id !== entry.createdFrame.id,
+			);
+			if (entry.reparentChanges.length > 0) {
+				const parentById = new Map(
+					entry.reparentChanges.map((change) => [
+						change.nodeId,
+						change.beforeParentId,
+					]),
+				);
+				snapshot.canvas.nodes = snapshot.canvas.nodes.map((node) => {
+					if (!parentById.has(node.id)) return node;
+					return {
+						...node,
+						parentId: parentById.get(node.id) ?? null,
+					};
+				});
+			}
+			return;
+		}
+		snapshot.canvas.nodes = [
+			...snapshot.canvas.nodes.filter(
+				(node) => node.id !== entry.createdFrame.id,
+			),
+			entry.createdFrame,
+		];
+		if (entry.reparentChanges.length > 0) {
+			const parentById = new Map(
+				entry.reparentChanges.map((change) => [
+					change.nodeId,
+					change.afterParentId,
+				]),
+			);
+			snapshot.canvas.nodes = snapshot.canvas.nodes.map((node) => {
+				if (!parentById.has(node.id)) return node;
+				return {
+					...node,
+					parentId: parentById.get(node.id) ?? null,
+				};
+			});
 		}
 	}
 };

@@ -692,6 +692,13 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("text"),
 		},
+		frame: {
+			type: "frame",
+			title: "Frame",
+			create: () => ({ type: "frame", name: "Frame" }),
+			skiaRenderer: GenericSkiaRenderer,
+			toolbar: createToolbar("frame"),
+		},
 	};
 	return {
 		canvasNodeDefinitionList: Object.values(definitions),
@@ -1288,6 +1295,30 @@ const dragSelectionBoundsAt = (
 	dragNodeAt(startClientX, startClientY, endClientX, endClientY, patch);
 };
 
+const dragCreateFrameAt = (
+	startClientX: number,
+	startClientY: number,
+	endClientX: number,
+	endClientY: number,
+): void => {
+	const canvas = screen.getByTestId("infinite-skia-canvas");
+	const workspace = screen.getByTestId("canvas-workspace");
+	act(() => {
+		fireEvent.pointerDown(canvas, {
+			...createPointerPatch(startClientX, startClientY),
+			buttons: 1,
+		});
+		fireEvent.pointerMove(workspace, {
+			...createPointerPatch(endClientX, endClientY),
+			buttons: 1,
+		});
+		fireEvent.pointerUp(workspace, {
+			...createPointerPatch(endClientX, endClientY),
+			buttons: 0,
+		});
+	});
+};
+
 const resizeNodeAt = (
 	startClientX: number,
 	startClientY: number,
@@ -1555,6 +1586,56 @@ describe("CanvasWorkspace", () => {
 			"node-scene-1",
 		]);
 		expect(screen.getByText("隐藏")).toBeTruthy();
+	});
+
+	it("侧边栏会按 frame 的 parentId 树进行分组缩进", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: [
+							...project.canvas.nodes.map((node) =>
+								node.id === "node-image-1"
+									? { ...node, parentId: "node-frame-1" }
+									: node,
+							),
+							{
+								id: "node-frame-1",
+								type: "frame",
+								name: "Frame 1",
+								x: 120,
+								y: 80,
+								width: 860,
+								height: 520,
+								zIndex: 4,
+								locked: false,
+								hidden: false,
+								parentId: null,
+								createdAt: 4,
+								updatedAt: 4,
+							},
+						],
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+
+		const nodeItems = screen.getAllByTestId(/canvas-sidebar-node-item-/);
+		const order = nodeItems.map((item) => item.getAttribute("data-node-id"));
+		const frameIndex = order.indexOf("node-frame-1");
+		expect(frameIndex).toBeGreaterThanOrEqual(0);
+		expect(order[frameIndex + 1]).toBe("node-image-1");
+
+		const frameItem = screen.getByTestId("canvas-sidebar-node-item-node-frame-1");
+		const childItem = screen.getByTestId("canvas-sidebar-node-item-node-image-1");
+		expect(frameItem.style.paddingLeft).toBe("8px");
+		expect(childItem.style.paddingLeft).toBe("24px");
 	});
 
 	it("overlay 布局不改变画布渲染尺寸", () => {
@@ -2311,6 +2392,108 @@ describe("CanvasWorkspace", () => {
 		expect(afterUi).toBeTruthy();
 		expect(afterUi?.activeNodeId).toBe(beforeUi?.activeNodeId);
 		expect(afterCamera).toEqual(beforeCamera);
+	});
+
+	it("工具模式按钮仅启用 Move/Frame，Pan/Text 为禁用态", () => {
+		render(<CanvasWorkspace />);
+		const moveButton = screen.getByTestId(
+			"canvas-tool-mode-move",
+		) as HTMLButtonElement;
+		const frameButton = screen.getByTestId(
+			"canvas-tool-mode-frame",
+		) as HTMLButtonElement;
+		const panButton = screen.getByTestId(
+			"canvas-tool-mode-pan",
+		) as HTMLButtonElement;
+		const textButton = screen.getByTestId(
+			"canvas-tool-mode-text",
+		) as HTMLButtonElement;
+		expect(moveButton.disabled).toBe(false);
+		expect(frameButton.disabled).toBe(false);
+		expect(panButton.disabled).toBe(true);
+		expect(textButton.disabled).toBe(true);
+		expect(moveButton.getAttribute("aria-pressed")).toBe("true");
+
+		fireEvent.click(frameButton);
+		const workspace = screen.getByTestId("canvas-workspace");
+		expect(frameButton.getAttribute("aria-pressed")).toBe("true");
+		expect(workspace.style.cursor).toBe("crosshair");
+	});
+
+	it("Frame 模式下小拖拽不创建 frame 且保持当前模式", () => {
+		render(<CanvasWorkspace />);
+		const frameButton = screen.getByTestId(
+			"canvas-tool-mode-frame",
+		) as HTMLButtonElement;
+		fireEvent.click(frameButton);
+		dragCreateFrameAt(100, 100, 103, 103);
+
+		const frameNodes = (
+			useProjectStore.getState().currentProject?.canvas.nodes ?? []
+		).filter((node) => node.type === "frame");
+		expect(frameNodes).toHaveLength(0);
+		expect(frameButton.getAttribute("aria-pressed")).toBe("true");
+		expect(screen.getByTestId("canvas-workspace").style.cursor).toBe("crosshair");
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
+	});
+
+	it("Frame 拉框创建会自动收编并写入单条原子历史，undo/redo 一次回滚", () => {
+		render(<CanvasWorkspace />);
+		const frameButton = screen.getByTestId(
+			"canvas-tool-mode-frame",
+		) as HTMLButtonElement;
+		const moveButton = screen.getByTestId(
+			"canvas-tool-mode-move",
+		) as HTMLButtonElement;
+		fireEvent.click(frameButton);
+		dragCreateFrameAt(220, 100, 580, 340);
+
+		const createdFrame = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.type === "frame");
+		expect(createdFrame).toBeTruthy();
+		if (!createdFrame) return;
+		const adoptedVideoNode = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-video-1");
+		expect(adoptedVideoNode).toBeTruthy();
+		expect(adoptedVideoNode?.parentId ?? null).toBe(createdFrame.id);
+		expect(moveButton.getAttribute("aria-pressed")).toBe("true");
+		const past = useStudioHistoryStore.getState().past;
+		expect(past).toHaveLength(1);
+		expect(past[0]?.kind).toBe("canvas.frame-create");
+		if (past[0]?.kind !== "canvas.frame-create") return;
+		expect(
+			past[0].reparentChanges.some(
+				(change) =>
+					change.nodeId === "node-video-1" &&
+					change.afterParentId === createdFrame.id,
+			),
+		).toBe(true);
+
+		act(() => {
+			useStudioHistoryStore.getState().undo();
+		});
+		const frameAfterUndo = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === createdFrame.id);
+		const videoAfterUndo = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-video-1");
+		expect(frameAfterUndo).toBeUndefined();
+		expect(videoAfterUndo?.parentId ?? null).toBeNull();
+
+		act(() => {
+			useStudioHistoryStore.getState().redo();
+		});
+		const frameAfterRedo = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === createdFrame.id);
+		const videoAfterRedo = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-video-1");
+		expect(frameAfterRedo?.type).toBe("frame");
+		expect(videoAfterRedo?.parentId ?? null).toBe(createdFrame.id);
 	});
 
 	it("双击非 focusable 节点仅调整 camera，不进入 focus", async () => {

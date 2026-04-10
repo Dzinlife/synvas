@@ -23,6 +23,7 @@ const NODE_TYPE_LABEL: Record<CanvasNode["type"], string> = {
 	audio: "Audio",
 	image: "Image",
 	text: "Text",
+	frame: "Frame",
 };
 
 interface NodeListProps {
@@ -32,6 +33,53 @@ interface NodeListProps {
 	onNodeSelect: (node: CanvasNode) => void;
 }
 
+interface FlattenedNodeItem {
+	node: CanvasNode;
+	depth: number;
+}
+
+const buildFlattenedNodeItems = (nodes: CanvasNode[]): FlattenedNodeItem[] => {
+	if (nodes.length === 0) return [];
+	const nodeById = new Map(nodes.map((node) => [node.id, node]));
+	const childrenByParentId = new Map<string | null, string[]>();
+	for (const node of nodes) {
+		const rawParentId = node.parentId ?? null;
+		const parentNode = rawParentId ? nodeById.get(rawParentId) : null;
+		const parentId = parentNode?.type === "frame" ? parentNode.id : null;
+		const existing = childrenByParentId.get(parentId) ?? [];
+		existing.push(node.id);
+		childrenByParentId.set(parentId, existing);
+	}
+
+	const flattenedItems: FlattenedNodeItem[] = [];
+	const visited = new Set<string>();
+	const visit = (parentId: string | null, depth: number) => {
+		const childNodeIds = childrenByParentId.get(parentId) ?? [];
+		for (const childNodeId of childNodeIds) {
+			if (visited.has(childNodeId)) continue;
+			visited.add(childNodeId);
+			const node = nodeById.get(childNodeId);
+			if (!node) continue;
+			flattenedItems.push({
+				node,
+				depth,
+			});
+			if (node.type === "frame") {
+				visit(node.id, depth + 1);
+			}
+		}
+	};
+	visit(null, 0);
+	for (const node of nodes) {
+		if (visited.has(node.id)) continue;
+		flattenedItems.push({
+			node,
+			depth: 0,
+		});
+	}
+	return flattenedItems;
+};
+
 const NodeList: React.FC<NodeListProps> = ({
 	nodes,
 	activeNodeId,
@@ -39,6 +87,9 @@ const NodeList: React.FC<NodeListProps> = ({
 	onNodeSelect,
 }) => {
 	const empty = nodes.length === 0;
+	const flattenedItems = useMemo(() => {
+		return buildFlattenedNodeItems(nodes);
+	}, [nodes]);
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -56,7 +107,7 @@ const NodeList: React.FC<NodeListProps> = ({
 					data-testid="canvas-sidebar-node-list"
 					className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto"
 				>
-					{nodes.map((node) => {
+					{flattenedItems.map(({ node, depth }) => {
 						const isActive = node.id === activeNodeId;
 						return (
 							<button
@@ -74,6 +125,9 @@ const NodeList: React.FC<NodeListProps> = ({
 										: "border-white/10 bg-black/20 text-white/90 hover:bg-white/10",
 									disabled && "cursor-not-allowed opacity-60 hover:bg-black/20",
 								)}
+								style={{
+									paddingLeft: `${8 + depth * 16}px`,
+								}}
 							>
 								<div className="flex items-center justify-between gap-2">
 									<div className="truncate text-xs font-medium">
