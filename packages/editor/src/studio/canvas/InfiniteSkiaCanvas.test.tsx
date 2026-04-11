@@ -35,6 +35,12 @@ const { renderNodeToPictureMock } = vi.hoisted(() => ({
 		dispose: vi.fn(),
 	})),
 }));
+const { textTilePictureSourceSignatureMock } = vi.hoisted(() => ({
+	textTilePictureSourceSignatureMock: vi.fn(
+		(context: { node: TextCanvasNode }) =>
+			`${context.node.id}:${context.node.updatedAt}:${context.node.text}`,
+	),
+}));
 const { textTilePictureGenerateMock } = vi.hoisted(() => ({
 	textTilePictureGenerateMock: vi.fn(
 		async (context: { node: TextCanvasNode }) => {
@@ -349,8 +355,7 @@ vi.mock("./node-system/registry", async () => {
 		generate: async () => null,
 	};
 	const textTilePictureCapability = {
-		getSourceSignature: ({ node }: { node: TextCanvasNode }) =>
-			`${node.id}:${node.updatedAt}:${node.text}`,
+		getSourceSignature: textTilePictureSourceSignatureMock,
 		generate: textTilePictureGenerateMock,
 	};
 	return {
@@ -657,6 +662,11 @@ describe("InfiniteSkiaCanvas", () => {
 		tilePipelineMockState.enabled = false;
 		acquireImageAssetMock.mockReset();
 		renderNodeToPictureMock.mockReset();
+		textTilePictureSourceSignatureMock.mockReset();
+		textTilePictureSourceSignatureMock.mockImplementation(
+			(context: { node: TextCanvasNode }) =>
+				`${context.node.id}:${context.node.updatedAt}:${context.node.text}`,
+		);
 		textTilePictureGenerateMock.mockReset();
 		textTilePictureGenerateMock.mockImplementation(
 			async (context: { node: TextCanvasNode }) => ({
@@ -1481,6 +1491,72 @@ describe("InfiniteSkiaCanvas", () => {
 			}>(getStaticTileLayerElement(getLatestRenderTree()));
 			expect(staticTileLayerProps?.drawItems?.length ?? 0).toBeGreaterThan(0);
 		});
+	});
+
+	it("text 节点仅位置变化时不会重复生成 tile picture", async () => {
+		tilePipelineMockState.enabled = true;
+		textTilePictureSourceSignatureMock.mockImplementation(
+			({ node }: { node: TextCanvasNode }) =>
+				`${node.id}:${node.text}:${node.fontSize}:${Math.max(
+					1,
+					Math.round(Math.abs(node.width)),
+				)}:${Math.max(1, Math.round(Math.abs(node.height)))}`,
+		);
+		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
+		const initialNode = createTextNode("node-text", 0, {
+			x: 20,
+			y: 30,
+			updatedAt: 1,
+		});
+		const { rerender } = render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={camera}
+				nodes={[initialNode]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(textTilePictureGenerateMock).toHaveBeenCalledTimes(1);
+		});
+		await waitFor(() => {
+			const staticTileLayerProps = getElementProps<{
+				drawItems?: Array<unknown>;
+			}>(getStaticTileLayerElement(getLatestRenderTree()));
+			expect(staticTileLayerProps?.drawItems?.length ?? 0).toBeGreaterThan(0);
+		});
+
+		rerender(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={camera}
+				nodes={[
+					{
+						...initialNode,
+						x: 220,
+						y: 140,
+						updatedAt: 2,
+					},
+				]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await act(async () => {
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+
+		expect(textTilePictureGenerateMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("image 节点存在 legacy thumbnail 时仍只使用主 image asset", async () => {

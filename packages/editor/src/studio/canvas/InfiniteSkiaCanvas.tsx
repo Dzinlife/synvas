@@ -1246,12 +1246,19 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					asset,
 					runtimeManager,
 				};
+			const tilePictureCapabilitySourceSignature =
+				tilePictureCapability?.getSourceSignature?.(tilePictureContext) ?? null;
 			const tilePictureSourceSignature =
-				tilePictureCapability?.getSourceSignature?.(tilePictureContext) ??
-				"none";
+				typeof tilePictureCapabilitySourceSignature === "string"
+					? tilePictureCapabilitySourceSignature
+					: null;
 			const sourceKey = fallbackToNodeRendererPicture
 				? tilePictureCapability
-					? `${sourceSignature}:fallback-picture:async:${tilePictureSourceSignature}`
+					? // 当 capability 提供专用签名时，不再混入 updatedAt（拖拽位移也会变化），
+						// 避免位置拖拽触发 picture 缓存抖动导致闪烁。
+						tilePictureSourceSignature !== null
+						? `fallback-picture:async:${tilePictureSourceSignature}`
+						: `${sourceSignature}:fallback-picture:async:none`
 					: `${sourceSignature}:fallback-picture:sync`
 				: sourceSignature;
 			const modeKey: TileInputCacheEntry["mode"] = fallbackToNodeRendererPicture
