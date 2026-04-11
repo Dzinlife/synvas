@@ -535,12 +535,26 @@ const compareCanvasNodeHitPriority = (
 	return compareLayerOrderDesc(left, right);
 };
 
+type CanvasFrameBodyHitMode = "include" | "exclude" | "selected-only";
+
+const canFrameBodyReceivePointHit = (
+	frameNodeId: string,
+	frameBodyHitMode: CanvasFrameBodyHitMode,
+	selectedNodeIds: string[],
+): boolean => {
+	if (frameBodyHitMode === "include") return true;
+	if (frameBodyHitMode === "exclude") return false;
+	return selectedNodeIds.includes(frameNodeId);
+};
+
 const resolveTopHitNodeByLinearScan = (
 	nodes: CanvasNode[],
 	worldX: number,
 	worldY: number,
 	isCanvasInteractionLocked: boolean,
 	focusedNodeId: string | null,
+	frameBodyHitMode: CanvasFrameBodyHitMode,
+	selectedNodeIds: string[],
 ): CanvasNode | null => {
 	for (let index = nodes.length - 1; index >= 0; index -= 1) {
 		const node = nodes[index];
@@ -548,6 +562,12 @@ const resolveTopHitNodeByLinearScan = (
 		const canInteractNode =
 			!isCanvasInteractionLocked || node.id === focusedNodeId;
 		if (!canInteractNode) continue;
+		if (
+			node.type === "frame" &&
+			!canFrameBodyReceivePointHit(node.id, frameBodyHitMode, selectedNodeIds)
+		) {
+			continue;
+		}
 		if (!isWorldPointInNode(node, worldX, worldY)) continue;
 		return node;
 	}
@@ -2434,8 +2454,16 @@ const CanvasWorkspace = () => {
 			localX: number;
 			localY: number;
 			liveCamera: CameraState;
+			frameBodyHitMode?: CanvasFrameBodyHitMode;
 		}): CanvasNode | null => {
-			const { worldX, worldY, localX, localY, liveCamera } = input;
+			const {
+				worldX,
+				worldY,
+				localX,
+				localY,
+				liveCamera,
+				frameBodyHitMode = "include",
+			} = input;
 			const indexedHitNodes = [...spatialIndex.queryPoint(worldX, worldY)]
 				.sort(compareCanvasSpatialHitPriority)
 				.map((item) => nodeById.get(item.nodeId) ?? null)
@@ -2445,6 +2473,16 @@ const CanvasWorkspace = () => {
 					const canInteractNode =
 						!isCanvasInteractionLocked || node.id === focusedNodeId;
 					if (!canInteractNode) return false;
+					if (
+						node.type === "frame" &&
+						!canFrameBodyReceivePointHit(
+							node.id,
+							frameBodyHitMode,
+							normalizedSelectedNodeIds,
+						)
+					) {
+						return false;
+					}
 					return isWorldPointInNode(node, worldX, worldY);
 				})
 				.sort(compareCanvasNodeHitPriority);
@@ -2456,6 +2494,8 @@ const CanvasWorkspace = () => {
 					worldY,
 					isCanvasInteractionLocked,
 					focusedNodeId,
+					frameBodyHitMode,
+					normalizedSelectedNodeIds,
 				);
 				warnCanvasSpatialIndexMismatch(
 					"point-hit",
@@ -2475,9 +2515,14 @@ const CanvasWorkspace = () => {
 					const canInteractNode =
 						!isCanvasInteractionLocked || node.id === focusedNodeId;
 					return canInteractNode;
-				})
-				.sort(compareCanvasNodeHitPriority);
+					})
+					.sort(compareCanvasNodeHitPriority);
 			if (labelHitNodes.length <= 0) return indexedTopHit;
+			const topFrameLabelHitNode =
+				labelHitNodes.find((node) => node.type === "frame") ?? null;
+			if (topFrameLabelHitNode) {
+				return topFrameLabelHitNode;
+			}
 			// label 与 body 命中并行参与，统一按现有优先级选 top。
 			const mergedHitNodes = [...indexedHitNodes, ...labelHitNodes]
 				.filter((node, index, list) => {
@@ -2490,6 +2535,7 @@ const CanvasWorkspace = () => {
 			focusedNodeId,
 			isCanvasInteractionLocked,
 			nodeById,
+			normalizedSelectedNodeIds,
 			sortedNodes,
 			spatialIndex,
 		],
@@ -2541,27 +2587,29 @@ const CanvasWorkspace = () => {
 			const indexedItems = [...spatialIndex.queryRect(queryRect)].sort(
 				compareCanvasSpatialPaintOrder,
 			);
-			for (const item of indexedItems) {
-				const node = nodeById.get(item.nodeId);
-				if (!node || node.hidden || seen.has(node.id)) continue;
-				if (!isNodeIntersectRect(node, queryRect)) continue;
-				seen.add(node.id);
-				indexedNodeIds.push(node.id);
-			}
-			if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
-				const legacyNodeIds = sortedNodes
-					.filter((node) =>
-						isNodeIntersectRect(node, {
-							left,
-							right,
-							top,
-							bottom,
-						}),
-					)
-					.map((node) => node.id);
-				warnCanvasSpatialIndexMismatch(
-					"marquee",
-					legacyNodeIds,
+				for (const item of indexedItems) {
+					const node = nodeById.get(item.nodeId);
+					if (!node || node.hidden || seen.has(node.id)) continue;
+					if (node.type === "frame") continue;
+					if (!isNodeIntersectRect(node, queryRect)) continue;
+					seen.add(node.id);
+					indexedNodeIds.push(node.id);
+				}
+				if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
+					const legacyNodeIds = sortedNodes
+						.filter((node) => node.type !== "frame")
+						.filter((node) =>
+							isNodeIntersectRect(node, {
+								left,
+								right,
+								top,
+								bottom,
+							}),
+						)
+						.map((node) => node.id);
+					warnCanvasSpatialIndexMismatch(
+						"marquee",
+						legacyNodeIds,
 					indexedNodeIds,
 				);
 			}
@@ -5167,11 +5215,13 @@ const CanvasWorkspace = () => {
 	const openNodeContextMenuAt = useCallback(
 		(node: CanvasNode, clientX: number, clientY: number): boolean => {
 			if (!currentProject) return false;
-			const targetNodeIds =
+			const nextSelectedNodeIds =
 				normalizedSelectedNodeIds.includes(node.id) &&
 				normalizedSelectedNodeIds.length > 0
 					? normalizedSelectedNodeIds
 					: [node.id];
+			commitSelectedNodeIds(nextSelectedNodeIds);
+			const targetNodeIds = nextSelectedNodeIds;
 			const definition = getCanvasNodeDefinition(node.type);
 			const nodeActions = definition.contextMenu
 				? definition.contextMenu({
@@ -5223,6 +5273,7 @@ const CanvasWorkspace = () => {
 			return true;
 		},
 		[
+			commitSelectedNodeIds,
 			copyNodeIdsToClipboard,
 			contextMenuSceneOptions,
 			currentProject,
@@ -5308,6 +5359,7 @@ const CanvasWorkspace = () => {
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
+				frameBodyHitMode: "exclude",
 			});
 			const keepMultiSelectionBounds = Boolean(
 				selectedBounds &&
@@ -5390,6 +5442,7 @@ const CanvasWorkspace = () => {
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
+				frameBodyHitMode: "exclude",
 			});
 			commitHoveredNodeId(node?.id ?? null);
 		},
@@ -5494,6 +5547,7 @@ const CanvasWorkspace = () => {
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
+				frameBodyHitMode: "selected-only",
 			});
 			const isInSelectionBounds = Boolean(
 				selectedBounds &&
@@ -5806,14 +5860,15 @@ const CanvasWorkspace = () => {
 					shouldResolveTap &&
 					(pointerSession.gesture !== "node-drag" ||
 						(pointerSession.startNodeId &&
-							getTopHitNode({
-								worldX: world.x,
-								worldY: world.y,
-								localX: local.x,
-								localY: local.y,
-								liveCamera: getCamera(),
-							})?.id ===
-								pointerSession.startNodeId))
+								getTopHitNode({
+									worldX: world.x,
+									worldY: world.y,
+									localX: local.x,
+									localY: local.y,
+									liveCamera: getCamera(),
+									frameBodyHitMode: "selected-only",
+								})?.id ===
+									pointerSession.startNodeId))
 				) {
 					handleCanvasSurfaceTap(tapMeta);
 				}
@@ -5950,6 +6005,7 @@ const CanvasWorkspace = () => {
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
+				frameBodyHitMode: "include",
 			});
 			if (
 				normalizedSelectedNodeIds.length > 1 &&

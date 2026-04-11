@@ -3,6 +3,7 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type {
 	AudioCanvasNode,
+	FrameCanvasNode,
 	ImageCanvasNode,
 	StudioProject,
 	TextCanvasNode,
@@ -545,6 +546,26 @@ const createSceneNode = (id: string, zIndex: number) => ({
 	createdAt: 1,
 	updatedAt: 1,
 	sceneId: "scene-1",
+});
+
+const createFrameNode = (
+	id: string,
+	zIndex: number,
+	patch: Partial<FrameCanvasNode> = {},
+): FrameCanvasNode => ({
+	id,
+	type: "frame",
+	name: id,
+	x: 20,
+	y: 30,
+	width: 320,
+	height: 180,
+	zIndex,
+	locked: false,
+	hidden: false,
+	createdAt: 1,
+	updatedAt: 1,
+	...patch,
 });
 
 const createTextNode = (
@@ -1396,6 +1417,68 @@ describe("InfiniteSkiaCanvas", () => {
 			);
 			expect(liveNodeIds).toEqual(["node-active"]);
 		});
+	});
+
+	it("active frame 不走 live 且仍保留在 tile 输入中", async () => {
+		tilePipelineMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		try {
+			const frameNode = {
+				...createFrameNode("node-frame-active", 1),
+				thumbnail: {
+					assetId: "frame-thumb",
+					sourceSignature: "frame-v1",
+					frame: 0,
+					generatedAt: 1,
+					version: 1 as const,
+				},
+			};
+			render(
+				<InfiniteSkiaCanvas
+					width={128}
+					height={128}
+					camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+					nodes={[
+						{
+							...createSceneNode("node-scene-under", 0),
+							thumbnail: {
+								assetId: "scene-under-thumb",
+								sourceSignature: "scene-under-v1",
+								frame: 0,
+								generatedAt: 1,
+								version: 1 as const,
+							},
+						},
+						frameNode,
+					]}
+					scenes={emptyScenes}
+					assets={[
+						createImageAsset("scene-under-thumb"),
+						createImageAsset("frame-thumb"),
+					]}
+					activeNodeId="node-frame-active"
+					selectedNodeIds={["node-frame-active"]}
+					focusedNodeId={null}
+				/>,
+			);
+			await waitFor(() => {
+				expect(setInputsSpy).toHaveBeenCalled();
+			});
+			await waitFor(() => {
+				const liveNodeIds = getCanvasNodeRenderItems(getLatestRenderTree()).map(
+					(nodeItem) =>
+						getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id,
+				);
+				expect(liveNodeIds).toEqual([]);
+			});
+			const containsFrameInput = setInputsSpy.mock.calls.some((call) => {
+				const inputs = call[0] as Array<{ nodeId?: string }>;
+				return inputs.some((input) => input.nodeId === "node-frame-active");
+			});
+			expect(containsFrameInput).toBe(true);
+		} finally {
+			setInputsSpy.mockRestore();
+		}
 	});
 
 	it("tile pipeline 不可用时非 active 节点不会走 live 渲染", async () => {

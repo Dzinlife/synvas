@@ -1625,6 +1625,39 @@ const resolveNodeLabelPoint = (
 	};
 };
 
+const injectFrameHitFixture = (): void => {
+	useProjectStore.setState((state) => {
+		const project = state.currentProject;
+		if (!project) return state;
+		return {
+			...state,
+			currentProject: {
+				...project,
+				canvas: {
+					...project.canvas,
+					nodes: [
+						...project.canvas.nodes.filter((node) => node.id !== "node-frame-hit-1"),
+						{
+							id: "node-frame-hit-1",
+							type: "frame",
+							name: "Frame Hit",
+							x: 1080,
+							y: 200,
+							width: 140,
+							height: 120,
+							zIndex: 20,
+							locked: false,
+							hidden: false,
+							createdAt: 9,
+							updatedAt: 9,
+						},
+					],
+				},
+			},
+		};
+	});
+};
+
 const touchDoubleTapNodeAt = (clientX: number, clientY: number): void => {
 	pointerTapAt(clientX, clientY, {
 		pointerType: "touch",
@@ -3400,8 +3433,7 @@ describe("CanvasWorkspace", () => {
 			"node-scene-1",
 		]);
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
-			"node-video-1",
-			"node-image-1",
+			"node-scene-1",
 		]);
 	});
 
@@ -3482,8 +3514,6 @@ describe("CanvasWorkspace", () => {
 
 	it("右键 image 节点可通过二级菜单插入到目标 scene timeline", async () => {
 		render(<CanvasWorkspace />);
-		const beforeUi = useProjectStore.getState().currentProject?.ui;
-
 		rightClickNodeAt(720, 360);
 		fireEvent.mouseEnter(
 			screen.getByRole("menuitem", { name: /插入到 Scene/ }),
@@ -3504,9 +3534,10 @@ describe("CanvasWorkspace", () => {
 		expect(inserted.timeline.role).toBe("clip");
 		expect(inserted.transform?.position.x).toBe(0);
 		expect(inserted.transform?.position.y).toBe(0);
-
-		const afterUi = project?.ui;
-		expect(afterUi).toEqual(beforeUi);
+		expect(project?.ui.activeNodeId).toBe("node-image-1");
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-image-1",
+		]);
 	});
 
 	it("右键 scene 节点可插入 Composition 到目标 scene timeline", async () => {
@@ -4132,6 +4163,72 @@ describe("CanvasWorkspace", () => {
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
 			"node-image-1",
 		);
+	});
+
+	it("frame body 不参与 hover/click，label 可命中 frame", () => {
+		injectFrameHitFixture();
+		render(<CanvasWorkspace />);
+		const frameBodyPoint = { x: 1120, y: 240 };
+		movePointerAt(frameBodyPoint.x, frameBodyPoint.y);
+		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBeNull();
+		clickNodeAt(frameBodyPoint.x, frameBodyPoint.y);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).not.toBe(
+			"node-frame-hit-1",
+		);
+		const frameLabelPoint = resolveNodeLabelPoint("node-frame-hit-1", 24);
+		movePointerAt(frameLabelPoint.x, frameLabelPoint.y);
+		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBe(
+			"node-frame-hit-1",
+		);
+		clickNodeAt(frameLabelPoint.x, frameLabelPoint.y);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-frame-hit-1",
+		);
+	});
+
+	it("marquee 不会选中 frame body", () => {
+		injectFrameHitFixture();
+		render(<CanvasWorkspace />);
+		marqueeCanvasAt(1060, 180, 1240, 340);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).not.toContain(
+			"node-frame-hit-1",
+		);
+	});
+
+	it("frame body 右键可打开 node menu 并同步选中 frame", async () => {
+		injectFrameHitFixture();
+		render(<CanvasWorkspace />);
+		rightClickNodeAt(1120, 240);
+		expect(await screen.findByRole("menuitem", { name: "复制" })).toBeTruthy();
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			"node-frame-hit-1",
+		]);
+	});
+
+	it("frame body 仅在已选中后可起手拖拽", () => {
+		injectFrameHitFixture();
+		render(<CanvasWorkspace />);
+		const initialFrameNode = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-frame-hit-1");
+		expect(initialFrameNode?.x).toBe(1080);
+		expect(initialFrameNode?.y).toBe(200);
+
+		dragNodeAt(1120, 240, 1180, 300);
+		const frameAfterUnselectedDrag = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-frame-hit-1");
+		expect(frameAfterUnselectedDrag?.x).toBe(1080);
+		expect(frameAfterUnselectedDrag?.y).toBe(200);
+
+		const frameLabelPoint = resolveNodeLabelPoint("node-frame-hit-1", 24);
+		clickNodeAt(frameLabelPoint.x, frameLabelPoint.y);
+		dragNodeAt(1120, 240, 1180, 300);
+		const frameAfterSelectedDrag = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-frame-hit-1");
+		expect(frameAfterSelectedDrag?.x).toBe(1140);
+		expect(frameAfterSelectedDrag?.y).toBe(260);
 	});
 
 	it("Shift 点击可多选和反选，主选中随最后一个选中节点切换", () => {

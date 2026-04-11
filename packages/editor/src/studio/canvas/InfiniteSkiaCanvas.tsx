@@ -860,14 +860,18 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (!focusedNodeId) return null;
 		return nodes.find((node) => node.id === focusedNodeId) ?? null;
 	}, [focusedNodeId, nodes]);
+	const activeLiveNodeId = useMemo(() => {
+		if (!activeNode || activeNode.type === "frame") return null;
+		return activeNode.id;
+	}, [activeNode]);
 	const liveRenderNodes = useMemo(() => {
-		if (!activeNodeId) return [];
+		if (!activeLiveNodeId) return [];
 		const activeNodeInRenderTree = renderNodes.find(
-			(node) => node.id === activeNodeId,
+			(node) => node.id === activeLiveNodeId,
 		);
 		if (!activeNodeInRenderTree) return [];
 		return [activeNodeInRenderTree];
-	}, [activeNodeId, renderNodes]);
+	}, [activeLiveNodeId, renderNodes]);
 	const focusedNodeDefinition = useMemo(() => {
 		if (!focusedNode) return null;
 		return getCanvasNodeDefinition(focusedNode.type);
@@ -1026,7 +1030,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		for (const node of tileNodes) {
 			// 这里直接使用当帧 tileNodes，避免读取 ref 带来一帧滞后。
 			const latestNode = node;
-			if (latestNode.id === activeNodeId) {
+			if (latestNode.id === activeLiveNodeId) {
 				nextNodeRasterUri.set(latestNode.id, null);
 				continue;
 			}
@@ -1093,7 +1097,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			disposed = true;
 		};
 	}, [
-		activeNodeId,
+		activeLiveNodeId,
 		tileNodes,
 		resolveNodeRasterUri,
 		scheduleTileTick,
@@ -1135,7 +1139,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const nextTileNodeIdSet = new Set<string>();
 		for (const node of tileNodes) {
 			nextTileNodeIdSet.add(node.id);
-			if (node.id === activeNodeId) {
+			if (node.id === activeLiveNodeId) {
 				const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 				if (oldAabb) {
 					scheduler.markDirtyRect(oldAabb);
@@ -1181,7 +1185,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			scheduleTileTick();
 		}
 	}, [
-		activeNodeId,
+		activeLiveNodeId,
 		assetById,
 		scenes,
 		scheduleTileTick,
@@ -1214,7 +1218,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		for (const node of tileNodes) {
 			// 这里直接使用当帧 tileNodes，避免 undo/redo 与拖拽时 tile 输入落后一帧。
 			const latestNode = node;
-			if (latestNode.id === activeNodeId) {
+			if (latestNode.id === activeLiveNodeId) {
 				continue;
 			}
 			visitedNodeIds.add(latestNode.id);
@@ -1393,7 +1397,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			asyncPictureRequests,
 		};
 	}, [
-		activeNodeId,
+		activeLiveNodeId,
 		assetById,
 		rasterCacheVersion,
 		resolveNodeRasterUri,
