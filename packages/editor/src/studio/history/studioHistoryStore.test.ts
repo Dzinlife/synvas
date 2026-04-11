@@ -716,6 +716,9 @@ describe("studioHistoryStore", () => {
 			updatedAt: 1,
 		};
 		useProjectStore.getState().restoreCanvasNodeForHistory(frameNode);
+		const nodeBeforeReparent = useProjectStore
+			.getState()
+			.currentProject?.canvas.nodes.find((node) => node.id === "node-2");
 		useProjectStore.getState().updateCanvasNodeLayoutBatch([
 			{
 				nodeId: "node-2",
@@ -732,6 +735,8 @@ describe("studioHistoryStore", () => {
 					nodeId: "node-2",
 					beforeParentId: null,
 					afterParentId: frameNode.id,
+					beforeZIndex: nodeBeforeReparent?.zIndex ?? 0,
+					afterZIndex: nodeBeforeReparent?.zIndex ?? 0,
 				},
 			],
 			focusNodeId: frameNode.id,

@@ -3,6 +3,12 @@ import type {
 	SceneDocument,
 	StudioProject,
 } from "core/studio/types";
+import {
+	allocateInsertZIndex,
+	compareLayerOrder,
+	resolveLayerSiblingCount,
+	sortByLayerOrder,
+} from "@/studio/canvas/layerOrderCoordinator";
 import type { StudioCanvasClipboardEntry } from "./studioClipboardStore";
 
 export type CanvasGraphHistoryEntry = {
@@ -26,12 +32,9 @@ const createCanvasEntityId = (prefix: string): string => {
 const sortEntriesByNodeOrder = (
 	entries: StudioCanvasClipboardEntry[],
 ): StudioCanvasClipboardEntry[] => {
-	return [...entries].sort((left, right) => {
-		if (left.node.zIndex !== right.node.zIndex) {
-			return left.node.zIndex - right.node.zIndex;
-		}
-		return left.node.createdAt - right.node.createdAt;
-	});
+	return [...entries].sort((left, right) =>
+		compareLayerOrder(left.node, right.node),
+	);
 };
 
 const resolveClipboardBounds = (
@@ -55,12 +58,9 @@ export const buildCanvasClipboardEntries = (
 ): StudioCanvasClipboardEntry[] => {
 	if (nodeIds.length === 0) return [];
 	const nodeIdSet = new Set(nodeIds);
-	const sourceNodes = project.canvas.nodes
-		.filter((node) => nodeIdSet.has(node.id))
-		.sort((left, right) => {
-			if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
-			return left.createdAt - right.createdAt;
-		});
+	const sourceNodes = sortByLayerOrder(
+		project.canvas.nodes.filter((node) => nodeIdSet.has(node.id)),
+	);
 	if (sourceNodes.length === 0) return [];
 	return sourceNodes.reduce<StudioCanvasClipboardEntry[]>((entries, node) => {
 		if (node.type === "scene") {
@@ -84,7 +84,7 @@ export const instantiateCanvasClipboardEntries = (options: {
 	sourceEntries: StudioCanvasClipboardEntry[];
 	targetLeft: number;
 	targetTop: number;
-	existingMaxZIndex: number;
+	existingNodes: CanvasNode[];
 }): CanvasGraphHistoryEntry[] => {
 	const orderedEntries = sortEntriesByNodeOrder(options.sourceEntries);
 	if (orderedEntries.length === 0) return [];
@@ -97,7 +97,7 @@ export const instantiateCanvasClipboardEntries = (options: {
 		targetNodeIdBySourceNodeId.set(item.node.id, createCanvasEntityId("node"));
 	}
 
-	return orderedEntries.reduce<CanvasGraphHistoryEntry[]>(
+	const entries = orderedEntries.reduce<CanvasGraphHistoryEntry[]>(
 		(entries, item, index) => {
 			const sourceNode = item.node;
 			const createdAt = now + index;
@@ -114,7 +114,7 @@ export const instantiateCanvasClipboardEntries = (options: {
 				parentId: mappedParentId,
 				x: sourceNode.x + deltaX,
 				y: sourceNode.y + deltaY,
-				zIndex: options.existingMaxZIndex + index + 1,
+				zIndex: sourceNode.zIndex,
 				createdAt,
 				updatedAt: createdAt,
 			};
@@ -148,4 +148,46 @@ export const instantiateCanvasClipboardEntries = (options: {
 		},
 		[],
 	);
+	if (entries.length === 0) return entries;
+	const entryByNodeId = new Map(entries.map((entry) => [entry.node.id, entry]));
+	const depthByNodeId = new Map<string, number>();
+	const resolveDepth = (nodeId: string): number => {
+		const cached = depthByNodeId.get(nodeId);
+		if (cached !== undefined) return cached;
+		const entry = entryByNodeId.get(nodeId);
+		if (!entry) return 0;
+		const parentId = entry.node.parentId ?? null;
+		if (!parentId || !entryByNodeId.has(parentId)) {
+			depthByNodeId.set(nodeId, 0);
+			return 0;
+		}
+		const depth = resolveDepth(parentId) + 1;
+		depthByNodeId.set(nodeId, depth);
+		return depth;
+	};
+	let workingNodes = [...options.existingNodes];
+	entries
+		.map((entry, sourceIndex) => ({
+			entry,
+			sourceIndex,
+			depth: resolveDepth(entry.node.id),
+		}))
+		.sort((left, right) => {
+			if (left.depth !== right.depth) return left.depth - right.depth;
+			return left.sourceIndex - right.sourceIndex;
+		})
+		.forEach(({ entry }) => {
+			const parentId = entry.node.parentId ?? null;
+			const insertIndex = resolveLayerSiblingCount(workingNodes, parentId);
+			const { zIndex } = allocateInsertZIndex(workingNodes, {
+				parentId,
+				index: insertIndex,
+			});
+			entry.node = {
+				...entry.node,
+				zIndex,
+			};
+			workingNodes = [...workingNodes, entry.node];
+		});
+	return entries;
 };

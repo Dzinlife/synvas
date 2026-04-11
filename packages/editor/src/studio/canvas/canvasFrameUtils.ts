@@ -17,7 +17,7 @@ const compareInnermostFrame = (left: CanvasNode, right: CanvasNode): number => {
 	const areaDelta = resolveNodeArea(left) - resolveNodeArea(right);
 	if (areaDelta !== 0) return areaDelta;
 	if (left.zIndex !== right.zIndex) return right.zIndex - left.zIndex;
-	return right.createdAt - left.createdAt;
+	return right.id.localeCompare(left.id);
 };
 
 export const resolveCanvasWorldRectFromPoints = (

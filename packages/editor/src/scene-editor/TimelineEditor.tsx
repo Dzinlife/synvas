@@ -21,6 +21,7 @@ import {
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
+import { compareLayerOrder } from "@/studio/canvas/layerOrderCoordinator";
 import type {
 	StudioTimelineCanvasDropRequest,
 	StudioTimelineClipboardPayload,
@@ -380,10 +381,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 					: currentProject;
 			const orderedEntries = [...clipboardPayload.entries].sort(
 				(left, right) => {
-					if (left.node.zIndex !== right.node.zIndex) {
-						return left.node.zIndex - right.node.zIndex;
-					}
-					return left.node.createdAt - right.node.createdAt;
+					return compareLayerOrder(left.node, right.node);
 				},
 			);
 			let nextStartFrame = 0;

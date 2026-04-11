@@ -126,7 +126,14 @@ describe("canvasClipboard", () => {
 			sourceEntries,
 			targetLeft: 1000,
 			targetTop: 600,
-			existingMaxZIndex: 5,
+			existingNodes: [
+				...project.canvas.nodes,
+				{
+					...project.canvas.nodes[1],
+					id: "existing-node-10",
+					zIndex: 10,
+				},
+			],
 		});
 		expect(pastedEntries).toHaveLength(2);
 		const sceneEntry = pastedEntries.find(
@@ -146,7 +153,7 @@ describe("canvasClipboard", () => {
 		expect(sceneEntry.node.sceneId).toBe(sceneEntry.scene?.id);
 		expect(sceneEntry.node.name).toBe("Scene 1副本");
 		expect(imageEntry.node.name).toBe("Image 1副本");
-		expect(sceneEntry.node.zIndex).toBeGreaterThan(5);
+		expect(sceneEntry.node.zIndex).toBeGreaterThan(10);
 		expect(imageEntry.node.zIndex).toBeGreaterThan(sceneEntry.node.zIndex);
 	});
 });

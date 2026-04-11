@@ -17,7 +17,6 @@ export interface CanvasSpatialItem {
 	maxY: number;
 	nodeId: string;
 	zIndex: number;
-	createdAt: number;
 }
 
 interface CanvasSpatialNodeSnapshot extends CanvasSpatialItem {
@@ -38,7 +37,6 @@ const resolveNodeSpatialSnapshot = (
 		maxY,
 		nodeId: node.id,
 		zIndex: node.zIndex,
-		createdAt: node.createdAt,
 		visible: !node.hidden,
 	};
 };
@@ -53,7 +51,6 @@ const toSpatialItem = (
 		maxY: snapshot.maxY,
 		nodeId: snapshot.nodeId,
 		zIndex: snapshot.zIndex,
-		createdAt: snapshot.createdAt,
 	};
 };
 
@@ -67,8 +64,7 @@ const isSpatialSnapshotEqual = (
 		left.minY === right.minY &&
 		left.maxX === right.maxX &&
 		left.maxY === right.maxY &&
-		left.zIndex === right.zIndex &&
-		left.createdAt === right.createdAt
+		left.zIndex === right.zIndex
 	);
 };
 
@@ -86,7 +82,7 @@ export const compareCanvasSpatialPaintOrder = (
 	right: CanvasSpatialItem,
 ): number => {
 	if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
-	return left.createdAt - right.createdAt;
+	return left.nodeId.localeCompare(right.nodeId);
 };
 
 export const compareCanvasSpatialHitPriority = (
@@ -94,7 +90,7 @@ export const compareCanvasSpatialHitPriority = (
 	right: CanvasSpatialItem,
 ): number => {
 	if (left.zIndex !== right.zIndex) return right.zIndex - left.zIndex;
-	return right.createdAt - left.createdAt;
+	return right.nodeId.localeCompare(left.nodeId);
 };
 
 export class CanvasSpatialIndex {
@@ -146,8 +142,7 @@ export class CanvasSpatialIndex {
 					prevSnapshot.maxX !== nextSnapshot.maxX ||
 					prevSnapshot.maxY !== nextSnapshot.maxY;
 				const orderChanged =
-					prevSnapshot.zIndex !== nextSnapshot.zIndex ||
-					prevSnapshot.createdAt !== nextSnapshot.createdAt;
+					prevSnapshot.zIndex !== nextSnapshot.zIndex;
 				if (geometryChanged || orderChanged) {
 					removeIds.add(nodeId);
 					insertIds.add(nodeId);

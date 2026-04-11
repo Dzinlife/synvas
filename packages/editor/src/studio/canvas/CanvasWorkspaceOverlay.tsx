@@ -3,7 +3,14 @@ import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
 import { Bug, PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import { AnimatePresence, motion, usePresence } from "motion/react";
 import type React from "react";
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useContext,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import {
 	getSkiaResourceTrackerConfig,
 	getSkiaResourceTrackerStorageKey,
@@ -29,8 +36,11 @@ import {
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
 import type { CanvasNodeDrawerProps } from "@/studio/canvas/node-system/types";
 import CanvasSidebar, {
+	type CanvasSidebarNodeReorderRequest,
+	type CanvasSidebarNodeSelectOptions,
 	type CanvasSidebarTab,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
+import { compareLayerOrderDesc } from "@/studio/canvas/layerOrderCoordinator";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
 import {
@@ -89,7 +99,12 @@ interface CanvasWorkspaceOverlayProps {
 	expandButtonOffsetY: number;
 	sidebarTab: CanvasSidebarTab;
 	onSidebarTabChange: (tab: CanvasSidebarTab) => void;
-	onSidebarNodeSelect: (node: CanvasNode) => void;
+	selectedNodeIds: string[];
+	onSidebarNodeSelect: (
+		node: CanvasNode,
+		options?: CanvasSidebarNodeSelectOptions,
+	) => void;
+	onSidebarNodeReorder?: (request: CanvasSidebarNodeReorderRequest) => void;
 	onCollapseSidebar: () => void;
 	onExpandSidebar: () => void;
 	rightPanelShouldRender: boolean;
@@ -230,14 +245,12 @@ const ActiveNodeToolbarOverlay = ({
 	const [camera, setCamera] = useState(() => {
 		return cameraSharedValue?.value ?? storeCamera;
 	});
-	const cameraListenerIdRef = useRef(81001 + Math.floor(Math.random() * 100000));
+	const cameraListenerIdRef = useRef(
+		81001 + Math.floor(Math.random() * 100000),
+	);
 	const setCameraIfChanged = useCallback((next: CameraState) => {
 		setCamera((prev) => {
-			if (
-				prev.x === next.x &&
-				prev.y === next.y &&
-				prev.zoom === next.zoom
-			) {
+			if (prev.x === next.x && prev.y === next.y && prev.zoom === next.zoom) {
 				return prev;
 			}
 			return next;
@@ -317,7 +330,9 @@ const CanvasWorkspaceOverlay = ({
 	expandButtonOffsetY,
 	sidebarTab,
 	onSidebarTabChange,
+	selectedNodeIds,
 	onSidebarNodeSelect,
+	onSidebarNodeReorder,
 	onCollapseSidebar,
 	onExpandSidebar,
 	rightPanelShouldRender,
@@ -371,10 +386,7 @@ const CanvasWorkspaceOverlay = ({
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
 	const sidebarNodes = useMemo(() => {
 		if (!currentProject) return [];
-		return [...currentProject.canvas.nodes].sort((left, right) => {
-			if (left.zIndex !== right.zIndex) return right.zIndex - left.zIndex;
-			return right.createdAt - left.createdAt;
-		});
+		return [...currentProject.canvas.nodes].sort(compareLayerOrderDesc);
 	}, [currentProject]);
 	const focusedSceneNode = useMemo((): SceneNode | null => {
 		if (!focusedNodeId) return null;
@@ -641,9 +653,11 @@ const CanvasWorkspaceOverlay = ({
 							mode={sidebarMode}
 							nodes={sidebarNodes}
 							activeNodeId={activeNodeId}
+							selectedNodeIds={selectedNodeIds}
 							activeTab={sidebarTab}
 							onTabChange={onSidebarTabChange}
 							onNodeSelect={onSidebarNodeSelect}
+							onNodeReorder={onSidebarNodeReorder}
 							onCollapse={onCollapseSidebar}
 						/>
 					</div>

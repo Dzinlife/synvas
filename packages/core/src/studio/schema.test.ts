@@ -184,6 +184,30 @@ describe("studio schema", () => {
 		}
 	});
 
+	it("zIndex 支持小数并拒绝 NaN/Infinity", () => {
+		const withFloatZIndex = createValidProject();
+		withFloatZIndex.canvas.nodes[1] = {
+			...withFloatZIndex.canvas.nodes[1],
+			zIndex: 1.25,
+		};
+		const parsed = parseStudioProject(withFloatZIndex);
+		expect(parsed.canvas.nodes[1]?.zIndex).toBe(1.25);
+
+		const withNaNZIndex = createValidProject();
+		withNaNZIndex.canvas.nodes[1] = {
+			...withNaNZIndex.canvas.nodes[1],
+			zIndex: Number.NaN,
+		};
+		expect(() => parseStudioProject(withNaNZIndex)).toThrow();
+
+		const withInfinityZIndex = createValidProject();
+		withInfinityZIndex.canvas.nodes[1] = {
+			...withInfinityZIndex.canvas.nodes[1],
+			zIndex: Number.POSITIVE_INFINITY,
+		};
+		expect(() => parseStudioProject(withInfinityZIndex)).toThrow();
+	});
+
 	it("非法 parentId 与环引用会在加载时修复为 null", () => {
 		const project = createValidProject();
 		project.canvas.nodes.push({
@@ -250,8 +274,12 @@ describe("studio schema", () => {
 			updatedAt: 2,
 		});
 		const parsed = parseStudioProject(project);
-		const frameA = parsed.canvas.nodes.find((node) => node.id === "node-frame-a");
-		const frameB = parsed.canvas.nodes.find((node) => node.id === "node-frame-b");
+		const frameA = parsed.canvas.nodes.find(
+			(node) => node.id === "node-frame-a",
+		);
+		const frameB = parsed.canvas.nodes.find(
+			(node) => node.id === "node-frame-b",
+		);
 		const textChild = parsed.canvas.nodes.find(
 			(node) => node.id === "node-text-child",
 		);
@@ -332,7 +360,8 @@ describe("studio schema", () => {
 
 	it("旧的扁平 uri 资产结构应被拒绝", () => {
 		const invalid = createValidProject();
-		(invalid.assets[0] as unknown as { uri?: string }).uri = "file:///legacy.mp4";
+		(invalid.assets[0] as unknown as { uri?: string }).uri =
+			"file:///legacy.mp4";
 		delete (invalid.assets[0] as unknown as { locator?: unknown }).locator;
 		expect(() => parseStudioProject(invalid)).toThrow();
 	});

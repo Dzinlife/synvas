@@ -65,7 +65,11 @@ import type {
 	CanvasNodeDrawerTrigger,
 	CanvasNodeResizeConstraints,
 } from "@/studio/canvas/node-system/types";
-import type { CanvasSidebarTab } from "@/studio/canvas/sidebar/CanvasSidebar";
+import type {
+	CanvasSidebarNodeReorderRequest,
+	CanvasSidebarNodeSelectOptions,
+	CanvasSidebarTab,
+} from "@/studio/canvas/sidebar/CanvasSidebar";
 import {
 	buildCanvasClipboardEntries,
 	type CanvasGraphHistoryEntry as ClipboardCanvasGraphHistoryEntry,
@@ -127,6 +131,15 @@ import {
 	compareCanvasSpatialHitPriority,
 	compareCanvasSpatialPaintOrder,
 } from "./canvasSpatialIndex";
+import {
+	allocateBatchInsertZIndex,
+	allocateInsertZIndex,
+	compareLayerOrder,
+	compareLayerOrderDesc,
+	LAYER_ORDER_REBALANCE_STEP,
+	resolveLayerSiblingCount,
+	sortByLayerOrder,
+} from "./layerOrderCoordinator";
 import {
 	buildNodeFitCamera,
 	buildNodePanCamera,
@@ -506,8 +519,7 @@ const compareCanvasNodePaintOrder = (
 	left: CanvasNode,
 	right: CanvasNode,
 ): number => {
-	if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
-	return left.createdAt - right.createdAt;
+	return compareLayerOrder(left, right);
 };
 
 const compareCanvasNodeHitPriority = (
@@ -519,8 +531,7 @@ const compareCanvasNodeHitPriority = (
 	if (leftIsFrame !== rightIsFrame) {
 		return leftIsFrame ? 1 : -1;
 	}
-	if (left.zIndex !== right.zIndex) return right.zIndex - left.zIndex;
-	return right.createdAt - left.createdAt;
+	return compareLayerOrderDesc(left, right);
 };
 
 const resolveTopHitNodeByLinearScan = (
@@ -809,9 +820,15 @@ interface ResolvedNodeDrawerTarget {
 }
 
 const isProjectEqualExceptCamera = (
-	left: { currentProject: ReturnType<typeof useProjectStore.getState>["currentProject"] },
+	left: {
+		currentProject: ReturnType<
+			typeof useProjectStore.getState
+		>["currentProject"];
+	},
 	right: {
-		currentProject: ReturnType<typeof useProjectStore.getState>["currentProject"];
+		currentProject: ReturnType<
+			typeof useProjectStore.getState
+		>["currentProject"];
 	},
 ): boolean => {
 	const leftProject = left.currentProject;
@@ -847,7 +864,9 @@ const CanvasWorkspace = () => {
 	const updateCanvasNodeLayoutBatch = useProjectStore(
 		(state) => state.updateCanvasNodeLayoutBatch,
 	);
-	const ensureProjectAsset = useProjectStore((state) => state.ensureProjectAsset);
+	const ensureProjectAsset = useProjectStore(
+		(state) => state.ensureProjectAsset,
+	);
 	const updateProjectAssetMeta = useProjectStore(
 		(state) => state.updateProjectAssetMeta,
 	);
@@ -907,8 +926,9 @@ const CanvasWorkspace = () => {
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
 	const initialCameraRef = useRef(getCanvasCamera());
 	const isCanvasInteractionLocked = Boolean(focusedNodeId);
-	const [canvasToolMode, setCanvasToolMode] =
-		useState<CanvasToolMode>(CANVAS_DEFAULT_TOOL_MODE);
+	const [canvasToolMode, setCanvasToolMode] = useState<CanvasToolMode>(
+		CANVAS_DEFAULT_TOOL_MODE,
+	);
 	const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
 	const [visibleDrawerHeight, setVisibleDrawerHeight] = useState(
 		CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
@@ -992,22 +1012,18 @@ const CanvasWorkspace = () => {
 		},
 		[],
 	);
-	const {
-		cameraSharedValue,
-		getCamera,
-		applyCamera,
-		stopCameraAnimation,
-	} = useCanvasCameraController({
-		camera: initialCameraRef.current,
-		onChange: setCanvasCamera,
-		onAnimationStateChange: (isAnimating) => {
-			setIsCameraAnimating(isAnimating);
-			if (!isAnimating) {
-				pendingCameraCullUpdateKindRef.current = null;
-				updateTileLodTransition(null);
-			}
-		},
-	});
+	const { cameraSharedValue, getCamera, applyCamera, stopCameraAnimation } =
+		useCanvasCameraController({
+			camera: initialCameraRef.current,
+			onChange: setCanvasCamera,
+			onAnimationStateChange: (isAnimating) => {
+				setIsCameraAnimating(isAnimating);
+				if (!isAnimating) {
+					pendingCameraCullUpdateKindRef.current = null;
+					updateTileLodTransition(null);
+				}
+			},
+		});
 	const clearPanCullIdleTimer = useEffectEvent(() => {
 		const timerId = panCullIdleTimerRef.current;
 		if (timerId === null) return;
@@ -1017,11 +1033,7 @@ const CanvasWorkspace = () => {
 		}
 	});
 	const setRenderCullStateWithTransition = useEffectEvent(
-		(
-			updater: (
-				prev: CanvasRenderCullState,
-			) => CanvasRenderCullState,
-		) => {
+		(updater: (prev: CanvasRenderCullState) => CanvasRenderCullState) => {
 			startTransition(() => {
 				setRenderCullState(updater);
 			});
@@ -1067,20 +1079,20 @@ const CanvasWorkspace = () => {
 			};
 		});
 	});
-		const schedulePanCullCommit = useEffectEvent((camera: CameraState) => {
-			panCullPendingCameraRef.current = camera;
-			if (!panCullBurstActiveRef.current) {
-				panCullBurstActiveRef.current = true;
-				flushPendingPanCullCommit();
-			}
-			clearPanCullIdleTimer();
-			if (typeof window === "undefined") return;
-			panCullIdleTimerRef.current = window.setTimeout(() => {
-				panCullIdleTimerRef.current = null;
-				panCullBurstActiveRef.current = false;
-				flushPendingPanCullCommit();
-			}, PAN_CULL_IDLE_FLUSH_MS);
-		});
+	const schedulePanCullCommit = useEffectEvent((camera: CameraState) => {
+		panCullPendingCameraRef.current = camera;
+		if (!panCullBurstActiveRef.current) {
+			panCullBurstActiveRef.current = true;
+			flushPendingPanCullCommit();
+		}
+		clearPanCullIdleTimer();
+		if (typeof window === "undefined") return;
+		panCullIdleTimerRef.current = window.setTimeout(() => {
+			panCullIdleTimerRef.current = null;
+			panCullBurstActiveRef.current = false;
+			flushPendingPanCullCommit();
+		}, PAN_CULL_IDLE_FLUSH_MS);
+	});
 	const lockRenderCullToViewportRect = useEffectEvent(
 		(viewportRect: CanvasViewportWorldRect | null, camera: CameraState) => {
 			clearPanCullIdleTimer();
@@ -1104,7 +1116,10 @@ const CanvasWorkspace = () => {
 		},
 	);
 	const applyInstantCameraWithCullIntent = useEffectEvent(
-		(nextCamera: CameraState, kind: Exclude<PendingCameraCullUpdateKind, "smooth">) => {
+		(
+			nextCamera: CameraState,
+			kind: Exclude<PendingCameraCullUpdateKind, "smooth">,
+		) => {
 			const currentCamera = getCamera();
 			if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
 			updateTileLodTransition(null);
@@ -1141,21 +1156,21 @@ const CanvasWorkspace = () => {
 			});
 		},
 	);
-		const handleCameraStoreCameraChange = useEffectEvent(
-			(nextCamera: CameraState, previousCamera: CameraState) => {
-				const pendingKind = pendingCameraCullUpdateKindRef.current;
-				pendingCameraCullUpdateKindRef.current = null;
-				if (isCameraAnimating || pendingKind === "smooth") return;
-				const shouldThrottleCullUpdate =
-					pendingKind === "pan" &&
-					!isCameraStateEqual(previousCamera, nextCamera);
-				if (shouldThrottleCullUpdate) {
-					schedulePanCullCommit(nextCamera);
-					return;
-				}
-				commitLiveCullCamera(nextCamera);
-			},
-		);
+	const handleCameraStoreCameraChange = useEffectEvent(
+		(nextCamera: CameraState, previousCamera: CameraState) => {
+			const pendingKind = pendingCameraCullUpdateKindRef.current;
+			pendingCameraCullUpdateKindRef.current = null;
+			if (isCameraAnimating || pendingKind === "smooth") return;
+			const shouldThrottleCullUpdate =
+				pendingKind === "pan" &&
+				!isCameraStateEqual(previousCamera, nextCamera);
+			if (shouldThrottleCullUpdate) {
+				schedulePanCullCommit(nextCamera);
+				return;
+			}
+			commitLiveCullCamera(nextCamera);
+		},
+	);
 	const syncCameraFromStore = useEffectEvent(() => {
 		stopCameraAnimation();
 		applyInstantCameraWithCullIntent(getCanvasCamera(), "immediate");
@@ -1226,16 +1241,19 @@ const CanvasWorkspace = () => {
 					afterSnapshot.samplesByType?.[item.type] ?? [],
 				]),
 			);
-			console.warn(`${SKIA_RESOURCE_TRACKER_LOG_TAG} project switch resource delta`, {
-				fromProjectId: previousProjectId,
-				toProjectId: currentProjectId,
-				beforeTotal: beforeSnapshot.total,
-				afterTotal: afterSnapshot.total,
-				totalDelta: snapshotDiff.totalDelta,
-				byTypeDelta: snapshotDiff.byTypeDelta,
-				increasedTypeSamples,
-				disposalQueueStats: getSkiaDisposalStats(),
-			});
+			console.warn(
+				`${SKIA_RESOURCE_TRACKER_LOG_TAG} project switch resource delta`,
+				{
+					fromProjectId: previousProjectId,
+					toProjectId: currentProjectId,
+					beforeTotal: beforeSnapshot.total,
+					afterTotal: afterSnapshot.total,
+					totalDelta: snapshotDiff.totalDelta,
+					byTypeDelta: snapshotDiff.byTypeDelta,
+					increasedTypeSamples,
+					disposalQueueStats: getSkiaDisposalStats(),
+				},
+			);
 		};
 		if (typeof window === "undefined") {
 			captureAndReportResourceDiff();
@@ -1986,9 +2004,7 @@ const CanvasWorkspace = () => {
 			if (deltaTime < 0 || deltaTime > DOUBLE_TAP_MAX_DELAY_MS) return false;
 			const deltaX = current.clientX - previous.clientX;
 			const deltaY = current.clientY - previous.clientY;
-			return (
-				Math.hypot(deltaX, deltaY) <= DOUBLE_TAP_MAX_DISTANCE_PX
-			);
+			return Math.hypot(deltaX, deltaY) <= DOUBLE_TAP_MAX_DISTANCE_PX;
 		},
 		[],
 	);
@@ -2315,31 +2331,31 @@ const CanvasWorkspace = () => {
 			if (nextZoom === currentCamera.zoom) return;
 			const safeCurrentZoom = Math.max(currentCamera.zoom, CAMERA_ZOOM_EPSILON);
 			const safeNextZoom = Math.max(nextZoom, CAMERA_ZOOM_EPSILON);
-				const anchorX = stageSize.width > 0 ? stageSize.width / 2 : 0;
-				const anchorY = stageSize.height > 0 ? stageSize.height / 2 : 0;
-				const anchorWorldX = anchorX / safeCurrentZoom - currentCamera.x;
-				const anchorWorldY = anchorY / safeCurrentZoom - currentCamera.y;
-				applyInstantCameraWithCullIntent(
-					{
-						x: anchorX / safeNextZoom - anchorWorldX,
-						y: anchorY / safeNextZoom - anchorWorldY,
-						zoom: nextZoom,
-					},
-					"immediate",
-				);
-			},
-			[
-				applyInstantCameraWithCullIntent,
-				dynamicMinZoom,
-				getCamera,
-				stageSize.height,
-				stageSize.width,
-			],
-		);
+			const anchorX = stageSize.width > 0 ? stageSize.width / 2 : 0;
+			const anchorY = stageSize.height > 0 ? stageSize.height / 2 : 0;
+			const anchorWorldX = anchorX / safeCurrentZoom - currentCamera.x;
+			const anchorWorldY = anchorY / safeCurrentZoom - currentCamera.y;
+			applyInstantCameraWithCullIntent(
+				{
+					x: anchorX / safeNextZoom - anchorWorldX,
+					y: anchorY / safeNextZoom - anchorWorldY,
+					zoom: nextZoom,
+				},
+				"immediate",
+			);
+		},
+		[
+			applyInstantCameraWithCullIntent,
+			dynamicMinZoom,
+			getCamera,
+			stageSize.height,
+			stageSize.width,
+		],
+	);
 
-		const handleResetView = useCallback(() => {
-			applySmoothCameraWithCullLock(DEFAULT_CAMERA);
-		}, [applySmoothCameraWithCullLock]);
+	const handleResetView = useCallback(() => {
+		applySmoothCameraWithCullLock(DEFAULT_CAMERA);
+	}, [applySmoothCameraWithCullLock]);
 
 	const handleContainerWheel = useCallback(
 		(event: WheelEvent) => {
@@ -2498,14 +2514,14 @@ const CanvasWorkspace = () => {
 			}
 			if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
 				const legacyNodeIds = sortedNodes
-				.filter((node) =>
-					isNodeIntersectRect(node, {
-						left,
-						right,
-						top,
-						bottom,
-					}),
-				)
+					.filter((node) =>
+						isNodeIntersectRect(node, {
+							left,
+							right,
+							top,
+							bottom,
+						}),
+					)
 					.map((node) => node.id);
 				warnCanvasSpatialIndexMismatch(
 					"marquee",
@@ -2565,7 +2581,7 @@ const CanvasWorkspace = () => {
 		): Array<{
 			nodeId: string;
 			beforeParentId: string | null;
-			afterParentId: string | null;
+			beforeZIndex: number;
 		}> => {
 			const createdFrame = nodes.find(
 				(node) => node.id === createdFrameId && node.type === "frame",
@@ -2575,7 +2591,7 @@ const CanvasWorkspace = () => {
 			const reparentChanges: Array<{
 				nodeId: string;
 				beforeParentId: string | null;
-				afterParentId: string | null;
+				beforeZIndex: number;
 			}> = [];
 			for (const node of nodes) {
 				if (node.id === createdFrameId) continue;
@@ -2583,16 +2599,20 @@ const CanvasWorkspace = () => {
 				if (!isCanvasWorldRectFullyContained(nodeRect, createdFrameRect)) {
 					continue;
 				}
-				const targetParentId = resolveInnermostContainingFrameId(nodes, nodeRect, {
-					excludeNodeIds: new Set([node.id]),
-				});
+				const targetParentId = resolveInnermostContainingFrameId(
+					nodes,
+					nodeRect,
+					{
+						excludeNodeIds: new Set([node.id]),
+					},
+				);
 				if (targetParentId !== createdFrameId) continue;
 				const beforeParentId = node.parentId ?? null;
 				if (beforeParentId === createdFrameId) continue;
 				reparentChanges.push({
 					nodeId: node.id,
 					beforeParentId,
-					afterParentId: createdFrameId,
+					beforeZIndex: node.zIndex,
 				});
 			}
 			return reparentChanges;
@@ -2640,15 +2660,151 @@ const CanvasWorkspace = () => {
 			projectAfterCreate.canvas.nodes,
 			createdFrame.id,
 		);
+		let finalizedReparentChanges: Array<{
+			nodeId: string;
+			beforeParentId: string | null;
+			afterParentId: string | null;
+			beforeZIndex: number;
+			afterZIndex: number;
+		}> = [];
 		if (reparentChanges.length > 0) {
-			updateCanvasNodeLayoutBatch(
-				reparentChanges.map((change) => ({
-					nodeId: change.nodeId,
-					patch: {
-						parentId: change.afterParentId,
-					},
-				})),
+			const beforeChangeByNodeId = new Map(
+				reparentChanges.map((change) => [change.nodeId, change]),
 			);
+			let workingNodes = [...projectAfterCreate.canvas.nodes];
+			const layoutPatchByNodeId = new Map<
+				string,
+				{ parentId?: string | null; zIndex?: number }
+			>();
+			const orderedChangeIds = reparentChanges
+				.map((change) => change.nodeId)
+				.sort((leftNodeId, rightNodeId) => {
+					const leftNode = workingNodes.find((node) => node.id === leftNodeId);
+					const rightNode = workingNodes.find(
+						(node) => node.id === rightNodeId,
+					);
+					if (!leftNode || !rightNode)
+						return leftNodeId.localeCompare(rightNodeId);
+					return compareLayerOrder(leftNode, rightNode);
+				});
+			for (const nodeId of orderedChangeIds) {
+				const currentNode = workingNodes.find((node) => node.id === nodeId);
+				if (!currentNode) continue;
+				const siblingInsertIndex = resolveLayerSiblingCount(
+					workingNodes,
+					createdFrame.id,
+					[nodeId],
+				);
+				const { zIndex, rebalancePatches } = allocateInsertZIndex(
+					workingNodes,
+					{
+						parentId: createdFrame.id,
+						index: siblingInsertIndex,
+						movingNodeIds: [nodeId],
+					},
+				);
+				if (rebalancePatches.length > 0) {
+					const rebalancePatchByNodeId = new Map(
+						rebalancePatches.map((patch) => [patch.nodeId, patch.zIndex]),
+					);
+					workingNodes = workingNodes.map((node) => {
+						const nextZIndex = rebalancePatchByNodeId.get(node.id);
+						if (nextZIndex === undefined || nextZIndex === node.zIndex) {
+							return node;
+						}
+						const nextPatch = layoutPatchByNodeId.get(node.id) ?? {};
+						layoutPatchByNodeId.set(node.id, {
+							...nextPatch,
+							zIndex: nextZIndex,
+						});
+						return {
+							...node,
+							zIndex: nextZIndex,
+						};
+					});
+				}
+				workingNodes = workingNodes.map((node) => {
+					if (node.id !== nodeId) return node;
+					const nextPatch = layoutPatchByNodeId.get(node.id) ?? {};
+					layoutPatchByNodeId.set(node.id, {
+						...nextPatch,
+						parentId: createdFrame.id,
+						zIndex,
+					});
+					return {
+						...node,
+						parentId: createdFrame.id,
+						zIndex,
+					};
+				});
+			}
+			const childZIndices = orderedChangeIds
+				.map(
+					(nodeId) => workingNodes.find((node) => node.id === nodeId)?.zIndex,
+				)
+				.filter((zIndex): zIndex is number => Number.isFinite(zIndex));
+			if (childZIndices.length > 0) {
+				const frameNode = workingNodes.find(
+					(node) => node.id === createdFrame.id,
+				);
+				const frameZIndex = frameNode?.zIndex ?? createdFrame.zIndex;
+				const nextFrameZIndex =
+					Math.min(...childZIndices) - LAYER_ORDER_REBALANCE_STEP;
+				if (nextFrameZIndex !== frameZIndex) {
+					workingNodes = workingNodes.map((node) => {
+						if (node.id !== createdFrame.id) return node;
+						const nextPatch = layoutPatchByNodeId.get(node.id) ?? {};
+						layoutPatchByNodeId.set(node.id, {
+							...nextPatch,
+							zIndex: nextFrameZIndex,
+						});
+						return {
+							...node,
+							zIndex: nextFrameZIndex,
+						};
+					});
+				}
+			}
+			if (layoutPatchByNodeId.size > 0) {
+				updateCanvasNodeLayoutBatch(
+					[...layoutPatchByNodeId.entries()].map(([nodeId, patch]) => ({
+						nodeId,
+						patch,
+					})),
+				);
+			}
+			finalizedReparentChanges = orderedChangeIds
+				.map((nodeId) => {
+					const before = beforeChangeByNodeId.get(nodeId);
+					if (!before) return null;
+					const afterNode =
+						workingNodes.find((node) => node.id === nodeId) ?? null;
+					if (!afterNode) return null;
+					return {
+						nodeId,
+						beforeParentId: before.beforeParentId,
+						afterParentId: afterNode.parentId ?? null,
+						beforeZIndex: before.beforeZIndex,
+						afterZIndex: afterNode.zIndex,
+					};
+				})
+				.filter(
+					(
+						change,
+					): change is {
+						nodeId: string;
+						beforeParentId: string | null;
+						afterParentId: string | null;
+						beforeZIndex: number;
+						afterZIndex: number;
+					} => {
+						if (!change) return false;
+						return (
+							change.beforeParentId !== change.afterParentId ||
+							change.beforeZIndex !== change.afterZIndex
+						);
+					},
+				);
 		}
 		const projectAfterReparent = useProjectStore.getState().currentProject;
 		if (!projectAfterReparent) return false;
@@ -2659,7 +2815,7 @@ const CanvasWorkspace = () => {
 		pushHistory({
 			kind: "canvas.frame-create",
 			createdFrame: historyFrameNode,
-			reparentChanges,
+			reparentChanges: finalizedReparentChanges,
 			focusNodeId: projectAfterReparent.ui.focusedNodeId,
 		});
 		commitSelectedNodeIds([historyFrameNode.id]);
@@ -2688,33 +2844,80 @@ const CanvasWorkspace = () => {
 	const resolveFrameReparentChangesAfterDrag = useCallback(
 		(nodes: CanvasNode[], movedNodeIds: string[]) => {
 			const rootNodeIds = resolveRootNodeIdsFromMovedSet(nodes, movedNodeIds);
-			if (rootNodeIds.length === 0) return [] as Array<{
-				nodeId: string;
-				afterParentId: string | null;
-			}>;
-			const changes: Array<{
-				nodeId: string;
-				afterParentId: string | null;
-			}> = [];
-			for (const rootNodeId of rootNodeIds) {
-				const node = nodes.find((item) => item.id === rootNodeId);
+			if (rootNodeIds.length === 0)
+				return [] as Array<{
+					nodeId: string;
+					afterParentId: string | null;
+					afterZIndex: number;
+				}>;
+			let workingNodes = [...nodes];
+			const changeByNodeId = new Map<
+				string,
+				{
+					afterParentId: string | null;
+					afterZIndex: number;
+				}
+			>();
+			const orderedRootNodeIds = sortByLayerOrder(
+				rootNodeIds
+					.map(
+						(nodeId) => workingNodes.find((node) => node.id === nodeId) ?? null,
+					)
+					.filter((node): node is CanvasNode => Boolean(node)),
+			).map((node) => node.id);
+			for (const rootNodeId of orderedRootNodeIds) {
+				const node = workingNodes.find((item) => item.id === rootNodeId);
 				if (!node) continue;
 				const nodeRect = resolveCanvasNodeWorldRect(node);
-				const descendantNodeIds = collectCanvasDescendantNodeIds(nodes, [
+				const descendantNodeIds = collectCanvasDescendantNodeIds(workingNodes, [
 					rootNodeId,
 				]);
 				const excludedNodeIds = new Set<string>([
 					rootNodeId,
 					...descendantNodeIds,
 				]);
-				const nextParentId = resolveInnermostContainingFrameId(nodes, nodeRect, {
-					excludeNodeIds: excludedNodeIds,
-				});
+				const nextParentId = resolveInnermostContainingFrameId(
+					workingNodes,
+					nodeRect,
+					{
+						excludeNodeIds: excludedNodeIds,
+					},
+				);
 				const currentParentId = node.parentId ?? null;
 				if (nextParentId === currentParentId) continue;
+				const siblingInsertIndex = resolveLayerSiblingCount(
+					workingNodes,
+					nextParentId,
+					[rootNodeId],
+				);
+				const { zIndex } = allocateInsertZIndex(workingNodes, {
+					parentId: nextParentId,
+					index: siblingInsertIndex,
+					movingNodeIds: [rootNodeId],
+				});
+				workingNodes = workingNodes.map((workingNode) => {
+					if (workingNode.id !== rootNodeId) return workingNode;
+					changeByNodeId.set(rootNodeId, {
+						afterParentId: nextParentId,
+						afterZIndex: zIndex,
+					});
+					return {
+						...workingNode,
+						parentId: nextParentId,
+						zIndex,
+					};
+				});
+			}
+			const changes: Array<{
+				nodeId: string;
+				afterParentId: string | null;
+				afterZIndex: number;
+			}> = [];
+			for (const [nodeId, change] of changeByNodeId) {
 				changes.push({
-					nodeId: rootNodeId,
-					afterParentId: nextParentId,
+					nodeId,
+					afterParentId: change.afterParentId,
+					afterZIndex: change.afterZIndex,
 				});
 			}
 			return changes;
@@ -2772,22 +2975,19 @@ const CanvasWorkspace = () => {
 		const latestProject = useProjectStore.getState().currentProject;
 		if (!latestProject || nodeIds.length === 0) return [];
 		const sourceNodeIdSet = new Set(nodeIds);
-		const sourceNodes = latestProject.canvas.nodes
-			.filter((node) => sourceNodeIdSet.has(node.id))
-			.sort((left, right) => {
-				if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
-				return left.createdAt - right.createdAt;
-			});
+		const sourceNodes = sortByLayerOrder(
+			latestProject.canvas.nodes.filter((node) => sourceNodeIdSet.has(node.id)),
+		);
 		if (sourceNodes.length === 0) return [];
 		const targetNodeIdBySourceNodeId = new Map<string, string>();
 		for (const sourceNode of sourceNodes) {
-			targetNodeIdBySourceNodeId.set(sourceNode.id, createCanvasEntityId("node"));
+			targetNodeIdBySourceNodeId.set(
+				sourceNode.id,
+				createCanvasEntityId("node"),
+			);
 		}
-		const maxZIndex = latestProject.canvas.nodes.reduce((maxValue, node) => {
-			return Math.max(maxValue, node.zIndex);
-		}, -1);
 		const now = Date.now();
-		return sourceNodes.reduce<CanvasGraphHistoryEntry[]>(
+		const copiedEntries = sourceNodes.reduce<CanvasGraphHistoryEntry[]>(
 			(entries, sourceNode, index) => {
 				const createdAt = now + index;
 				const copyName = buildCopyName(sourceNode.name);
@@ -2799,7 +2999,7 @@ const CanvasWorkspace = () => {
 					id: targetNodeIdBySourceNodeId.get(sourceNode.id) ?? sourceNode.id,
 					name: copyName,
 					parentId: mappedParentId,
-					zIndex: maxZIndex + index + 1,
+					zIndex: sourceNode.zIndex,
 					createdAt,
 					updatedAt: createdAt,
 				};
@@ -2830,6 +3030,50 @@ const CanvasWorkspace = () => {
 			},
 			[],
 		);
+		if (copiedEntries.length === 0) return copiedEntries;
+		const entryByNodeId = new Map(
+			copiedEntries.map((entry) => [entry.node.id, entry]),
+		);
+		const depthByNodeId = new Map<string, number>();
+		const resolveDepth = (nodeId: string): number => {
+			const cached = depthByNodeId.get(nodeId);
+			if (cached !== undefined) return cached;
+			const entry = entryByNodeId.get(nodeId);
+			if (!entry) return 0;
+			const parentId = entry.node.parentId ?? null;
+			if (!parentId || !entryByNodeId.has(parentId)) {
+				depthByNodeId.set(nodeId, 0);
+				return 0;
+			}
+			const depth = resolveDepth(parentId) + 1;
+			depthByNodeId.set(nodeId, depth);
+			return depth;
+		};
+		let workingNodes = [...latestProject.canvas.nodes];
+		copiedEntries
+			.map((entry, sourceIndex) => ({
+				entry,
+				sourceIndex,
+				depth: resolveDepth(entry.node.id),
+			}))
+			.sort((left, right) => {
+				if (left.depth !== right.depth) return left.depth - right.depth;
+				return left.sourceIndex - right.sourceIndex;
+			})
+			.forEach(({ entry }) => {
+				const parentId = entry.node.parentId ?? null;
+				const insertIndex = resolveLayerSiblingCount(workingNodes, parentId);
+				const { zIndex } = allocateInsertZIndex(workingNodes, {
+					parentId,
+					index: insertIndex,
+				});
+				entry.node = {
+					...entry.node,
+					zIndex,
+				};
+				workingNodes = [...workingNodes, entry.node];
+			});
+		return copiedEntries;
 	}, []);
 
 	const resolvePointerTimelineDropTarget = useCallback(() => {
@@ -2851,14 +3095,12 @@ const CanvasWorkspace = () => {
 			return dragSession.dragNodeIds
 				.map((nodeId) => {
 					return (
-						latestProject.canvas.nodes.find((node) => node.id === nodeId) ?? null
+						latestProject.canvas.nodes.find((node) => node.id === nodeId) ??
+						null
 					);
 				})
 				.filter((node): node is CanvasNode => Boolean(node))
-				.sort((left, right) => {
-					if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
-					return left.createdAt - right.createdAt;
-				})
+				.sort(compareLayerOrder)
 				.filter((node) => {
 					const definition = getCanvasNodeDefinition(node.type);
 					return Boolean(definition.toTimelineClipboardElement);
@@ -2906,13 +3148,19 @@ const CanvasWorkspace = () => {
 			const timelineRuntime = runtimeManager?.getActiveEditTimelineRuntime();
 			if (!timelineRuntime) return null;
 			const timelineState = timelineRuntime.timelineStore.getState();
-			const ratio = getPixelsPerFrame(timelineState.fps, timelineState.timelineScale);
+			const ratio = getPixelsPerFrame(
+				timelineState.fps,
+				timelineState.timelineScale,
+			);
 			if (!Number.isFinite(ratio) || ratio <= 0) return null;
 			return resolveMaterialDropTarget(
 				{
 					fps: timelineState.fps,
 					ratio,
-					defaultDurationFrames: Math.max(1, secondsToFrames(5, timelineState.fps)),
+					defaultDurationFrames: Math.max(
+						1,
+						secondsToFrames(5, timelineState.fps),
+					),
 					elements: timelineState.elements,
 					trackAssignments: getStoredTrackAssignments(timelineState.elements),
 					trackRoleMap: getTrackRoleMapFromTracks(timelineState.tracks),
@@ -3025,7 +3273,9 @@ const CanvasWorkspace = () => {
 	const resetCanvasDragSession = useCallback(
 		(dragSession: NodeDragSession) => {
 			if (dragSession.copyEntries.length > 0) {
-				const copyNodeIds = dragSession.copyEntries.map((entry) => entry.node.id);
+				const copyNodeIds = dragSession.copyEntries.map(
+					(entry) => entry.node.id,
+				);
 				removeCanvasGraphBatch(copyNodeIds);
 				for (const copyNodeId of copyNodeIds) {
 					delete dragSession.snapshots[copyNodeId];
@@ -3045,8 +3295,11 @@ const CanvasWorkspace = () => {
 						},
 					};
 				})
-				.filter((entry): entry is { nodeId: string; patch: { x: number; y: number } } =>
-					Boolean(entry),
+				.filter(
+					(
+						entry,
+					): entry is { nodeId: string; patch: { x: number; y: number } } =>
+						Boolean(entry),
 				);
 			if (rollbackEntries.length > 0) {
 				updateCanvasNodeLayoutBatch(rollbackEntries);
@@ -3057,7 +3310,11 @@ const CanvasWorkspace = () => {
 			dragSession.guideValuesCache = null;
 			clearCanvasSnapGuides();
 		},
-		[clearCanvasSnapGuides, removeCanvasGraphBatch, updateCanvasNodeLayoutBatch],
+		[
+			clearCanvasSnapGuides,
+			removeCanvasGraphBatch,
+			updateCanvasNodeLayoutBatch,
+		],
 	);
 
 	const buildTimelinePayloadFromCanvasDragSession = useCallback(
@@ -3136,7 +3393,11 @@ const CanvasWorkspace = () => {
 	const commitCanvasTimelineDrop = useCallback(
 		(dragSession: NodeDragSession): boolean => {
 			const dropTarget = dragSession.timelineDropTarget;
-			if (!dropTarget || dropTarget.zone !== "timeline" || !dropTarget.canDrop) {
+			if (
+				!dropTarget ||
+				dropTarget.zone !== "timeline" ||
+				!dropTarget.canDrop
+			) {
 				return false;
 			}
 			if (
@@ -3194,13 +3455,13 @@ const CanvasWorkspace = () => {
 						)
 					: pasteResult.insertedIds.length <= 1
 						? pasteResult.elements
-					: insertElementsIntoMainTrackGroup(
-							pasteResult.elements,
-							pasteResult.insertedIds,
-							dropTarget.time,
-							postProcessOptions,
-							dropTarget.time,
-						)
+						: insertElementsIntoMainTrackGroup(
+								pasteResult.elements,
+								pasteResult.insertedIds,
+								dropTarget.time,
+								postProcessOptions,
+								dropTarget.time,
+							)
 				: pasteResult.elements;
 			timelineState.setElements(committedElements);
 			timelineState.setSelectedIds(
@@ -3303,7 +3564,9 @@ const CanvasWorkspace = () => {
 
 	const createTimelineClipboardConvertedNodesAt = useCallback(
 		(
-			convertedInputs: ReturnType<typeof resolveTimelineClipboardConvertedInputs>,
+			convertedInputs: ReturnType<
+				typeof resolveTimelineClipboardConvertedInputs
+			>,
 			anchorPoint: { x: number; y: number },
 		): boolean => {
 			if (convertedInputs.length === 0) return false;
@@ -3342,7 +3605,11 @@ const CanvasWorkspace = () => {
 	);
 
 	const handleDropTimelineElementsToCanvas = useCallback(
-		({ payload, clientX, clientY }: StudioTimelineCanvasDropRequest): boolean => {
+		({
+			payload,
+			clientX,
+			clientY,
+		}: StudioTimelineCanvasDropRequest): boolean => {
 			const isCanvasDropPoint = (() => {
 				if (typeof document === "undefined") return false;
 				const timelineEditors = document.querySelectorAll<HTMLElement>(
@@ -3385,7 +3652,9 @@ const CanvasWorkspace = () => {
 					"[data-track-drop-zone]",
 				);
 				for (const zone of timelineDropZones) {
-					if (!isPointInsideRect(clientX, clientY, zone.getBoundingClientRect())) {
+					if (
+						!isPointInsideRect(clientX, clientY, zone.getBoundingClientRect())
+					) {
 						continue;
 					}
 					return false;
@@ -3394,7 +3663,9 @@ const CanvasWorkspace = () => {
 					'[data-canvas-overlay-ui="true"]',
 				);
 				for (const layer of overlayLayers) {
-					if (!isPointInsideRect(clientX, clientY, layer.getBoundingClientRect())) {
+					if (
+						!isPointInsideRect(clientX, clientY, layer.getBoundingClientRect())
+					) {
 						continue;
 					}
 					return false;
@@ -3412,8 +3683,7 @@ const CanvasWorkspace = () => {
 				return false;
 			})();
 			if (!isCanvasDropPoint) return false;
-			const convertedInputs =
-				resolveTimelineClipboardConvertedInputs(payload);
+			const convertedInputs = resolveTimelineClipboardConvertedInputs(payload);
 			if (convertedInputs.length === 0) return true;
 			const worldPoint = resolveWorldPoint(clientX, clientY);
 			createTimelineClipboardConvertedNodesAt(convertedInputs, worldPoint);
@@ -3437,11 +3707,13 @@ const CanvasWorkspace = () => {
 				new Set(latestProject.canvas.nodes.map((node) => node.id)),
 			);
 			if (normalizedNodeIds.length === 0) return false;
-			const expandedNodeIds = resolveExpandedNodeIdsWithDescendants(
-				normalizedNodeIds,
-			);
+			const expandedNodeIds =
+				resolveExpandedNodeIdsWithDescendants(normalizedNodeIds);
 			if (expandedNodeIds.length === 0) return false;
-			const entries = buildCanvasClipboardEntries(latestProject, expandedNodeIds);
+			const entries = buildCanvasClipboardEntries(
+				latestProject,
+				expandedNodeIds,
+			);
 			if (entries.length === 0) return false;
 			setStudioClipboardPayload({
 				kind: "canvas-nodes",
@@ -3461,7 +3733,9 @@ const CanvasWorkspace = () => {
 					return Boolean(entry.scene);
 				});
 			}
-			return resolveTimelineClipboardConvertedInputs(clipboardPayload).length > 0;
+			return (
+				resolveTimelineClipboardConvertedInputs(clipboardPayload).length > 0
+			);
 		},
 		[resolveTimelineClipboardConvertedInputs],
 	);
@@ -3473,14 +3747,11 @@ const CanvasWorkspace = () => {
 			if (clipboardPayload.kind === "canvas-nodes") {
 				const latestProject = useProjectStore.getState().currentProject;
 				if (!latestProject) return false;
-				const maxZIndex = latestProject.canvas.nodes.reduce((maxValue, node) => {
-					return Math.max(maxValue, node.zIndex);
-				}, -1);
 				const entries = instantiateCanvasClipboardEntries({
 					sourceEntries: clipboardPayload.entries,
 					targetLeft: anchorPoint.x,
 					targetTop: anchorPoint.y,
-					existingMaxZIndex: maxZIndex,
+					existingNodes: latestProject.canvas.nodes,
 				});
 				if (entries.length === 0) return false;
 				appendCanvasGraphBatch(entries);
@@ -3549,17 +3820,17 @@ const CanvasWorkspace = () => {
 				guideValues: null,
 			};
 		},
-			[
-				commitCanvasResizeCursor,
-				commitCanvasResizeCursorByAnchor,
-				clearPendingClickSuppression,
-				clearCanvasMarquee,
-				clearCanvasSnapGuides,
-				clearHoveredNode,
-				focusedNodeId,
-				commitSelectedNodeIds,
-				handleNodeActivate,
-				isCanvasInteractionLocked,
+		[
+			commitCanvasResizeCursor,
+			commitCanvasResizeCursorByAnchor,
+			clearPendingClickSuppression,
+			clearCanvasMarquee,
+			clearCanvasSnapGuides,
+			clearHoveredNode,
+			focusedNodeId,
+			commitSelectedNodeIds,
+			handleNodeActivate,
+			isCanvasInteractionLocked,
 			normalizedSelectedNodeIds.length,
 			resolveNodeResizeConstraints,
 		],
@@ -3724,15 +3995,15 @@ const CanvasWorkspace = () => {
 				before: resizeSession.before,
 				after,
 				focusNodeId: latestProject.ui.focusedNodeId,
-				});
-			},
-			[
-				clearCanvasSnapGuides,
-				commitCanvasResizeCursorByAnchor,
-				pushHistory,
-				resolveResizeAnchorAtWorldPoint,
-			],
-		);
+			});
+		},
+		[
+			clearCanvasSnapGuides,
+			commitCanvasResizeCursorByAnchor,
+			pushHistory,
+			resolveResizeAnchorAtWorldPoint,
+		],
+	);
 
 	const handleSkiaNodeResize = useCallback(
 		(resizeEvent: CanvasNodeResizeEvent) => {
@@ -3765,7 +4036,10 @@ const CanvasWorkspace = () => {
 			if (!latestProject) return false;
 			const expandableFrameNodeIds = input.pendingSelectedNodeIds
 				.map((nodeId) => {
-					return latestProject.canvas.nodes.find((node) => node.id === nodeId) ?? null;
+					return (
+						latestProject.canvas.nodes.find((node) => node.id === nodeId) ??
+						null
+					);
 				})
 				.filter((node): node is CanvasNode => Boolean(node))
 				.filter((node) => node.type === "frame" && !node.locked)
@@ -3878,17 +4152,17 @@ const CanvasWorkspace = () => {
 				dragSession.timelineDropMode = false;
 				dragSession.timelineDropTarget = null;
 			}
-				if (
-					Math.abs(event.movementX) + Math.abs(event.movementY) <
-					CANVAS_MARQUEE_ACTIVATION_PX
-				) {
-					return;
-				}
-				clearPendingClickSuppression();
-				const timelineDropTarget = resolveCanvasNodeTimelineDropTarget(
-					dragSession,
-					pointerX,
-					pointerY,
+			if (
+				Math.abs(event.movementX) + Math.abs(event.movementY) <
+				CANVAS_MARQUEE_ACTIVATION_PX
+			) {
+				return;
+			}
+			clearPendingClickSuppression();
+			const timelineDropTarget = resolveCanvasNodeTimelineDropTarget(
+				dragSession,
+				pointerX,
+				pointerY,
 			);
 			if (timelineDropTarget?.zone === "timeline") {
 				resetCanvasDragSession(dragSession);
@@ -4015,15 +4289,15 @@ const CanvasWorkspace = () => {
 			}
 			dragSession.moved = dragSession.moved || didMove;
 		},
-			[
-				appendCanvasGraphBatch,
-				buildCanvasCopyEntries,
-				canvasSnapEnabled,
-				clearCanvasSnapGuides,
-				clearPendingClickSuppression,
-				getCamera,
-				resetCanvasDragSession,
-				resolveCanvasNodeTimelineDropTarget,
+		[
+			appendCanvasGraphBatch,
+			buildCanvasCopyEntries,
+			canvasSnapEnabled,
+			clearCanvasSnapGuides,
+			clearPendingClickSuppression,
+			getCamera,
+			resetCanvasDragSession,
+			resolveCanvasNodeTimelineDropTarget,
 			resolveCanvasGuideValues,
 			startCanvasTimelineDropPreview,
 			stopCanvasTimelineDropPreview,
@@ -4073,6 +4347,7 @@ const CanvasWorkspace = () => {
 						nodeId: change.nodeId,
 						patch: {
 							parentId: change.afterParentId,
+							zIndex: change.afterZIndex,
 						},
 					})),
 				);
@@ -4140,24 +4415,24 @@ const CanvasWorkspace = () => {
 				});
 				return;
 			}
-				pushHistory({
-					kind: "canvas.node-layout.batch",
-					entries: nextEntries,
-					focusNodeId: latestProject.ui.focusedNodeId,
-				});
-			},
-			[
-				clearCanvasSnapGuides,
-				commitCanvasTimelineDrop,
-				pushHistory,
-				removeCanvasGraphBatch,
-				resolveFrameReparentChangesAfterDrag,
-				resetCanvasDragSession,
-				setPendingClickSuppression,
-				stopCanvasTimelineDropPreview,
-				updateCanvasNodeLayoutBatch,
-			],
-		);
+			pushHistory({
+				kind: "canvas.node-layout.batch",
+				entries: nextEntries,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+		},
+		[
+			clearCanvasSnapGuides,
+			commitCanvasTimelineDrop,
+			pushHistory,
+			removeCanvasGraphBatch,
+			resolveFrameReparentChangesAfterDrag,
+			resetCanvasDragSession,
+			setPendingClickSuppression,
+			stopCanvasTimelineDropPreview,
+			updateCanvasNodeLayoutBatch,
+		],
+	);
 
 	const handleSelectionResizeStart = useCallback(
 		(anchor: CanvasNodeResizeAnchor, event: CanvasNodeDragEvent) => {
@@ -4207,14 +4482,14 @@ const CanvasWorkspace = () => {
 				guideValues: null,
 			};
 		},
-			[
-				commitCanvasResizeCursorByAnchor,
-				clearCanvasMarquee,
-				clearCanvasSnapGuides,
-				clearHoveredNode,
-				isCanvasInteractionLocked,
-				resolveNodeResizeConstraints,
-				selectedBounds,
+		[
+			commitCanvasResizeCursorByAnchor,
+			clearCanvasMarquee,
+			clearCanvasSnapGuides,
+			clearHoveredNode,
+			isCanvasInteractionLocked,
+			resolveNodeResizeConstraints,
+			selectedBounds,
 			selectedNodes,
 			setPendingClickSuppression,
 		],
@@ -4467,19 +4742,19 @@ const CanvasWorkspace = () => {
 				});
 				return;
 			}
-				pushHistory({
-					kind: "canvas.node-layout.batch",
-					entries: nextEntries,
-					focusNodeId: latestProject.ui.focusedNodeId,
-				});
-			},
-			[
-				clearCanvasSnapGuides,
-				commitCanvasResizeCursorByAnchor,
-				pushHistory,
-				resolveResizeAnchorAtWorldPoint,
-			],
-		);
+			pushHistory({
+				kind: "canvas.node-layout.batch",
+				entries: nextEntries,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+		},
+		[
+			clearCanvasSnapGuides,
+			commitCanvasResizeCursorByAnchor,
+			pushHistory,
+			resolveResizeAnchorAtWorldPoint,
+		],
+	);
 
 	const handleSelectionResize = useCallback(
 		(resizeEvent: CanvasSelectionResizeEvent) => {
@@ -4558,7 +4833,17 @@ const CanvasWorkspace = () => {
 	);
 
 	const handleSidebarNodeSelect = useCallback(
-		(node: CanvasNode) => {
+		(node: CanvasNode, options?: CanvasSidebarNodeSelectOptions) => {
+			const toggle = options?.toggle ?? false;
+			if (toggle && !isSidebarFocusMode) {
+				const canInteractNode =
+					!isCanvasInteractionLocked || node.id === focusedNodeId;
+				if (!canInteractNode) return;
+				commitSelectedNodeIds(
+					toggleSelectedNodeIds(normalizedSelectedNodeIds, node.id),
+				);
+				return;
+			}
 			handleNodeActivate(node);
 			if (isSidebarFocusMode) return;
 			if (stageSize.width <= 0 || stageSize.height <= 0) return;
@@ -4580,8 +4865,170 @@ const CanvasWorkspace = () => {
 			getCamera,
 			handleNodeActivate,
 			isSidebarFocusMode,
+			isCanvasInteractionLocked,
+			focusedNodeId,
+			commitSelectedNodeIds,
+			normalizedSelectedNodeIds,
 			stageSize.height,
 			stageSize.width,
+		],
+	);
+
+	const handleSidebarNodeReorder = useCallback(
+		(request: CanvasSidebarNodeReorderRequest) => {
+			if (isSidebarFocusMode) return;
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const allNodes = latestProject.canvas.nodes;
+			const nodeById = new Map(allNodes.map((node) => [node.id, node]));
+			const dragRootNodeIds = resolveRootNodeIdsFromMovedSet(
+				allNodes,
+				request.dragNodeIds,
+			);
+			if (dragRootNodeIds.length === 0) return;
+			const movingNodeIdSet = new Set(dragRootNodeIds);
+			const orderedDragNodeIds = sortByLayerOrder(
+				dragRootNodeIds
+					.map((nodeId) => nodeById.get(nodeId) ?? null)
+					.filter((node): node is CanvasNode => Boolean(node)),
+			).map((node) => node.id);
+			if (orderedDragNodeIds.length === 0) return;
+			const targetNode = request.targetNodeId
+				? (nodeById.get(request.targetNodeId) ?? null)
+				: null;
+			let destinationParentId: string | null = null;
+			let destinationIndex = 0;
+			if (!targetNode) {
+				destinationParentId = null;
+				destinationIndex =
+					request.position === "before"
+						? resolveLayerSiblingCount(allNodes, null, movingNodeIdSet)
+						: 0;
+			} else if (request.position === "inside") {
+				if (targetNode.type !== "frame") return;
+				destinationParentId = targetNode.id;
+				destinationIndex = resolveLayerSiblingCount(
+					allNodes,
+					destinationParentId,
+					movingNodeIdSet,
+				);
+			} else {
+				destinationParentId = targetNode.parentId ?? null;
+				const siblingNodes = sortByLayerOrder(
+					allNodes.filter((node) => {
+						if (movingNodeIdSet.has(node.id)) return false;
+						return (node.parentId ?? null) === destinationParentId;
+					}),
+				);
+				const targetIndex = siblingNodes.findIndex(
+					(sibling) => sibling.id === targetNode.id,
+				);
+				if (targetIndex < 0) return;
+				destinationIndex =
+					request.position === "before" ? targetIndex + 1 : targetIndex;
+			}
+			let ancestorId = destinationParentId;
+			while (ancestorId) {
+				if (movingNodeIdSet.has(ancestorId)) return;
+				ancestorId = nodeById.get(ancestorId)?.parentId ?? null;
+			}
+			const { assignments, rebalancePatches } = allocateBatchInsertZIndex(
+				allNodes,
+				{
+					parentId: destinationParentId,
+					index: destinationIndex,
+					nodeIds: orderedDragNodeIds,
+					movingNodeIds: movingNodeIdSet,
+				},
+			);
+			const assignedZIndexByNodeId = new Map(
+				assignments.map((assignment) => [assignment.nodeId, assignment.zIndex]),
+			);
+			const rebalancedZIndexByNodeId = new Map(
+				rebalancePatches.map((patch) => [patch.nodeId, patch.zIndex]),
+			);
+			const patchEntries = allNodes.reduce<
+				Array<{
+					nodeId: string;
+					patch: {
+						parentId?: string | null;
+						zIndex?: number;
+					};
+				}>
+			>((entries, node) => {
+				const nextParentId = movingNodeIdSet.has(node.id)
+					? destinationParentId
+					: (node.parentId ?? null);
+				const nextZIndex =
+					assignedZIndexByNodeId.get(node.id) ??
+					rebalancedZIndexByNodeId.get(node.id) ??
+					node.zIndex;
+				const patch: {
+					parentId?: string | null;
+					zIndex?: number;
+				} = {};
+				if ((node.parentId ?? null) !== nextParentId) {
+					patch.parentId = nextParentId;
+				}
+				if (node.zIndex !== nextZIndex) {
+					patch.zIndex = nextZIndex;
+				}
+				if (Object.keys(patch).length === 0) return entries;
+				entries.push({
+					nodeId: node.id,
+					patch,
+				});
+				return entries;
+			}, []);
+			if (patchEntries.length === 0) return;
+			const beforeByNodeId = new Map(
+				patchEntries.map((entry) => {
+					const node = nodeById.get(entry.nodeId);
+					return [entry.nodeId, node ? pickLayout(node) : null] as const;
+				}),
+			);
+			updateCanvasNodeLayoutBatch(patchEntries);
+			const projectAfterReorder = useProjectStore.getState().currentProject;
+			if (!projectAfterReorder) return;
+			const historyEntries = patchEntries
+				.map((entry) => {
+					const before = beforeByNodeId.get(entry.nodeId);
+					const afterNode = projectAfterReorder.canvas.nodes.find(
+						(node) => node.id === entry.nodeId,
+					);
+					if (!before || !afterNode) return null;
+					const after = pickLayout(afterNode);
+					if (isLayoutEqual(before, after)) return null;
+					return {
+						nodeId: entry.nodeId,
+						before,
+						after,
+					};
+				})
+				.filter(
+					(
+						entry,
+					): entry is {
+						nodeId: string;
+						before: CanvasNodeLayoutSnapshot;
+						after: CanvasNodeLayoutSnapshot;
+					} => Boolean(entry),
+				);
+			if (historyEntries.length > 0) {
+				pushHistory({
+					kind: "canvas.node-layout.batch",
+					entries: historyEntries,
+					focusNodeId: projectAfterReorder.ui.focusedNodeId,
+				});
+			}
+			commitSelectedNodeIds(orderedDragNodeIds);
+		},
+		[
+			isSidebarFocusMode,
+			resolveRootNodeIdsFromMovedSet,
+			updateCanvasNodeLayoutBatch,
+			pushHistory,
+			commitSelectedNodeIds,
 		],
 	);
 
@@ -4608,7 +5055,8 @@ const CanvasWorkspace = () => {
 				nodeIds,
 				new Set(latestProject.canvas.nodes.map((node) => node.id)),
 			);
-			const targetIds = resolveExpandedNodeIdsWithDescendants(normalizedTargetIds);
+			const targetIds =
+				resolveExpandedNodeIdsWithDescendants(normalizedTargetIds);
 			if (targetIds.length === 0) return;
 			const entries = targetIds
 				.map((nodeId) => {
@@ -4749,25 +5197,11 @@ const CanvasWorkspace = () => {
 		],
 	);
 
-	const finishCanvasMarquee = useCallback(
-		(): boolean => {
-			const marqueeSession = marqueeSessionRef.current;
-			if (!marqueeSession) return false;
-			marqueeSessionRef.current = null;
-			if (!marqueeSession.activated) {
-				updateMarqueeRectState({
-					visible: false,
-					x1: marqueeRectRef.current.x1,
-					y1: marqueeRectRef.current.y1,
-					x2: marqueeRectRef.current.x2,
-					y2: marqueeRectRef.current.y2,
-				});
-				return false;
-			}
-			applyMarqueeSelection(marqueeRectRef.current, {
-				isFinalize: true,
-				marqueeSession,
-			});
+	const finishCanvasMarquee = useCallback((): boolean => {
+		const marqueeSession = marqueeSessionRef.current;
+		if (!marqueeSession) return false;
+		marqueeSessionRef.current = null;
+		if (!marqueeSession.activated) {
 			updateMarqueeRectState({
 				visible: false,
 				x1: marqueeRectRef.current.x1,
@@ -4775,10 +5209,21 @@ const CanvasWorkspace = () => {
 				x2: marqueeRectRef.current.x2,
 				y2: marqueeRectRef.current.y2,
 			});
-			return true;
-		},
-		[applyMarqueeSelection, updateMarqueeRectState],
-	);
+			return false;
+		}
+		applyMarqueeSelection(marqueeRectRef.current, {
+			isFinalize: true,
+			marqueeSession,
+		});
+		updateMarqueeRectState({
+			visible: false,
+			x1: marqueeRectRef.current.x1,
+			y1: marqueeRectRef.current.y1,
+			x2: marqueeRectRef.current.x2,
+			y2: marqueeRectRef.current.y2,
+		});
+		return true;
+	}, [applyMarqueeSelection, updateMarqueeRectState]);
 
 	const resolveCanvasDragEventFromPointer = useCallback(
 		(
@@ -4821,13 +5266,12 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			const node = getTopHitNode(world.x, world.y);
-			const keepMultiSelectionBounds =
-				Boolean(
-					selectedBounds &&
-						normalizedSelectedNodeIds.length > 1 &&
-						isWorldPointInBounds(selectedBounds, world.x, world.y) &&
-						(!node || !normalizedSelectedNodeIds.includes(node.id)),
-				);
+			const keepMultiSelectionBounds = Boolean(
+				selectedBounds &&
+					normalizedSelectedNodeIds.length > 1 &&
+					isWorldPointInBounds(selectedBounds, world.x, world.y) &&
+					(!node || !normalizedSelectedNodeIds.includes(node.id)),
+			);
 			if (keepMultiSelectionBounds) {
 				lastTapRecordRef.current = null;
 				return;
@@ -4908,13 +5352,13 @@ const CanvasWorkspace = () => {
 
 	const handleCanvasPointerDown = useCallback(
 		(event: React.PointerEvent<HTMLDivElement>) => {
-				lastPointerClientRef.current = {
-					x: event.clientX,
-					y: event.clientY,
-				};
-				const world = resolveWorldPoint(event.clientX, event.clientY);
-				lastCanvasPointerWorldRef.current = world;
-				clearCanvasSnapGuides();
+			lastPointerClientRef.current = {
+				x: event.clientX,
+				y: event.clientY,
+			};
+			const world = resolveWorldPoint(event.clientX, event.clientY);
+			lastCanvasPointerWorldRef.current = world;
+			clearCanvasSnapGuides();
 			if (event.button !== 0 || !event.isPrimary) return;
 			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
@@ -4973,68 +5417,64 @@ const CanvasWorkspace = () => {
 			try {
 				canvasSurface.setPointerCapture(event.pointerId);
 			} catch {}
-			const hitResizeAnchor = resolveResizeAnchorAtWorldPoint(
-				world.x,
-				world.y,
-			);
+			const hitResizeAnchor = resolveResizeAnchorAtWorldPoint(world.x, world.y);
 			if (hitResizeAnchor) {
-					commitCanvasResizeCursorByAnchor(hitResizeAnchor);
-					clearHoveredNode();
-					pointerSessionRef.current = {
-						pointerId: event.pointerId,
-						pointerType: event.pointerType || "mouse",
-						gesture: "tap",
-						startClientX: event.clientX,
-						startClientY: event.clientY,
-						startNodeId: null,
-						startTarget: event.target,
-					};
-					return;
-				}
+				commitCanvasResizeCursorByAnchor(hitResizeAnchor);
+				clearHoveredNode();
+				pointerSessionRef.current = {
+					pointerId: event.pointerId,
+					pointerType: event.pointerType || "mouse",
+					gesture: "tap",
+					startClientX: event.clientX,
+					startClientY: event.clientY,
+					startNodeId: null,
+					startTarget: event.target,
+				};
+				return;
+			}
 			commitCanvasResizeCursor(null);
 			const node = getTopHitNode(world.x, world.y);
-			const isInSelectionBounds =
-				Boolean(
-					selectedBounds &&
-						normalizedSelectedNodeIds.length > 1 &&
-						isWorldPointInBounds(selectedBounds, world.x, world.y),
-				);
+			const isInSelectionBounds = Boolean(
+				selectedBounds &&
+					normalizedSelectedNodeIds.length > 1 &&
+					isWorldPointInBounds(selectedBounds, world.x, world.y),
+			);
 			clearCanvasMarquee();
 			let gesture: CanvasBasePointerSession["gesture"] = "tap";
-				if (isInSelectionBounds) {
-					const didStartSelectionDrag = beginCanvasDragSession({
-						origin: "selection",
-						anchorNodeId: null,
-						pendingSelectedNodeIds: normalizedSelectedNodeIds,
-						copyMode: event.altKey,
+			if (isInSelectionBounds) {
+				const didStartSelectionDrag = beginCanvasDragSession({
+					origin: "selection",
+					anchorNodeId: null,
+					pendingSelectedNodeIds: normalizedSelectedNodeIds,
+					copyMode: event.altKey,
+				});
+				if (didStartSelectionDrag) {
+					const existingSuppression = pendingClickSuppressionRef.current;
+					setPendingClickSuppression({
+						suppressNode: existingSuppression?.suppressNode ?? false,
+						suppressCanvas: true,
 					});
-					if (didStartSelectionDrag) {
-						const existingSuppression = pendingClickSuppressionRef.current;
-						setPendingClickSuppression({
-							suppressNode: existingSuppression?.suppressNode ?? false,
-							suppressCanvas: true,
-						});
-						setIsTileTaskBoostActive(true);
-						gesture = "selection-drag";
-					}
-				} else if (node && !node.locked) {
+					setIsTileTaskBoostActive(true);
+					gesture = "selection-drag";
+				}
+			} else if (node && !node.locked) {
 				const isNodeSelected = normalizedSelectedNodeIds.includes(node.id);
 				const pendingSelectedNodeIds = isNodeSelected
 					? normalizedSelectedNodeIds
 					: event.shiftKey
 						? [...normalizedSelectedNodeIds, node.id]
 						: [node.id];
-					const didStartDrag = beginCanvasDragSession({
-						origin: "node",
-						anchorNodeId: node.id,
-						pendingSelectedNodeIds,
-						copyMode: event.altKey,
-					});
-					if (didStartDrag) {
-						setIsTileTaskBoostActive(true);
-						gesture = "node-drag";
-					}
-				} else if (node?.locked) {
+				const didStartDrag = beginCanvasDragSession({
+					origin: "node",
+					anchorNodeId: node.id,
+					pendingSelectedNodeIds,
+					copyMode: event.altKey,
+				});
+				if (didStartDrag) {
+					setIsTileTaskBoostActive(true);
+					gesture = "node-drag";
+				}
+			} else if (node?.locked) {
 				if (!event.shiftKey) {
 					handleNodeActivate(node);
 				}
@@ -5056,36 +5496,36 @@ const CanvasWorkspace = () => {
 				});
 				gesture = "marquee";
 			}
-				if (gesture !== "tap") {
-					clearHoveredNode();
-				}
-				pointerSessionRef.current = {
-					pointerId: event.pointerId,
-					pointerType: event.pointerType || "mouse",
-					gesture,
-					startClientX: event.clientX,
-					startClientY: event.clientY,
-					startNodeId: isInSelectionBounds ? null : (node?.id ?? null),
-					startTarget: event.target,
-				};
+			if (gesture !== "tap") {
+				clearHoveredNode();
+			}
+			pointerSessionRef.current = {
+				pointerId: event.pointerId,
+				pointerType: event.pointerType || "mouse",
+				gesture,
+				startClientX: event.clientX,
+				startClientY: event.clientY,
+				startNodeId: isInSelectionBounds ? null : (node?.id ?? null),
+				startTarget: event.target,
+			};
 		},
-			[
-				beginCanvasDragSession,
-				clearCanvasMarquee,
-				clearCanvasSnapGuides,
-				clearHoveredNode,
-				clearPendingClickSuppression,
-				commitCanvasResizeCursor,
-				commitCanvasResizeCursorByAnchor,
-				getTopHitNode,
-				handleNodeActivate,
-				isCanvasInteractionLocked,
-				canvasToolMode,
-				normalizedSelectedNodeIds,
-				resolveResizeAnchorAtWorldPoint,
-				resolveLocalPoint,
-				resolveWorldPoint,
-				selectedBounds,
+		[
+			beginCanvasDragSession,
+			clearCanvasMarquee,
+			clearCanvasSnapGuides,
+			clearHoveredNode,
+			clearPendingClickSuppression,
+			commitCanvasResizeCursor,
+			commitCanvasResizeCursorByAnchor,
+			getTopHitNode,
+			handleNodeActivate,
+			isCanvasInteractionLocked,
+			canvasToolMode,
+			normalizedSelectedNodeIds,
+			resolveResizeAnchorAtWorldPoint,
+			resolveLocalPoint,
+			resolveWorldPoint,
+			selectedBounds,
 			setPendingClickSuppression,
 			updateMarqueeRectState,
 		],
@@ -5097,10 +5537,7 @@ const CanvasWorkspace = () => {
 				x: event.clientX,
 				y: event.clientY,
 			};
-			const world = resolveWorldPoint(
-				event.clientX,
-				event.clientY,
-			);
+			const world = resolveWorldPoint(event.clientX, event.clientY);
 			lastCanvasPointerWorldRef.current = world;
 			const pointerSession = pointerSessionRef.current;
 			if (pointerSession && pointerSession.pointerId === event.pointerId) {
@@ -5145,17 +5582,17 @@ const CanvasWorkspace = () => {
 					const local = resolveLocalPoint(event.clientX, event.clientY);
 					const deltaX = local.x - marqueeSession.startLocalX;
 					const deltaY = local.y - marqueeSession.startLocalY;
-						const hasActivated =
-							marqueeSession.activated ||
-							Math.abs(deltaX) >= CANVAS_MARQUEE_ACTIVATION_PX ||
-							Math.abs(deltaY) >= CANVAS_MARQUEE_ACTIVATION_PX;
-						marqueeSession.activated = hasActivated;
-						if (hasActivated) {
-							clearPendingClickSuppression();
-						}
-						const nextRect: CanvasMarqueeRect = {
-							visible: hasActivated,
-							x1: marqueeSession.startLocalX,
+					const hasActivated =
+						marqueeSession.activated ||
+						Math.abs(deltaX) >= CANVAS_MARQUEE_ACTIVATION_PX ||
+						Math.abs(deltaY) >= CANVAS_MARQUEE_ACTIVATION_PX;
+					marqueeSession.activated = hasActivated;
+					if (hasActivated) {
+						clearPendingClickSuppression();
+					}
+					const nextRect: CanvasMarqueeRect = {
+						visible: hasActivated,
+						x1: marqueeSession.startLocalX,
 						y1: marqueeSession.startLocalY,
 						x2: local.x,
 						y2: local.y,
@@ -5263,10 +5700,10 @@ const CanvasWorkspace = () => {
 					event.currentTarget.releasePointerCapture(event.pointerId);
 				}
 			} catch {}
-				const tapMeta = {
-					...resolvePointerTapMeta(event),
-					target: pointerSession.startTarget,
-				};
+			const tapMeta = {
+				...resolvePointerTapMeta(event),
+				target: pointerSession.startTarget,
+			};
 			const isTap = isPointerTapWithinThreshold(
 				pointerSession,
 				event.clientX,
@@ -5295,9 +5732,7 @@ const CanvasWorkspace = () => {
 							!dragSession.timelineDropMode &&
 							!dragSession.moved &&
 							dragSession.origin ===
-								(pointerSession.gesture === "node-drag"
-									? "node"
-									: "selection"),
+								(pointerSession.gesture === "node-drag" ? "node" : "selection"),
 					);
 				if (dragSession) {
 					finishCanvasDragSession(
@@ -5308,7 +5743,8 @@ const CanvasWorkspace = () => {
 					shouldResolveTap &&
 					(pointerSession.gesture !== "node-drag" ||
 						(pointerSession.startNodeId &&
-							getTopHitNode(world.x, world.y)?.id === pointerSession.startNodeId))
+							getTopHitNode(world.x, world.y)?.id ===
+								pointerSession.startNodeId))
 				) {
 					handleCanvasSurfaceTap(tapMeta);
 				}
@@ -5738,27 +6174,25 @@ const CanvasWorkspace = () => {
 	const resolvedCanvasCursor =
 		canvasToolMode === "frame" ? "crosshair" : canvasResizeCursor;
 
-		return (
-			<div
-				ref={containerRef}
-				data-testid="canvas-workspace"
-				role="application"
-				className="relative h-full w-full overflow-hidden"
-				style={
-					resolvedCanvasCursor
-						? { cursor: resolvedCanvasCursor }
-						: undefined
-				}
-				onMouseOverCapture={handleEditorMouseOverCapture}
-				onPointerDown={handleCanvasPointerDown}
-				onPointerMove={handleCanvasPointerMove}
-				onPointerUp={handleCanvasPointerUp}
-				onPointerCancel={handleCanvasPointerCancel}
-				onPointerLeave={handleCanvasPointerLeave}
-				onContextMenu={handleCanvasContextMenu}
-				onDragOver={(event) => {
-					event.preventDefault();
-					event.dataTransfer.dropEffect = "copy";
+	return (
+		<div
+			ref={containerRef}
+			data-testid="canvas-workspace"
+			role="application"
+			className="relative h-full w-full overflow-hidden"
+			style={
+				resolvedCanvasCursor ? { cursor: resolvedCanvasCursor } : undefined
+			}
+			onMouseOverCapture={handleEditorMouseOverCapture}
+			onPointerDown={handleCanvasPointerDown}
+			onPointerMove={handleCanvasPointerMove}
+			onPointerUp={handleCanvasPointerUp}
+			onPointerCancel={handleCanvasPointerCancel}
+			onPointerLeave={handleCanvasPointerLeave}
+			onContextMenu={handleCanvasContextMenu}
+			onDragOver={(event) => {
+				event.preventDefault();
+				event.dataTransfer.dropEffect = "copy";
 			}}
 			onDrop={handleCanvasDrop}
 		>
@@ -5769,17 +6203,17 @@ const CanvasWorkspace = () => {
 				nodes={renderNodes}
 				tileSourceNodes={sortedNodes}
 				scenes={currentProject.scenes}
-					assets={currentProject.assets}
-					activeNodeId={activeNodeId}
-					selectedNodeIds={normalizedSelectedNodeIds}
-					focusedNodeId={focusedNodeId}
-					hoveredNodeId={hoveredNodeId}
-					marqueeRectScreen={marqueeRect}
-					snapGuidesScreen={snapGuidesScreen}
+				assets={currentProject.assets}
+				activeNodeId={activeNodeId}
+				selectedNodeIds={normalizedSelectedNodeIds}
+				focusedNodeId={focusedNodeId}
+				hoveredNodeId={hoveredNodeId}
+				marqueeRectScreen={marqueeRect}
+				snapGuidesScreen={snapGuidesScreen}
 				suspendHover={isCameraAnimating}
 				tileDebugEnabled={tileDebugEnabled}
 				tileMaxTasksPerTick={tileMaxTasksPerTick}
-					tileLodTransition={effectiveTileLodTransition}
+				tileLodTransition={effectiveTileLodTransition}
 				onNodeResize={handleSkiaNodeResize}
 				onSelectionResize={handleSelectionResize}
 			/>
@@ -5804,7 +6238,9 @@ const CanvasWorkspace = () => {
 				expandButtonOffsetY={expandButtonOffsetY}
 				sidebarTab={sidebarTab}
 				onSidebarTabChange={setSidebarTab}
+				selectedNodeIds={normalizedSelectedNodeIds}
 				onSidebarNodeSelect={handleSidebarNodeSelect}
+				onSidebarNodeReorder={handleSidebarNodeReorder}
 				onCollapseSidebar={() => setSidebarExpanded(false)}
 				onExpandSidebar={() => setSidebarExpanded(true)}
 				rightPanelShouldRender={rightPanelShouldRender}

@@ -28,6 +28,10 @@ import {
 	setCurrentProjectId,
 } from "./projectDb";
 import { isSameAssetLocator, normalizeAssetLocator } from "./assetLocator";
+import {
+	allocateInsertZIndex,
+	resolveLayerSiblingCount,
+} from "@/studio/canvas/layerOrderCoordinator";
 
 const DEFAULT_SCENE_NODE_WIDTH = 960;
 const DEFAULT_SCENE_NODE_HEIGHT = 540;
@@ -70,6 +74,7 @@ export interface SceneCreateInput {
 	height?: number;
 	name?: string;
 	parentId?: string | null;
+	insertIndex?: number;
 }
 
 type CanvasNodePatch = Partial<
@@ -88,6 +93,7 @@ export type CanvasNodeCreateInput =
 			height?: number;
 			name?: string;
 			parentId?: string | null;
+			insertIndex?: number;
 			assetId?: string;
 			duration?: number;
 			text?: string;
@@ -326,10 +332,6 @@ const repairCanvasNodeParentRelations = (nodes: CanvasNode[]): CanvasNode[] => {
 	return hasChanged ? nextNodes : nodes;
 };
 
-const getMaxCanvasNodeZIndex = (nodes: CanvasNode[]): number => {
-	return nodes.reduce((maxValue, node) => Math.max(maxValue, node.zIndex), -1);
-};
-
 const findSceneNodeBySceneId = (
 	project: StudioProject,
 	sceneId: string | null | undefined,
@@ -388,7 +390,9 @@ const withProjectRevision = (project: StudioProject): StudioProject => {
 	};
 };
 
-const stripProjectOtForPersistence = (project: StudioProject): StudioProject => {
+const stripProjectOtForPersistence = (
+	project: StudioProject,
+): StudioProject => {
 	// 当前阶段 OT 仅用于本地调试，不持久化到项目数据。
 	const { ot: _ot, ...rest } = project;
 	// focus 属于编辑期瞬时状态，不持久化到项目数据。
@@ -404,7 +408,9 @@ const stripProjectOtForPersistence = (project: StudioProject): StudioProject => 
 	};
 };
 
-const normalizeProjectRuntimeState = (project: StudioProject): StudioProject => {
+const normalizeProjectRuntimeState = (
+	project: StudioProject,
+): StudioProject => {
 	const repairedNodes = repairCanvasNodeParentRelations(project.canvas.nodes);
 	const projectWithParents =
 		repairedNodes === project.canvas.nodes
@@ -633,7 +639,6 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const project = state.currentProject;
 			const now = Date.now();
 			const nodeId = createEntityId("node");
-			const maxZIndex = getMaxCanvasNodeZIndex(project.canvas.nodes);
 			const sceneIndex = Object.keys(project.scenes).length + 1;
 
 			let nextScenes = project.scenes;
@@ -671,7 +676,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: maxZIndex + 1,
+						zIndex: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -693,7 +698,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: maxZIndex + 1,
+						zIndex: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -715,7 +720,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: maxZIndex + 1,
+						zIndex: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -736,7 +741,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: maxZIndex + 1,
+						zIndex: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -758,7 +763,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: maxZIndex + 1,
+						zIndex: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -778,7 +783,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: maxZIndex + 1,
+						zIndex: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -788,12 +793,45 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				}
 			}
 
+			const parentId = node.parentId ?? null;
+			const insertIndex =
+				input.insertIndex ??
+				resolveLayerSiblingCount(project.canvas.nodes, parentId);
+			const { zIndex, rebalancePatches } = allocateInsertZIndex(
+				project.canvas.nodes,
+				{
+					parentId,
+					index: insertIndex,
+				},
+			);
+			const patchByNodeId = new Map(
+				rebalancePatches.map((patch) => [patch.nodeId, patch.zIndex]),
+			);
+			const nextCanvasNodes = project.canvas.nodes.map((existingNode) => {
+				const rebalancedZIndex = patchByNodeId.get(existingNode.id);
+				if (
+					rebalancedZIndex === undefined ||
+					rebalancedZIndex === existingNode.zIndex
+				) {
+					return existingNode;
+				}
+				return {
+					...existingNode,
+					zIndex: rebalancedZIndex,
+					updatedAt: now,
+				};
+			});
+			node = {
+				...node,
+				zIndex,
+			};
+
 			createdNodeId = node.id;
 			const nextProject = withProjectRevision({
 				...project,
 				scenes: nextScenes,
 				canvas: {
-					nodes: [...project.canvas.nodes, node],
+					nodes: [...nextCanvasNodes, node],
 				},
 				ui: {
 					...project.ui,
@@ -813,10 +851,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 		set((state) => {
 			if (!state.currentProject) return state;
 			let didUpdate = false;
-			const didPatchParentId = Object.prototype.hasOwnProperty.call(
-				patch,
-				"parentId",
-			);
+			const didPatchParentId = Object.hasOwn(patch, "parentId");
 			const now = Date.now();
 			const nextNodes = state.currentProject.canvas.nodes.map((node) => {
 				if (node.id !== nodeId) return node;
@@ -862,7 +897,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			}
 			if (mergedPatches.size === 0) return state;
 			const didPatchParentId = [...mergedPatches.values()].some((patch) =>
-				Object.prototype.hasOwnProperty.call(patch, "parentId"),
+				Object.hasOwn(patch, "parentId"),
 			);
 			let didUpdate = false;
 			const now = Date.now();
@@ -956,7 +991,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				: undefined;
 			const existedByLocator = state.currentProject.assets.find(
 				(asset) =>
-					asset.kind === input.kind && isSameAssetLocator(asset.locator, locator),
+					asset.kind === input.kind &&
+					isSameAssetLocator(asset.locator, locator),
 			);
 			const existed = existedByHash ?? existedByLocator;
 			if (existed) {
@@ -1250,7 +1286,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			if (!state.currentProject) return state;
 			if (entries.length === 0) return state;
 			const currentProject = state.currentProject;
-			const nodeIdSet = new Set(currentProject.canvas.nodes.map((node) => node.id));
+			const nodeIdSet = new Set(
+				currentProject.canvas.nodes.map((node) => node.id),
+			);
 			const nextScenes = { ...currentProject.scenes };
 			const nextNodes = [...currentProject.canvas.nodes];
 			let nextOt = ensureStudioProjectOt(currentProject);

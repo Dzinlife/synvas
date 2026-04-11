@@ -10,33 +10,37 @@ import {
 import type { TimelineAsset } from "core/element/types";
 import type { CanvasNode, StudioProject } from "core/studio/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetAudioOwnerForTests, getOwner, requestOwner } from "@/audio/owner";
-import { componentRegistry } from "@/element/model/componentRegistry";
+import {
+	__resetAudioOwnerForTests,
+	getOwner,
+	requestOwner,
+} from "@/audio/owner";
 import { resolveClipboardNodeGeometry } from "@/element/model/clipboardTransform";
+import { componentRegistry } from "@/element/model/componentRegistry";
 import { createTransformMeta } from "@/element/transform";
 import { useProjectStore } from "@/projects/projectStore";
+import { useDragStore } from "@/scene-editor/drag";
 import {
 	createRuntimeProviderWrapper,
 	createTestEditorRuntime,
 } from "@/scene-editor/runtime/testUtils";
-import { useDragStore } from "@/scene-editor/drag";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
-import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
+import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
+import CanvasWorkspace from "./CanvasWorkspace";
 import {
 	CANVAS_OVERLAY_GAP_PX,
 	CANVAS_OVERLAY_OUTER_PADDING_PX,
 	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
 	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
 } from "./canvasOverlayLayout";
-import {
-	resolveDynamicMinZoom,
-	type CameraState,
-} from "./canvasWorkspaceUtils";
 import * as canvasSnapUtils from "./canvasSnapUtils";
-import CanvasWorkspace from "./CanvasWorkspace";
+import {
+	type CameraState,
+	resolveDynamicMinZoom,
+} from "./canvasWorkspaceUtils";
 import {
 	TILE_MAX_TASKS_PER_TICK,
 	TILE_MAX_TASKS_PER_TICK_DRAG,
@@ -93,7 +97,10 @@ interface MockInfiniteSkiaCanvasProps {
 	} | null;
 	tileDebugEnabled?: boolean;
 	tileMaxTasksPerTick?: number;
-	tileLodTransition?: { mode: "follow" | "freeze" | "snap"; zoom?: number } | null;
+	tileLodTransition?: {
+		mode: "follow" | "freeze" | "snap";
+		zoom?: number;
+	} | null;
 	focusedNodeId?: string | null;
 	hoveredNodeId?: string | null;
 	selectedNodeIds?: string[];
@@ -1038,7 +1045,9 @@ const getLatestInfiniteSkiaCanvasProps = (): MockInfiniteSkiaCanvasProps => {
 };
 
 const getLatestRenderNodeIds = (): string[] => {
-	return (getLatestInfiniteSkiaCanvasProps().nodes ?? []).map((node) => node.id);
+	return (getLatestInfiniteSkiaCanvasProps().nodes ?? []).map(
+		(node) => node.id,
+	);
 };
 
 const createCanvasWorkspaceRuntime = () => {
@@ -1161,7 +1170,7 @@ const getTopVisibleNodeAt = (clientX: number, clientY: number): CanvasNode => {
 		.filter((node) => !node.hidden)
 		.sort((a, b) => {
 			if (a.zIndex !== b.zIndex) return a.zIndex - b.zIndex;
-			return a.createdAt - b.createdAt;
+			return a.id.localeCompare(b.id);
 		});
 	for (let i = sortedNodes.length - 1; i >= 0; i -= 1) {
 		const node = sortedNodes[i];
@@ -1573,19 +1582,18 @@ describe("CanvasWorkspace", () => {
 		}
 	});
 
-	it("全局侧边栏展示所有节点并按 zIndex/createdAt 排序", () => {
+	it("全局侧边栏展示所有节点并按 zIndex/id 排序", () => {
 		render(<CanvasWorkspace />);
 		const nodeItems = screen.getAllByTestId(/canvas-sidebar-node-item-/);
 		const order = nodeItems.map((item) => item.getAttribute("data-node-id"));
 		expect(order).toEqual([
 			"node-image-hidden",
-			"node-image-1",
 			"node-video-offscreen",
-			"node-scene-2",
+			"node-image-1",
 			"node-video-1",
+			"node-scene-2",
 			"node-scene-1",
 		]);
-		expect(screen.getByText("隐藏")).toBeTruthy();
 	});
 
 	it("侧边栏会按 frame 的 parentId 树进行分组缩进", () => {
@@ -1632,10 +1640,89 @@ describe("CanvasWorkspace", () => {
 		expect(frameIndex).toBeGreaterThanOrEqual(0);
 		expect(order[frameIndex + 1]).toBe("node-image-1");
 
-		const frameItem = screen.getByTestId("canvas-sidebar-node-item-node-frame-1");
-		const childItem = screen.getByTestId("canvas-sidebar-node-item-node-image-1");
-		expect(frameItem.style.paddingLeft).toBe("8px");
-		expect(childItem.style.paddingLeft).toBe("24px");
+		const frameItem = screen.getByTestId(
+			"canvas-sidebar-node-item-node-frame-1",
+		);
+		const childItem = screen.getByTestId(
+			"canvas-sidebar-node-item-node-image-1",
+		);
+		const frameGroup = screen.getByTestId(
+			"canvas-sidebar-node-group-node-frame-1",
+		);
+		expect(frameGroup.contains(frameItem)).toBe(true);
+		expect(frameGroup.contains(childItem)).toBe(true);
+	});
+
+	it("frame 收起后不会把子节点提升到根层，且可再次展开", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: [
+							...project.canvas.nodes.map((node) =>
+								node.id === "node-image-1"
+									? { ...node, parentId: "node-frame-1" }
+									: node,
+							),
+							{
+								id: "node-frame-1",
+								type: "frame",
+								name: "Frame 1",
+								x: 120,
+								y: 80,
+								width: 860,
+								height: 520,
+								zIndex: 4,
+								locked: false,
+								hidden: false,
+								parentId: null,
+								createdAt: 4,
+								updatedAt: 4,
+							},
+						],
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+
+		const frameToggle = screen.getByTestId(
+			"canvas-sidebar-node-toggle-node-frame-1",
+		);
+		fireEvent.pointerDown(frameToggle, createPointerPatch(16, 16));
+
+		expect(
+			screen.queryByTestId("canvas-sidebar-node-item-node-image-1"),
+		).toBeNull();
+		expect(
+			screen.getByTestId("canvas-sidebar-node-toggle-node-frame-1"),
+		).toBeTruthy();
+
+		fireEvent.pointerDown(
+			screen.getByTestId("canvas-sidebar-node-toggle-node-frame-1"),
+			createPointerPatch(16, 16),
+		);
+
+		const childItem = screen.getByTestId(
+			"canvas-sidebar-node-item-node-image-1",
+		);
+		const frameGroup = screen.getByTestId(
+			"canvas-sidebar-node-group-node-frame-1",
+		);
+		expect(frameGroup.contains(childItem)).toBe(true);
+	});
+
+	it("侧边栏列表不使用 gap 间距，节点行使用 padding 作为插入通道", () => {
+		render(<CanvasWorkspace />);
+		const list = screen.getByTestId("canvas-sidebar-node-list");
+		expect(list.className).not.toContain("gap-");
+		const item = screen.getByTestId("canvas-sidebar-node-item-node-scene-1");
+		expect(item.parentElement?.className).toContain("py-1");
 	});
 
 	it("overlay 布局不改变画布渲染尺寸", () => {
@@ -1796,8 +1883,7 @@ describe("CanvasWorkspace", () => {
 			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
 		});
 		await waitFor(() => {
-			const zoom =
-				useCanvasCameraStore.getState().camera.zoom ?? 1;
+			const zoom = useCanvasCameraStore.getState().camera.zoom ?? 1;
 			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1805,12 +1891,10 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const beforeZoom =
-			useCanvasCameraStore.getState().camera.zoom ?? 0;
+		const beforeZoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
 		fireEvent.click(screen.getByLabelText("收起侧边栏"));
 		await waitFor(() => {
-			const zoom =
-				useCanvasCameraStore.getState().camera.zoom ?? 0;
+			const zoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
 			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1818,8 +1902,7 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const afterZoom =
-			useCanvasCameraStore.getState().camera.zoom ?? 0;
+		const afterZoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
@@ -1830,8 +1913,7 @@ describe("CanvasWorkspace", () => {
 			expect(screen.getByTestId("canvas-active-node-meta-panel")).toBeTruthy();
 		});
 		await waitFor(() => {
-			const zoom =
-				useCanvasCameraStore.getState().camera.zoom ?? 1;
+			const zoom = useCanvasCameraStore.getState().camera.zoom ?? 1;
 			expect(Math.abs(zoom - 1)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1839,8 +1921,7 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const beforeZoom =
-			useCanvasCameraStore.getState().camera.zoom ?? 0;
+		const beforeZoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
 		act(() => {
 			useProjectStore.getState().setActiveNode(null);
 		});
@@ -1848,8 +1929,7 @@ describe("CanvasWorkspace", () => {
 			expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
 		});
 		await waitFor(() => {
-			const zoom =
-				useCanvasCameraStore.getState().camera.zoom ?? 0;
+			const zoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
 			expect(Math.abs(zoom - beforeZoom)).toBeGreaterThan(0.001);
 		});
 		await act(async () => {
@@ -1857,8 +1937,7 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const afterZoom =
-			useCanvasCameraStore.getState().camera.zoom ?? 0;
+		const afterZoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
 		expect(afterZoom).toBeGreaterThan(beforeZoom);
 	});
 
@@ -1893,8 +1972,7 @@ describe("CanvasWorkspace", () => {
 			expect(screen.getByTestId("focus-scene-skia-layer")).toBeTruthy();
 		});
 		await waitFor(() => {
-			const zoom =
-				useCanvasCameraStore.getState().camera.zoom ?? 1;
+			const zoom = useCanvasCameraStore.getState().camera.zoom ?? 1;
 			expect(zoom).toBeLessThan(0.2);
 		});
 	});
@@ -2042,7 +2120,9 @@ describe("CanvasWorkspace", () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const originalElementFromPoint = (
 			document as Document & {
-				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+				elementFromPoint?:
+					| ((x: number, y: number) => Element | null)
+					| undefined;
 			}
 		).elementFromPoint;
 		try {
@@ -2116,8 +2196,8 @@ describe("CanvasWorkspace", () => {
 			expect(createdNode?.x).toBe(900);
 			expect(createdNode?.y).toBe(120);
 			const timelineElements =
-				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
-				[];
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState()
+					.elements ?? [];
 			expect(timelineElements).toHaveLength(0);
 			const past = useStudioHistoryStore.getState().past;
 			expect(past.at(-1)?.kind).toBe("canvas.node-create.batch");
@@ -2130,7 +2210,9 @@ describe("CanvasWorkspace", () => {
 			} else {
 				delete (
 					document as Document & {
-						elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+						elementFromPoint?:
+							| ((x: number, y: number) => Element | null)
+							| undefined;
 					}
 				).elementFromPoint;
 			}
@@ -2141,7 +2223,9 @@ describe("CanvasWorkspace", () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const originalElementFromPoint = (
 			document as Document & {
-				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+				elementFromPoint?:
+					| ((x: number, y: number) => Element | null)
+					| undefined;
 			}
 		).elementFromPoint;
 		try {
@@ -2223,7 +2307,9 @@ describe("CanvasWorkspace", () => {
 			} else {
 				delete (
 					document as Document & {
-						elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+						elementFromPoint?:
+							| ((x: number, y: number) => Element | null)
+							| undefined;
 					}
 				).elementFromPoint;
 			}
@@ -2234,7 +2320,9 @@ describe("CanvasWorkspace", () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const originalElementFromPoint = (
 			document as Document & {
-				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+				elementFromPoint?:
+					| ((x: number, y: number) => Element | null)
+					| undefined;
 			}
 		).elementFromPoint;
 		try {
@@ -2317,7 +2405,9 @@ describe("CanvasWorkspace", () => {
 			} else {
 				delete (
 					document as Document & {
-						elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+						elementFromPoint?:
+							| ((x: number, y: number) => Element | null)
+							| undefined;
 					}
 				).elementFromPoint;
 			}
@@ -2433,7 +2523,9 @@ describe("CanvasWorkspace", () => {
 		).filter((node) => node.type === "frame");
 		expect(frameNodes).toHaveLength(0);
 		expect(frameButton.getAttribute("aria-pressed")).toBe("true");
-		expect(screen.getByTestId("canvas-workspace").style.cursor).toBe("crosshair");
+		expect(screen.getByTestId("canvas-workspace").style.cursor).toBe(
+			"crosshair",
+		);
 		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
 	});
 
@@ -2500,8 +2592,7 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		const beforeCamera = useCanvasCameraStore.getState().camera;
 		doubleClickNodeAt(300, 160);
-		const immediateCamera =
-			useCanvasCameraStore.getState().camera;
+		const immediateCamera = useCanvasCameraStore.getState().camera;
 		expect(
 			useProjectStore.getState().currentProject?.ui.focusedNodeId,
 		).toBeNull();
@@ -2555,10 +2646,10 @@ describe("CanvasWorkspace", () => {
 		clickSidebarNode("node-video-offscreen");
 		const unionNodeIds = [
 			"node-scene-1",
-			"node-video-1",
 			"node-scene-2",
-			"node-video-offscreen",
+			"node-video-1",
 			"node-image-1",
+			"node-video-offscreen",
 		];
 		expect(getLatestRenderNodeIds()).toEqual(unionNodeIds);
 		await act(async () => {
@@ -2896,8 +2987,7 @@ describe("CanvasWorkspace", () => {
 		expect(afterWheel).toEqual(beforeWheel);
 
 		await waitFor(() => {
-			const cameraAfterAnimation =
-				useCanvasCameraStore.getState().camera;
+			const cameraAfterAnimation = useCanvasCameraStore.getState().camera;
 			expect(cameraAfterAnimation).toBeTruthy();
 			if (!cameraAfterAnimation) return;
 			expect(
@@ -3039,11 +3129,13 @@ describe("CanvasWorkspace", () => {
 		expect(preFocusCamera).toBeTruthy();
 		if (!preFocusCamera) return;
 		expect(preFocusCamera.zoom).toBeGreaterThan(1);
-		expect(Math.abs(preFocusCamera.x) + Math.abs(preFocusCamera.y)).toBeGreaterThan(
-			0.001,
-		);
+		expect(
+			Math.abs(preFocusCamera.x) + Math.abs(preFocusCamera.y),
+		).toBeGreaterThan(0.001);
 		const preFocusCenter = {
-			x: mockDOMRect.width / Math.max(preFocusCamera.zoom, 1e-6) / 2 - preFocusCamera.x,
+			x:
+				mockDOMRect.width / Math.max(preFocusCamera.zoom, 1e-6) / 2 -
+				preFocusCamera.x,
 			y:
 				mockDOMRect.height / Math.max(preFocusCamera.zoom, 1e-6) / 2 -
 				preFocusCamera.y,
@@ -3126,8 +3218,7 @@ describe("CanvasWorkspace", () => {
 				setTimeout(resolve, 280);
 			});
 		});
-		const beforeResizeZoom =
-			useCanvasCameraStore.getState().camera.zoom ?? 0;
+		const beforeResizeZoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
 
 		const handle = screen.getByLabelText("调整 Drawer 高度");
 		const zoomSamples: number[] = [];
@@ -3969,7 +4060,9 @@ describe("CanvasWorkspace", () => {
 	it("无 active 时框选单节点会转为 active 并清空选区", () => {
 		render(<CanvasWorkspace />);
 		clickCanvasAt(1120, 700);
-		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().currentProject?.ui.activeNodeId,
+		).toBeNull();
 
 		marqueeCanvasAt(980, 20, 100, 80);
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([]);
@@ -4025,7 +4118,10 @@ describe("CanvasWorkspace", () => {
 	});
 
 	it("同一拖拽手势会复用吸附 guide 值缓存", () => {
-		const collectSpy = vi.spyOn(canvasSnapUtils, "collectCanvasSnapGuideValues");
+		const collectSpy = vi.spyOn(
+			canvasSnapUtils,
+			"collectCanvasSnapGuideValues",
+		);
 		try {
 			render(<CanvasWorkspace />);
 			clickNodeAt(300, 160);
@@ -4045,11 +4141,11 @@ describe("CanvasWorkspace", () => {
 					...createPointerPatch(880, 480),
 					buttons: 1,
 				});
-					fireEvent.pointerUp(canvas, {
-						...createPointerPatch(880, 480),
-						buttons: 0,
-					});
+				fireEvent.pointerUp(canvas, {
+					...createPointerPatch(880, 480),
+					buttons: 0,
 				});
+			});
 			expect(collectSpy.mock.calls.length - beforeCalls).toBe(1);
 		} finally {
 			collectSpy.mockRestore();
@@ -4071,8 +4167,8 @@ describe("CanvasWorkspace", () => {
 			expect(draggedNode?.x).toBe(240);
 			expect(draggedNode?.y).toBe(120);
 			const timelineElements =
-				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
-				[];
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState()
+					.elements ?? [];
 			expect(timelineElements.length).toBe(1);
 			expect(timelineElements[0]?.type).toBe("VideoClip");
 			expect(timelineElements[0]?.timeline.trackIndex).toBe(0);
@@ -4096,8 +4192,8 @@ describe("CanvasWorkspace", () => {
 			});
 			dragNodeAt(300, 160, 120, 80);
 			const timelineElements =
-				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
-				[];
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState()
+					.elements ?? [];
 			expect(timelineElements.length).toBe(2);
 			expect(
 				timelineElements
@@ -4124,14 +4220,14 @@ describe("CanvasWorkspace", () => {
 				(item) => item.id === "node-video-1",
 			);
 			expect(project?.canvas.nodes.length).toBe(beforeNodeCount);
-			expect(project?.canvas.nodes.some((item) => item.name.includes("副本"))).toBe(
-				false,
-			);
+			expect(
+				project?.canvas.nodes.some((item) => item.name.includes("副本")),
+			).toBe(false);
 			expect(draggedNode?.x).toBe(240);
 			expect(draggedNode?.y).toBe(120);
 			const timelineElements =
-				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
-				[];
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState()
+					.elements ?? [];
 			expect(timelineElements.length).toBe(1);
 			expect(timelineElements[0]?.type).toBe("VideoClip");
 			expect(useStudioHistoryStore.getState().past).toHaveLength(0);
@@ -4145,7 +4241,9 @@ describe("CanvasWorkspace", () => {
 		const removeDropZone = mountMainTimelineDropZone();
 		const originalElementFromPoint = (
 			document as Document & {
-				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+				elementFromPoint?:
+					| ((x: number, y: number) => Element | null)
+					| undefined;
 			}
 		).elementFromPoint;
 		try {
@@ -4184,8 +4282,8 @@ describe("CanvasWorkspace", () => {
 			expect(draggedNode?.x).toBe(560);
 			expect(draggedNode?.y).toBe(320);
 			const timelineElements =
-				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState().elements ??
-				[];
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState()
+					.elements ?? [];
 			expect(timelineElements).toHaveLength(0);
 			const past = useStudioHistoryStore.getState().past;
 			expect(past).toHaveLength(1);
@@ -4199,7 +4297,9 @@ describe("CanvasWorkspace", () => {
 			} else {
 				delete (
 					document as Document & {
-						elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+						elementFromPoint?:
+							| ((x: number, y: number) => Element | null)
+							| undefined;
 					}
 				).elementFromPoint;
 			}
@@ -4939,18 +5039,18 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
-		it("节点拖拽后坐标会被约束为整数", () => {
-			useCanvasCameraStore.getState().setCamera({
-				x: 0,
-				y: 0,
-				zoom: 1.3,
-			});
-			render(<CanvasWorkspace />);
-			dragNodeAt(340, 200, 460, 300);
-			const project = useProjectStore.getState().currentProject;
-			const node = project?.canvas.nodes.find(
-				(item) => item.id === "node-video-1",
-			);
+	it("节点拖拽后坐标会被约束为整数", () => {
+		useCanvasCameraStore.getState().setCamera({
+			x: 0,
+			y: 0,
+			zoom: 1.3,
+		});
+		render(<CanvasWorkspace />);
+		dragNodeAt(340, 200, 460, 300);
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
 		expect(node?.x).toBe(332);
 		expect(node?.y).toBe(197);
 		expect(Number.isInteger(node?.x ?? NaN)).toBe(true);

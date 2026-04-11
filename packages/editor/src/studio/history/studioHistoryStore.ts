@@ -45,14 +45,7 @@ import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 
 export type CanvasNodeLayoutSnapshot = Pick<
 	CanvasNode,
-	| "x"
-	| "y"
-	| "width"
-	| "height"
-	| "zIndex"
-	| "hidden"
-	| "locked"
-	| "parentId"
+	"x" | "y" | "width" | "height" | "zIndex" | "hidden" | "locked" | "parentId"
 >;
 
 type CanvasGraphHistoryItem = {
@@ -147,6 +140,8 @@ export type StudioHistoryEntry =
 				nodeId: string;
 				beforeParentId: string | null;
 				afterParentId: string | null;
+				beforeZIndex: number;
+				afterZIndex: number;
 			}>;
 			focusNodeId?: string | null;
 	  };
@@ -971,6 +966,7 @@ const applyEntry = (
 						nodeId: change.nodeId,
 						patch: {
 							parentId: change.beforeParentId,
+							zIndex: change.beforeZIndex,
 						},
 					})),
 				);
@@ -984,6 +980,7 @@ const applyEntry = (
 					nodeId: change.nodeId,
 					patch: {
 						parentId: change.afterParentId,
+						zIndex: change.afterZIndex,
 					},
 				})),
 			);
@@ -1176,16 +1173,15 @@ const applyEntryToBaselineSnapshot = (
 			);
 			if (entry.reparentChanges.length > 0) {
 				const parentById = new Map(
-					entry.reparentChanges.map((change) => [
-						change.nodeId,
-						change.beforeParentId,
-					]),
+					entry.reparentChanges.map((change) => [change.nodeId, change]),
 				);
 				snapshot.canvas.nodes = snapshot.canvas.nodes.map((node) => {
-					if (!parentById.has(node.id)) return node;
+					const change = parentById.get(node.id);
+					if (!change) return node;
 					return {
 						...node,
-						parentId: parentById.get(node.id) ?? null,
+						parentId: change.beforeParentId,
+						zIndex: change.beforeZIndex,
 					};
 				});
 			}
@@ -1199,16 +1195,15 @@ const applyEntryToBaselineSnapshot = (
 		];
 		if (entry.reparentChanges.length > 0) {
 			const parentById = new Map(
-				entry.reparentChanges.map((change) => [
-					change.nodeId,
-					change.afterParentId,
-				]),
+				entry.reparentChanges.map((change) => [change.nodeId, change]),
 			);
 			snapshot.canvas.nodes = snapshot.canvas.nodes.map((node) => {
-				if (!parentById.has(node.id)) return node;
+				const change = parentById.get(node.id);
+				if (!change) return node;
 				return {
 					...node,
-					parentId: parentById.get(node.id) ?? null,
+					parentId: change.afterParentId,
+					zIndex: change.afterZIndex,
 				};
 			});
 		}

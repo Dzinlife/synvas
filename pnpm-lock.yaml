@@ -43,8 +43,8 @@ importers:
         specifier: ^3.10.1
         version: 3.10.1
       mediabunny:
-        specifier: ^1.27.3
-        version: 1.27.3
+        specifier: ^1.39.2
+        version: 1.40.1
       react:
         specifier: ^19.2.0
         version: 19.2.3
@@ -113,8 +113,8 @@ importers:
         specifier: ^0.561.0
         version: 0.561.0(react@19.2.3)
       mediabunny:
-        specifier: ^1.27.3
-        version: 1.27.3
+        specifier: ^1.39.2
+        version: 1.40.1
       motion:
         specifier: ^12.34.0
         version: 12.34.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -182,12 +182,12 @@ importers:
 
   packages/electron:
     dependencies:
-      '@synvas/editor':
-        specifier: workspace:*
-        version: link:../editor
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8
+      '@synvas/editor':
+        specifier: workspace:*
+        version: link:../editor
       react:
         specifier: ^19.2.0
         version: 19.2.3
@@ -290,9 +290,6 @@ importers:
 
   packages/web:
     dependencies:
-      '@synvas/editor':
-        specifier: workspace:*
-        version: link:../editor
       '@base-ui/react':
         specifier: ^1.1.0
         version: 1.1.0(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -302,6 +299,9 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8
+      '@synvas/editor':
+        specifier: workspace:*
+        version: link:../editor
       '@tailwindcss/vite':
         specifier: ^4.0.6
         version: 4.1.18(vite@7.3.0(@types/node@22.19.3)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0)(yaml@2.8.2))
@@ -348,8 +348,8 @@ importers:
         specifier: ^0.561.0
         version: 0.561.0(react@19.2.3)
       mediabunny:
-        specifier: ^1.27.3
-        version: 1.27.3
+        specifier: ^1.39.2
+        version: 1.40.1
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -712,15 +712,15 @@ packages:
   '@definitelytyped/header-parser@0.0.121':
     resolution: {integrity: sha512-78HY1J+QiwZPXFZQWb9gPQPxAMNg6/1e4gl7gL/8dmd17vVWLi3AGrLJoG8Pn1p8d7MF2rlPw/2AE6+r1IHNHA==}
 
-  '@definitelytyped/header-parser@0.2.25':
-    resolution: {integrity: sha512-T5hVZCiOOjBNLZlw+MF8CRxNqEYCUptZDfix02DMfdLPgMIgidS2b1mtfk8cwf1Efk8Zm+AKuL5SCSbPbgvFgA==}
+  '@definitelytyped/header-parser@0.2.26':
+    resolution: {integrity: sha512-t8j4cfEDV5fe7Pji/KuvFIBOpwVXZ4Zm7ptoGFqkqgw1tSONJOCveElEmGxSideo6pr30W7nQziPiJreZ6Li3A==}
     engines: {node: '>=20.17.0'}
 
   '@definitelytyped/typescript-versions@0.0.121':
     resolution: {integrity: sha512-mTfkR7MrGo08lzOPZx3ZgIER9PoalRZok3hmrsLDxTUhS5lrgdgXBOpAyDMtnJUAO6AxrIx126XGlkN+1rvKcA==}
 
-  '@definitelytyped/typescript-versions@0.1.10':
-    resolution: {integrity: sha512-4aBop464n0PUxrlzj1FpAfiNa5P5ENycB0K/Ho22Ay8xAGEGXUpLkaWtFsn2R+Jfn4ldd7lJqfqw0z29sAingQ==}
+  '@definitelytyped/typescript-versions@0.1.11':
+    resolution: {integrity: sha512-hkO3A+ZyjeiLEXLTYe561uv9hnTvHM15+JTi3RgetfuB/+/Rp4Im1y/m+SehSi6D3iwdnbPckupv5TZ4PnlKPg==}
     engines: {node: '>=20.17.0'}
 
   '@definitelytyped/utils@0.1.13':
@@ -3268,8 +3268,8 @@ packages:
   mdn-data@2.12.2:
     resolution: {integrity: sha512-IEn+pegP1aManZuckezWCO+XZQDplx1366JoVhTpMpBB1sPey/SbveZQUosKiKiGYjg1wH4pMlNgXbCiYgihQA==}
 
-  mediabunny@1.27.3:
-    resolution: {integrity: sha512-hlzmgzMznp9DhA5fMJKS5yEAyfCUMxAc+DbSPxD4J1J2cYVl1L+pZLndkt5xLlD5aB5eHEnphHMW14ammMlUXg==}
+  mediabunny@1.40.1:
+    resolution: {integrity: sha512-HU/stGzAkdWaJIly6ypbUVgAUvT9kt39DIg0IaErR7/1fwtTmgUYs4i8uEPYcgcjPjbB9gtBmUXOLnXi6J2LDw==}
 
   miller-rabin@4.0.1:
     resolution: {integrity: sha512-115fLhvZVqWwHPbClyntxEVfVDfl9DLLTuJvq3g2O/Oxi8AiNouAHvDSzHS0viUJc+V5vm3eq91Xwqn9dp4jRA==}
@@ -4839,9 +4839,9 @@ snapshots:
       '@types/parsimmon': 1.10.9
       parsimmon: 1.18.1
 
-  '@definitelytyped/header-parser@0.2.25':
+  '@definitelytyped/header-parser@0.2.26':
     dependencies:
-      '@definitelytyped/typescript-versions': 0.1.10
+      '@definitelytyped/typescript-versions': 0.1.11
       '@definitelytyped/utils': 0.1.13
       semver: 7.7.4
     transitivePeerDependencies:
@@ -4852,7 +4852,7 @@ snapshots:
 
   '@definitelytyped/typescript-versions@0.0.121': {}
 
-  '@definitelytyped/typescript-versions@0.1.10': {}
+  '@definitelytyped/typescript-versions@0.1.11': {}
 
   '@definitelytyped/utils@0.1.13':
     dependencies:
@@ -5264,7 +5264,7 @@ snapshots:
 
   '@npmcli/fs@5.0.0':
     dependencies:
-      semver: 7.7.3
+      semver: 7.7.4
 
   '@npmcli/git@7.0.2':
     dependencies:
@@ -5274,7 +5274,7 @@ snapshots:
       lru-cache: 11.2.4
       npm-pick-manifest: 11.0.3
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.7.4
       which: 6.0.1
 
   '@npmcli/package-json@7.0.5':
@@ -5284,7 +5284,7 @@ snapshots:
       hosted-git-info: 9.0.2
       json-parse-even-better-errors: 5.0.0
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.7.4
       spdx-expression-parse: 4.0.0
 
   '@npmcli/promise-spawn@9.0.1':
@@ -6701,7 +6701,7 @@ snapshots:
 
   dts-critic@3.3.11(typescript@4.7.4):
     dependencies:
-      '@definitelytyped/header-parser': 0.2.25
+      '@definitelytyped/header-parser': 0.2.26
       command-exists: 1.2.9
       rimraf: 3.0.2
       semver: 6.3.1
@@ -6716,8 +6716,8 @@ snapshots:
 
   dtslint@4.2.1(typescript@4.7.4):
     dependencies:
-      '@definitelytyped/header-parser': 0.2.25
-      '@definitelytyped/typescript-versions': 0.1.10
+      '@definitelytyped/header-parser': 0.2.26
+      '@definitelytyped/typescript-versions': 0.1.11
       '@definitelytyped/utils': 0.1.13
       dts-critic: 3.3.11(typescript@4.7.4)
       fs-extra: 6.0.1
@@ -7355,7 +7355,7 @@ snapshots:
       npm-package-arg: 13.0.2
       npm-registry-fetch: 19.1.1
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.7.4
       sigstore: 4.1.0
       ssri: 13.0.1
     transitivePeerDependencies:
@@ -7475,7 +7475,7 @@ snapshots:
 
   mdn-data@2.12.2: {}
 
-  mediabunny@1.27.3:
+  mediabunny@1.40.1:
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.11
       '@types/dom-webcodecs': 0.1.13
@@ -7679,7 +7679,7 @@ snapshots:
 
   npm-install-checks@8.0.0:
     dependencies:
-      semver: 7.7.3
+      semver: 7.7.4
 
   npm-normalize-package-bin@5.0.0: {}
 
@@ -7687,7 +7687,7 @@ snapshots:
     dependencies:
       hosted-git-info: 9.0.2
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.7.4
       validate-npm-package-name: 7.0.2
 
   npm-pick-manifest@11.0.3:
@@ -7695,7 +7695,7 @@ snapshots:
       npm-install-checks: 8.0.0
       npm-normalize-package-bin: 5.0.0
       npm-package-arg: 13.0.2
-      semver: 7.7.3
+      semver: 7.7.4
 
   npm-registry-fetch@19.1.1:
     dependencies:

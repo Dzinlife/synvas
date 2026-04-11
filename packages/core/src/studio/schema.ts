@@ -18,7 +18,7 @@ const canvasNodeBaseSchema = z.object({
 	y: finiteNumberSchema,
 	width: z.number().positive(),
 	height: z.number().positive(),
-	zIndex: z.number().int(),
+	zIndex: finiteNumberSchema,
 	locked: z.boolean(),
 	hidden: z.boolean(),
 	createdAt: z.number(),
@@ -149,7 +149,13 @@ const timelineSchema = z.object({
 	elements: z.array(z.unknown()),
 });
 
-const assetKindSchema = z.enum(["video", "audio", "image", "lottie", "unknown"]);
+const assetKindSchema = z.enum([
+	"video",
+	"audio",
+	"image",
+	"lottie",
+	"unknown",
+]);
 const linkedRemoteUriSchema = nonEmptyStringSchema.refine(
 	(value) =>
 		value.startsWith("http://") ||
@@ -267,11 +273,13 @@ const studioProjectSchema = z.object({
 		focusedNodeId: nonEmptyStringSchema.nullable(),
 		activeNodeId: nonEmptyStringSchema.nullable(),
 		canvasSnapEnabled: z.boolean().default(true),
-		camera: z.object({
-			x: finiteNumberSchema,
-			y: finiteNumberSchema,
-			zoom: z.number().positive(),
-		}).default(defaultCamera),
+		camera: z
+			.object({
+				x: finiteNumberSchema,
+				y: finiteNumberSchema,
+				zoom: z.number().positive(),
+			})
+			.default(defaultCamera),
 	}),
 	createdAt: z.number(),
 	updatedAt: z.number(),
@@ -279,7 +287,9 @@ const studioProjectSchema = z.object({
 
 export const parseStudioProject = (value: unknown): StudioProject => {
 	const parsed = studioProjectSchema.parse(value) as StudioProject;
-	const repairedCanvasNodes = repairCanvasNodeParentRelations(parsed.canvas.nodes);
+	const repairedCanvasNodes = repairCanvasNodeParentRelations(
+		parsed.canvas.nodes,
+	);
 	const normalizedProject: StudioProject =
 		repairedCanvasNodes === parsed.canvas.nodes
 			? parsed
