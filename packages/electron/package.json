@@ -14,14 +14,14 @@
     "check": "biome check"
   },
   "dependencies": {
-    "@synvas/editor": "workspace:*",
     "@fontsource-variable/inter": "^5.2.8",
+    "@synvas/editor": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.4",
-    "@tailwindcss/vite": "^4.0.6",
+    "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

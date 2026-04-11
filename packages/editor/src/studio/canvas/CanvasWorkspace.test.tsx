@@ -1722,7 +1722,10 @@ describe("CanvasWorkspace", () => {
 		const list = screen.getByTestId("canvas-sidebar-node-list");
 		expect(list.className).not.toContain("gap-");
 		const item = screen.getByTestId("canvas-sidebar-node-item-node-scene-1");
-		expect(item.parentElement?.className).toContain("py-1");
+		const hasPaddingChannel =
+			item.className.includes("py-1") ||
+			Boolean(item.parentElement?.className.includes("py-1"));
+		expect(hasPaddingChannel).toBe(true);
 	});
 
 	it("overlay 布局不改变画布渲染尺寸", () => {

@@ -115,6 +115,8 @@ const AUTO_SCROLL_MAX_SPEED = 14;
 const ROOT_DROP_EDGE_PX = 18;
 const INTENT_HYSTERESIS_PX = 2;
 const ROW_BOUNDARY_HYSTERESIS_PX = 4;
+const NODE_ROW_BASE_PADDING_LEFT_PX = 8;
+const NODE_ROW_INDENT_PX = 16;
 
 const isSameDropIntent = (
 	left: DropIntent | null,
@@ -461,6 +463,7 @@ const isNodeInsideDragSubtree = (
 
 interface NodeListRowProps {
 	item: NestedNodeItem;
+	depth: number;
 	isActive: boolean;
 	isSelected: boolean;
 	isDragging: boolean;
@@ -482,6 +485,7 @@ interface NodeListRowProps {
 
 const NodeListRow: React.FC<NodeListRowProps> = ({
 	item,
+	depth,
 	isActive,
 	isSelected,
 	isDragging,
@@ -529,46 +533,58 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 	);
 
 	return (
-		<div
-			className="relative py-1"
+		<button
+			type="button"
+			className={cn(
+				"group relative w-full py-1 text-left",
+				!disabled && "cursor-pointer",
+				disabled && "cursor-not-allowed",
+			)}
+			data-testid={`canvas-sidebar-node-item-${item.node.id}`}
 			data-node-id={item.node.id}
 			data-node-row-container="true"
+			disabled={disabled}
+			onClick={(event) => {
+				const target = event.target as HTMLElement;
+				if (target.closest("[data-node-toggle='true']")) {
+					return;
+				}
+				if (suppressClickRef.current) {
+					suppressClickRef.current = false;
+					return;
+				}
+				onNodeSelect(item.node, {
+					toggle: event.shiftKey || event.metaKey || event.ctrlKey,
+				});
+			}}
+			{...bindRowDrag()}
 		>
-			<button
-				type="button"
-				data-testid={`canvas-sidebar-node-item-${item.node.id}`}
-				data-node-id={item.node.id}
-				onClick={(event) => {
-					if (suppressClickRef.current) {
-						suppressClickRef.current = false;
-						return;
-					}
-					onNodeSelect(item.node, {
-						toggle: event.shiftKey || event.metaKey || event.ctrlKey,
-					});
-				}}
-				disabled={disabled}
+			<div
 				className={cn(
-					"relative w-full rounded-md px-2 py-1.5 text-left transition-colors",
-					isActive && "bg-blue-500/25 text-white",
-					!isActive && isSelected && "bg-sky-500/20 text-white",
+					"relative w-full rounded-md py-1.5 pr-2 text-left",
+					isActive && "bg-mauve-500/15 text-white",
+					!isActive && isSelected && "bg-mauve-500/20 text-white",
 					!isActive && !isSelected && "bg-transparent text-white/90",
 					!isDragging &&
 						!disabled &&
 						!isActive &&
 						!isSelected &&
-						"hover:bg-white/10",
-					disabled && "cursor-not-allowed opacity-60",
+						"group-hover:bg-white/5",
+					disabled && "opacity-60",
 					showInsideIndicator &&
 						item.node.type === "frame" &&
-						"ring-1 ring-blue-300/70",
+						"ring-1 ring-white ring-inset rounded-none",
 				)}
-				{...bindRowDrag()}
+				style={{
+					paddingLeft:
+						NODE_ROW_BASE_PADDING_LEFT_PX + depth * NODE_ROW_INDENT_PX,
+				}}
 			>
 				<div className="flex items-center justify-between gap-2">
 					<div className="flex min-w-0 items-center gap-1">
 						{item.node.type === "frame" && item.hasChildren ? (
 							<span
+								data-node-toggle="true"
 								data-testid={`canvas-sidebar-node-toggle-${item.node.id}`}
 								onPointerDown={(event) => {
 									event.preventDefault();
@@ -596,8 +612,8 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 						{NODE_TYPE_LABEL[item.node.type]}
 					</div>
 				</div>
-			</button>
-		</div>
+			</div>
+		</button>
 	);
 };
 
@@ -882,20 +898,27 @@ const NodeList: React.FC<NodeListProps> = ({
 		clearDragState();
 	}, [clearDragState, onNodeReorder]);
 
-	const renderNestedItem = (item: NestedNodeItem): React.ReactNode => {
+	const renderNestedItem = (
+		item: NestedNodeItem,
+		depth: number,
+	): React.ReactNode => {
 		const isSelected = selectedNodeIdSet.has(item.node.id);
 		const highlightFrameGroup = item.node.type === "frame" && isSelected;
 		return (
 			<div
 				key={item.node.id}
 				data-testid={`canvas-sidebar-node-group-${item.node.id}`}
-				className={cn(
-					"relative",
-					highlightFrameGroup && "rounded-md bg-sky-500/10",
-				)}
+				className="relative"
 			>
+				<div
+					className={cn(
+						highlightFrameGroup &&
+							"absolute inset-0 inset-y-1 rounded-md bg-mauve-500/10",
+					)}
+				/>
 				<NodeListRow
 					item={item}
+					depth={depth}
 					isActive={item.node.id === activeNodeId}
 					isSelected={isSelected}
 					isDragging={dragState !== null}
@@ -908,8 +931,8 @@ const NodeList: React.FC<NodeListProps> = ({
 					onRowDragEnd={handleRowDragEnd}
 				/>
 				{item.children.length > 0 && !item.isCollapsed && (
-					<div className="ml-4 flex flex-col">
-						{item.children.map((child) => renderNestedItem(child))}
+					<div className="flex flex-col">
+						{item.children.map((child) => renderNestedItem(child, depth + 1))}
 					</div>
 				)}
 			</div>
@@ -934,13 +957,13 @@ const NodeList: React.FC<NodeListProps> = ({
 						data-testid="canvas-sidebar-node-list"
 						className="flex min-h-0 flex-1 flex-col overflow-y-auto"
 					>
-						{nestedItems.map((item) => renderNestedItem(item))}
+						{nestedItems.map((item) => renderNestedItem(item, 0))}
 					</div>
 					{!disabled &&
 						dragState?.overIntent?.position !== "inside" &&
 						globalDropLineTop !== null && (
 							<div
-								className="pointer-events-none absolute inset-x-1 z-30 h-0.5 rounded bg-blue-300"
+								className="pointer-events-none absolute inset-x-0 -mt-0.5 z-30 h-0.5 rounded bg-white"
 								style={{ top: globalDropLineTop }}
 							/>
 						)}
