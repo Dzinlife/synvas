@@ -64,6 +64,35 @@ interface CanvasNodeLabelLayerProps {
 	getNodeLayout: (nodeId: string) => SharedValue<CanvasNodeLayoutState> | null;
 	nodes: CanvasNode[];
 	focusedNodeId: string | null;
+	onHitTesterChange?: (tester: CanvasNodeLabelHitTester | null) => void;
+}
+
+interface CanvasNodeLabelHitRect {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+interface CanvasNodeLabelHitTranslate {
+	translateX: number;
+	translateY: number;
+}
+
+export interface CanvasNodeLabelHitEntry {
+	nodeId: string;
+	zIndex: number;
+	isFrame: boolean;
+	rect: CanvasNodeLabelHitRect;
+	cameraSnapshot: CanvasCameraState;
+}
+
+export interface CanvasNodeLabelHitTester {
+	hitTest: (
+		localX: number,
+		localY: number,
+		liveCamera: CanvasCameraState,
+	) => string[];
 }
 
 interface CanvasNodeLabelCandidate {
@@ -169,6 +198,38 @@ const disposeParagraph = (paragraph: SkParagraph | null | undefined) => {
 	} catch {}
 };
 
+const resolveLabelPanCompensation = (
+	liveCamera: CanvasCameraState,
+	snapshotCamera: CanvasCameraState,
+): CanvasNodeLabelHitTranslate => {
+	if (
+		Math.abs(liveCamera.zoom - snapshotCamera.zoom) >
+		LABEL_PAN_COMPENSATION_ZOOM_EPSILON
+	) {
+		return {
+			translateX: 0,
+			translateY: 0,
+		};
+	}
+	const liveOffset = resolveCanvasCameraScreenOffset(liveCamera);
+	const snapshotOffset = resolveCanvasCameraScreenOffset(snapshotCamera);
+	const translateX = liveOffset.x - snapshotOffset.x;
+	const translateY = liveOffset.y - snapshotOffset.y;
+	if (
+		Math.abs(translateX) <= LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON &&
+		Math.abs(translateY) <= LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON
+	) {
+		return {
+			translateX: 0,
+			translateY: 0,
+		};
+	}
+	return {
+		translateX,
+		translateY,
+	};
+};
+
 const buildLabelParagraph = ({
 	text,
 	runPlan,
@@ -235,6 +296,7 @@ export const CanvasNodeLabelLayer = ({
 	getNodeLayout,
 	nodes,
 	focusedNodeId,
+	onHitTesterChange,
 }: CanvasNodeLabelLayerProps) => {
 	const [fontProvider, setFontProvider] =
 		useState<SkTypefaceFontProvider | null>(null);
@@ -295,20 +357,11 @@ export const CanvasNodeLabelLayer = ({
 		useDerivedValue<LabelPanCompensationTransform>(() => {
 			const liveCamera = camera.value;
 			const snapshotCamera = pictureCameraSnapshot.value;
-			if (
-				Math.abs(liveCamera.zoom - snapshotCamera.zoom) >
-				LABEL_PAN_COMPENSATION_ZOOM_EPSILON
-			) {
-				return LABEL_PAN_COMPENSATION_IDENTITY_TRANSFORM;
-			}
-			const liveOffset = resolveCanvasCameraScreenOffset(liveCamera);
-			const snapshotOffset = resolveCanvasCameraScreenOffset(snapshotCamera);
-			const translateX = liveOffset.x - snapshotOffset.x;
-			const translateY = liveOffset.y - snapshotOffset.y;
-			if (
-				Math.abs(translateX) <= LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON &&
-				Math.abs(translateY) <= LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON
-			) {
+			const { translateX, translateY } = resolveLabelPanCompensation(
+				liveCamera,
+				snapshotCamera,
+			);
+			if (translateX === 0 && translateY === 0) {
 				return LABEL_PAN_COMPENSATION_IDENTITY_TRANSFORM;
 			}
 			return [{ translateX }, { translateY }];
@@ -355,7 +408,50 @@ export const CanvasNodeLabelLayer = ({
 	const rebuildTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const deferredDisposeFrameRef = useRef<number | null>(null);
 	const deferredDisposeQueueRef = useRef<SkPicture[]>([]);
+	const labelHitEntriesRef = useRef<CanvasNodeLabelHitEntry[]>([]);
 	const lifecycleEpochRef = useRef(0);
+
+	const hitTestLabelNodeIds = useEffectEvent(
+		(localX: number, localY: number, liveCamera: CanvasCameraState): string[] => {
+			if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
+				return [];
+			}
+			const hitNodeIds: string[] = [];
+			for (const entry of labelHitEntriesRef.current) {
+				const { translateX, translateY } = resolveLabelPanCompensation(
+					liveCamera,
+					entry.cameraSnapshot,
+				);
+				const left = entry.rect.x + translateX;
+				const right = left + entry.rect.width;
+				const top = entry.rect.y + translateY;
+				const bottom = top + entry.rect.height;
+				if (
+					localX >= left &&
+					localX <= right &&
+					localY >= top &&
+					localY <= bottom
+				) {
+					hitNodeIds.push(entry.nodeId);
+				}
+			}
+			return hitNodeIds;
+		},
+	);
+	const labelHitTester = useMemo<CanvasNodeLabelHitTester>(() => {
+		return {
+			hitTest: (localX, localY, liveCamera) => {
+				return hitTestLabelNodeIds(localX, localY, liveCamera);
+			},
+		};
+	}, [hitTestLabelNodeIds]);
+
+	useEffect(() => {
+		onHitTesterChange?.(labelHitTester);
+		return () => {
+			onHitTesterChange?.(null);
+		};
+	}, [labelHitTester, onHitTesterChange]);
 
 	useEffect(() => {
 		let disposed = false;
@@ -529,6 +625,7 @@ export const CanvasNodeLabelLayer = ({
 			labelCandidates.length === 0 ||
 			!fontProvider
 		) {
+			labelHitEntriesRef.current = [];
 			commitPicture(emptyPicture);
 			return;
 		}
@@ -544,6 +641,7 @@ export const CanvasNodeLabelLayer = ({
 			});
 			const cameraState = camera.value;
 			let hasVisibleLabel = false;
+			const nextLabelHitEntries: CanvasNodeLabelHitEntry[] = [];
 
 			for (const candidate of labelCandidates) {
 				const layout = layoutByNodeId.get(candidate.nodeId);
@@ -586,6 +684,39 @@ export const CanvasNodeLabelLayer = ({
 					width: frameWidthPx,
 					height: labelClipHeight,
 				};
+				// 命中宽度与可见文字宽度对齐，避免右侧空白误命中。
+				let labelHitWidth = frameWidthPx;
+				try {
+					const longestLine = paragraph.getLongestLine();
+					if (Number.isFinite(longestLine)) {
+						labelHitWidth = Math.min(
+							frameWidthPx,
+							Math.max(1, Math.ceil(longestLine)),
+						);
+					}
+				} catch (error) {
+					console.warn(
+						"[CanvasNodeLabelLayer] Failed to resolve label hit width:",
+						error,
+					);
+				}
+					nextLabelHitEntries.push({
+						nodeId: candidate.nodeId,
+						zIndex: candidate.node.zIndex,
+						isFrame: candidate.node.type === "frame",
+						rect: {
+							x: labelRect.x,
+							y: labelRect.y,
+							width: labelHitWidth,
+							// 命中区域向下补齐 gap，避免 label 与 node 顶边之间出现交互空隙。
+							height: labelRect.height + LABEL_GAP_PX,
+						},
+						cameraSnapshot: {
+							x: cameraState.x,
+						y: cameraState.y,
+						zoom: cameraState.zoom,
+					},
+				});
 				const requiresDimLayer = candidate.opacity < 0.999;
 				if (requiresDimLayer) {
 					alphaPaint.setAlphaf(candidate.opacity);
@@ -612,9 +743,11 @@ export const CanvasNodeLabelLayer = ({
 					recordingCanvas.restore();
 				}
 			}
+			labelHitEntriesRef.current = nextLabelHitEntries;
 
 			const nextPicture = recorder.finishRecordingAsPicture();
 			if (!hasVisibleLabel) {
+				labelHitEntriesRef.current = [];
 				try {
 					nextPicture.dispose();
 				} catch {}
@@ -742,6 +875,7 @@ export const CanvasNodeLabelLayer = ({
 					disposeParagraph(entry.paragraph);
 				}
 				paragraphCacheByNodeIdRef.current.clear();
+				labelHitEntriesRef.current = [];
 				const currentPicture = picture.value;
 				if (currentPicture !== emptyPicture) {
 					try {

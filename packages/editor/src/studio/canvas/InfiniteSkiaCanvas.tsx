@@ -36,7 +36,10 @@ import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
-import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
+import {
+	CanvasNodeLabelLayer,
+	type CanvasNodeLabelHitTester,
+} from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import {
 	CanvasTriDotGridBackground,
@@ -119,6 +122,7 @@ interface InfiniteSkiaCanvasProps {
 	tileLodTransition?: TileLodTransition | null;
 	onNodeResize?: (event: CanvasNodeResizeEvent) => void;
 	onSelectionResize?: (event: CanvasSelectionResizeEvent) => void;
+	onLabelHitTesterChange?: (tester: CanvasNodeLabelHitTester | null) => void;
 }
 const EMPTY_SNAP_GUIDES_SCREEN: CanvasSnapGuidesScreen = {
 	vertical: [],
@@ -696,6 +700,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	tileLodTransition = null,
 	onNodeResize,
 	onSelectionResize,
+	onLabelHitTesterChange,
 }) => {
 	const runtimeManager = useStudioRuntimeManager();
 	const canvasRef = useRef<CanvasRef>(null);
@@ -920,6 +925,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			duration: NODE_HUD_FADE_IN_DURATION_MS,
 		});
 	}, [nodeHudOpacity, shouldRenderNodeLabels]);
+	useEffect(() => {
+		if (shouldRenderNodeLabels) return;
+		onLabelHitTesterChange?.(null);
+	}, [onLabelHitTesterChange, shouldRenderNodeLabels]);
 
 	const handleFocusLayerChange = useCallback(
 		(next: CanvasNodeFocusEditorLayerState) => {
@@ -1606,6 +1615,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							getNodeLayout={getNodeLayoutValue}
 							nodes={renderNodes}
 							focusedNodeId={focusedNodeId}
+							onHitTesterChange={onLabelHitTesterChange}
 						/>
 						{shouldRenderNodeOverlay && (
 							<CanvasNodeOverlayLayer
@@ -1643,6 +1653,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		height,
 		hoverNode,
 		onSelectionResize,
+		onLabelHitTesterChange,
 		liveRenderNodes,
 		marqueeRectScreen,
 		scheduleTileTick,

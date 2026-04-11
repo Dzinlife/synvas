@@ -10,6 +10,7 @@ const {
 	paragraphBuilderStyles,
 	paragraphRunStyles,
 	paragraphInstances,
+	paragraphLongestLineByText,
 	pictureInstances,
 	paintInstances,
 	groupRenderProps,
@@ -19,6 +20,7 @@ const {
 		text: string;
 		layout: ReturnType<typeof vi.fn>;
 		getHeight: ReturnType<typeof vi.fn>;
+		getLongestLine: ReturnType<typeof vi.fn>;
 		paint: ReturnType<typeof vi.fn>;
 		dispose: ReturnType<typeof vi.fn>;
 	};
@@ -32,6 +34,7 @@ const {
 			fontFamilies?: string[];
 		}>,
 		paragraphInstances: [] as ParagraphInstance[],
+		paragraphLongestLineByText: new Map<string, number>(),
 		pictureInstances: [] as Array<{ dispose: ReturnType<typeof vi.fn> }>,
 		paintInstances: [] as Array<{
 			setAntiAlias: ReturnType<typeof vi.fn>;
@@ -147,6 +150,12 @@ vi.mock("react-skia-lite", () => ({
 							text: paragraphText,
 							layout: vi.fn(),
 							getHeight: vi.fn(() => 12),
+							getLongestLine: vi.fn(() => {
+								return (
+									paragraphLongestLineByText.get(paragraphText) ??
+									Math.max(1, paragraphText.length * 8)
+								);
+							}),
 							paint: vi.fn(),
 							dispose: vi.fn(),
 						};
@@ -276,6 +285,7 @@ describe("CanvasNodeLabelLayer", () => {
 		paragraphBuilderStyles.length = 0;
 		paragraphRunStyles.length = 0;
 		paragraphInstances.length = 0;
+		paragraphLongestLineByText.clear();
 		pictureInstances.length = 0;
 		paintInstances.length = 0;
 		groupRenderProps.length = 0;
@@ -314,7 +324,7 @@ describe("CanvasNodeLabelLayer", () => {
 		);
 		expect(fontRegistryMock.ensureCoverage).toHaveBeenCalledWith(
 			expect.objectContaining({
-				text: expect.stringContaining("Hg国"),
+				text: expect.stringContaining("Hg"),
 			}),
 		);
 		expect(
@@ -564,5 +574,148 @@ describe("CanvasNodeLabelLayer", () => {
 		await waitFor(() => {
 			expect(paragraphBuilderStyles.length).toBeGreaterThan(buildCountBefore);
 		});
+	});
+
+	it("命中宽度会按可见文字宽度收窄，避免右侧空白误命中", async () => {
+		paragraphLongestLineByText.set("narrow-hit", 36);
+		const hitTesterSpy = vi.fn();
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={createSharedValue({ x: 0, y: 0, zoom: 1 })}
+				getNodeLayout={() =>
+					createSharedValue({ x: 0, y: 0, width: 160, height: 60 })
+				}
+				nodes={[createVideoNode({ name: "narrow-hit", width: 160 })]}
+				focusedNodeId={null}
+				onHitTesterChange={hitTesterSpy}
+			/>,
+		);
+		await waitFor(() => {
+			expect(hitTesterSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			expect(
+				paragraphInstances.some(
+					(paragraph) => paragraph.paint.mock.calls.length > 0,
+				),
+			).toBe(true);
+		});
+
+		const tester = [...hitTesterSpy.mock.calls]
+			.map((call) => call[0])
+			.find((value) => Boolean(value));
+		if (!tester || typeof tester !== "object" || !("hitTest" in tester)) {
+			throw new Error("label hit tester 未注册");
+		}
+		const camera = { x: 0, y: 0, zoom: 1 };
+		expect(tester.hitTest(24, -10, camera)).toEqual(["node-a"]);
+		expect(tester.hitTest(120, -10, camera)).toEqual([]);
+	});
+
+	it("label 命中会覆盖到底部 gap 区域，避免下方出现空隙", async () => {
+		paragraphLongestLineByText.set("gap-hit", 36);
+		const hitTesterSpy = vi.fn();
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={createSharedValue({ x: 0, y: 0, zoom: 1 })}
+				getNodeLayout={() =>
+					createSharedValue({ x: 0, y: 0, width: 160, height: 60 })
+				}
+				nodes={[createVideoNode({ name: "gap-hit", width: 160 })]}
+				focusedNodeId={null}
+				onHitTesterChange={hitTesterSpy}
+			/>,
+		);
+		await waitFor(() => {
+			expect(hitTesterSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			expect(
+				paragraphInstances.some(
+					(paragraph) => paragraph.paint.mock.calls.length > 0,
+				),
+			).toBe(true);
+		});
+
+		const tester = [...hitTesterSpy.mock.calls]
+			.map((call) => call[0])
+			.find((value) => Boolean(value));
+		if (!tester || typeof tester !== "object" || !("hitTest" in tester)) {
+			throw new Error("label hit tester 未注册");
+		}
+		// 命中点位于 label 下边缘到 node 顶边之间的 gap 区域。
+		expect(tester.hitTest(24, -2, { x: 0, y: 0, zoom: 1 })).toEqual([
+			"node-a",
+		]);
+	});
+
+	it("pan 补偿会同步应用到 label 命中区域", async () => {
+		paragraphLongestLineByText.set("pan-hit", 36);
+		const hitTesterSpy = vi.fn();
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={createSharedValue({ x: 0, y: 0, zoom: 1 })}
+				getNodeLayout={() =>
+					createSharedValue({ x: 0, y: 0, width: 160, height: 60 })
+				}
+				nodes={[createVideoNode({ name: "pan-hit", width: 160 })]}
+				focusedNodeId={null}
+				onHitTesterChange={hitTesterSpy}
+			/>,
+		);
+		await waitFor(() => {
+			expect(hitTesterSpy).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			expect(
+				paragraphInstances.some(
+					(paragraph) => paragraph.paint.mock.calls.length > 0,
+				),
+			).toBe(true);
+		});
+
+		const tester = [...hitTesterSpy.mock.calls]
+			.map((call) => call[0])
+			.find((value) => Boolean(value));
+		if (!tester || typeof tester !== "object" || !("hitTest" in tester)) {
+			throw new Error("label hit tester 未注册");
+		}
+		expect(tester.hitTest(45, -10, { x: 40, y: 0, zoom: 1 })).toEqual([
+			"node-a",
+		]);
+		expect(tester.hitTest(45, -10, { x: 40, y: 0, zoom: 1.2 })).toEqual([]);
+	});
+
+	it("label 不可见时不会产生命中条目", async () => {
+		const hitTesterSpy = vi.fn();
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={createSharedValue({ x: 0, y: 0, zoom: 1 })}
+				getNodeLayout={() =>
+					createSharedValue({ x: 0, y: 0, width: 20, height: 60 })
+				}
+				nodes={[createVideoNode({ name: "tiny", width: 20 })]}
+				focusedNodeId={null}
+				onHitTesterChange={hitTesterSpy}
+			/>,
+		);
+		await waitFor(() => {
+			expect(hitTesterSpy).toHaveBeenCalled();
+		});
+		const tester = [...hitTesterSpy.mock.calls]
+			.map((call) => call[0])
+			.find((value) => Boolean(value));
+		if (!tester || typeof tester !== "object" || !("hitTest" in tester)) {
+			throw new Error("label hit tester 未注册");
+		}
+		expect(tester.hitTest(4, -10, { x: 0, y: 0, zoom: 1 })).toEqual([]);
 	});
 });

@@ -91,6 +91,7 @@ import { secondsToFrames } from "@/utils/timecode";
 import CanvasWorkspaceOverlay, {
 	type DrawerViewData,
 } from "./CanvasWorkspaceOverlay";
+import type { CanvasNodeLabelHitTester } from "./CanvasNodeLabelLayer";
 import {
 	CANVAS_DEFAULT_TOOL_MODE,
 	isCanvasToolModeEnabled,
@@ -1344,6 +1345,7 @@ const CanvasWorkspace = () => {
 		return new Map(allCanvasNodes.map((node) => [node.id, node]));
 	}, [allCanvasNodes]);
 	const spatialIndexRef = useRef<CanvasSpatialIndex | null>(null);
+	const labelHitTesterRef = useRef<CanvasNodeLabelHitTester | null>(null);
 	const spatialIndex = useMemo(() => {
 		if (!spatialIndexRef.current) {
 			spatialIndexRef.current = new CanvasSpatialIndex();
@@ -1351,6 +1353,12 @@ const CanvasWorkspace = () => {
 		spatialIndexRef.current.sync(allCanvasNodes);
 		return spatialIndexRef.current;
 	}, [allCanvasNodes]);
+	const handleLabelHitTesterChange = useCallback(
+		(tester: CanvasNodeLabelHitTester | null) => {
+			labelHitTesterRef.current = tester;
+		},
+		[],
+	);
 	const currentNodeIdSet = useMemo(() => {
 		return new Set(allCanvasNodes.map((node) => node.id));
 	}, [allCanvasNodes]);
@@ -2420,7 +2428,14 @@ const CanvasWorkspace = () => {
 	}, [handleContainerWheel]);
 
 	const getTopHitNode = useCallback(
-		(worldX: number, worldY: number): CanvasNode | null => {
+		(input: {
+			worldX: number;
+			worldY: number;
+			localX: number;
+			localY: number;
+			liveCamera: CameraState;
+		}): CanvasNode | null => {
+			const { worldX, worldY, localX, localY, liveCamera } = input;
 			const indexedHitNodes = [...spatialIndex.queryPoint(worldX, worldY)]
 				.sort(compareCanvasSpatialHitPriority)
 				.map((item) => nodeById.get(item.nodeId) ?? null)
@@ -2448,7 +2463,28 @@ const CanvasWorkspace = () => {
 					indexedTopHit ? [indexedTopHit.id] : [],
 				);
 			}
-			return indexedTopHit;
+			const labelHitTester = labelHitTesterRef.current;
+			if (!labelHitTester) return indexedTopHit;
+			const labelHitNodeIds = labelHitTester.hitTest(localX, localY, liveCamera);
+			if (labelHitNodeIds.length <= 0) return indexedTopHit;
+			const labelHitNodes = labelHitNodeIds
+				.map((nodeId) => nodeById.get(nodeId) ?? null)
+				.filter((node): node is CanvasNode => Boolean(node))
+				.filter((node) => {
+					if (node.hidden) return false;
+					const canInteractNode =
+						!isCanvasInteractionLocked || node.id === focusedNodeId;
+					return canInteractNode;
+				})
+				.sort(compareCanvasNodeHitPriority);
+			if (labelHitNodes.length <= 0) return indexedTopHit;
+			// label 与 body 命中并行参与，统一按现有优先级选 top。
+			const mergedHitNodes = [...indexedHitNodes, ...labelHitNodes]
+				.filter((node, index, list) => {
+					return list.findIndex((item) => item.id === node.id) === index;
+				})
+				.sort(compareCanvasNodeHitPriority);
+			return mergedHitNodes[0] ?? null;
 		},
 		[
 			focusedNodeId,
@@ -5260,12 +5296,19 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			const world = resolveWorldPoint(tapMeta.clientX, tapMeta.clientY);
+			const local = resolveLocalPoint(tapMeta.clientX, tapMeta.clientY);
 			lastCanvasPointerWorldRef.current = world;
 			if (isResizeAnchorHitAtWorldPoint(world.x, world.y)) {
 				lastTapRecordRef.current = null;
 				return;
 			}
-			const node = getTopHitNode(world.x, world.y);
+			const node = getTopHitNode({
+				worldX: world.x,
+				worldY: world.y,
+				localX: local.x,
+				localY: local.y,
+				liveCamera: getCamera(),
+			});
 			const keepMultiSelectionBounds = Boolean(
 				selectedBounds &&
 					normalizedSelectedNodeIds.length > 1 &&
@@ -5306,12 +5349,14 @@ const CanvasWorkspace = () => {
 		[
 			commitSelectedNodeIds,
 			getTopHitNode,
+			getCamera,
 			handleNodeDoubleActivate,
 			handleNodeTapSelection,
 			isDoubleTapRecordMatch,
 			isCanvasInteractionLocked,
 			isResizeAnchorHitAtWorldPoint,
 			normalizedSelectedNodeIds,
+			resolveLocalPoint,
 			resolvePendingClickSuppression,
 			resolveWorldPoint,
 			selectedBounds,
@@ -5338,14 +5383,23 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			const world = resolveWorldPoint(clientX, clientY);
-			const node = getTopHitNode(world.x, world.y);
+			const local = resolveLocalPoint(clientX, clientY);
+			const node = getTopHitNode({
+				worldX: world.x,
+				worldY: world.y,
+				localX: local.x,
+				localY: local.y,
+				liveCamera: getCamera(),
+			});
 			commitHoveredNodeId(node?.id ?? null);
 		},
 		[
 			clearHoveredNode,
 			commitHoveredNodeId,
+			getCamera,
 			getTopHitNode,
 			isCanvasInteractionLocked,
+			resolveLocalPoint,
 			resolveWorldPoint,
 		],
 	);
@@ -5433,7 +5487,14 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			commitCanvasResizeCursor(null);
-			const node = getTopHitNode(world.x, world.y);
+			const local = resolveLocalPoint(event.clientX, event.clientY);
+			const node = getTopHitNode({
+				worldX: world.x,
+				worldY: world.y,
+				localX: local.x,
+				localY: local.y,
+				liveCamera: getCamera(),
+			});
 			const isInSelectionBounds = Boolean(
 				selectedBounds &&
 					normalizedSelectedNodeIds.length > 1 &&
@@ -5517,6 +5578,7 @@ const CanvasWorkspace = () => {
 			clearPendingClickSuppression,
 			commitCanvasResizeCursor,
 			commitCanvasResizeCursorByAnchor,
+			getCamera,
 			getTopHitNode,
 			handleNodeActivate,
 			isCanvasInteractionLocked,
@@ -5680,6 +5742,7 @@ const CanvasWorkspace = () => {
 				y: event.clientY,
 			};
 			const world = resolveWorldPoint(event.clientX, event.clientY);
+			const local = resolveLocalPoint(event.clientX, event.clientY);
 			lastCanvasPointerWorldRef.current = world;
 			const pointerSession = pointerSessionRef.current;
 			if (!pointerSession || pointerSession.pointerId !== event.pointerId) {
@@ -5743,7 +5806,13 @@ const CanvasWorkspace = () => {
 					shouldResolveTap &&
 					(pointerSession.gesture !== "node-drag" ||
 						(pointerSession.startNodeId &&
-							getTopHitNode(world.x, world.y)?.id ===
+							getTopHitNode({
+								worldX: world.x,
+								worldY: world.y,
+								localX: local.x,
+								localY: local.y,
+								liveCamera: getCamera(),
+							})?.id ===
 								pointerSession.startNodeId))
 				) {
 					handleCanvasSurfaceTap(tapMeta);
@@ -5798,8 +5867,10 @@ const CanvasWorkspace = () => {
 			resolveCanvasDragEventFromPointer,
 			resolvePointerTapMeta,
 			resolveResizeAnchorAtWorldPoint,
+			resolveLocalPoint,
 			resolveWorldPoint,
 			updateHoverFromPointer,
+			getCamera,
 		],
 	);
 
@@ -5871,8 +5942,15 @@ const CanvasWorkspace = () => {
 			if (isCanvasInteractionLocked) return;
 			event.preventDefault();
 			const world = resolveWorldPoint(event.clientX, event.clientY);
+			const local = resolveLocalPoint(event.clientX, event.clientY);
 			lastCanvasPointerWorldRef.current = world;
-			const node = getTopHitNode(world.x, world.y);
+			const node = getTopHitNode({
+				worldX: world.x,
+				worldY: world.y,
+				localX: local.x,
+				localY: local.y,
+				liveCamera: getCamera(),
+			});
 			if (
 				normalizedSelectedNodeIds.length > 1 &&
 				selectedBounds &&
@@ -5911,6 +5989,8 @@ const CanvasWorkspace = () => {
 			openDeleteContextMenuAt,
 			openCanvasContextMenuAt,
 			openNodeContextMenuAt,
+			getCamera,
+			resolveLocalPoint,
 			resolveWorldPoint,
 			selectedBounds,
 		],
@@ -6216,6 +6296,7 @@ const CanvasWorkspace = () => {
 				tileLodTransition={effectiveTileLodTransition}
 				onNodeResize={handleSkiaNodeResize}
 				onSelectionResize={handleSelectionResize}
+				onLabelHitTesterChange={handleLabelHitTesterChange}
 			/>
 
 			<CanvasWorkspaceOverlay

@@ -120,6 +120,13 @@ interface MockInfiniteSkiaCanvasProps {
 		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left";
 		event: MockCanvasNodeDragEvent;
 	}) => void;
+	onLabelHitTesterChange?: (tester: {
+		hitTest: (
+			localX: number,
+			localY: number,
+			liveCamera: CameraState,
+		) => string[];
+	} | null) => void;
 }
 
 vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
@@ -132,6 +139,67 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 vi.mock("./InfiniteSkiaCanvas", () => ({
 	default: (props: MockInfiniteSkiaCanvasProps) => {
 		infiniteSkiaCanvasPropsMock(props);
+		const shouldRenderNodeLabels =
+			!props.focusedNodeId &&
+			(props.tileLodTransition?.mode ?? "follow") === "follow";
+		if (!shouldRenderNodeLabels) {
+			props.onLabelHitTesterChange?.(null);
+		} else {
+			const snapshotCamera = props.camera?.value ?? {
+				x: 0,
+				y: 0,
+				zoom: 1,
+			};
+			props.onLabelHitTesterChange?.({
+				hitTest: (localX, localY, liveCamera) => {
+					const hitNodeIds: string[] = [];
+					const safeSnapshotZoom = Math.max(snapshotCamera.zoom, 1e-6);
+					const safeLiveZoom = Math.max(liveCamera.zoom, 1e-6);
+					const sameZoom =
+						Math.abs(liveCamera.zoom - snapshotCamera.zoom) <= 1e-6;
+					const translateX = sameZoom
+						? liveCamera.x * safeLiveZoom - snapshotCamera.x * safeSnapshotZoom
+						: 0;
+					const translateY = sameZoom
+						? liveCamera.y * safeLiveZoom - snapshotCamera.y * safeSnapshotZoom
+						: 0;
+					for (const node of props.nodes ?? []) {
+						const labelText = node.name.trim();
+						if (!labelText) continue;
+						const nodeLeft = Math.min(node.x, node.x + node.width);
+						const nodeTop = Math.min(node.y, node.y + node.height);
+						const frameWidth = Math.max(
+							0,
+							Math.floor(Math.max(1, Math.abs(node.width) * safeSnapshotZoom)),
+						);
+						if (frameWidth < 24) continue;
+						const labelWidth = Math.min(
+							frameWidth,
+							Math.max(1, Math.ceil(labelText.length * 8)),
+						);
+						const labelX =
+							nodeLeft * safeSnapshotZoom +
+							snapshotCamera.x * safeSnapshotZoom +
+							translateX;
+						const labelY =
+							nodeTop * safeSnapshotZoom +
+							snapshotCamera.y * safeSnapshotZoom -
+							5 -
+							13 +
+							translateY;
+						if (
+							localX >= labelX &&
+							localX <= labelX + labelWidth &&
+							localY >= labelY &&
+							localY <= labelY + 13
+						) {
+							hitNodeIds.push(node.id);
+						}
+					}
+					return hitNodeIds;
+				},
+			});
+		}
 		return (
 			<>
 				<div data-testid="infinite-skia-canvas" data-canvas-surface="true" />
@@ -1536,6 +1604,25 @@ const cancelPointerAt = (clientX: number, clientY: number): void => {
 		...createPointerPatch(clientX, clientY),
 		buttons: 0,
 	});
+};
+
+const resolveNodeLabelPoint = (
+	nodeId: string,
+	offsetX = 16,
+): { x: number; y: number } => {
+	const props = getLatestInfiniteSkiaCanvasProps();
+	const node = props.nodes?.find((item) => item.id === nodeId);
+	if (!node) {
+		throw new Error(`未找到节点: ${nodeId}`);
+	}
+	const camera = props.camera?.value ?? { x: 0, y: 0, zoom: 1 };
+	const safeZoom = Math.max(camera.zoom, 1e-6);
+	const nodeLeft = Math.min(node.x, node.x + node.width);
+	const nodeTop = Math.min(node.y, node.y + node.height);
+	return {
+		x: nodeLeft * safeZoom + camera.x * safeZoom + offsetX,
+		y: nodeTop * safeZoom + camera.y * safeZoom - 10,
+	};
 };
 
 const touchDoubleTapNodeAt = (clientX: number, clientY: number): void => {
@@ -3948,6 +4035,103 @@ describe("CanvasWorkspace", () => {
 		);
 		cancelPointerAt(300, 160);
 		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBeNull();
+	});
+
+	it("hover 到 label 区域时也会命中对应 node", () => {
+		render(<CanvasWorkspace />);
+		const videoLabelPoint = resolveNodeLabelPoint("node-video-1");
+		const imageLabelPoint = resolveNodeLabelPoint("node-image-1");
+		movePointerAt(videoLabelPoint.x, videoLabelPoint.y);
+		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBe(
+			"node-video-1",
+		);
+		movePointerAt(imageLabelPoint.x, imageLabelPoint.y);
+		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBe(
+			"node-image-1",
+		);
+	});
+
+	it("点击 label 区域会选中对应 node", () => {
+		render(<CanvasWorkspace />);
+		const videoLabelPoint = resolveNodeLabelPoint("node-video-1");
+		const imageLabelPoint = resolveNodeLabelPoint("node-image-1");
+		clickNodeAt(videoLabelPoint.x, videoLabelPoint.y);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-video-1",
+		);
+		clickNodeAt(imageLabelPoint.x, imageLabelPoint.y);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-image-1",
+		);
+	});
+
+	it("从 label 区域起手拖拽会移动 node", () => {
+		render(<CanvasWorkspace />);
+		const videoLabelPoint = resolveNodeLabelPoint("node-video-1");
+		dragNodeAt(
+			videoLabelPoint.x,
+			videoLabelPoint.y,
+			videoLabelPoint.x + 120,
+			videoLabelPoint.y + 100,
+		);
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-video-1",
+		);
+		expect(node?.x).toBe(360);
+		expect(node?.y).toBe(220);
+	});
+
+	it("在 label 区域右键会打开 node context menu", async () => {
+		render(<CanvasWorkspace />);
+		const videoLabelPoint = resolveNodeLabelPoint("node-video-1");
+		rightClickNodeAt(videoLabelPoint.x, videoLabelPoint.y);
+		expect(await screen.findByRole("menuitem", { name: "复制" })).toBeTruthy();
+		expect(screen.queryByRole("menuitem", { name: "新建文本节点" })).toBeNull();
+	});
+
+	it("重叠 label 命中会沿用现有 node 命中优先级", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: project.canvas.nodes.map((node) => {
+							if (node.id === "node-video-1") {
+								return {
+									...node,
+									x: 240,
+									y: 180,
+									width: 260,
+									height: 140,
+									zIndex: 1,
+								};
+							}
+							if (node.id === "node-image-1") {
+								return {
+									...node,
+									x: 260,
+									y: 188,
+									width: 260,
+									height: 140,
+									zIndex: 2,
+								};
+							}
+							return node;
+						}),
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 172);
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-image-1",
+		);
 	});
 
 	it("Shift 点击可多选和反选，主选中随最后一个选中节点切换", () => {
