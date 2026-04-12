@@ -133,13 +133,13 @@ import {
 	compareCanvasSpatialPaintOrder,
 } from "./canvasSpatialIndex";
 import {
-	allocateBatchInsertZIndex,
-	allocateInsertZIndex,
-	compareLayerOrder,
-	compareLayerOrderDesc,
+	allocateBatchInsertSiblingOrder,
+	allocateInsertSiblingOrder,
+	buildLayerTreeOrder,
 	LAYER_ORDER_REBALANCE_STEP,
 	resolveLayerSiblingCount,
-	sortByLayerOrder,
+	sortBySiblingOrder,
+	sortByTreePaintOrder,
 } from "./layerOrderCoordinator";
 import {
 	buildNodeFitCamera,
@@ -514,25 +514,6 @@ const isNodeIntersectRect = (
 		rect.top < nodeBottom &&
 		rect.bottom > nodeTop
 	);
-};
-
-const compareCanvasNodePaintOrder = (
-	left: CanvasNode,
-	right: CanvasNode,
-): number => {
-	return compareLayerOrder(left, right);
-};
-
-const compareCanvasNodeHitPriority = (
-	left: CanvasNode,
-	right: CanvasNode,
-): number => {
-	const leftIsFrame = left.type === "frame";
-	const rightIsFrame = right.type === "frame";
-	if (leftIsFrame !== rightIsFrame) {
-		return leftIsFrame ? 1 : -1;
-	}
-	return compareLayerOrderDesc(left, right);
 };
 
 type CanvasFrameBodyHitMode = "include" | "exclude" | "selected-only";
@@ -1356,11 +1337,43 @@ const CanvasWorkspace = () => {
 	const allCanvasNodes = useMemo(() => {
 		return currentProject?.canvas.nodes ?? [];
 	}, [currentProject]);
+	const layerTreeOrder = useMemo(() => {
+		return buildLayerTreeOrder(allCanvasNodes);
+	}, [allCanvasNodes]);
+	const compareCanvasNodePaintOrder = useCallback(
+		(left: CanvasNode, right: CanvasNode): number => {
+			const leftIndex =
+				layerTreeOrder.paintOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+			const rightIndex =
+				layerTreeOrder.paintOrderByNodeId.get(right.id) ??
+				Number.MAX_SAFE_INTEGER;
+			if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+			return left.id.localeCompare(right.id);
+		},
+		[layerTreeOrder],
+	);
+	const compareCanvasNodeHitPriority = useCallback(
+		(left: CanvasNode, right: CanvasNode): number => {
+			const leftIsFrame = left.type === "frame";
+			const rightIsFrame = right.type === "frame";
+			if (leftIsFrame !== rightIsFrame) {
+				return leftIsFrame ? 1 : -1;
+			}
+			const leftIndex =
+				layerTreeOrder.hitOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+			const rightIndex =
+				layerTreeOrder.hitOrderByNodeId.get(right.id) ??
+				Number.MAX_SAFE_INTEGER;
+			if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+			return right.id.localeCompare(left.id);
+		},
+		[layerTreeOrder],
+	);
 	const sortedNodes = useMemo(() => {
 		return [...allCanvasNodes]
 			.filter((node) => !node.hidden)
 			.sort(compareCanvasNodePaintOrder);
-	}, [allCanvasNodes]);
+	}, [allCanvasNodes, compareCanvasNodePaintOrder]);
 	const nodeById = useMemo(() => {
 		return new Map(allCanvasNodes.map((node) => [node.id, node]));
 	}, [allCanvasNodes]);
@@ -1462,6 +1475,7 @@ const CanvasWorkspace = () => {
 		sortedNodes,
 		stageSize.height,
 		stageSize.width,
+		compareCanvasNodePaintOrder,
 	]);
 	useEffect(() => {
 		if (!runtimeManager) {
@@ -2515,8 +2529,8 @@ const CanvasWorkspace = () => {
 					const canInteractNode =
 						!isCanvasInteractionLocked || node.id === focusedNodeId;
 					return canInteractNode;
-					})
-					.sort(compareCanvasNodeHitPriority);
+				})
+				.sort(compareCanvasNodeHitPriority);
 			if (labelHitNodes.length <= 0) return indexedTopHit;
 			const topFrameLabelHitNode =
 				labelHitNodes.find((node) => node.type === "frame") ?? null;
@@ -2532,6 +2546,7 @@ const CanvasWorkspace = () => {
 			return mergedHitNodes[0] ?? null;
 		},
 		[
+			compareCanvasNodeHitPriority,
 			focusedNodeId,
 			isCanvasInteractionLocked,
 			nodeById,
@@ -2665,7 +2680,7 @@ const CanvasWorkspace = () => {
 		): Array<{
 			nodeId: string;
 			beforeParentId: string | null;
-			beforeZIndex: number;
+			beforeSiblingOrder: number;
 		}> => {
 			const createdFrame = nodes.find(
 				(node) => node.id === createdFrameId && node.type === "frame",
@@ -2675,7 +2690,7 @@ const CanvasWorkspace = () => {
 			const reparentChanges: Array<{
 				nodeId: string;
 				beforeParentId: string | null;
-				beforeZIndex: number;
+				beforeSiblingOrder: number;
 			}> = [];
 			for (const node of nodes) {
 				if (node.id === createdFrameId) continue;
@@ -2696,7 +2711,7 @@ const CanvasWorkspace = () => {
 				reparentChanges.push({
 					nodeId: node.id,
 					beforeParentId,
-					beforeZIndex: node.zIndex,
+					beforeSiblingOrder: node.siblingOrder,
 				});
 			}
 			return reparentChanges;
@@ -2748,8 +2763,8 @@ const CanvasWorkspace = () => {
 			nodeId: string;
 			beforeParentId: string | null;
 			afterParentId: string | null;
-			beforeZIndex: number;
-			afterZIndex: number;
+			beforeSiblingOrder: number;
+			afterSiblingOrder: number;
 		}> = [];
 		if (reparentChanges.length > 0) {
 			const beforeChangeByNodeId = new Map(
@@ -2758,19 +2773,17 @@ const CanvasWorkspace = () => {
 			let workingNodes = [...projectAfterCreate.canvas.nodes];
 			const layoutPatchByNodeId = new Map<
 				string,
-				{ parentId?: string | null; zIndex?: number }
+				{ parentId?: string | null; siblingOrder?: number }
 			>();
-			const orderedChangeIds = reparentChanges
-				.map((change) => change.nodeId)
-				.sort((leftNodeId, rightNodeId) => {
-					const leftNode = workingNodes.find((node) => node.id === leftNodeId);
-					const rightNode = workingNodes.find(
-						(node) => node.id === rightNodeId,
-					);
-					if (!leftNode || !rightNode)
-						return leftNodeId.localeCompare(rightNodeId);
-					return compareLayerOrder(leftNode, rightNode);
-				});
+			const orderedChangeIds = sortByTreePaintOrder(
+				reparentChanges
+					.map((change) => {
+						return (
+							workingNodes.find((node) => node.id === change.nodeId) ?? null
+						);
+					})
+					.filter((node): node is CanvasNode => Boolean(node)),
+			).map((node) => node.id);
 			for (const nodeId of orderedChangeIds) {
 				const currentNode = workingNodes.find((node) => node.id === nodeId);
 				if (!currentNode) continue;
@@ -2779,31 +2792,31 @@ const CanvasWorkspace = () => {
 					createdFrame.id,
 					[nodeId],
 				);
-				const { zIndex, rebalancePatches } = allocateInsertZIndex(
-					workingNodes,
-					{
-						parentId: createdFrame.id,
+					const { siblingOrder, rebalancePatches } = allocateInsertSiblingOrder(
+						workingNodes,
+						{
+							parentId: createdFrame.id,
 						index: siblingInsertIndex,
 						movingNodeIds: [nodeId],
 					},
 				);
 				if (rebalancePatches.length > 0) {
 					const rebalancePatchByNodeId = new Map(
-						rebalancePatches.map((patch) => [patch.nodeId, patch.zIndex]),
+						rebalancePatches.map((patch) => [patch.nodeId, patch.siblingOrder]),
 					);
 					workingNodes = workingNodes.map((node) => {
 						const nextZIndex = rebalancePatchByNodeId.get(node.id);
-						if (nextZIndex === undefined || nextZIndex === node.zIndex) {
+						if (nextZIndex === undefined || nextZIndex === node.siblingOrder) {
 							return node;
 						}
 						const nextPatch = layoutPatchByNodeId.get(node.id) ?? {};
 						layoutPatchByNodeId.set(node.id, {
 							...nextPatch,
-							zIndex: nextZIndex,
+							siblingOrder: nextZIndex,
 						});
 						return {
 							...node,
-							zIndex: nextZIndex,
+							siblingOrder: nextZIndex,
 						};
 					});
 				}
@@ -2813,25 +2826,25 @@ const CanvasWorkspace = () => {
 					layoutPatchByNodeId.set(node.id, {
 						...nextPatch,
 						parentId: createdFrame.id,
-						zIndex,
+						siblingOrder,
 					});
 					return {
 						...node,
 						parentId: createdFrame.id,
-						zIndex,
+						siblingOrder,
 					};
 				});
 			}
 			const childZIndices = orderedChangeIds
 				.map(
-					(nodeId) => workingNodes.find((node) => node.id === nodeId)?.zIndex,
+					(nodeId) => workingNodes.find((node) => node.id === nodeId)?.siblingOrder,
 				)
-				.filter((zIndex): zIndex is number => Number.isFinite(zIndex));
+				.filter((siblingOrder): siblingOrder is number => Number.isFinite(siblingOrder));
 			if (childZIndices.length > 0) {
 				const frameNode = workingNodes.find(
 					(node) => node.id === createdFrame.id,
 				);
-				const frameZIndex = frameNode?.zIndex ?? createdFrame.zIndex;
+				const frameZIndex = frameNode?.siblingOrder ?? createdFrame.siblingOrder;
 				const nextFrameZIndex =
 					Math.min(...childZIndices) - LAYER_ORDER_REBALANCE_STEP;
 				if (nextFrameZIndex !== frameZIndex) {
@@ -2840,11 +2853,11 @@ const CanvasWorkspace = () => {
 						const nextPatch = layoutPatchByNodeId.get(node.id) ?? {};
 						layoutPatchByNodeId.set(node.id, {
 							...nextPatch,
-							zIndex: nextFrameZIndex,
+							siblingOrder: nextFrameZIndex,
 						});
 						return {
 							...node,
-							zIndex: nextFrameZIndex,
+							siblingOrder: nextFrameZIndex,
 						};
 					});
 				}
@@ -2868,8 +2881,8 @@ const CanvasWorkspace = () => {
 						nodeId,
 						beforeParentId: before.beforeParentId,
 						afterParentId: afterNode.parentId ?? null,
-						beforeZIndex: before.beforeZIndex,
-						afterZIndex: afterNode.zIndex,
+						beforeSiblingOrder: before.beforeSiblingOrder,
+						afterSiblingOrder: afterNode.siblingOrder,
 					};
 				})
 				.filter(
@@ -2879,13 +2892,13 @@ const CanvasWorkspace = () => {
 						nodeId: string;
 						beforeParentId: string | null;
 						afterParentId: string | null;
-						beforeZIndex: number;
-						afterZIndex: number;
+						beforeSiblingOrder: number;
+						afterSiblingOrder: number;
 					} => {
 						if (!change) return false;
 						return (
 							change.beforeParentId !== change.afterParentId ||
-							change.beforeZIndex !== change.afterZIndex
+							change.beforeSiblingOrder !== change.afterSiblingOrder
 						);
 					},
 				);
@@ -2932,17 +2945,17 @@ const CanvasWorkspace = () => {
 				return [] as Array<{
 					nodeId: string;
 					afterParentId: string | null;
-					afterZIndex: number;
+					afterSiblingOrder: number;
 				}>;
 			let workingNodes = [...nodes];
 			const changeByNodeId = new Map<
 				string,
 				{
 					afterParentId: string | null;
-					afterZIndex: number;
+					afterSiblingOrder: number;
 				}
 			>();
-			const orderedRootNodeIds = sortByLayerOrder(
+			const orderedRootNodeIds = sortByTreePaintOrder(
 				rootNodeIds
 					.map(
 						(nodeId) => workingNodes.find((node) => node.id === nodeId) ?? null,
@@ -2974,34 +2987,34 @@ const CanvasWorkspace = () => {
 					nextParentId,
 					[rootNodeId],
 				);
-				const { zIndex } = allocateInsertZIndex(workingNodes, {
-					parentId: nextParentId,
-					index: siblingInsertIndex,
-					movingNodeIds: [rootNodeId],
-				});
+					const { siblingOrder } = allocateInsertSiblingOrder(workingNodes, {
+						parentId: nextParentId,
+						index: siblingInsertIndex,
+						movingNodeIds: [rootNodeId],
+					});
 				workingNodes = workingNodes.map((workingNode) => {
 					if (workingNode.id !== rootNodeId) return workingNode;
 					changeByNodeId.set(rootNodeId, {
 						afterParentId: nextParentId,
-						afterZIndex: zIndex,
+						afterSiblingOrder: siblingOrder,
 					});
 					return {
 						...workingNode,
 						parentId: nextParentId,
-						zIndex,
+						siblingOrder,
 					};
 				});
 			}
 			const changes: Array<{
 				nodeId: string;
 				afterParentId: string | null;
-				afterZIndex: number;
+				afterSiblingOrder: number;
 			}> = [];
 			for (const [nodeId, change] of changeByNodeId) {
 				changes.push({
 					nodeId,
 					afterParentId: change.afterParentId,
-					afterZIndex: change.afterZIndex,
+					afterSiblingOrder: change.afterSiblingOrder,
 				});
 			}
 			return changes;
@@ -3059,7 +3072,7 @@ const CanvasWorkspace = () => {
 		const latestProject = useProjectStore.getState().currentProject;
 		if (!latestProject || nodeIds.length === 0) return [];
 		const sourceNodeIdSet = new Set(nodeIds);
-		const sourceNodes = sortByLayerOrder(
+		const sourceNodes = sortByTreePaintOrder(
 			latestProject.canvas.nodes.filter((node) => sourceNodeIdSet.has(node.id)),
 		);
 		if (sourceNodes.length === 0) return [];
@@ -3083,7 +3096,7 @@ const CanvasWorkspace = () => {
 					id: targetNodeIdBySourceNodeId.get(sourceNode.id) ?? sourceNode.id,
 					name: copyName,
 					parentId: mappedParentId,
-					zIndex: sourceNode.zIndex,
+					siblingOrder: sourceNode.siblingOrder,
 					createdAt,
 					updatedAt: createdAt,
 				};
@@ -3147,13 +3160,13 @@ const CanvasWorkspace = () => {
 			.forEach(({ entry }) => {
 				const parentId = entry.node.parentId ?? null;
 				const insertIndex = resolveLayerSiblingCount(workingNodes, parentId);
-				const { zIndex } = allocateInsertZIndex(workingNodes, {
-					parentId,
-					index: insertIndex,
-				});
+					const { siblingOrder } = allocateInsertSiblingOrder(workingNodes, {
+						parentId,
+						index: insertIndex,
+					});
 				entry.node = {
 					...entry.node,
-					zIndex,
+					siblingOrder,
 				};
 				workingNodes = [...workingNodes, entry.node];
 			});
@@ -3176,6 +3189,9 @@ const CanvasWorkspace = () => {
 		(dragSession: NodeDragSession) => {
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return [];
+			const paintOrderByNodeId = buildLayerTreeOrder(
+				latestProject.canvas.nodes,
+			).paintOrderByNodeId;
 			return dragSession.dragNodeIds
 				.map((nodeId) => {
 					return (
@@ -3184,7 +3200,14 @@ const CanvasWorkspace = () => {
 					);
 				})
 				.filter((node): node is CanvasNode => Boolean(node))
-				.sort(compareLayerOrder)
+				.sort((left, right) => {
+					const leftIndex =
+						paintOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+					const rightIndex =
+						paintOrderByNodeId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+					if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+					return left.id.localeCompare(right.id);
+				})
 				.filter((node) => {
 					const definition = getCanvasNodeDefinition(node.type);
 					return Boolean(definition.toTimelineClipboardElement);
@@ -4431,7 +4454,7 @@ const CanvasWorkspace = () => {
 						nodeId: change.nodeId,
 						patch: {
 							parentId: change.afterParentId,
-							zIndex: change.afterZIndex,
+							siblingOrder: change.afterSiblingOrder,
 						},
 					})),
 				);
@@ -4971,7 +4994,7 @@ const CanvasWorkspace = () => {
 			);
 			if (dragRootNodeIds.length === 0) return;
 			const movingNodeIdSet = new Set(dragRootNodeIds);
-			const orderedDragNodeIds = sortByLayerOrder(
+			const orderedDragNodeIds = sortByTreePaintOrder(
 				dragRootNodeIds
 					.map((nodeId) => nodeById.get(nodeId) ?? null)
 					.filter((node): node is CanvasNode => Boolean(node)),
@@ -4998,12 +5021,12 @@ const CanvasWorkspace = () => {
 				);
 			} else {
 				destinationParentId = targetNode.parentId ?? null;
-				const siblingNodes = sortByLayerOrder(
-					allNodes.filter((node) => {
-						if (movingNodeIdSet.has(node.id)) return false;
-						return (node.parentId ?? null) === destinationParentId;
-					}),
-				);
+					const siblingNodes = sortBySiblingOrder(
+						allNodes.filter((node) => {
+							if (movingNodeIdSet.has(node.id)) return false;
+							return (node.parentId ?? null) === destinationParentId;
+						}),
+					);
 				const targetIndex = siblingNodes.findIndex(
 					(sibling) => sibling.id === targetNode.id,
 				);
@@ -5016,27 +5039,27 @@ const CanvasWorkspace = () => {
 				if (movingNodeIdSet.has(ancestorId)) return;
 				ancestorId = nodeById.get(ancestorId)?.parentId ?? null;
 			}
-			const { assignments, rebalancePatches } = allocateBatchInsertZIndex(
-				allNodes,
-				{
-					parentId: destinationParentId,
+				const { assignments, rebalancePatches } = allocateBatchInsertSiblingOrder(
+					allNodes,
+					{
+						parentId: destinationParentId,
 					index: destinationIndex,
 					nodeIds: orderedDragNodeIds,
 					movingNodeIds: movingNodeIdSet,
 				},
 			);
 			const assignedZIndexByNodeId = new Map(
-				assignments.map((assignment) => [assignment.nodeId, assignment.zIndex]),
+				assignments.map((assignment) => [assignment.nodeId, assignment.siblingOrder]),
 			);
 			const rebalancedZIndexByNodeId = new Map(
-				rebalancePatches.map((patch) => [patch.nodeId, patch.zIndex]),
+				rebalancePatches.map((patch) => [patch.nodeId, patch.siblingOrder]),
 			);
 			const patchEntries = allNodes.reduce<
 				Array<{
 					nodeId: string;
 					patch: {
 						parentId?: string | null;
-						zIndex?: number;
+						siblingOrder?: number;
 					};
 				}>
 			>((entries, node) => {
@@ -5046,16 +5069,16 @@ const CanvasWorkspace = () => {
 				const nextZIndex =
 					assignedZIndexByNodeId.get(node.id) ??
 					rebalancedZIndexByNodeId.get(node.id) ??
-					node.zIndex;
+					node.siblingOrder;
 				const patch: {
 					parentId?: string | null;
-					zIndex?: number;
+					siblingOrder?: number;
 				} = {};
 				if ((node.parentId ?? null) !== nextParentId) {
 					patch.parentId = nextParentId;
 				}
-				if (node.zIndex !== nextZIndex) {
-					patch.zIndex = nextZIndex;
+				if (node.siblingOrder !== nextZIndex) {
+					patch.siblingOrder = nextZIndex;
 				}
 				if (Object.keys(patch).length === 0) return entries;
 				entries.push({

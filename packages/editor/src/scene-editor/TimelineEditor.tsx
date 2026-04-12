@@ -21,7 +21,7 @@ import {
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
-import { compareLayerOrder } from "@/studio/canvas/layerOrderCoordinator";
+import { sortByTreePaintOrder } from "@/studio/canvas/layerOrderCoordinator";
 import type {
 	StudioTimelineCanvasDropRequest,
 	StudioTimelineClipboardPayload,
@@ -379,11 +379,18 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 							},
 						}
 					: currentProject;
-			const orderedEntries = [...clipboardPayload.entries].sort(
-				(left, right) => {
-					return compareLayerOrder(left.node, right.node);
-				},
+			const entryByNodeId = new Map(
+				clipboardPayload.entries.map((entry) => [entry.node.id, entry]),
 			);
+			const orderedEntries = sortByTreePaintOrder(
+				clipboardPayload.entries.map((entry) => entry.node),
+			)
+				.map((node) => entryByNodeId.get(node.id) ?? null)
+				.filter(
+					(
+						entry,
+					): entry is (typeof clipboardPayload.entries)[number] => Boolean(entry),
+				);
 			let nextStartFrame = 0;
 			const convertedElements: TimelineElementType[] = [];
 			for (const entry of orderedEntries) {

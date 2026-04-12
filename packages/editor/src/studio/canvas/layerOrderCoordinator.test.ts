@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	buildLayerTreeOrder,
 	allocateBatchInsertZIndex,
 	allocateInsertZIndex,
 	rebalanceSiblingZIndex,
@@ -9,23 +10,23 @@ import {
 interface TestNode {
 	id: string;
 	parentId: string | null;
-	zIndex: number;
+	siblingOrder: number;
 }
 
 const createNode = (
 	id: string,
-	zIndex: number,
+	siblingOrder: number,
 	parentId: string | null = null,
 ): TestNode => {
 	return {
 		id,
 		parentId,
-		zIndex,
+		siblingOrder,
 	};
 };
 
 describe("layerOrderCoordinator", () => {
-	it("sortByLayerOrder 使用 zIndex + id 稳定排序", () => {
+	it("sortByLayerOrder 使用 siblingOrder + id 稳定排序", () => {
 		const nodes = [
 			createNode("node-c", 1),
 			createNode("node-a", 1),
@@ -44,8 +45,13 @@ describe("layerOrderCoordinator", () => {
 			parentId: null,
 			index: 1,
 		});
-		expect(result.rebalancePatches).toHaveLength(0);
-		expect(result.zIndex).toBe(512);
+		expect(result.rebalancePatches).toEqual([
+			{
+				nodeId: "right",
+				siblingOrder: 2,
+			},
+		]);
+		expect(result.siblingOrder).toBe(1);
 	});
 
 	it("allocateBatchInsertZIndex 会保持批量节点相对顺序", () => {
@@ -55,26 +61,36 @@ describe("layerOrderCoordinator", () => {
 			index: 1,
 			nodeIds: ["drag-1", "drag-2", "drag-3"],
 		});
-		expect(result.rebalancePatches).toHaveLength(0);
+		expect(result.rebalancePatches).toHaveLength(1);
 		expect(result.assignments.map((item) => item.nodeId)).toEqual([
 			"drag-1",
 			"drag-2",
 			"drag-3",
 		]);
-		expect(result.assignments.map((item) => item.zIndex)).toEqual([
-			256, 512, 768,
+		expect(result.assignments.map((item) => item.siblingOrder)).toEqual([
+			1, 2, 3,
+		]);
+		expect(result.rebalancePatches).toEqual([
+			{
+				nodeId: "right",
+				siblingOrder: 4,
+			},
 		]);
 	});
 
-	it("allocateInsertZIndex 间隙不足时会触发同级 rebalance", () => {
-		const nodes = [createNode("left", 0), createNode("right", 1e-8)];
+	it("allocateInsertZIndex 会把稀疏同级序规整为连续整数", () => {
+		const nodes = [createNode("left", 0), createNode("right", 99)];
 		const result = allocateInsertZIndex(nodes, {
 			parentId: null,
 			index: 1,
 		});
-		expect(result.rebalancePatches.length).toBeGreaterThan(0);
-		expect(result.zIndex).toBeGreaterThan(0);
-		expect(result.zIndex).toBeLessThan(1024);
+		expect(result.rebalancePatches).toEqual([
+			{
+				nodeId: "right",
+				siblingOrder: 2,
+			},
+		]);
+		expect(result.siblingOrder).toBe(1);
 	});
 
 	it("rebalanceSiblingZIndex 仅重排同级节点", () => {
@@ -89,6 +105,32 @@ describe("layerOrderCoordinator", () => {
 		expect(patches.map((patch) => patch.nodeId)).toEqual([
 			"child-a",
 			"child-b",
+		]);
+		expect(patches.map((patch) => patch.siblingOrder)).toEqual([0, 1]);
+	});
+
+	it("buildLayerTreeOrder 使用父先子后的原子子树顺序", () => {
+		const nodes = [
+			createNode("root-a", 0, null),
+			createNode("root-b", 1, null),
+			createNode("child-a-1", 0, "root-a"),
+			createNode("child-a-2", 1, "root-a"),
+			createNode("child-b-1", 0, "root-b"),
+		];
+		const order = buildLayerTreeOrder(nodes);
+		expect(order.paintNodeIds).toEqual([
+			"root-a",
+			"child-a-1",
+			"child-a-2",
+			"root-b",
+			"child-b-1",
+		]);
+		expect(order.hitNodeIds).toEqual([
+			"child-b-1",
+			"root-b",
+			"child-a-2",
+			"child-a-1",
+			"root-a",
 		]);
 	});
 });

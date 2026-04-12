@@ -16,7 +16,7 @@ const createVideoNode = (
 	y: 30,
 	width: 160,
 	height: 90,
-	zIndex: 0,
+	siblingOrder: 0,
 	locked: false,
 	hidden: false,
 	createdAt: 1,

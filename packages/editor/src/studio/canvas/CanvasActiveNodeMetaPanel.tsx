@@ -68,7 +68,7 @@ const CanvasActiveNodeMetaPanel: React.FC<CanvasActiveNodeMetaPanelProps> = ({
 				<Item label="ID" value={node.id} />
 				<Item label="X / Y" value={`${node.x} / ${node.y}`} />
 				<Item label="Width / Height" value={`${node.width} / ${node.height}`} />
-				<Item label="Z-Index" value={node.zIndex} />
+				<Item label="Sibling Order" value={node.siblingOrder} />
 				<Item label="Locked" value={String(node.locked)} />
 				<Item label="Hidden" value={String(node.hidden)} />
 				{scene && <Item label="Scene" value={`${scene.name} (${scene.id})`} />}

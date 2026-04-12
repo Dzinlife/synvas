@@ -1,23 +1,16 @@
 import type { CanvasNode } from "core/studio/types";
 
-export const LAYER_ORDER_REBALANCE_STEP = 1024;
-export const LAYER_ORDER_MIN_GAP = 1e-6;
+export const LAYER_ORDER_REBALANCE_STEP = 1;
 
 export interface LayerOrderNodeLike {
 	id: string;
-	zIndex: number;
+	siblingOrder: number;
 	parentId?: string | null;
 }
 
-export interface LayerOrderZIndexPatch {
+export interface LayerOrderSiblingPatch {
 	nodeId: string;
-	zIndex: number;
-}
-
-interface ResolveInsertContext {
-	prevZIndex: number | null;
-	nextZIndex: number | null;
-	insertCount: number;
+	siblingOrder: number;
 }
 
 const normalizeParentId = (
@@ -31,35 +24,39 @@ const clampIndex = (index: number, maxValue: number): number => {
 	return Math.max(0, Math.min(maxValue, Math.trunc(index)));
 };
 
-export const compareLayerOrder = <
-	T extends Pick<LayerOrderNodeLike, "id" | "zIndex">,
+export const compareSiblingOrder = <
+	T extends Pick<LayerOrderNodeLike, "id" | "siblingOrder">,
 >(
 	left: T,
 	right: T,
 ): number => {
-	if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
+	if (left.siblingOrder !== right.siblingOrder) {
+		return left.siblingOrder - right.siblingOrder;
+	}
 	return left.id.localeCompare(right.id);
 };
 
-export const compareLayerOrderDesc = <
-	T extends Pick<LayerOrderNodeLike, "id" | "zIndex">,
+export const compareSiblingOrderDesc = <
+	T extends Pick<LayerOrderNodeLike, "id" | "siblingOrder">,
 >(
 	left: T,
 	right: T,
 ): number => {
-	if (left.zIndex !== right.zIndex) return right.zIndex - left.zIndex;
+	if (left.siblingOrder !== right.siblingOrder) {
+		return right.siblingOrder - left.siblingOrder;
+	}
 	return right.id.localeCompare(left.id);
 };
 
-export const sortByLayerOrder = <
-	T extends Pick<LayerOrderNodeLike, "id" | "zIndex">,
+export const sortBySiblingOrder = <
+	T extends Pick<LayerOrderNodeLike, "id" | "siblingOrder">,
 >(
 	nodes: T[],
 ): T[] => {
-	return [...nodes].sort(compareLayerOrder);
+	return [...nodes].sort(compareSiblingOrder);
 };
 
-export const resolveSiblingNodesByLayerOrder = <T extends LayerOrderNodeLike>(
+export const resolveSiblingNodesBySiblingOrder = <T extends LayerOrderNodeLike>(
 	nodes: T[],
 	options: {
 		parentId: string | null;
@@ -70,7 +67,7 @@ export const resolveSiblingNodesByLayerOrder = <T extends LayerOrderNodeLike>(
 	const excludeNodeIds = options.excludeNodeIds
 		? new Set(options.excludeNodeIds)
 		: null;
-	return sortByLayerOrder(
+	return sortBySiblingOrder(
 		nodes.filter((node) => {
 			if (excludeNodeIds?.has(node.id)) return false;
 			return normalizeParentId(node.parentId) === parentId;
@@ -78,84 +75,63 @@ export const resolveSiblingNodesByLayerOrder = <T extends LayerOrderNodeLike>(
 	);
 };
 
-const resolveInsertZIndices = (
-	context: ResolveInsertContext,
-): number[] | null => {
-	const { prevZIndex, nextZIndex, insertCount } = context;
-	if (insertCount <= 0) return [];
-	if (prevZIndex === null && nextZIndex === null) {
-		return Array.from({ length: insertCount }, (_, index) => {
-			return index * LAYER_ORDER_REBALANCE_STEP;
-		});
-	}
-	if (prevZIndex === null) {
-		const start = nextZIndex - insertCount * LAYER_ORDER_REBALANCE_STEP;
-		return Array.from({ length: insertCount }, (_, index) => {
-			return start + index * LAYER_ORDER_REBALANCE_STEP;
-		});
-	}
-	if (nextZIndex === null) {
-		return Array.from({ length: insertCount }, (_, index) => {
-			return prevZIndex + (index + 1) * LAYER_ORDER_REBALANCE_STEP;
-		});
-	}
-	const gap = nextZIndex - prevZIndex;
-	const step = gap / (insertCount + 1);
-	if (step < LAYER_ORDER_MIN_GAP) return null;
-	return Array.from({ length: insertCount }, (_, index) => {
-		return prevZIndex + step * (index + 1);
-	});
-};
-
-const resolvePatchedZIndex = (
-	node: LayerOrderNodeLike,
-	patchByNodeId: Map<string, number>,
-): number => {
-	return patchByNodeId.get(node.id) ?? node.zIndex;
-};
-
-const resolveSiblingNodesAfterRebalance = <T extends LayerOrderNodeLike>(
-	nodes: T[],
-	options: {
-		parentId: string | null;
-		excludeNodeIds?: Iterable<string>;
-		patchByNodeId: Map<string, number>;
-	},
-): T[] => {
-	const siblings = resolveSiblingNodesByLayerOrder(nodes, options);
-	return siblings
-		.map((node) => ({
-			...node,
-			zIndex: resolvePatchedZIndex(node, options.patchByNodeId),
-		}))
-		.sort(compareLayerOrder);
-};
-
-export const rebalanceSiblingZIndex = <T extends LayerOrderNodeLike>(
-	nodes: T[],
-	options: {
-		parentId: string | null;
-		excludeNodeIds?: Iterable<string>;
-	},
-): LayerOrderZIndexPatch[] => {
-	const siblings = resolveSiblingNodesByLayerOrder(nodes, options);
-	if (siblings.length <= 1) return [];
-	const minZIndex = siblings[0]?.zIndex ?? 0;
-	const start =
-		Math.floor(minZIndex / LAYER_ORDER_REBALANCE_STEP) *
-		LAYER_ORDER_REBALANCE_STEP;
-	return siblings.reduce<LayerOrderZIndexPatch[]>((patches, sibling, index) => {
-		const nextZIndex = start + index * LAYER_ORDER_REBALANCE_STEP;
-		if (nextZIndex === sibling.zIndex) return patches;
+const buildDenseSiblingPatches = <T extends LayerOrderNodeLike>(
+	siblings: T[],
+): LayerOrderSiblingPatch[] => {
+	if (siblings.length <= 0) return [];
+	return siblings.reduce<LayerOrderSiblingPatch[]>((patches, sibling, index) => {
+		if (sibling.siblingOrder === index) return patches;
 		patches.push({
 			nodeId: sibling.id,
-			zIndex: nextZIndex,
+			siblingOrder: index,
 		});
 		return patches;
 	}, []);
 };
 
-export const allocateInsertZIndex = <T extends LayerOrderNodeLike>(
+export const rebalanceSiblingOrder = <T extends LayerOrderNodeLike>(
+	nodes: T[],
+	options: {
+		parentId: string | null;
+		excludeNodeIds?: Iterable<string>;
+	},
+): LayerOrderSiblingPatch[] => {
+	const siblings = resolveSiblingNodesBySiblingOrder(nodes, options);
+	return buildDenseSiblingPatches(siblings);
+};
+
+const buildInsertPatches = <T extends LayerOrderNodeLike>(
+	siblings: T[],
+	insertIndex: number,
+	insertCount: number,
+): LayerOrderSiblingPatch[] => {
+	if (insertCount <= 0) return [];
+	return siblings.reduce<LayerOrderSiblingPatch[]>((patches, sibling, index) => {
+		const nextOrder = index >= insertIndex ? index + insertCount : index;
+		if (sibling.siblingOrder === nextOrder) return patches;
+		patches.push({
+			nodeId: sibling.id,
+			siblingOrder: nextOrder,
+		});
+		return patches;
+	}, []);
+};
+
+const mergeSiblingPatches = (
+	patches: LayerOrderSiblingPatch[],
+): LayerOrderSiblingPatch[] => {
+	if (patches.length <= 1) return patches;
+	const patchByNodeId = new Map<string, number>();
+	for (const patch of patches) {
+		patchByNodeId.set(patch.nodeId, patch.siblingOrder);
+	}
+	return [...patchByNodeId.entries()].map(([nodeId, siblingOrder]) => ({
+		nodeId,
+		siblingOrder,
+	}));
+};
+
+export const allocateInsertSiblingOrder = <T extends LayerOrderNodeLike>(
 	nodes: T[],
 	options: {
 		parentId: string | null;
@@ -163,59 +139,30 @@ export const allocateInsertZIndex = <T extends LayerOrderNodeLike>(
 		movingNodeIds?: Iterable<string>;
 	},
 ): {
-	zIndex: number;
-	rebalancePatches: LayerOrderZIndexPatch[];
+	siblingOrder: number;
+	rebalancePatches: LayerOrderSiblingPatch[];
 } => {
-	const siblings = resolveSiblingNodesByLayerOrder(nodes, {
+	const siblings = resolveSiblingNodesBySiblingOrder(nodes, {
 		parentId: options.parentId,
 		excludeNodeIds: options.movingNodeIds,
 	});
-	const insertIndex = clampIndex(options.index, siblings.length);
-	const prevZIndex = siblings[insertIndex - 1]?.zIndex ?? null;
-	const nextZIndex = siblings[insertIndex]?.zIndex ?? null;
-	const result = resolveInsertZIndices({
-		prevZIndex,
-		nextZIndex,
-		insertCount: 1,
-	});
-	if (result) {
-		return {
-			zIndex: result[0] ?? 0,
-			rebalancePatches: [],
-		};
-	}
-
-	const rebalancePatches = rebalanceSiblingZIndex(nodes, {
-		parentId: options.parentId,
-		excludeNodeIds: options.movingNodeIds,
-	});
-	const patchByNodeId = new Map(
-		rebalancePatches.map((patch) => [patch.nodeId, patch.zIndex]),
-	);
-	const rebalancedSiblings = resolveSiblingNodesAfterRebalance(nodes, {
-		parentId: options.parentId,
-		excludeNodeIds: options.movingNodeIds,
-		patchByNodeId,
-	});
-	const rebalancedInsertIndex = clampIndex(
-		options.index,
-		rebalancedSiblings.length,
-	);
-	const finalPrev =
-		rebalancedSiblings[rebalancedInsertIndex - 1]?.zIndex ?? null;
-	const finalNext = rebalancedSiblings[rebalancedInsertIndex]?.zIndex ?? null;
-	const finalResult = resolveInsertZIndices({
-		prevZIndex: finalPrev,
-		nextZIndex: finalNext,
-		insertCount: 1,
-	}) ?? [finalPrev === null ? 0 : finalPrev + LAYER_ORDER_REBALANCE_STEP];
+	const densePatches = buildDenseSiblingPatches(siblings);
+	const denseSiblings =
+		densePatches.length > 0
+			? siblings.map((sibling, index) => ({
+					...sibling,
+					siblingOrder: index,
+				}))
+			: siblings;
+	const insertIndex = clampIndex(options.index, denseSiblings.length);
+	const insertPatches = buildInsertPatches(denseSiblings, insertIndex, 1);
 	return {
-		zIndex: finalResult[0] ?? 0,
-		rebalancePatches,
+		siblingOrder: insertIndex,
+		rebalancePatches: mergeSiblingPatches([...densePatches, ...insertPatches]),
 	};
 };
 
-export const allocateBatchInsertZIndex = <T extends LayerOrderNodeLike>(
+export const allocateBatchInsertSiblingOrder = <T extends LayerOrderNodeLike>(
 	nodes: T[],
 	options: {
 		parentId: string | null;
@@ -224,8 +171,8 @@ export const allocateBatchInsertZIndex = <T extends LayerOrderNodeLike>(
 		movingNodeIds?: Iterable<string>;
 	},
 ): {
-	assignments: Array<{ nodeId: string; zIndex: number }>;
-	rebalancePatches: LayerOrderZIndexPatch[];
+	assignments: Array<{ nodeId: string; siblingOrder: number }>;
+	rebalancePatches: LayerOrderSiblingPatch[];
 } => {
 	const nodeIds = options.nodeIds.filter(Boolean);
 	if (nodeIds.length === 0) {
@@ -234,79 +181,52 @@ export const allocateBatchInsertZIndex = <T extends LayerOrderNodeLike>(
 			rebalancePatches: [],
 		};
 	}
-	const siblings = resolveSiblingNodesByLayerOrder(nodes, {
+	const siblings = resolveSiblingNodesBySiblingOrder(nodes, {
 		parentId: options.parentId,
 		excludeNodeIds: options.movingNodeIds,
 	});
-	const insertIndex = clampIndex(options.index, siblings.length);
-	const prevZIndex = siblings[insertIndex - 1]?.zIndex ?? null;
-	const nextZIndex = siblings[insertIndex]?.zIndex ?? null;
-	const result = resolveInsertZIndices({
-		prevZIndex,
-		nextZIndex,
-		insertCount: nodeIds.length,
-	});
-	if (result) {
-		return {
-			assignments: nodeIds.map((nodeId, index) => ({
-				nodeId,
-				zIndex: result[index] ?? 0,
-			})),
-			rebalancePatches: [],
-		};
-	}
-
-	const rebalancePatches = rebalanceSiblingZIndex(nodes, {
-		parentId: options.parentId,
-		excludeNodeIds: options.movingNodeIds,
-	});
-	const patchByNodeId = new Map(
-		rebalancePatches.map((patch) => [patch.nodeId, patch.zIndex]),
+	const densePatches = buildDenseSiblingPatches(siblings);
+	const denseSiblings =
+		densePatches.length > 0
+			? siblings.map((sibling, index) => ({
+					...sibling,
+					siblingOrder: index,
+				}))
+			: siblings;
+	const insertIndex = clampIndex(options.index, denseSiblings.length);
+	const insertPatches = buildInsertPatches(
+		denseSiblings,
+		insertIndex,
+		nodeIds.length,
 	);
-	const rebalancedSiblings = resolveSiblingNodesAfterRebalance(nodes, {
-		parentId: options.parentId,
-		excludeNodeIds: options.movingNodeIds,
-		patchByNodeId,
-	});
-	const rebalancedInsertIndex = clampIndex(
-		options.index,
-		rebalancedSiblings.length,
-	);
-	const finalPrev =
-		rebalancedSiblings[rebalancedInsertIndex - 1]?.zIndex ?? null;
-	const finalNext = rebalancedSiblings[rebalancedInsertIndex]?.zIndex ?? null;
-	const finalResult =
-		resolveInsertZIndices({
-			prevZIndex: finalPrev,
-			nextZIndex: finalNext,
-			insertCount: nodeIds.length,
-		}) ??
-		Array.from({ length: nodeIds.length }, (_, index) => {
-			return (finalPrev ?? 0) + (index + 1) * LAYER_ORDER_REBALANCE_STEP;
-		});
 	return {
 		assignments: nodeIds.map((nodeId, index) => ({
 			nodeId,
-			zIndex: finalResult[index] ?? 0,
+			siblingOrder: insertIndex + index,
 		})),
-		rebalancePatches,
+		rebalancePatches: mergeSiblingPatches([...densePatches, ...insertPatches]),
 	};
 };
 
 export const applyLayerOrderPatches = <T extends LayerOrderNodeLike>(
 	nodes: T[],
-	patches: LayerOrderZIndexPatch[],
+	patches: LayerOrderSiblingPatch[],
 ): T[] => {
 	if (patches.length === 0) return nodes;
 	const patchByNodeId = new Map(
-		patches.map((patch) => [patch.nodeId, patch.zIndex]),
+		patches.map((patch) => [patch.nodeId, patch.siblingOrder]),
 	);
 	return nodes.map((node) => {
-		const nextZIndex = patchByNodeId.get(node.id);
-		if (nextZIndex === undefined || nextZIndex === node.zIndex) return node;
+		const nextSiblingOrder = patchByNodeId.get(node.id);
+		if (
+			nextSiblingOrder === undefined ||
+			nextSiblingOrder === node.siblingOrder
+		) {
+			return node;
+		}
 		return {
 			...node,
-			zIndex: nextZIndex,
+			siblingOrder: nextSiblingOrder,
 		};
 	});
 };
@@ -316,13 +236,118 @@ export const resolveLayerSiblingCount = (
 	parentId: string | null,
 	excludeNodeIds?: Iterable<string>,
 ): number => {
-	return resolveSiblingNodesByLayerOrder(nodes, {
+	return resolveSiblingNodesBySiblingOrder(nodes, {
 		parentId,
 		excludeNodeIds,
 	}).length;
 };
 
+export interface LayerTreeOrder {
+	paintNodeIds: string[];
+	hitNodeIds: string[];
+	paintOrderByNodeId: Map<string, number>;
+	hitOrderByNodeId: Map<string, number>;
+}
+
+export const buildLayerTreeOrder = <T extends LayerOrderNodeLike>(
+	nodes: T[],
+): LayerTreeOrder => {
+	const nodeById = new Map(nodes.map((node) => [node.id, node]));
+	const childrenByParentId = new Map<string | null, T[]>();
+	for (const node of nodes) {
+		const rawParentId = normalizeParentId(node.parentId);
+		const parentId = rawParentId && nodeById.has(rawParentId) ? rawParentId : null;
+		const siblings = childrenByParentId.get(parentId) ?? [];
+		siblings.push(node);
+		childrenByParentId.set(parentId, siblings);
+	}
+	for (const [parentId, children] of childrenByParentId) {
+		childrenByParentId.set(parentId, sortBySiblingOrder(children));
+	}
+
+	const visited = new Set<string>();
+	const paintNodeIds: string[] = [];
+	const visiting = new Set<string>();
+
+	const visit = (node: T) => {
+		if (visited.has(node.id)) return;
+		if (visiting.has(node.id)) return;
+		visiting.add(node.id);
+		visited.add(node.id);
+		paintNodeIds.push(node.id);
+		const children = childrenByParentId.get(node.id) ?? [];
+		for (const child of children) {
+			visit(child);
+		}
+		visiting.delete(node.id);
+	};
+
+	for (const root of childrenByParentId.get(null) ?? []) {
+		visit(root);
+	}
+
+	const remaining = sortBySiblingOrder(
+		nodes.filter((node) => !visited.has(node.id)),
+	);
+	for (const node of remaining) {
+		visit(node);
+	}
+
+	const hitNodeIds = [...paintNodeIds].reverse();
+	const paintOrderByNodeId = new Map<string, number>();
+	for (const [index, nodeId] of paintNodeIds.entries()) {
+		paintOrderByNodeId.set(nodeId, index);
+	}
+	const hitOrderByNodeId = new Map<string, number>();
+	for (const [index, nodeId] of hitNodeIds.entries()) {
+		hitOrderByNodeId.set(nodeId, index);
+	}
+	return {
+		paintNodeIds,
+		hitNodeIds,
+		paintOrderByNodeId,
+		hitOrderByNodeId,
+	};
+};
+
+export const sortByTreePaintOrder = <T extends LayerOrderNodeLike>(
+	nodes: T[],
+): T[] => {
+	if (nodes.length <= 1) return nodes;
+	const order = buildLayerTreeOrder(nodes);
+	return [...nodes].sort((left, right) => {
+		const leftIndex = order.paintOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+		const rightIndex =
+			order.paintOrderByNodeId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+		if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+		return left.id.localeCompare(right.id);
+	});
+};
+
+export const sortByTreeHitOrder = <T extends LayerOrderNodeLike>(
+	nodes: T[],
+): T[] => {
+	if (nodes.length <= 1) return nodes;
+	const order = buildLayerTreeOrder(nodes);
+	return [...nodes].sort((left, right) => {
+		const leftIndex = order.hitOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+		const rightIndex =
+			order.hitOrderByNodeId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+		if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+		return right.id.localeCompare(left.id);
+	});
+};
+
+// 兼容旧命名
+export const compareLayerOrder = compareSiblingOrder;
+export const compareLayerOrderDesc = compareSiblingOrderDesc;
+export const sortByLayerOrder = sortBySiblingOrder;
+export const resolveSiblingNodesByLayerOrder = resolveSiblingNodesBySiblingOrder;
+export const rebalanceSiblingZIndex = rebalanceSiblingOrder;
+export const allocateInsertZIndex = allocateInsertSiblingOrder;
+export const allocateBatchInsertZIndex = allocateBatchInsertSiblingOrder;
+
 export type CanvasLayerOrderNodeLike = Pick<
 	CanvasNode,
-	"id" | "parentId" | "zIndex"
+	"id" | "parentId" | "siblingOrder"
 >;

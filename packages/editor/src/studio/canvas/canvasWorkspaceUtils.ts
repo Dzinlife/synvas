@@ -236,7 +236,7 @@ export const pickLayout = (node: CanvasNode): CanvasNodeLayoutSnapshot => ({
 	y: node.y,
 	width: node.width,
 	height: node.height,
-	zIndex: node.zIndex,
+	siblingOrder: node.siblingOrder,
 	hidden: node.hidden,
 	locked: node.locked,
 	parentId: node.parentId ?? null,
@@ -338,7 +338,7 @@ export const isLayoutEqual = (
 		before.y === after.y &&
 		before.width === after.width &&
 		before.height === after.height &&
-		before.zIndex === after.zIndex &&
+		before.siblingOrder === after.siblingOrder &&
 		before.hidden === after.hidden &&
 		before.locked === after.locked &&
 		(before.parentId ?? null) === (after.parentId ?? null)

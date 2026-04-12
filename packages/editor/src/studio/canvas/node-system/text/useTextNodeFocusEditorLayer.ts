@@ -86,7 +86,7 @@ const isTextNodeSnapshotEqual = (
 		left.y === right.y &&
 		left.width === right.width &&
 		left.height === right.height &&
-		left.zIndex === right.zIndex &&
+		left.siblingOrder === right.siblingOrder &&
 		left.locked === right.locked &&
 		left.hidden === right.hidden &&
 		left.text === right.text &&

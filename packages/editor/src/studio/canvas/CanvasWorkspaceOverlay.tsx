@@ -40,7 +40,6 @@ import CanvasSidebar, {
 	type CanvasSidebarNodeSelectOptions,
 	type CanvasSidebarTab,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
-import { compareLayerOrderDesc } from "@/studio/canvas/layerOrderCoordinator";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
 import {
@@ -386,7 +385,7 @@ const CanvasWorkspaceOverlay = ({
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
 	const sidebarNodes = useMemo(() => {
 		if (!currentProject) return [];
-		return [...currentProject.canvas.nodes].sort(compareLayerOrderDesc);
+		return currentProject.canvas.nodes;
 	}, [currentProject]);
 	const focusedSceneNode = useMemo((): SceneNode | null => {
 		if (!focusedNodeId) return null;

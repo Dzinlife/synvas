@@ -513,7 +513,7 @@ const hasNamedComponent = (tree: React.ReactNode, name: string): boolean => {
 
 const createVideoNode = (
 	id: string,
-	zIndex: number,
+	siblingOrder: number,
 	patch: Partial<VideoCanvasNode> = {},
 ): VideoCanvasNode => ({
 	id,
@@ -523,7 +523,7 @@ const createVideoNode = (
 	y: 30,
 	width: 160,
 	height: 90,
-	zIndex,
+	siblingOrder,
 	locked: false,
 	hidden: false,
 	createdAt: 1,
@@ -532,7 +532,7 @@ const createVideoNode = (
 	...patch,
 });
 
-const createSceneNode = (id: string, zIndex: number) => ({
+const createSceneNode = (id: string, siblingOrder: number) => ({
 	id,
 	type: "scene" as const,
 	name: id,
@@ -540,7 +540,7 @@ const createSceneNode = (id: string, zIndex: number) => ({
 	y: 30,
 	width: 320,
 	height: 180,
-	zIndex,
+	siblingOrder,
 	locked: false,
 	hidden: false,
 	createdAt: 1,
@@ -550,7 +550,7 @@ const createSceneNode = (id: string, zIndex: number) => ({
 
 const createFrameNode = (
 	id: string,
-	zIndex: number,
+	siblingOrder: number,
 	patch: Partial<FrameCanvasNode> = {},
 ): FrameCanvasNode => ({
 	id,
@@ -560,7 +560,7 @@ const createFrameNode = (
 	y: 30,
 	width: 320,
 	height: 180,
-	zIndex,
+	siblingOrder,
 	locked: false,
 	hidden: false,
 	createdAt: 1,
@@ -570,7 +570,7 @@ const createFrameNode = (
 
 const createTextNode = (
 	id: string,
-	zIndex: number,
+	siblingOrder: number,
 	patch: Partial<TextCanvasNode> = {},
 ): TextCanvasNode => ({
 	id,
@@ -582,7 +582,7 @@ const createTextNode = (
 	y: 30,
 	width: 240,
 	height: 120,
-	zIndex,
+	siblingOrder,
 	locked: false,
 	hidden: false,
 	createdAt: 1,
@@ -592,7 +592,7 @@ const createTextNode = (
 
 const createAudioNode = (
 	id: string,
-	zIndex: number,
+	siblingOrder: number,
 	patch: Partial<AudioCanvasNode> = {},
 ): AudioCanvasNode => ({
 	id,
@@ -602,7 +602,7 @@ const createAudioNode = (
 	y: 30,
 	width: 240,
 	height: 120,
-	zIndex,
+	siblingOrder,
 	locked: false,
 	hidden: false,
 	createdAt: 1,
@@ -613,7 +613,7 @@ const createAudioNode = (
 
 const createImageNode = (
 	id: string,
-	zIndex: number,
+	siblingOrder: number,
 	patch: Partial<ImageCanvasNode> = {},
 ): ImageCanvasNode => ({
 	id,
@@ -623,7 +623,7 @@ const createImageNode = (
 	y: 30,
 	width: 240,
 	height: 120,
-	zIndex,
+	siblingOrder,
 	locked: false,
 	hidden: false,
 	createdAt: 1,

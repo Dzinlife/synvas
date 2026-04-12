@@ -81,7 +81,7 @@ interface CanvasNodeLabelHitTranslate {
 
 export interface CanvasNodeLabelHitEntry {
 	nodeId: string;
-	zIndex: number;
+	siblingOrder: number;
 	isFrame: boolean;
 	rect: CanvasNodeLabelHitRect;
 	cameraSnapshot: CanvasCameraState;
@@ -702,7 +702,7 @@ export const CanvasNodeLabelLayer = ({
 				}
 					nextLabelHitEntries.push({
 						nodeId: candidate.nodeId,
-						zIndex: candidate.node.zIndex,
+						siblingOrder: candidate.node.siblingOrder,
 						isFrame: candidate.node.type === "frame",
 						rect: {
 							x: labelRect.x,

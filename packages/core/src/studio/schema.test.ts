@@ -53,7 +53,7 @@ const createValidProject = () => ({
 				y: 0,
 				width: 960,
 				height: 540,
-				zIndex: 0,
+				siblingOrder: 0,
 				locked: false,
 				hidden: false,
 				createdAt: 1,
@@ -68,7 +68,7 @@ const createValidProject = () => ({
 				y: 80,
 				width: 640,
 				height: 360,
-				zIndex: 1,
+				siblingOrder: 1,
 				locked: false,
 				hidden: false,
 				createdAt: 1,
@@ -83,7 +83,7 @@ const createValidProject = () => ({
 				y: 480,
 				width: 640,
 				height: 180,
-				zIndex: 2,
+				siblingOrder: 2,
 				locked: false,
 				hidden: false,
 				createdAt: 1,
@@ -98,7 +98,7 @@ const createValidProject = () => ({
 				y: 120,
 				width: 640,
 				height: 360,
-				zIndex: 3,
+				siblingOrder: 3,
 				locked: false,
 				hidden: false,
 				createdAt: 1,
@@ -114,7 +114,7 @@ const createValidProject = () => ({
 				y: 520,
 				width: 500,
 				height: 160,
-				zIndex: 4,
+				siblingOrder: 4,
 				locked: false,
 				hidden: false,
 				createdAt: 1,
@@ -184,26 +184,26 @@ describe("studio schema", () => {
 		}
 	});
 
-	it("zIndex 支持小数并拒绝 NaN/Infinity", () => {
+	it("siblingOrder 支持小数并拒绝 NaN/Infinity", () => {
 		const withFloatZIndex = createValidProject();
 		withFloatZIndex.canvas.nodes[1] = {
 			...withFloatZIndex.canvas.nodes[1],
-			zIndex: 1.25,
+			siblingOrder: 1.25,
 		};
 		const parsed = parseStudioProject(withFloatZIndex);
-		expect(parsed.canvas.nodes[1]?.zIndex).toBe(1.25);
+		expect(parsed.canvas.nodes[1]?.siblingOrder).toBe(1.25);
 
 		const withNaNZIndex = createValidProject();
 		withNaNZIndex.canvas.nodes[1] = {
 			...withNaNZIndex.canvas.nodes[1],
-			zIndex: Number.NaN,
+			siblingOrder: Number.NaN,
 		};
 		expect(() => parseStudioProject(withNaNZIndex)).toThrow();
 
 		const withInfinityZIndex = createValidProject();
 		withInfinityZIndex.canvas.nodes[1] = {
 			...withInfinityZIndex.canvas.nodes[1],
-			zIndex: Number.POSITIVE_INFINITY,
+			siblingOrder: Number.POSITIVE_INFINITY,
 		};
 		expect(() => parseStudioProject(withInfinityZIndex)).toThrow();
 	});
@@ -219,7 +219,7 @@ describe("studio schema", () => {
 			y: 0,
 			width: 400,
 			height: 300,
-			zIndex: 5,
+			siblingOrder: 5,
 			locked: false,
 			hidden: false,
 			createdAt: 2,
@@ -234,7 +234,7 @@ describe("studio schema", () => {
 			y: 20,
 			width: 300,
 			height: 200,
-			zIndex: 6,
+			siblingOrder: 6,
 			locked: false,
 			hidden: false,
 			createdAt: 2,
@@ -251,7 +251,7 @@ describe("studio schema", () => {
 			y: 80,
 			width: 120,
 			height: 60,
-			zIndex: 7,
+			siblingOrder: 7,
 			locked: false,
 			hidden: false,
 			createdAt: 2,
@@ -267,7 +267,7 @@ describe("studio schema", () => {
 			y: 10,
 			width: 200,
 			height: 100,
-			zIndex: 8,
+			siblingOrder: 8,
 			locked: false,
 			hidden: false,
 			createdAt: 2,

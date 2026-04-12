@@ -1,5 +1,6 @@
 import type { CanvasNode } from "core/studio/types";
 import RBush from "rbush";
+import { buildLayerTreeOrder } from "./layerOrderCoordinator";
 
 const CANVAS_SPATIAL_INDEX_REBUILD_RATIO = 0.3;
 
@@ -16,7 +17,8 @@ export interface CanvasSpatialItem {
 	maxX: number;
 	maxY: number;
 	nodeId: string;
-	zIndex: number;
+	paintOrder: number;
+	hitOrder: number;
 }
 
 interface CanvasSpatialNodeSnapshot extends CanvasSpatialItem {
@@ -25,6 +27,10 @@ interface CanvasSpatialNodeSnapshot extends CanvasSpatialItem {
 
 const resolveNodeSpatialSnapshot = (
 	node: CanvasNode,
+	order: {
+		paintOrderByNodeId: Map<string, number>;
+		hitOrderByNodeId: Map<string, number>;
+	},
 ): CanvasSpatialNodeSnapshot => {
 	const minX = Math.min(node.x, node.x + node.width);
 	const maxX = Math.max(node.x, node.x + node.width);
@@ -36,7 +42,8 @@ const resolveNodeSpatialSnapshot = (
 		maxX,
 		maxY,
 		nodeId: node.id,
-		zIndex: node.zIndex,
+		paintOrder: order.paintOrderByNodeId.get(node.id) ?? Number.MAX_SAFE_INTEGER,
+		hitOrder: order.hitOrderByNodeId.get(node.id) ?? Number.MAX_SAFE_INTEGER,
 		visible: !node.hidden,
 	};
 };
@@ -50,7 +57,8 @@ const toSpatialItem = (
 		maxX: snapshot.maxX,
 		maxY: snapshot.maxY,
 		nodeId: snapshot.nodeId,
-		zIndex: snapshot.zIndex,
+		paintOrder: snapshot.paintOrder,
+		hitOrder: snapshot.hitOrder,
 	};
 };
 
@@ -64,7 +72,8 @@ const isSpatialSnapshotEqual = (
 		left.minY === right.minY &&
 		left.maxX === right.maxX &&
 		left.maxY === right.maxY &&
-		left.zIndex === right.zIndex
+		left.paintOrder === right.paintOrder &&
+		left.hitOrder === right.hitOrder
 	);
 };
 
@@ -81,7 +90,9 @@ export const compareCanvasSpatialPaintOrder = (
 	left: CanvasSpatialItem,
 	right: CanvasSpatialItem,
 ): number => {
-	if (left.zIndex !== right.zIndex) return left.zIndex - right.zIndex;
+	if (left.paintOrder !== right.paintOrder) {
+		return left.paintOrder - right.paintOrder;
+	}
 	return left.nodeId.localeCompare(right.nodeId);
 };
 
@@ -89,7 +100,9 @@ export const compareCanvasSpatialHitPriority = (
 	left: CanvasSpatialItem,
 	right: CanvasSpatialItem,
 ): number => {
-	if (left.zIndex !== right.zIndex) return right.zIndex - left.zIndex;
+	if (left.hitOrder !== right.hitOrder) {
+		return left.hitOrder - right.hitOrder;
+	}
 	return right.nodeId.localeCompare(left.nodeId);
 };
 
@@ -103,9 +116,10 @@ export class CanvasSpatialIndex {
 	sync(nodes: CanvasNode[]): void {
 		const nextSnapshotById = new Map<string, CanvasSpatialNodeSnapshot>();
 		const nextVisibleItemById = new Map<string, CanvasSpatialItem>();
+		const layerTreeOrder = buildLayerTreeOrder(nodes);
 
 		for (const node of nodes) {
-			const snapshot = resolveNodeSpatialSnapshot(node);
+			const snapshot = resolveNodeSpatialSnapshot(node, layerTreeOrder);
 			nextSnapshotById.set(node.id, snapshot);
 			if (!snapshot.visible) continue;
 			nextVisibleItemById.set(node.id, toSpatialItem(snapshot));
@@ -142,7 +156,8 @@ export class CanvasSpatialIndex {
 					prevSnapshot.maxX !== nextSnapshot.maxX ||
 					prevSnapshot.maxY !== nextSnapshot.maxY;
 				const orderChanged =
-					prevSnapshot.zIndex !== nextSnapshot.zIndex;
+					prevSnapshot.paintOrder !== nextSnapshot.paintOrder ||
+					prevSnapshot.hitOrder !== nextSnapshot.hitOrder;
 				if (geometryChanged || orderChanged) {
 					removeIds.add(nodeId);
 					insertIds.add(nodeId);

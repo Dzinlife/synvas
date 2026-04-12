@@ -29,7 +29,7 @@ import {
 } from "./projectDb";
 import { isSameAssetLocator, normalizeAssetLocator } from "./assetLocator";
 import {
-	allocateInsertZIndex,
+	allocateInsertSiblingOrder,
 	resolveLayerSiblingCount,
 } from "@/studio/canvas/layerOrderCoordinator";
 
@@ -56,7 +56,7 @@ export interface CanvasNodeLayoutPatch {
 	y?: number;
 	width?: number;
 	height?: number;
-	zIndex?: number;
+	siblingOrder?: number;
 	hidden?: boolean;
 	locked?: boolean;
 	parentId?: string | null;
@@ -332,6 +332,44 @@ const repairCanvasNodeParentRelations = (nodes: CanvasNode[]): CanvasNode[] => {
 	return hasChanged ? nextNodes : nodes;
 };
 
+const normalizeCanvasNodeSiblingOrder = (nodes: CanvasNode[]): CanvasNode[] => {
+	if (nodes.length === 0) return nodes;
+	const nodeById = new Map(nodes.map((node) => [node.id, node]));
+	const siblingsByParentId = new Map<string | null, CanvasNode[]>();
+	for (const node of nodes) {
+		const rawParentId = node.parentId ?? null;
+		const parentId =
+			rawParentId && nodeById.has(rawParentId) ? rawParentId : null;
+		const siblings = siblingsByParentId.get(parentId) ?? [];
+		siblings.push(node);
+		siblingsByParentId.set(parentId, siblings);
+	}
+	const siblingOrderByNodeId = new Map<string, number>();
+	for (const siblings of siblingsByParentId.values()) {
+		[...siblings]
+			.sort((left, right) => {
+				if (left.siblingOrder !== right.siblingOrder) {
+					return left.siblingOrder - right.siblingOrder;
+				}
+				return left.id.localeCompare(right.id);
+			})
+			.forEach((node, index) => {
+				siblingOrderByNodeId.set(node.id, index);
+			});
+	}
+	let hasChanged = false;
+	const nextNodes = nodes.map((node) => {
+		const nextSiblingOrder = siblingOrderByNodeId.get(node.id) ?? 0;
+		if (node.siblingOrder === nextSiblingOrder) return node;
+		hasChanged = true;
+		return {
+			...node,
+			siblingOrder: nextSiblingOrder,
+		};
+	});
+	return hasChanged ? nextNodes : nodes;
+};
+
 const findSceneNodeBySceneId = (
 	project: StudioProject,
 	sceneId: string | null | undefined,
@@ -411,7 +449,9 @@ const stripProjectOtForPersistence = (
 const normalizeProjectRuntimeState = (
 	project: StudioProject,
 ): StudioProject => {
-	const repairedNodes = repairCanvasNodeParentRelations(project.canvas.nodes);
+	const repairedNodes = normalizeCanvasNodeSiblingOrder(
+		repairCanvasNodeParentRelations(project.canvas.nodes),
+	);
 	const projectWithParents =
 		repairedNodes === project.canvas.nodes
 			? project
@@ -676,7 +716,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: 0,
+						siblingOrder: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -698,7 +738,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: 0,
+						siblingOrder: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -720,7 +760,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: 0,
+						siblingOrder: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -741,7 +781,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: 0,
+						siblingOrder: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -763,7 +803,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: 0,
+						siblingOrder: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -783,7 +823,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						y: input.y ?? -height / 2,
 						width,
 						height,
-						zIndex: 0,
+						siblingOrder: 0,
 						locked: false,
 						hidden: false,
 						createdAt: now,
@@ -797,7 +837,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const insertIndex =
 				input.insertIndex ??
 				resolveLayerSiblingCount(project.canvas.nodes, parentId);
-			const { zIndex, rebalancePatches } = allocateInsertZIndex(
+			const { siblingOrder, rebalancePatches } = allocateInsertSiblingOrder(
 				project.canvas.nodes,
 				{
 					parentId,
@@ -805,25 +845,25 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				},
 			);
 			const patchByNodeId = new Map(
-				rebalancePatches.map((patch) => [patch.nodeId, patch.zIndex]),
+				rebalancePatches.map((patch) => [patch.nodeId, patch.siblingOrder]),
 			);
 			const nextCanvasNodes = project.canvas.nodes.map((existingNode) => {
 				const rebalancedZIndex = patchByNodeId.get(existingNode.id);
 				if (
 					rebalancedZIndex === undefined ||
-					rebalancedZIndex === existingNode.zIndex
+					rebalancedZIndex === existingNode.siblingOrder
 				) {
 					return existingNode;
 				}
 				return {
 					...existingNode,
-					zIndex: rebalancedZIndex,
+					siblingOrder: rebalancedZIndex,
 					updatedAt: now,
 				};
 			});
 			node = {
 				...node,
-				zIndex,
+				siblingOrder,
 			};
 
 			createdNodeId = node.id;
@@ -866,7 +906,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			if (!didUpdate) return state;
 			const repairedNodes = didPatchParentId
-				? repairCanvasNodeParentRelations(nextNodes)
+				? normalizeCanvasNodeSiblingOrder(
+						repairCanvasNodeParentRelations(nextNodes),
+					)
 				: nextNodes;
 			const nextProject = withProjectRevision({
 				...state.currentProject,
@@ -916,7 +958,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					nextNode.y !== node.y ||
 					nextNode.width !== node.width ||
 					nextNode.height !== node.height ||
-					nextNode.zIndex !== node.zIndex ||
+					nextNode.siblingOrder !== node.siblingOrder ||
 					nextNode.hidden !== node.hidden ||
 					nextNode.locked !== node.locked ||
 					nextNode.parentId !== node.parentId;
@@ -926,7 +968,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			});
 			if (!didUpdate) return state;
 			const repairedNodes = didPatchParentId
-				? repairCanvasNodeParentRelations(nextNodes)
+				? normalizeCanvasNodeSiblingOrder(
+						repairCanvasNodeParentRelations(nextNodes),
+					)
 				: nextNodes;
 			const nextProject = withProjectRevision({
 				...state.currentProject,
@@ -1235,7 +1279,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const nextProject = withProjectRevision({
 				...currentProject,
 				canvas: {
-					nodes: repairCanvasNodeParentRelations(nextNodes),
+					nodes: normalizeCanvasNodeSiblingOrder(
+						repairCanvasNodeParentRelations(nextNodes),
+					),
 				},
 				ui: {
 					...currentProject.ui,
@@ -1262,10 +1308,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				(item) => item.id === node.id,
 			);
 			if (existed) return state;
-			const nextNodes = repairCanvasNodeParentRelations([
-				...currentProject.canvas.nodes,
-				node,
-			]);
+			const nextNodes = normalizeCanvasNodeSiblingOrder(
+				repairCanvasNodeParentRelations([
+					...currentProject.canvas.nodes,
+					node,
+				]),
+			);
 			const nextProject = withProjectRevision({
 				...currentProject,
 				canvas: {
@@ -1314,7 +1362,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				ot: nextOt,
 				scenes: nextScenes,
 				canvas: {
-					nodes: repairCanvasNodeParentRelations(nextNodes),
+					nodes: normalizeCanvasNodeSiblingOrder(
+						repairCanvasNodeParentRelations(nextNodes),
+					),
 				},
 			});
 			return {
@@ -1381,7 +1431,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				ot: nextOt,
 				scenes: nextScenes,
 				canvas: {
-					nodes: repairCanvasNodeParentRelations(nextNodes),
+					nodes: normalizeCanvasNodeSiblingOrder(
+						repairCanvasNodeParentRelations(nextNodes),
+					),
 				},
 				ui: {
 					...currentProject.ui,
@@ -1450,7 +1502,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				ot: nextOt,
 				scenes: nextScenes,
 				canvas: {
-					nodes: repairCanvasNodeParentRelations(nextNodes),
+					nodes: normalizeCanvasNodeSiblingOrder(
+						repairCanvasNodeParentRelations(nextNodes),
+					),
 				},
 				ui: {
 					...currentProject.ui,
@@ -1490,10 +1544,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					[scene.id]: scene,
 				},
 				canvas: {
-					nodes: repairCanvasNodeParentRelations([
-						...currentProject.canvas.nodes,
-						node,
-					]),
+					nodes: normalizeCanvasNodeSiblingOrder(
+						repairCanvasNodeParentRelations([
+							...currentProject.canvas.nodes,
+							node,
+						]),
+					),
 				},
 				ui: {
 					...currentProject.ui,

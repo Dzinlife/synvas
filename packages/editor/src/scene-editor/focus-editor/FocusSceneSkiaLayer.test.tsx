@@ -26,7 +26,7 @@ const focusedNode: SceneNode = {
 	y: 0,
 	width: 1000,
 	height: 1000,
-	zIndex: 0,
+	siblingOrder: 0,
 	locked: false,
 	hidden: false,
 	createdAt: 1,

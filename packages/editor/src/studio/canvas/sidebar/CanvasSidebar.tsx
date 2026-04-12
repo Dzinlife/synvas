@@ -12,8 +12,8 @@ import {
 } from "react";
 import { cn } from "@/lib/utils";
 import {
-	compareLayerOrderDesc,
-	sortByLayerOrder,
+	buildLayerTreeOrder,
+	compareSiblingOrderDesc,
 } from "@/studio/canvas/layerOrderCoordinator";
 import CanvasElementLibrary from "./CanvasElementLibrary";
 
@@ -361,6 +361,15 @@ const buildNestedNodeItems = (
 	collapsedFrameIds: Set<string>,
 ): NestedNodeItem[] => {
 	if (nodes.length === 0) return [];
+	const layerTreeOrder = buildLayerTreeOrder(nodes);
+	const compareNodeTreePaintOrder = (left: CanvasNode, right: CanvasNode): number => {
+		const leftIndex =
+			layerTreeOrder.paintOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+		const rightIndex =
+			layerTreeOrder.paintOrderByNodeId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+		if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+		return left.id.localeCompare(right.id);
+	};
 	const nodeById = new Map(nodes.map((node) => [node.id, node]));
 	const childrenByParentId = new Map<string | null, CanvasNode[]>();
 	for (const node of nodes) {
@@ -370,7 +379,7 @@ const buildNestedNodeItems = (
 		childrenByParentId.set(parentId, siblings);
 	}
 	for (const [parentId, siblings] of childrenByParentId) {
-		childrenByParentId.set(parentId, [...siblings].sort(compareLayerOrderDesc));
+		childrenByParentId.set(parentId, [...siblings].sort(compareSiblingOrderDesc));
 	}
 	const visited = new Set<string>();
 	const items: NestedNodeItem[] = [];
@@ -397,7 +406,7 @@ const buildNestedNodeItems = (
 		return children;
 	};
 	items.push(...visit(null));
-	for (const node of sortByLayerOrder(nodes).reverse()) {
+	for (const node of [...nodes].sort(compareNodeTreePaintOrder).reverse()) {
 		if (visited.has(node.id)) continue;
 		const isCollapsed = collapsedFrameIds.has(node.id);
 		const hasChildren =
@@ -433,15 +442,24 @@ const resolveRootDragNodeIds = (
 	candidateNodeIds: string[],
 ): string[] => {
 	if (candidateNodeIds.length === 0) return [];
+	const layerTreeOrder = buildLayerTreeOrder(nodes);
+	const compareNodeTreePaintOrder = (left: CanvasNode, right: CanvasNode): number => {
+		const leftIndex =
+			layerTreeOrder.paintOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+		const rightIndex =
+			layerTreeOrder.paintOrderByNodeId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+		if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+		return left.id.localeCompare(right.id);
+	};
 	const nodeById = new Map(nodes.map((node) => [node.id, node]));
 	const nodeIdSet = new Set(candidateNodeIds);
-	const rootNodes = sortByLayerOrder(
-		candidateNodeIds
-			.map((nodeId) => nodeById.get(nodeId) ?? null)
-			.filter((node): node is CanvasNode => Boolean(node)),
-	).filter((node) => {
-		return !hasAncestorInSet(node.id, nodeById, nodeIdSet);
-	});
+	const rootNodes = candidateNodeIds
+		.map((nodeId) => nodeById.get(nodeId) ?? null)
+		.filter((node): node is CanvasNode => Boolean(node))
+		.sort(compareNodeTreePaintOrder)
+		.filter((node) => {
+			return !hasAncestorInSet(node.id, nodeById, nodeIdSet);
+		});
 	return rootNodes.map((node) => node.id);
 };
 

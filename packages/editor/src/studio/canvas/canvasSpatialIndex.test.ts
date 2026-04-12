@@ -12,7 +12,7 @@ interface CreateNodeInput {
 	y: number;
 	width: number;
 	height: number;
-	zIndex?: number;
+	siblingOrder?: number;
 	createdAt?: number;
 	hidden?: boolean;
 }
@@ -27,7 +27,7 @@ const createCanvasNode = (input: CreateNodeInput): CanvasNode => {
 		y: input.y,
 		width: input.width,
 		height: input.height,
-		zIndex: input.zIndex ?? 0,
+		siblingOrder: input.siblingOrder ?? 0,
 		locked: false,
 		hidden: input.hidden ?? false,
 		createdAt,
@@ -46,7 +46,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 120,
 				height: 80,
-				zIndex: 0,
+				siblingOrder: 0,
 				createdAt: 1,
 			}),
 			createCanvasNode({
@@ -55,7 +55,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 120,
 				height: 80,
-				zIndex: 2,
+				siblingOrder: 2,
 				createdAt: 2,
 			}),
 			createCanvasNode({
@@ -64,7 +64,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 120,
 				height: 80,
-				zIndex: 2,
+				siblingOrder: 2,
 				createdAt: 3,
 			}),
 		]);
@@ -91,7 +91,7 @@ describe("canvasSpatialIndex", () => {
 				y: 100,
 				width: -40,
 				height: -30,
-				zIndex: 1,
+				siblingOrder: 1,
 			}),
 			createCanvasNode({
 				id: "node-far",
@@ -99,7 +99,7 @@ describe("canvasSpatialIndex", () => {
 				y: 240,
 				width: 50,
 				height: 50,
-				zIndex: 2,
+				siblingOrder: 2,
 			}),
 		]);
 
@@ -124,7 +124,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 100,
 				height: 60,
-				zIndex: 0,
+				siblingOrder: 0,
 			}),
 			createCanvasNode({
 				id: "node-hidden",
@@ -132,7 +132,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 100,
 				height: 60,
-				zIndex: 1,
+				siblingOrder: 1,
 				hidden: true,
 			}),
 		]);
@@ -158,7 +158,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 80,
 				height: 60,
-				zIndex: 0,
+				siblingOrder: 0,
 				createdAt: 1,
 			}),
 			createCanvasNode({
@@ -167,7 +167,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 80,
 				height: 60,
-				zIndex: 1,
+				siblingOrder: 1,
 				createdAt: 2,
 			}),
 		];
@@ -180,7 +180,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 80,
 				height: 60,
-				zIndex: 0,
+				siblingOrder: 0,
 				createdAt: 1,
 			}),
 			createCanvasNode({
@@ -189,7 +189,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 80,
 				height: 60,
-				zIndex: 1,
+				siblingOrder: 1,
 				createdAt: 2,
 				hidden: true,
 			}),
@@ -199,7 +199,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 80,
 				height: 60,
-				zIndex: 2,
+				siblingOrder: 2,
 				createdAt: 3,
 			}),
 		]);
@@ -225,7 +225,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 80,
 				height: 60,
-				zIndex: 1,
+				siblingOrder: 1,
 				createdAt: 2,
 			}),
 			createCanvasNode({
@@ -234,7 +234,7 @@ describe("canvasSpatialIndex", () => {
 				y: 0,
 				width: 80,
 				height: 60,
-				zIndex: 2,
+				siblingOrder: 2,
 				createdAt: 3,
 			}),
 		]);
@@ -263,7 +263,7 @@ describe("canvasSpatialIndex", () => {
 					y: 0,
 					width: 80,
 					height: 60,
-					zIndex: itemIndex,
+					siblingOrder: itemIndex,
 					createdAt: itemIndex,
 				});
 			});

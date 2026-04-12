@@ -47,7 +47,7 @@ const createNode = (id = "node-1"): ImageCanvasNode => ({
 	y: 0,
 	width: 320,
 	height: 180,
-	zIndex: 0,
+	siblingOrder: 0,
 	locked: false,
 	hidden: false,
 	createdAt: 1,

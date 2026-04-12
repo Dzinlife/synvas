@@ -45,7 +45,7 @@ import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 
 export type CanvasNodeLayoutSnapshot = Pick<
 	CanvasNode,
-	"x" | "y" | "width" | "height" | "zIndex" | "hidden" | "locked" | "parentId"
+	"x" | "y" | "width" | "height" | "siblingOrder" | "hidden" | "locked" | "parentId"
 >;
 
 type CanvasGraphHistoryItem = {
@@ -140,8 +140,8 @@ export type StudioHistoryEntry =
 				nodeId: string;
 				beforeParentId: string | null;
 				afterParentId: string | null;
-				beforeZIndex: number;
-				afterZIndex: number;
+				beforeSiblingOrder: number;
+				afterSiblingOrder: number;
 			}>;
 			focusNodeId?: string | null;
 	  };
@@ -966,7 +966,7 @@ const applyEntry = (
 						nodeId: change.nodeId,
 						patch: {
 							parentId: change.beforeParentId,
-							zIndex: change.beforeZIndex,
+							siblingOrder: change.beforeSiblingOrder,
 						},
 					})),
 				);
@@ -980,7 +980,7 @@ const applyEntry = (
 					nodeId: change.nodeId,
 					patch: {
 						parentId: change.afterParentId,
-						zIndex: change.afterZIndex,
+						siblingOrder: change.afterSiblingOrder,
 					},
 				})),
 			);
@@ -1181,7 +1181,7 @@ const applyEntryToBaselineSnapshot = (
 					return {
 						...node,
 						parentId: change.beforeParentId,
-						zIndex: change.beforeZIndex,
+						siblingOrder: change.beforeSiblingOrder,
 					};
 				});
 			}
@@ -1203,7 +1203,7 @@ const applyEntryToBaselineSnapshot = (
 				return {
 					...node,
 					parentId: change.afterParentId,
-					zIndex: change.afterZIndex,
+					siblingOrder: change.afterSiblingOrder,
 				};
 			});
 		}

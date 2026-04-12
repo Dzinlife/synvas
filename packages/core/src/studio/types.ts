@@ -27,12 +27,12 @@ export interface CanvasNodeBase {
 	id: string;
 	type: CanvasNodeType;
 	name: string;
-	parentId: string | null;
+	parentId?: string | null;
 	x: number;
 	y: number;
 	width: number;
 	height: number;
-	zIndex: number;
+	siblingOrder: number;
 	locked: boolean;
 	hidden: boolean;
 	createdAt: number;

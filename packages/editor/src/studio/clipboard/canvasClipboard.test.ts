@@ -19,7 +19,7 @@ const createProject = (): StudioProject => ({
 				y: 80,
 				width: 960,
 				height: 540,
-				zIndex: 0,
+				siblingOrder: 0,
 				locked: false,
 				hidden: false,
 				createdAt: 1,
@@ -34,7 +34,7 @@ const createProject = (): StudioProject => ({
 				y: 260,
 				width: 320,
 				height: 180,
-				zIndex: 1,
+				siblingOrder: 1,
 				locked: false,
 				hidden: false,
 				createdAt: 2,
@@ -131,7 +131,7 @@ describe("canvasClipboard", () => {
 				{
 					...project.canvas.nodes[1],
 					id: "existing-node-10",
-					zIndex: 10,
+					siblingOrder: 10,
 				},
 			],
 		});
@@ -150,10 +150,11 @@ describe("canvasClipboard", () => {
 		expect(imageEntry.node.x).toBe(1320);
 		expect(imageEntry.node.y).toBe(780);
 		expect(sceneEntry.scene?.id).not.toBe("scene-1");
-		expect(sceneEntry.node.sceneId).toBe(sceneEntry.scene?.id);
-		expect(sceneEntry.node.name).toBe("Scene 1副本");
-		expect(imageEntry.node.name).toBe("Image 1副本");
-		expect(sceneEntry.node.zIndex).toBeGreaterThan(10);
-		expect(imageEntry.node.zIndex).toBeGreaterThan(sceneEntry.node.zIndex);
+			expect(sceneEntry.node.sceneId).toBe(sceneEntry.scene?.id);
+			expect(sceneEntry.node.name).toBe("Scene 1副本");
+			expect(imageEntry.node.name).toBe("Image 1副本");
+			expect(sceneEntry.node.siblingOrder).toBeGreaterThanOrEqual(3);
+			expect(imageEntry.node.siblingOrder).toBeGreaterThan(sceneEntry.node.siblingOrder);
+			expect(imageEntry.node.siblingOrder - sceneEntry.node.siblingOrder).toBe(1);
+		});
 	});
-});

@@ -86,7 +86,7 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 					y: -DEFAULT_SCENE_NODE_HEIGHT / 2,
 					width: DEFAULT_SCENE_NODE_WIDTH,
 					height: DEFAULT_SCENE_NODE_HEIGHT,
-					zIndex: 0,
+					siblingOrder: 0,
 					locked: false,
 					hidden: false,
 					createdAt: now,

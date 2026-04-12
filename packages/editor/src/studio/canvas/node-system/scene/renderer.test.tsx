@@ -339,7 +339,7 @@ const createRendererProps = (
 		y: 0,
 		width: 960,
 		height: 540,
-		zIndex: 1,
+		siblingOrder: 1,
 		locked: false,
 		hidden: false,
 		createdAt: 0,

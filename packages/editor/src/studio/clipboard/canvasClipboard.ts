@@ -4,10 +4,9 @@ import type {
 	StudioProject,
 } from "core/studio/types";
 import {
-	allocateInsertZIndex,
-	compareLayerOrder,
+	allocateInsertSiblingOrder,
 	resolveLayerSiblingCount,
-	sortByLayerOrder,
+	sortByTreePaintOrder,
 } from "@/studio/canvas/layerOrderCoordinator";
 import type { StudioCanvasClipboardEntry } from "./studioClipboardStore";
 
@@ -32,9 +31,10 @@ const createCanvasEntityId = (prefix: string): string => {
 const sortEntriesByNodeOrder = (
 	entries: StudioCanvasClipboardEntry[],
 ): StudioCanvasClipboardEntry[] => {
-	return [...entries].sort((left, right) =>
-		compareLayerOrder(left.node, right.node),
-	);
+	const entryByNodeId = new Map(entries.map((entry) => [entry.node.id, entry]));
+	return sortByTreePaintOrder(entries.map((entry) => entry.node))
+		.map((node) => entryByNodeId.get(node.id) ?? null)
+		.filter((entry): entry is StudioCanvasClipboardEntry => Boolean(entry));
 };
 
 const resolveClipboardBounds = (
@@ -58,7 +58,7 @@ export const buildCanvasClipboardEntries = (
 ): StudioCanvasClipboardEntry[] => {
 	if (nodeIds.length === 0) return [];
 	const nodeIdSet = new Set(nodeIds);
-	const sourceNodes = sortByLayerOrder(
+	const sourceNodes = sortByTreePaintOrder(
 		project.canvas.nodes.filter((node) => nodeIdSet.has(node.id)),
 	);
 	if (sourceNodes.length === 0) return [];
@@ -114,7 +114,7 @@ export const instantiateCanvasClipboardEntries = (options: {
 				parentId: mappedParentId,
 				x: sourceNode.x + deltaX,
 				y: sourceNode.y + deltaY,
-				zIndex: sourceNode.zIndex,
+				siblingOrder: sourceNode.siblingOrder,
 				createdAt,
 				updatedAt: createdAt,
 			};
@@ -179,13 +179,13 @@ export const instantiateCanvasClipboardEntries = (options: {
 		.forEach(({ entry }) => {
 			const parentId = entry.node.parentId ?? null;
 			const insertIndex = resolveLayerSiblingCount(workingNodes, parentId);
-			const { zIndex } = allocateInsertZIndex(workingNodes, {
+			const { siblingOrder } = allocateInsertSiblingOrder(workingNodes, {
 				parentId,
 				index: insertIndex,
 			});
 			entry.node = {
 				...entry.node,
-				zIndex,
+				siblingOrder,
 			};
 			workingNodes = [...workingNodes, entry.node];
 		});

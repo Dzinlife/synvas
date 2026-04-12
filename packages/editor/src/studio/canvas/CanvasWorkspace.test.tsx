@@ -827,7 +827,7 @@ const createProject = (): StudioProject => ({
 				y: 0,
 				width: 960,
 				height: 540,
-				zIndex: 0,
+				siblingOrder: 0,
 				locked: false,
 				hidden: false,
 				createdAt: 1,
@@ -842,7 +842,7 @@ const createProject = (): StudioProject => ({
 				y: 120,
 				width: 320,
 				height: 180,
-				zIndex: 1,
+				siblingOrder: 1,
 				locked: false,
 				hidden: false,
 				createdAt: 1,
@@ -857,7 +857,7 @@ const createProject = (): StudioProject => ({
 				y: 80,
 				width: 960,
 				height: 540,
-				zIndex: 1,
+				siblingOrder: 1,
 				locked: false,
 				hidden: false,
 				createdAt: 2,
@@ -872,7 +872,7 @@ const createProject = (): StudioProject => ({
 				y: 160,
 				width: 320,
 				height: 180,
-				zIndex: 2,
+				siblingOrder: 2,
 				locked: false,
 				hidden: false,
 				createdAt: 2,
@@ -887,7 +887,7 @@ const createProject = (): StudioProject => ({
 				y: 320,
 				width: 260,
 				height: 160,
-				zIndex: 2,
+				siblingOrder: 2,
 				locked: false,
 				hidden: false,
 				createdAt: 3,
@@ -902,7 +902,7 @@ const createProject = (): StudioProject => ({
 				y: 40,
 				width: 320,
 				height: 180,
-				zIndex: 3,
+				siblingOrder: 3,
 				locked: false,
 				hidden: true,
 				createdAt: 3,
@@ -1237,7 +1237,7 @@ const getTopVisibleNodeAt = (clientX: number, clientY: number): CanvasNode => {
 	const sortedNodes = [...project.canvas.nodes]
 		.filter((node) => !node.hidden)
 		.sort((a, b) => {
-			if (a.zIndex !== b.zIndex) return a.zIndex - b.zIndex;
+			if (a.siblingOrder !== b.siblingOrder) return a.siblingOrder - b.siblingOrder;
 			return a.id.localeCompare(b.id);
 		});
 	for (let i = sortedNodes.length - 1; i >= 0; i -= 1) {
@@ -1645,7 +1645,7 @@ const injectFrameHitFixture = (): void => {
 							y: 200,
 							width: 140,
 							height: 120,
-							zIndex: 20,
+							siblingOrder: 20,
 							locked: false,
 							hidden: false,
 							createdAt: 9,
@@ -1702,7 +1702,7 @@ describe("CanvasWorkspace", () => {
 		}
 	});
 
-	it("全局侧边栏展示所有节点并按 zIndex/id 排序", () => {
+	it("全局侧边栏展示所有节点并按 siblingOrder/id 排序", () => {
 		render(<CanvasWorkspace />);
 		const nodeItems = screen.getAllByTestId(/canvas-sidebar-node-item-/);
 		const order = nodeItems.map((item) => item.getAttribute("data-node-id"));
@@ -1740,7 +1740,7 @@ describe("CanvasWorkspace", () => {
 								y: 80,
 								width: 860,
 								height: 520,
-								zIndex: 4,
+								siblingOrder: 4,
 								locked: false,
 								hidden: false,
 								parentId: null,
@@ -1797,7 +1797,7 @@ describe("CanvasWorkspace", () => {
 								y: 80,
 								width: 860,
 								height: 520,
-								zIndex: 4,
+								siblingOrder: 4,
 								locked: false,
 								hidden: false,
 								parentId: null,
@@ -4040,7 +4040,7 @@ describe("CanvasWorkspace", () => {
 		).toBeNull();
 	});
 
-	it("重叠节点命中优先 zIndex 更高者", () => {
+	it("重叠节点命中优先 siblingOrder 更高者", () => {
 		render(<CanvasWorkspace />);
 		clickNodeAt(300, 160);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
@@ -4139,7 +4139,7 @@ describe("CanvasWorkspace", () => {
 									y: 180,
 									width: 260,
 									height: 140,
-									zIndex: 1,
+									siblingOrder: 1,
 								};
 							}
 							if (node.id === "node-image-1") {
@@ -4149,7 +4149,7 @@ describe("CanvasWorkspace", () => {
 									y: 188,
 									width: 260,
 									height: 140,
-									zIndex: 2,
+									siblingOrder: 2,
 								};
 							}
 							return node;

@@ -54,7 +54,7 @@ const createNode = (): VideoCanvasNode => ({
 	y: 0,
 	width: 320,
 	height: 180,
-	zIndex: 1,
+	siblingOrder: 1,
 	locked: false,
 	hidden: false,
 	createdAt: 1,

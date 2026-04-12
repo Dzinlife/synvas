@@ -143,7 +143,7 @@ describe("SceneNodeSkiaRenderer flicker fix", () => {
 			y: 0,
 			width: 960,
 			height: 540,
-			zIndex: 0,
+			siblingOrder: 0,
 			locked: false,
 			hidden: false,
 			createdAt: 1,

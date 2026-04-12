@@ -156,7 +156,7 @@ const createSceneNode = (sceneId: string): SceneNode => ({
 	y: 240,
 	width: 640,
 	height: 360,
-	zIndex: 1,
+	siblingOrder: 1,
 	locked: false,
 	hidden: false,
 	createdAt: 1,

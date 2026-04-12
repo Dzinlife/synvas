@@ -134,7 +134,7 @@ const createSceneNode = (id = "node-1"): CanvasNode => ({
 	y: 10,
 	width: 100,
 	height: 50,
-	zIndex: 0,
+	siblingOrder: 0,
 	locked: false,
 	hidden: false,
 	createdAt: 1,

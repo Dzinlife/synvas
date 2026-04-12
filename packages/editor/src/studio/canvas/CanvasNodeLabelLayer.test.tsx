@@ -260,7 +260,7 @@ const createVideoNode = (
 	y: 0,
 	width: 100,
 	height: 60,
-	zIndex: 0,
+	siblingOrder: 0,
 	locked: false,
 	hidden: false,
 	createdAt: 1,
