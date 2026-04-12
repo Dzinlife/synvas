@@ -671,6 +671,20 @@ const createCameraShared = (camera: { x: number; y: number; zoom: number }) => {
 	};
 };
 
+const createDeferred = <T,>() => {
+	let resolve!: (value: T | PromiseLike<T>) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return {
+		promise,
+		resolve,
+		reject,
+	};
+};
+
 const emptyScenes: StudioProject["scenes"] = {};
 
 describe("InfiniteSkiaCanvas", () => {
@@ -1640,6 +1654,143 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 
 		expect(textTilePictureGenerateMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("tilePicture 重算 pending 时会保留上一帧输入，避免闪烁", async () => {
+		tilePipelineMockState.enabled = true;
+		textTilePictureSourceSignatureMock.mockImplementation(
+			({ node }: { node: TextCanvasNode }) =>
+				`${node.id}:${Math.max(1, Math.round(Math.abs(node.width)))}:${Math.max(
+					1,
+					Math.round(Math.abs(node.height)),
+				)}`,
+		);
+		const firstPictureDispose = vi.fn();
+		const firstResultDispose = vi.fn();
+		const secondPictureDispose = vi.fn();
+		const secondResultDispose = vi.fn();
+		const firstDeferred = createDeferred<{
+			picture: { dispose: () => void };
+			sourceWidth: number;
+			sourceHeight: number;
+			dispose: () => void;
+		}>();
+		const secondDeferred = createDeferred<{
+			picture: { dispose: () => void };
+			sourceWidth: number;
+			sourceHeight: number;
+			dispose: () => void;
+		}>();
+		let generateCount = 0;
+		textTilePictureGenerateMock.mockImplementation(() => {
+			if (generateCount === 0) {
+				generateCount += 1;
+				return firstDeferred.promise;
+			}
+			generateCount += 1;
+			return secondDeferred.promise;
+		});
+		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
+		const initialNode = createTextNode("node-text", 0, {
+			width: 240,
+			height: 120,
+			updatedAt: 1,
+		});
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		try {
+			const { rerender } = render(
+				<InfiniteSkiaCanvas
+					width={128}
+					height={128}
+					camera={camera}
+					nodes={[initialNode]}
+					scenes={emptyScenes}
+					assets={[]}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					focusedNodeId={null}
+				/>,
+			);
+			await waitFor(() => {
+				expect(textTilePictureGenerateMock).toHaveBeenCalledTimes(1);
+			});
+			await act(async () => {
+				firstDeferred.resolve({
+					picture: {
+						dispose: firstPictureDispose,
+					},
+					sourceWidth: 240,
+					sourceHeight: 120,
+					dispose: firstResultDispose,
+				});
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+			await waitFor(() => {
+				const hasNodeInput = setInputsSpy.mock.calls.some((call) => {
+					const inputs = call[0] as Array<{ nodeId?: string }>;
+					return inputs.some((input) => input.nodeId === "node-text");
+				});
+				expect(hasNodeInput).toBe(true);
+			});
+			const setInputsCountAfterFirstReady = setInputsSpy.mock.calls.length;
+
+			rerender(
+				<InfiniteSkiaCanvas
+					width={128}
+					height={128}
+					camera={camera}
+					nodes={[
+						{
+							...initialNode,
+							width: 320,
+							height: 160,
+							updatedAt: 2,
+						},
+					]}
+					scenes={emptyScenes}
+					assets={[]}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					focusedNodeId={null}
+				/>,
+			);
+			await waitFor(() => {
+				expect(textTilePictureGenerateMock).toHaveBeenCalledTimes(2);
+			});
+			await waitFor(() => {
+				expect(setInputsSpy.mock.calls.length).toBeGreaterThan(
+					setInputsCountAfterFirstReady,
+				);
+			});
+			const latestInputs = (setInputsSpy.mock.calls.at(-1)?.[0] ??
+				[]) as Array<{ nodeId?: string }>;
+			expect(latestInputs.some((input) => input.nodeId === "node-text")).toBe(
+				true,
+			);
+
+			await act(async () => {
+				secondDeferred.resolve({
+					picture: {
+						dispose: secondPictureDispose,
+					},
+					sourceWidth: 320,
+					sourceHeight: 160,
+					dispose: secondResultDispose,
+				});
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+
+			await waitFor(() => {
+				expect(firstResultDispose).toHaveBeenCalledTimes(1);
+				expect(firstPictureDispose).toHaveBeenCalledTimes(1);
+			});
+			expect(secondResultDispose).not.toHaveBeenCalled();
+			expect(secondPictureDispose).not.toHaveBeenCalled();
+		} finally {
+			setInputsSpy.mockRestore();
+		}
 	});
 
 	it("image 节点存在 legacy thumbnail 时仍只使用主 image asset", async () => {

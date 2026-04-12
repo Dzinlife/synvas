@@ -37,8 +37,8 @@ import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import {
-	CanvasNodeLabelLayer,
 	type CanvasNodeLabelHitTester,
+	CanvasNodeLabelLayer,
 } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import {
@@ -1303,17 +1303,11 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				};
 			} else if (fallbackToNodeRendererPicture) {
 				if (tilePictureCapability) {
-					let asyncPictureEntry =
+					const asyncPictureEntry =
 						tileAsyncPictureCacheRef.current.get(latestNode.id) ?? null;
-					if (
-						asyncPictureEntry &&
-						asyncPictureEntry.sourceSignature !== sourceKey
-					) {
-						disposeTileAsyncPictureCacheEntry(asyncPictureEntry);
-						tileAsyncPictureCacheRef.current.delete(latestNode.id);
-						asyncPictureEntry = null;
-					}
-					const shouldQueueAsyncPictureRequest = !asyncPictureEntry;
+					const hasMatchingAsyncPictureSource =
+						asyncPictureEntry?.sourceSignature === sourceKey;
+					const shouldQueueAsyncPictureRequest = !hasMatchingAsyncPictureSource;
 					if (shouldQueueAsyncPictureRequest) {
 						asyncPictureRequests.push({
 							nodeId: latestNode.id,
@@ -1322,20 +1316,15 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							context: tilePictureContext,
 						});
 					}
-					if (
-						asyncPictureEntry &&
-						asyncPictureEntry.sourceSignature === sourceKey &&
-						asyncPictureEntry.status === "ready" &&
-						asyncPictureEntry.picture
-					) {
+					if (asyncPictureEntry?.picture) {
 						input = {
 							kind: "picture",
 							id: inputId,
 							nodeId: latestNode.id,
 							picture: asyncPictureEntry.picture,
 							aabb,
-							sourceWidth: asyncPictureEntry.sourceWidth,
-							sourceHeight: asyncPictureEntry.sourceHeight,
+							sourceWidth: Math.max(1, asyncPictureEntry.sourceWidth),
+							sourceHeight: Math.max(1, asyncPictureEntry.sourceHeight),
 							epoch,
 							dispose: null,
 						};
@@ -1424,22 +1413,27 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			}
 			const taskId = tileAsyncPictureTaskIdRef.current + 1;
 			tileAsyncPictureTaskIdRef.current = taskId;
-			if (existingEntry) {
-				disposeTileAsyncPictureCacheEntry(existingEntry);
-			}
+			const fallbackPicture = existingEntry?.picture ?? null;
+			const fallbackDispose = existingEntry?.dispose ?? null;
 			tileAsyncPictureCacheRef.current.set(request.nodeId, {
 				sourceSignature: request.sourceSignature,
 				status: "pending",
-				picture: null,
+				picture: fallbackPicture,
 				sourceWidth: Math.max(
 					1,
-					Math.round(Math.abs(request.context.node.width)),
+					Math.round(
+						Math.abs(existingEntry?.sourceWidth ?? request.context.node.width),
+					),
 				),
 				sourceHeight: Math.max(
 					1,
-					Math.round(Math.abs(request.context.node.height)),
+					Math.round(
+						Math.abs(
+							existingEntry?.sourceHeight ?? request.context.node.height,
+						),
+					),
 				),
-				dispose: null,
+				dispose: fallbackDispose,
 				taskId,
 			});
 			void Promise.resolve(request.capability.generate(request.context))
@@ -1462,6 +1456,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						setTileAsyncPictureVersion((prev) => prev + 1);
 						scheduleTileTick();
 						return;
+					}
+					const previousDispose = latestEntry.dispose;
+					if (previousDispose) {
+						try {
+							previousDispose();
+						} catch {}
 					}
 					latestEntry.status = "ready";
 					latestEntry.picture = result.picture;
