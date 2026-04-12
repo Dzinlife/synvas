@@ -362,11 +362,15 @@ const buildNestedNodeItems = (
 ): NestedNodeItem[] => {
 	if (nodes.length === 0) return [];
 	const layerTreeOrder = buildLayerTreeOrder(nodes);
-	const compareNodeTreePaintOrder = (left: CanvasNode, right: CanvasNode): number => {
+	const compareNodeTreePaintOrder = (
+		left: CanvasNode,
+		right: CanvasNode,
+	): number => {
 		const leftIndex =
 			layerTreeOrder.paintOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
 		const rightIndex =
-			layerTreeOrder.paintOrderByNodeId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+			layerTreeOrder.paintOrderByNodeId.get(right.id) ??
+			Number.MAX_SAFE_INTEGER;
 		if (leftIndex !== rightIndex) return leftIndex - rightIndex;
 		return left.id.localeCompare(right.id);
 	};
@@ -379,7 +383,10 @@ const buildNestedNodeItems = (
 		childrenByParentId.set(parentId, siblings);
 	}
 	for (const [parentId, siblings] of childrenByParentId) {
-		childrenByParentId.set(parentId, [...siblings].sort(compareSiblingOrderDesc));
+		childrenByParentId.set(
+			parentId,
+			[...siblings].sort(compareSiblingOrderDesc),
+		);
 	}
 	const visited = new Set<string>();
 	const items: NestedNodeItem[] = [];
@@ -443,11 +450,15 @@ const resolveRootDragNodeIds = (
 ): string[] => {
 	if (candidateNodeIds.length === 0) return [];
 	const layerTreeOrder = buildLayerTreeOrder(nodes);
-	const compareNodeTreePaintOrder = (left: CanvasNode, right: CanvasNode): number => {
+	const compareNodeTreePaintOrder = (
+		left: CanvasNode,
+		right: CanvasNode,
+	): number => {
 		const leftIndex =
 			layerTreeOrder.paintOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
 		const rightIndex =
-			layerTreeOrder.paintOrderByNodeId.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+			layerTreeOrder.paintOrderByNodeId.get(right.id) ??
+			Number.MAX_SAFE_INTEGER;
 		if (leftIndex !== rightIndex) return leftIndex - rightIndex;
 		return left.id.localeCompare(right.id);
 	};
@@ -958,7 +969,7 @@ const NodeList: React.FC<NodeListProps> = ({
 	};
 
 	return (
-		<div className="flex min-h-0 flex-1 flex-col">
+		<div className="flex min-h-0 h-full flex-col">
 			{disabled && (
 				<div className="rounded-md border border-amber-300/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">
 					拖拽 node asset 到时间线（待实现）
@@ -973,7 +984,7 @@ const NodeList: React.FC<NodeListProps> = ({
 					<div
 						ref={listRef}
 						data-testid="canvas-sidebar-node-list"
-						className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+						className="flex min-h-0 flex-1 flex-col overflow-y-auto -m-3 p-3"
 					>
 						{nestedItems.map((item) => renderNestedItem(item, 0))}
 					</div>
