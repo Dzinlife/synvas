@@ -965,6 +965,8 @@ const CanvasWorkspace = () => {
 	const preFocusCameraRef = useRef<CameraState | null>(null);
 	const preFocusCameraCenterRef = useRef<{ x: number; y: number } | null>(null);
 	const focusCameraZoomRef = useRef<number | null>(null);
+	const activeDrawerAutoPanNodeKeyRef = useRef<string | null>(null);
+	const activeDrawerAutoPanSignatureRef = useRef<string | null>(null);
 	const previousProjectIdRef = useRef<string | null>(currentProjectId);
 	const previousSkiaResourceSnapshotRef =
 		useRef<TrackedSkiaHostObjectSnapshot | null>(null);
@@ -2318,6 +2320,56 @@ const CanvasWorkspace = () => {
 		dynamicMinZoom,
 		focusedNode,
 		focusedNodeId,
+		stageSize.height,
+		stageSize.width,
+	]);
+
+	useEffect(() => {
+		if (!activeNode) {
+			activeDrawerAutoPanNodeKeyRef.current = null;
+			activeDrawerAutoPanSignatureRef.current = null;
+			return;
+		}
+		const activeDrawerTarget = resolvedDrawerTarget;
+		if (
+			!activeDrawerTarget ||
+			activeDrawerTarget.trigger !== "active" ||
+			activeDrawerTarget.node.id !== activeNode.id
+		) {
+			activeDrawerAutoPanNodeKeyRef.current = null;
+			activeDrawerAutoPanSignatureRef.current = null;
+			return;
+		}
+		if (stageSize.width <= 0 || stageSize.height <= 0) return;
+		const drawerKey = `${activeNode.id}:${activeDrawerTarget.trigger}`;
+		const drawerSignature = `${drawerKey}:${cameraSafeInsets.bottom}`;
+		if (activeDrawerAutoPanSignatureRef.current === drawerSignature) {
+			return;
+		}
+		activeDrawerAutoPanSignatureRef.current = drawerSignature;
+		const currentCamera = getCamera();
+		const nextCamera = buildNodePanCamera({
+			node: activeNode,
+			camera: currentCamera,
+			stageWidth: stageSize.width,
+			stageHeight: stageSize.height,
+			safeInsets: cameraSafeInsets,
+			paddingPx: SIDEBAR_VIEW_PADDING_PX,
+		});
+		if (isCameraAlmostEqual(currentCamera, nextCamera)) return;
+		if (activeDrawerAutoPanNodeKeyRef.current !== drawerKey) {
+			activeDrawerAutoPanNodeKeyRef.current = drawerKey;
+			applySmoothCameraWithCullLock(nextCamera);
+			return;
+		}
+		applyInstantCameraWithCullIntent(nextCamera, "pan");
+	}, [
+		activeNode,
+		applyInstantCameraWithCullIntent,
+		applySmoothCameraWithCullLock,
+		cameraSafeInsets,
+		getCamera,
+		resolvedDrawerTarget,
 		stageSize.height,
 		stageSize.width,
 	]);

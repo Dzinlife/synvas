@@ -2584,6 +2584,59 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
+	it("画布点击激活 active drawer 节点后会自动平移 camera", async () => {
+		const videoDefinition = getCanvasNodeDefinition("video");
+		const previousFocusable = videoDefinition?.focusable;
+		if (videoDefinition) {
+			videoDefinition.focusable = true;
+		}
+		try {
+			useProjectStore.setState((state) => {
+				const project = state.currentProject;
+				if (!project) return state;
+				return {
+					...state,
+					currentProject: {
+						...project,
+						canvas: {
+							...project.canvas,
+							nodes: project.canvas.nodes.map((node) => {
+								if (node.id !== "node-video-1") return node;
+								return {
+									...node,
+									y: 520,
+								};
+							}),
+						},
+					},
+				};
+			});
+			render(<CanvasWorkspace />);
+			const before = useCanvasCameraStore.getState().camera;
+			clickNodeAt(300, 560);
+			expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+				"node-video-1",
+			);
+			expect(screen.getByTestId("video-node-drawer")).toBeTruthy();
+			const immediate = useCanvasCameraStore.getState().camera;
+			expect(before).toBeTruthy();
+			expect(immediate).toBeTruthy();
+			if (!before || !immediate) return;
+			expect(immediate).toEqual(before);
+			await waitFor(() => {
+				const after = useCanvasCameraStore.getState().camera;
+				expect(after).toBeTruthy();
+				if (!after) return;
+				expect(after.zoom).toBe(before.zoom);
+				expect(after.x !== before.x || after.y !== before.y).toBe(true);
+			});
+		} finally {
+			if (videoDefinition) {
+				videoDefinition.focusable = previousFocusable;
+			}
+		}
+	});
+
 	it("Focus 模式默认 元素 tab，Node tab 仅占位禁用", () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(80, 80);
@@ -3050,6 +3103,11 @@ describe("CanvasWorkspace", () => {
 			await waitFor(() => {
 				expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
 			});
+			await act(async () => {
+				await new Promise((resolve) => {
+					setTimeout(resolve, 280);
+				});
+			});
 
 			for (let i = 0; i < 120; i += 1) {
 				fireEvent.wheel(workspace, {
@@ -3362,6 +3420,171 @@ describe("CanvasWorkspace", () => {
 
 		const maxSample = Math.max(beforeResizeZoom, ...zoomSamples);
 		expect(maxSample).toBeLessThanOrEqual(beforeResizeZoom + 0.02);
+	});
+
+	it("拖拽 active drawer resize 时会持续触发 camera 平移", async () => {
+		const videoDefinition = getCanvasNodeDefinition("video");
+		const drawerOptions = videoDefinition?.drawerOptions;
+		const previousFocusable = videoDefinition?.focusable;
+		const previousResizable = drawerOptions?.resizable;
+		let unsubscribe = () => {};
+		if (videoDefinition) {
+			videoDefinition.focusable = true;
+		}
+		if (drawerOptions) {
+			drawerOptions.resizable = true;
+		}
+		try {
+			useProjectStore.setState((state) => {
+				const project = state.currentProject;
+				if (!project) return state;
+				return {
+					...state,
+					currentProject: {
+						...project,
+						canvas: {
+							...project.canvas,
+							nodes: project.canvas.nodes.map((node) => {
+								if (node.id !== "node-video-1") return node;
+								return {
+									...node,
+									y: 520,
+								};
+							}),
+						},
+					},
+				};
+			});
+			render(<CanvasWorkspace />);
+			clickNodeAt(300, 560);
+			await waitFor(() => {
+				expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
+			});
+			await act(async () => {
+				await new Promise((resolve) => {
+					setTimeout(resolve, 280);
+				});
+			});
+
+			const handle = screen.getByLabelText("调整 Drawer 高度");
+			const cameraSamples: Array<{ x: number; y: number }> = [];
+			unsubscribe = useCanvasCameraStore.subscribe((state) => {
+				cameraSamples.push({
+					x: state.camera.x,
+					y: state.camera.y,
+				});
+			});
+			fireEvent.mouseDown(handle, { clientY: 700 });
+			fireEvent.mouseMove(document, { clientY: 600 });
+			fireEvent.mouseMove(document, { clientY: 760 });
+			fireEvent.mouseMove(document, { clientY: 560 });
+			fireEvent.mouseUp(document);
+
+			await waitFor(() => {
+				const movedSamples = cameraSamples.filter((sample, index, list) => {
+					if (index === 0) return true;
+					const prev = list[index - 1];
+					if (!prev) return true;
+					return sample.x !== prev.x || sample.y !== prev.y;
+				});
+				expect(movedSamples.length).toBeGreaterThan(1);
+			});
+		} finally {
+			unsubscribe();
+			if (videoDefinition) {
+				videoDefinition.focusable = previousFocusable;
+			}
+			if (drawerOptions) {
+				drawerOptions.resizable = previousResizable;
+			}
+		}
+	});
+
+	it("active drawer 高度变化触发平移时 zoom 保持不变", async () => {
+		const videoDefinition = getCanvasNodeDefinition("video");
+		const drawerOptions = videoDefinition?.drawerOptions;
+		const previousFocusable = videoDefinition?.focusable;
+		const previousResizable = drawerOptions?.resizable;
+		let unsubscribe = () => {};
+		if (videoDefinition) {
+			videoDefinition.focusable = true;
+		}
+		if (drawerOptions) {
+			drawerOptions.resizable = true;
+		}
+		try {
+			useProjectStore.setState((state) => {
+				const project = state.currentProject;
+				if (!project) return state;
+				return {
+					...state,
+					currentProject: {
+						...project,
+						canvas: {
+							...project.canvas,
+							nodes: project.canvas.nodes.map((node) => {
+								if (node.id !== "node-video-1") return node;
+								return {
+									...node,
+									y: 520,
+								};
+							}),
+						},
+					},
+				};
+			});
+			render(<CanvasWorkspace />);
+			clickNodeAt(300, 560);
+			await waitFor(() => {
+				expect(screen.getByLabelText("调整 Drawer 高度")).toBeTruthy();
+			});
+			await act(async () => {
+				await new Promise((resolve) => {
+					setTimeout(resolve, 280);
+				});
+			});
+			const beforeZoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
+
+			const handle = screen.getByLabelText("调整 Drawer 高度");
+			const zoomSamples: number[] = [];
+			const positionSamples: Array<{ x: number; y: number }> = [];
+			unsubscribe = useCanvasCameraStore.subscribe((state) => {
+				zoomSamples.push(state.camera.zoom);
+				positionSamples.push({
+					x: state.camera.x,
+					y: state.camera.y,
+				});
+			});
+			fireEvent.mouseDown(handle, { clientY: 700 });
+			fireEvent.mouseMove(document, { clientY: 600 });
+			fireEvent.mouseMove(document, { clientY: 760 });
+			fireEvent.mouseMove(document, { clientY: 560 });
+			fireEvent.mouseUp(document);
+
+			await waitFor(() => {
+				const didMove = positionSamples.some((sample, index, list) => {
+					if (index === 0) return false;
+					const prev = list[index - 1];
+					if (!prev) return false;
+					return sample.x !== prev.x || sample.y !== prev.y;
+				});
+				expect(didMove).toBe(true);
+			});
+
+			const afterZoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
+			expect(afterZoom).toBeCloseTo(beforeZoom, 6);
+			for (const zoom of zoomSamples) {
+				expect(zoom).toBeCloseTo(beforeZoom, 6);
+			}
+		} finally {
+			unsubscribe();
+			if (videoDefinition) {
+				videoDefinition.focusable = previousFocusable;
+			}
+			if (drawerOptions) {
+				drawerOptions.resizable = previousResizable;
+			}
+		}
 	});
 
 	it("右键菜单可在画布位置创建 text 节点", async () => {
