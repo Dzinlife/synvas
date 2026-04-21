@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import type { VideoCanvasNode } from "core/studio/types";
+import type { CanvasNode, VideoCanvasNode } from "core/studio/types";
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";
@@ -45,16 +45,23 @@ const {
 		fontRegistryMock: {
 			getFontProvider: vi.fn().mockResolvedValue({ id: "provider" }),
 			ensureCoverage: vi.fn().mockResolvedValue(undefined),
-			getParagraphRunPlan: vi.fn((text: string) => {
-				if (!text) return [];
-				return [
-					{
-						text,
-						fontFamilies: ["Noto Sans SC"],
-						status: "primary" as const,
+			getParagraphRunPlan: vi.fn(
+				(
+					text: string,
+					options?: {
+						fallbackChain?: string[];
 					},
-				];
-			}),
+				) => {
+					if (!text) return [];
+					return [
+						{
+							text,
+							fontFamilies: options?.fallbackChain ?? ["Noto Sans SC"],
+							status: "primary" as const,
+						},
+					];
+				},
+			),
 			subscribe: vi.fn((listener: () => void) => {
 				listeners.add(listener);
 				return () => {
@@ -250,6 +257,16 @@ const resolveLatestLabelPanCompensation = (): { x: number; y: number } => {
 	return { x, y };
 };
 
+const LABEL_FONT_FALLBACK_CHAIN = [
+	"Noto Sans SC",
+	"SynvasIcon",
+	"Noto Sans SC",
+	"Apple Color Emoji",
+];
+
+const VIDEO_LABEL_ICON = "\uF001";
+const withVideoLabelIcon = (text: string): string => `${VIDEO_LABEL_ICON} ${text}`;
+
 const createVideoNode = (
 	patch: Partial<VideoCanvasNode> = {},
 ): VideoCanvasNode => ({
@@ -268,6 +285,55 @@ const createVideoNode = (
 	assetId: "asset-a",
 	...patch,
 });
+
+const createNodeByType = (
+	type: CanvasNode["type"],
+	index: number,
+): CanvasNode => {
+	const base = {
+		id: `node-${type}-${index}`,
+		type,
+		name: type,
+		x: index * 12,
+		y: 0,
+		width: 120,
+		height: 60,
+		siblingOrder: index,
+		locked: false,
+		hidden: false,
+		createdAt: 1,
+		updatedAt: 1,
+	};
+	switch (type) {
+		case "scene":
+			return {
+				...base,
+				type,
+				sceneId: `scene-${index}`,
+			};
+		case "video":
+		case "audio":
+		case "image":
+			return {
+				...base,
+				type,
+				assetId: `asset-${type}-${index}`,
+			};
+		case "text":
+			return {
+				...base,
+				type,
+				text: type,
+				fontSize: 24,
+			};
+		case "frame":
+			return {
+				...base,
+				type,
+			};
+	}
+	throw new Error(`Unsupported node type: ${type}`);
+};
 
 describe("CanvasNodeLabelLayer", () => {
 	beforeEach(() => {
@@ -319,6 +385,11 @@ describe("CanvasNodeLabelLayer", () => {
 		);
 		expect(fontRegistryMock.ensureCoverage).toHaveBeenCalledWith(
 			expect.objectContaining({
+				text: expect.stringContaining(VIDEO_LABEL_ICON),
+			}),
+		);
+		expect(fontRegistryMock.ensureCoverage).toHaveBeenCalledWith(
+			expect.objectContaining({
 				text: expect.stringContaining("…"),
 			}),
 		);
@@ -334,13 +405,56 @@ describe("CanvasNodeLabelLayer", () => {
 		).toBe(true);
 	});
 
+	it("会为六类 node label 添加图标前缀和空格", async () => {
+		const nodes: CanvasNode[] = [
+			createNodeByType("scene", 0),
+			createNodeByType("video", 1),
+			createNodeByType("frame", 2),
+			createNodeByType("audio", 3),
+			createNodeByType("text", 4),
+			createNodeByType("image", 5),
+		];
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={createSharedValue({ x: 0, y: 0, zoom: 1 })}
+				getNodeLayout={() =>
+					createSharedValue({ x: 0, y: 0, width: 120, height: 60 })
+				}
+				nodes={nodes}
+				focusedNodeId={null}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(
+				paragraphInstances.some(
+					(paragraph) => paragraph.paint.mock.calls.length > 0,
+				),
+			).toBe(true);
+		});
+
+		const texts = paragraphInstances.map((paragraph) => paragraph.text);
+		expect(texts).toEqual(
+			expect.arrayContaining([
+				"\uF000 scene",
+				"\uF001 video",
+				"\uF002 frame",
+				"\uF003 audio",
+				"\uF004 text",
+				"\uF005 image",
+			]),
+		);
+	});
+
 	it("会给正文 run 合并省略号字体链", async () => {
 		fontRegistryMock.getParagraphRunPlan.mockImplementation((text: string) => {
 			if (text === "…") {
 				return [
 					{
 						text,
-						fontFamilies: ["Noto Sans SC__ellipsis"],
+						fontFamilies: ["SynvasIcon", "Noto Sans SC__ellipsis"],
 						status: "primary" as const,
 					},
 				];
@@ -349,7 +463,7 @@ describe("CanvasNodeLabelLayer", () => {
 			return [
 				{
 					text,
-					fontFamilies: ["Noto Sans SC__label"],
+					fontFamilies: ["SynvasIcon", "Noto Sans SC__label"],
 					status: "primary" as const,
 				},
 			];
@@ -374,11 +488,15 @@ describe("CanvasNodeLabelLayer", () => {
 		expect(
 			paragraphRunStyles.some((style) => {
 				return (
+					style.fontFamilies?.includes("SynvasIcon") &&
 					style.fontFamilies?.includes("Noto Sans SC__label") &&
 					style.fontFamilies?.includes("Noto Sans SC__ellipsis")
 				);
 			}),
 		).toBe(true);
+		expect(fontRegistryMock.getParagraphRunPlan).toHaveBeenCalledWith("…", {
+			fallbackChain: LABEL_FONT_FALLBACK_CHAIN,
+		});
 	});
 
 	it("节点屏幕宽度小于 24px 时不会绘制文字", async () => {
@@ -577,7 +695,7 @@ describe("CanvasNodeLabelLayer", () => {
 	});
 
 	it("命中宽度会按可见文字宽度收窄，避免右侧空白误命中", async () => {
-		paragraphLongestLineByText.set("narrow-hit", 36);
+		paragraphLongestLineByText.set(withVideoLabelIcon("narrow-hit"), 36);
 		const hitTesterSpy = vi.fn();
 		render(
 			<CanvasNodeLabelLayer
@@ -615,7 +733,7 @@ describe("CanvasNodeLabelLayer", () => {
 	});
 
 	it("label 命中会覆盖到底部 gap 区域，避免下方出现空隙", async () => {
-		paragraphLongestLineByText.set("gap-hit", 36);
+		paragraphLongestLineByText.set(withVideoLabelIcon("gap-hit"), 36);
 		const hitTesterSpy = vi.fn();
 		render(
 			<CanvasNodeLabelLayer
@@ -654,7 +772,7 @@ describe("CanvasNodeLabelLayer", () => {
 	});
 
 	it("pan 补偿会同步应用到 label 命中区域", async () => {
-		paragraphLongestLineByText.set("pan-hit", 36);
+		paragraphLongestLineByText.set(withVideoLabelIcon("pan-hit"), 36);
 		const hitTesterSpy = vi.fn();
 		render(
 			<CanvasNodeLabelLayer

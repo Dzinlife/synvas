@@ -6,10 +6,12 @@ import {
 } from "react-skia-lite";
 
 const PRIMARY_FONT_FAMILY = "Inter";
+const SYNVAS_ICON_FONT_FAMILY = "SynvasIcon";
 const SECONDARY_FONT_FAMILY = "Noto Sans SC";
 const APPLE_EMOJI_FAMILY = "Apple Color Emoji";
 
 const PRIMARY_LOCAL_FONT_URI = "/fonts/Inter-Latin-wght-normal.woff2";
+const SYNVAS_ICON_LOCAL_URI = "/fonts/SynvasIcon.woff2";
 const SECONDARY_LOCAL_FONT_URI = "/fonts/NotoSansSC-Base-400.woff2";
 const APPLE_EMOJI_LOCAL_URI = "/fonts/AppleColorEmoji-Linux.ttf";
 
@@ -207,6 +209,19 @@ const createDefaultFontDefinitions = (): FontDefinition[] => {
 				kind: "url",
 				provider: "local",
 				url: PRIMARY_LOCAL_FONT_URI,
+			},
+			weight: 400,
+			style: "normal",
+			priority: 0,
+		},
+		{
+			id: "default-synvas-icon",
+			family: SYNVAS_ICON_FONT_FAMILY,
+			languages: ["latin"],
+			source: {
+				kind: "url",
+				provider: "local",
+				url: SYNVAS_ICON_LOCAL_URI,
 			},
 			weight: 400,
 			style: "normal",

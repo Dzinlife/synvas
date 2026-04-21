@@ -105,6 +105,10 @@ const mocks = vi.hoisted(() => {
 				family: "Apple Color Emoji",
 				text: "🙂😀❤️🇨🇳",
 			});
+			setFontPayload("/fonts/SynvasIcon.woff2", {
+				family: "SynvasIcon",
+				text: "\uF000\uF001\uF002\uF003\uF004\uF005",
+			});
 			typefaceFontProvider.registerFont.mockClear();
 			fromBytes.mockClear();
 			makeTypeface.mockClear();
@@ -114,6 +118,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("react-skia-lite", () => ({
+	scheduleSkiaDispose: vi.fn(),
 	Skia: {
 		TypefaceFontProvider: {
 			Make: () => mocks.typefaceFontProvider,
@@ -243,6 +248,26 @@ describe("FontRegistry", () => {
 			{
 				text: "HELLO",
 				fontFamilies: ["My Latin"],
+				status: "primary",
+			},
+		]);
+	});
+
+	it("支持按调用方 fallback 链懒加载 SynvasIcon", async () => {
+		await fontRegistry.ensureCoverage({
+			text: "\uF001",
+			fallbackChain: ["SynvasIcon"],
+		});
+
+		expectRequestedUrls(["/fonts/SynvasIcon.woff2"]);
+		expect(
+			fontRegistry.getParagraphRunPlan("\uF001", {
+				fallbackChain: ["SynvasIcon"],
+			}),
+		).toEqual([
+			{
+				text: "\uF001",
+				fontFamilies: ["SynvasIcon"],
 				status: "primary",
 			},
 		]);

@@ -1,4 +1,4 @@
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode, CanvasNodeType } from "core/studio/types";
 import {
 	useCallback,
 	useEffect,
@@ -37,7 +37,7 @@ const LABEL_FONT_SIZE_PX = 12;
 const LABEL_LINE_HEIGHT_MULTIPLIER = 1;
 const LABEL_LINE_HEIGHT_PX = LABEL_FONT_SIZE_PX * LABEL_LINE_HEIGHT_MULTIPLIER;
 const LABEL_TEXT_HEIGHT_PX = Math.ceil(LABEL_LINE_HEIGHT_PX);
-const LABEL_TEXT_CLIP_PADDING_TOP_PX = 0;
+const LABEL_TEXT_CLIP_PADDING_TOP_PX = 1;
 const LABEL_TEXT_CLIP_PADDING_BOTTOM_PX = 1;
 const LABEL_TEXT_COLOR = "rgba(255,255,255,0.92)";
 const LABEL_LINE_HEIGHT_SAMPLE_TEXT = "Hg";
@@ -47,6 +47,22 @@ const LABEL_MIN_VISIBLE_WIDTH_PX = 24;
 const LABEL_TEXT_ELLIPSIS = "…";
 const LABEL_PAN_COMPENSATION_ZOOM_EPSILON = 1e-6;
 const LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON = 1e-4;
+const LABEL_ICON_FONT_FAMILY = "SynvasIcon";
+const LABEL_FONT_FALLBACK_CHAIN = [
+	FONT_REGISTRY_PRIMARY_FAMILY,
+	LABEL_ICON_FONT_FAMILY,
+	"Noto Sans SC",
+	"Apple Color Emoji",
+];
+
+const LABEL_ICON_BY_NODE_TYPE: Record<CanvasNodeType, string> = {
+	scene: "\uF000",
+	video: "\uF001",
+	frame: "\uF002",
+	audio: "\uF003",
+	text: "\uF004",
+	image: "\uF005",
+};
 
 type LabelPanCompensationTransform = Array<
 	{ translateX: number } | { translateY: number }
@@ -133,6 +149,13 @@ const collectRunPlanFamilies = (runPlan: RunPlan[]): string[] => {
 		}
 	}
 	return merged;
+};
+
+const resolveCanvasNodeLabelText = (node: CanvasNode): string => {
+	const labelText = node.name.trim();
+	if (!labelText) return "";
+	const icon = LABEL_ICON_BY_NODE_TYPE[node.type];
+	return `${icon}  ${labelText}`;
 };
 
 interface ListenerCapableSharedValue<T = unknown> {
@@ -308,7 +331,7 @@ export const CanvasNodeLabelLayer = ({
 		if (width <= 0 || height <= 0) return [];
 		return nodes
 			.map((node) => {
-				const labelText = node.name.trim();
+				const labelText = resolveCanvasNodeLabelText(node);
 				if (!labelText) return null;
 				return {
 					nodeId: node.id,
@@ -336,8 +359,12 @@ export const CanvasNodeLabelLayer = ({
 	}, [labelCandidates]);
 	const ellipsisFontFamilies = useMemo(() => {
 		void fontRegistryRevision;
-		const ellipsisRunPlan =
-			fontRegistry.getParagraphRunPlan(LABEL_TEXT_ELLIPSIS);
+		const ellipsisRunPlan = fontRegistry.getParagraphRunPlan(
+			LABEL_TEXT_ELLIPSIS,
+			{
+				fallbackChain: LABEL_FONT_FALLBACK_CHAIN,
+			},
+		);
 		// 缩放会改变截断位置，需保证所有 run 都能回退到可渲染省略号的字体链。
 		return collectRunPlanFamilies(ellipsisRunPlan);
 	}, [fontRegistryRevision]);
@@ -379,6 +406,9 @@ export const CanvasNodeLabelLayer = ({
 				text: LABEL_LINE_HEIGHT_SAMPLE_TEXT,
 				runPlan: fontRegistry.getParagraphRunPlan(
 					LABEL_LINE_HEIGHT_SAMPLE_TEXT,
+					{
+						fallbackChain: LABEL_FONT_FALLBACK_CHAIN,
+					},
 				),
 				fontProvider,
 				ellipsisFontFamilies,
@@ -412,7 +442,11 @@ export const CanvasNodeLabelLayer = ({
 	const lifecycleEpochRef = useRef(0);
 
 	const hitTestLabelNodeIds = useEffectEvent(
-		(localX: number, localY: number, liveCamera: CanvasCameraState): string[] => {
+		(
+			localX: number,
+			localY: number,
+			liveCamera: CanvasCameraState,
+		): string[] => {
 			if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
 				return [];
 			}
@@ -495,7 +529,10 @@ export const CanvasNodeLabelLayer = ({
 	useEffect(() => {
 		if (!labelCoverageText) return;
 		void fontRegistry
-			.ensureCoverage({ text: labelCoverageText })
+			.ensureCoverage({
+				text: labelCoverageText,
+				fallbackChain: LABEL_FONT_FALLBACK_CHAIN,
+			})
 			.catch((error) => {
 				console.warn(
 					"[CanvasNodeLabelLayer] Failed to ensure label font coverage:",
@@ -583,7 +620,9 @@ export const CanvasNodeLabelLayer = ({
 			try {
 				const paragraph = buildLabelParagraph({
 					text,
-					runPlan: fontRegistry.getParagraphRunPlan(text),
+					runPlan: fontRegistry.getParagraphRunPlan(text, {
+						fallbackChain: LABEL_FONT_FALLBACK_CHAIN,
+					}),
 					fontProvider,
 					ellipsisFontFamilies,
 				});
@@ -631,7 +670,8 @@ export const CanvasNodeLabelLayer = ({
 		}
 
 		const recorder = Skia.PictureRecorder();
-		let recordingCanvas: ReturnType<typeof recorder.beginRecording> | null = null;
+		let recordingCanvas: ReturnType<typeof recorder.beginRecording> | null =
+			null;
 		try {
 			recordingCanvas = recorder.beginRecording({
 				x: 0,
@@ -700,19 +740,19 @@ export const CanvasNodeLabelLayer = ({
 						error,
 					);
 				}
-					nextLabelHitEntries.push({
-						nodeId: candidate.nodeId,
-						siblingOrder: candidate.node.siblingOrder,
-						isFrame: candidate.node.type === "frame",
-						rect: {
-							x: labelRect.x,
-							y: labelRect.y,
-							width: labelHitWidth,
-							// 命中区域向下补齐 gap，避免 label 与 node 顶边之间出现交互空隙。
-							height: labelRect.height + LABEL_GAP_PX,
-						},
-						cameraSnapshot: {
-							x: cameraState.x,
+				nextLabelHitEntries.push({
+					nodeId: candidate.nodeId,
+					siblingOrder: candidate.node.siblingOrder,
+					isFrame: candidate.node.type === "frame",
+					rect: {
+						x: labelRect.x,
+						y: labelRect.y,
+						width: labelHitWidth,
+						// 命中区域向下补齐 gap，避免 label 与 node 顶边之间出现交互空隙。
+						height: labelRect.height + LABEL_GAP_PX,
+					},
+					cameraSnapshot: {
+						x: cameraState.x,
 						y: cameraState.y,
 						zoom: cameraState.zoom,
 					},
@@ -727,7 +767,8 @@ export const CanvasNodeLabelLayer = ({
 						0,
 						(labelContentHeight - paragraphHeight) / 2,
 					);
-					const textY = labelY + LABEL_TEXT_CLIP_PADDING_TOP_PX + verticalOffset;
+					const textY =
+						labelY + LABEL_TEXT_CLIP_PADDING_TOP_PX + verticalOffset;
 					recordingCanvas.save();
 					recordingCanvas.clipRect(labelRect, ClipOp.Intersect, true);
 					paragraph.paint(recordingCanvas, frame.x, textY);
