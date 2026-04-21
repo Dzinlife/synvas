@@ -1,4 +1,4 @@
-import type { CanvasNode, CanvasNodeType } from "core/studio/types";
+import type { CanvasNode } from "core/studio/types";
 import {
 	useCallback,
 	useEffect,
@@ -32,6 +32,10 @@ import {
 	resolveCanvasNodeLayoutScreenFrame,
 	resolveCanvasViewportRect,
 } from "./canvasNodeLabelUtils";
+import {
+	CANVAS_NODE_ICON_FONT_FAMILY,
+	resolveCanvasNodeLabelText,
+} from "./canvasNodeIconLabel";
 
 const LABEL_FONT_SIZE_PX = 12;
 const LABEL_LINE_HEIGHT_MULTIPLIER = 1;
@@ -47,22 +51,12 @@ const LABEL_MIN_VISIBLE_WIDTH_PX = 24;
 const LABEL_TEXT_ELLIPSIS = "…";
 const LABEL_PAN_COMPENSATION_ZOOM_EPSILON = 1e-6;
 const LABEL_PAN_COMPENSATION_TRANSLATE_EPSILON = 1e-4;
-const LABEL_ICON_FONT_FAMILY = "SynvasIcon";
 const LABEL_FONT_FALLBACK_CHAIN = [
 	FONT_REGISTRY_PRIMARY_FAMILY,
-	LABEL_ICON_FONT_FAMILY,
+	CANVAS_NODE_ICON_FONT_FAMILY,
 	"Noto Sans SC",
 	"Apple Color Emoji",
 ];
-
-const LABEL_ICON_BY_NODE_TYPE: Record<CanvasNodeType, string> = {
-	scene: "\uF000",
-	video: "\uF001",
-	frame: "\uF002",
-	audio: "\uF003",
-	text: "\uF004",
-	image: "\uF005",
-};
 
 type LabelPanCompensationTransform = Array<
 	{ translateX: number } | { translateY: number }
@@ -149,13 +143,6 @@ const collectRunPlanFamilies = (runPlan: RunPlan[]): string[] => {
 		}
 	}
 	return merged;
-};
-
-const resolveCanvasNodeLabelText = (node: CanvasNode): string => {
-	const labelText = node.name.trim();
-	if (!labelText) return "";
-	const icon = LABEL_ICON_BY_NODE_TYPE[node.type];
-	return `${icon}  ${labelText}`;
 };
 
 interface ListenerCapableSharedValue<T = unknown> {

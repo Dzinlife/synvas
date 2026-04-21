@@ -8,6 +8,14 @@
 @import "@fontsource/barlow";
 @import "@fontsource-variable/inter";
 
+@font-face {
+  font-family: "SynvasIcon";
+  src: url("/fonts/SynvasIcon.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
 :root {
   --color-blue: oklch(45% 50% 264deg);
   --color-red: oklch(50% 55% 31deg);
@@ -65,4 +73,15 @@ body, html {
   min-height: 0;
   touch-action: none;
   color-scheme: dark;
+}
+
+.canvas-sidebar-node-icon {
+  font-family: "SynvasIcon";
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  flex-shrink: 0;
 }

@@ -15,6 +15,7 @@ import {
 	buildLayerTreeOrder,
 	compareSiblingOrderDesc,
 } from "@/studio/canvas/layerOrderCoordinator";
+import { resolveCanvasNodeTypeIcon } from "../canvasNodeIconLabel";
 import CanvasElementLibrary from "./CanvasElementLibrary";
 
 export type CanvasSidebarMode = "canvas" | "focus";
@@ -46,15 +47,6 @@ interface CanvasSidebarProps {
 	onNodeReorder?: (request: CanvasSidebarNodeReorderRequest) => void;
 	onCollapse?: () => void;
 }
-
-const NODE_TYPE_LABEL: Record<CanvasNode["type"], string> = {
-	scene: "Scene",
-	video: "Video",
-	audio: "Audio",
-	image: "Image",
-	text: "Text",
-	frame: "Frame",
-};
 
 interface NodeListProps {
 	nodes: CanvasNode[];
@@ -115,8 +107,7 @@ const AUTO_SCROLL_MAX_SPEED = 14;
 const ROOT_DROP_EDGE_PX = 18;
 const INTENT_HYSTERESIS_PX = 2;
 const ROW_BOUNDARY_HYSTERESIS_PX = 4;
-const NODE_ROW_BASE_PADDING_LEFT_PX = 8;
-const NODE_ROW_INDENT_PX = 16;
+const NODE_ROW_INDENT_PX = 21;
 
 const isSameDropIntent = (
 	left: DropIntent | null,
@@ -590,7 +581,7 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 		>
 			<div
 				className={cn(
-					"relative w-full rounded-md py-1.5 pr-2 text-left",
+					"relative w-full rounded-md py-1.5 pl-0.5 pr-2 text-left",
 					isActive && "bg-mauve-500/15 text-white",
 					!isActive && isSelected && "bg-mauve-500/20 text-white",
 					!isActive && !isSelected && "bg-transparent text-white/90",
@@ -605,12 +596,11 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 						"ring-1 ring-white ring-inset rounded-none",
 				)}
 				style={{
-					paddingLeft:
-						NODE_ROW_BASE_PADDING_LEFT_PX + depth * NODE_ROW_INDENT_PX,
+					paddingLeft: depth * NODE_ROW_INDENT_PX,
 				}}
 			>
-				<div className="flex items-center justify-between gap-2">
-					<div className="flex min-w-0 items-center gap-1">
+				<div className="flex items-center justify-between">
+					<div className="flex min-w-0 items-center relative">
 						{item.node.type === "frame" && item.hasChildren ? (
 							<span
 								data-node-toggle="true"
@@ -621,24 +611,35 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 									onToggleCollapse(item.node.id);
 								}}
 								className={cn(
-									"rounded p-0.5 text-white/65",
-									!isDragging && "hover:bg-white/10 hover:text-white",
+									"group/toggle pl-1.5 pr-0 py-0.5 absolute -left-[23px]",
+									{
+										"absolute -left-[20px]": depth === 0,
+									},
 								)}
 							>
-								<ChevronRight
+								<div
 									className={cn(
-										"size-3 transition-transform",
-										!item.isCollapsed && "rotate-90",
+										"rounded p-0.5 text-white/65",
+										!isDragging && "group-hover/toggle:text-white",
 									)}
-								/>
+								>
+									<ChevronRight
+										className={cn(
+											"size-3 transition-transform",
+											!item.isCollapsed && "rotate-90",
+										)}
+									/>
+								</div>
 							</span>
-						) : (
-							<span className="block size-4 shrink-0" />
-						)}
+						) : null}
+						<span
+							data-testid={`canvas-sidebar-node-icon-${item.node.id}`}
+							className="canvas-sidebar-node-icon text-white/80 ml-1.5 mr-2"
+							aria-hidden="true"
+						>
+							{resolveCanvasNodeTypeIcon(item.node.type)}
+						</span>
 						<div className="truncate text-xs font-medium">{item.node.name}</div>
-					</div>
-					<div className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-white/70">
-						{NODE_TYPE_LABEL[item.node.type]}
 					</div>
 				</div>
 			</div>

@@ -1716,6 +1716,27 @@ describe("CanvasWorkspace", () => {
 		]);
 	});
 
+	it("侧边栏 node label 前会显示类型图标，并移除右侧类型 badge", () => {
+		render(<CanvasWorkspace />);
+		const sceneItem = screen.getByTestId("canvas-sidebar-node-item-node-scene-1");
+		const videoItem = screen.getByTestId("canvas-sidebar-node-item-node-video-1");
+		expect(
+			screen.getByTestId("canvas-sidebar-node-icon-node-scene-1").textContent,
+		).toBe("\uF000");
+		expect(
+			screen.getByTestId("canvas-sidebar-node-icon-node-video-1").textContent,
+		).toBe("\uF001");
+		expect(
+			screen.getByTestId("canvas-sidebar-node-icon-node-image-1").textContent,
+		).toBe("\uF005");
+		expect(sceneItem.textContent?.replace(/\s+/g, "")).not.toContain(
+			"Scene1Scene",
+		);
+		expect(videoItem.textContent?.replace(/\s+/g, "")).not.toContain(
+			"Video1Video",
+		);
+	});
+
 	it("侧边栏会按 frame 的 parentId 树进行分组缩进", () => {
 		useProjectStore.setState((state) => {
 			const project = state.currentProject;
