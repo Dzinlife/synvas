@@ -34,6 +34,13 @@ import type { Command } from "../Core";
 import { CommandType } from "../Core";
 import type { DrawingContext } from "../DrawingContext";
 
+const isDisposedSkImage = (image: unknown): boolean => {
+	if (!image || typeof image !== "object") return false;
+	const maybeHostImage = image as { ref?: unknown };
+	if (!("ref" in maybeHostImage)) return false;
+	return maybeHostImage.ref === null || maybeHostImage.ref === undefined;
+};
+
 const declareShader = (
 	ctx: DrawingContext,
 	props: ShaderProps,
@@ -207,7 +214,7 @@ const declareTurbulenceShader = (
 const declareImageShader = (ctx: DrawingContext, props: ImageShaderProps) => {
 	"worklet";
 	const { fit, image, tx, ty, sampling, ...imageShaderProps } = props;
-	if (!image) {
+	if (!image || isDisposedSkImage(image)) {
 		return;
 	}
 

@@ -95,13 +95,16 @@ describe("renderNodeToPicture", () => {
 		expect(renderMock).toHaveBeenCalledTimes(1);
 		expect(renderMock.mock.calls[0][0]).toBe(child);
 		expect(makeSurfaceMock).not.toHaveBeenCalled();
-		expect(drawOnCanvasMock).toHaveBeenCalledWith(recordingCanvas);
+		expect(drawOnCanvasMock).toHaveBeenCalledWith(recordingCanvas, {
+			retainResources: true,
+		});
 		expect(unmountMock).toHaveBeenCalledTimes(1);
 		expect(finishRecordingAsPictureMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("包含 BackdropFilter 的树会先重放到隔离 surface", () => {
 		const child = React.createElement("child", { id: "content" });
+		const cleanup = vi.fn();
 		const surfaceCanvas = {
 			clear: vi.fn(),
 		};
@@ -111,23 +114,34 @@ describe("renderNodeToPicture", () => {
 		const surface = {
 			getCanvas: vi.fn(() => surfaceCanvas),
 			flush: vi.fn(),
+			asImageCopy: vi.fn(() => image),
 			asImage: vi.fn(() => image),
 			makeImageSnapshot: vi.fn(() => image),
 			dispose: vi.fn(),
 		};
 		makeSurfaceMock.mockReturnValueOnce(surface);
+		drawOnCanvasMock.mockReturnValueOnce([cleanup]);
 		renderMock.mockImplementation(() => {
 			sceneGraph.children = [{ type: "skBackdropFilter", children: [] }];
 		});
 
-		renderNodeToPicture(child, { width: 320, height: 180 });
+		const picture = renderNodeToPicture(child, { width: 320, height: 180 });
 
 		expect(makeSurfaceMock).toHaveBeenCalledWith(320, 180);
 		expect(makeColorMock).toHaveBeenCalledWith("transparent");
 		expect(surfaceCanvas.clear).toHaveBeenCalledWith("transparent");
-		expect(drawOnCanvasMock).toHaveBeenCalledWith(surfaceCanvas);
-		expect(surface.asImage).toHaveBeenCalledTimes(1);
+		expect(drawOnCanvasMock).toHaveBeenCalledWith(surfaceCanvas, {
+			retainResources: true,
+		});
+		expect(surface.asImageCopy).toHaveBeenCalledTimes(1);
+		expect(surface.asImage).not.toHaveBeenCalled();
 		expect(recordingCanvas.drawImage).toHaveBeenCalledWith(image, 0, 0);
+		expect(image.dispose).not.toHaveBeenCalled();
+		expect(surface.dispose).toHaveBeenCalledTimes(1);
+
+		picture?.dispose?.();
+
+		expect(cleanup).toHaveBeenCalledTimes(1);
 		expect(image.dispose).toHaveBeenCalledTimes(1);
 		expect(surface.dispose).toHaveBeenCalledTimes(1);
 	});
@@ -146,7 +160,9 @@ describe("renderNodeToPicture", () => {
 		renderNodeToPicture(child, { width: 320, height: 180 });
 
 		expect(makeSurfaceMock).not.toHaveBeenCalled();
-		expect(drawOnCanvasMock).toHaveBeenCalledWith(recordingCanvas);
+		expect(drawOnCanvasMock).toHaveBeenCalledWith(recordingCanvas, {
+			retainResources: true,
+		});
 	});
 
 	it("WebGL 下包含 BackdropFilter 的树会回退到原始 picture 录制路径", () => {
@@ -164,7 +180,9 @@ describe("renderNodeToPicture", () => {
 		renderNodeToPicture(child, { width: 320, height: 180 });
 
 		expect(makeSurfaceMock).not.toHaveBeenCalled();
-		expect(drawOnCanvasMock).toHaveBeenCalledWith(recordingCanvas);
+		expect(drawOnCanvasMock).toHaveBeenCalledWith(recordingCanvas, {
+			retainResources: true,
+		});
 	});
 
 	it("WebGPU 下会直接把节点重放到 offscreen surface 并输出 image", () => {

@@ -2,9 +2,9 @@ import { type ReactNode } from "react";
 import {
 	getSkiaRenderBackend,
 	NodeType,
+	type SkImage,
 	Skia,
 	SkiaSGRoot,
-	type SkImage,
 	type SkPicture,
 } from "react-skia-lite";
 
@@ -67,6 +67,10 @@ export const renderNodeToPicture = (
 		height: size.height,
 	});
 	const root = new SkiaSGRoot(Skia);
+	let retainedResources: Array<() => void> = [];
+	let isolatedSurface: DisposableLike | null = null;
+	let isolatedSurfaceRetained = false;
+	let isolatedSnapshotImage: DisposableLike | null = null;
 	root.render(node);
 	try {
 		const renderBackend = getSkiaRenderBackend();
@@ -79,31 +83,61 @@ export const renderNodeToPicture = (
 			renderBackend.kind !== "webgpu" ||
 			hasRenderTarget
 		) {
-			root.drawOnCanvas(canvas);
+			retainedResources = root.drawOnCanvas(canvas, {
+				retainResources: true,
+			});
 		} else {
 			// BackdropFilter 会读取当前画布内容；先在独立 raster surface 上重放一遍，
 			// 再把结果录回 picture，避免外层 overlay 污染 scene。
 			const surface = Skia.Surface.Make(size.width, size.height);
 			if (!surface) {
-				root.drawOnCanvas(canvas);
+				retainedResources = root.drawOnCanvas(canvas, {
+					retainResources: true,
+				});
 			} else {
+				isolatedSurface = surface;
 				try {
 					const surfaceCanvas = surface.getCanvas();
 					surfaceCanvas.clear(Skia.Color("transparent"));
-					root.drawOnCanvas(surfaceCanvas);
+					retainedResources = root.drawOnCanvas(surfaceCanvas, {
+						retainResources: true,
+					});
 					surface.flush();
-					const image = surface.asImage?.() ?? surface.makeImageSnapshot();
-					try {
-						canvas.drawImage(image, 0, 0);
-					} finally {
-						image.dispose?.();
+					const copiedImage = surface.asImageCopy?.() ?? null;
+					const image = copiedImage ?? surface.makeImageSnapshot();
+					isolatedSnapshotImage = image;
+					isolatedSurfaceRetained = copiedImage === null;
+					canvas.drawImage(image, 0, 0);
+					if (!isolatedSurfaceRetained) {
+						isolatedSurface?.dispose?.();
+						isolatedSurface = null;
 					}
-				} finally {
-					surface.dispose?.();
+				} catch (error) {
+					for (const cleanup of retainedResources) {
+						cleanup();
+					}
+					retainedResources = [];
+					isolatedSnapshotImage?.dispose?.();
+					isolatedSnapshotImage = null;
+					isolatedSurface?.dispose?.();
+					isolatedSurface = null;
+					throw error;
 				}
 			}
 		}
-		return recorder.finishRecordingAsPicture();
+		const picture = recorder.finishRecordingAsPicture();
+		return attachCleanupToDisposable(picture, () => {
+			for (const cleanup of retainedResources) {
+				cleanup();
+			}
+			retainedResources = [];
+			isolatedSnapshotImage?.dispose?.();
+			isolatedSnapshotImage = null;
+			if (isolatedSurfaceRetained) {
+				isolatedSurface?.dispose?.();
+				isolatedSurface = null;
+			}
+		});
 	} finally {
 		root.unmount();
 		(canvas as { dispose?: () => void }).dispose?.();
