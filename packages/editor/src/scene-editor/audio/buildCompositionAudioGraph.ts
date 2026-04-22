@@ -1,8 +1,8 @@
-import type { ExportElementAudioSource } from "core/editor/exportVideo";
 import {
 	CLIP_GAIN_DB_DEFAULT,
 	resolveClipGainDb,
 } from "core/editor/audio/clipGain";
+import type { ExportElementAudioSource } from "core/editor/exportVideo";
 import { isTimelineTrackAudible } from "core/editor/utils/trackAudibility";
 import type { TimelineElement, TimelineMeta } from "core/element/types";
 import type { AudioBufferSink } from "mediabunny";
@@ -15,6 +15,7 @@ import type {
 import type { TimelineTrack } from "@/scene-editor/timeline/types";
 import { isCompositionSourceAudioMuted } from "@/scene-editor/utils/compositionAudioSeparation";
 import { isVideoSourceAudioMuted } from "@/scene-editor/utils/videoClipAudioSeparation";
+import { resolveSceneReferenceSceneIdFromElement } from "@/studio/scene/sceneComposition";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import type { AudioMixTarget } from "./TimelineAudioMixRunner";
 import type { AudioMixInstruction } from "./transitionAudioMix";
@@ -128,22 +129,6 @@ const toFrame = (value: unknown): number => {
 const toOptionalOffsetFrame = (value: unknown): number | undefined => {
 	if (value === undefined || value === null) return undefined;
 	return Math.max(0, Math.round(resolveFiniteNumber(value, 0)));
-};
-
-const resolveSceneReferenceSceneId = (
-	element: TimelineElement,
-): string | null => {
-	if (
-		element.type !== "Composition" &&
-		element.type !== "CompositionAudioClip"
-	) {
-		return null;
-	}
-	const rawSceneId = (element.props as { sceneId?: unknown } | undefined)
-		?.sceneId;
-	if (typeof rawSceneId !== "string") return null;
-	const sceneId = rawSceneId.trim();
-	return sceneId.length > 0 ? sceneId : null;
 };
 
 const shouldIncludeAudioLeaf = (element: TimelineElement): boolean => {
@@ -424,7 +409,7 @@ const buildFlattenedAudioGraph = (params: {
 			element.type === "Composition" ||
 			element.type === "CompositionAudioClip"
 		) {
-			const childSceneId = resolveSceneReferenceSceneId(element);
+			const childSceneId = resolveSceneReferenceSceneIdFromElement(element);
 			if (!childSceneId) {
 				console.warn(
 					`[TimelineAudioMix] Scene reference "${element.id}" missing props.sceneId`,

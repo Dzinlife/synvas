@@ -69,6 +69,7 @@ interface DrawerViewData {
 	onDropTimelineElementsToCanvas?: (
 		request: StudioTimelineCanvasDropRequest,
 	) => boolean;
+	onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
 }
 
 interface OverlayCameraSharedValue {
@@ -118,6 +119,7 @@ interface CanvasWorkspaceOverlayProps {
 	onDropTimelineElementsToCanvas?: (
 		request: StudioTimelineCanvasDropRequest,
 	) => boolean;
+	onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
 	contextMenuOpen: boolean;
 	contextMenuX: number;
 	contextMenuY: number;
@@ -344,6 +346,7 @@ const CanvasWorkspaceOverlay = ({
 	onDrawerHeightChange,
 	onCloseDrawer,
 	onDropTimelineElementsToCanvas,
+	onRestoreSceneReferenceToCanvas,
 	contextMenuOpen,
 	contextMenuX,
 	contextMenuY,
@@ -737,6 +740,10 @@ const CanvasWorkspaceOverlay = ({
 								onDropTimelineElementsToCanvas={
 									resolvedDrawer.onDropTimelineElementsToCanvas ??
 									onDropTimelineElementsToCanvas
+								}
+								onRestoreSceneReferenceToCanvas={
+									resolvedDrawer.onRestoreSceneReferenceToCanvas ??
+									onRestoreSceneReferenceToCanvas
 								}
 							/>
 						</CanvasNodeDrawerShell>

@@ -46,7 +46,6 @@ const TimelineRuler: React.FC<TimelineRulerProps> = ({
 		ctx.font = "11px Barlow";
 		ctx.textAlign = "left";
 		ctx.textBaseline = "middle";
-
 		// 根据 ratio 计算主刻度间隔（帧）
 		const { interval, useFrames } = calculateInterval(ratio, fps);
 

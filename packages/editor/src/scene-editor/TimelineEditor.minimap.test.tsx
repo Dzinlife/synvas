@@ -13,8 +13,15 @@ import {
 	createEditorRuntimeWrapper,
 	createTestEditorRuntime,
 } from "./runtime/testUtils";
+import { useProjectStore } from "@/projects/projectStore";
 import TimelineEditor from "./TimelineEditor";
 import { getPixelsPerFrame } from "./utils/timelineScale";
+
+const latestContextMenuActionsRef: {
+	current: Array<{ key: string; label: string }> | null;
+} = {
+	current: null,
+};
 
 vi.mock("@use-gesture/react", () => ({
 	useDrag: () => () => ({}),
@@ -29,7 +36,22 @@ vi.mock("@/scene-editor/components/TimeIndicatorCanvas", () => ({
 }));
 
 vi.mock("./components/TimelineContextMenu", () => ({
-	default: () => null,
+	default: ({
+		open,
+		actions,
+	}: {
+		open: boolean;
+		actions: Array<{ key: string; label: string }>;
+	}) => {
+		latestContextMenuActionsRef.current = open ? actions : null;
+		return open ? (
+			<div data-testid="timeline-context-menu">
+				{actions.map((action) => (
+					<div key={action.key}>{action.label}</div>
+				))}
+			</div>
+		) : null;
+	},
 }));
 
 vi.mock("./components/TimelineDragOverlay", () => ({
@@ -37,7 +59,24 @@ vi.mock("./components/TimelineDragOverlay", () => ({
 }));
 
 vi.mock("./components/TimelineElement", () => ({
-	default: () => null,
+	default: ({
+		element,
+		onRequestContextMenu,
+	}: {
+		element: TimelineElement;
+		onRequestContextMenu?: (
+			event: React.MouseEvent<HTMLDivElement>,
+			elementId: string,
+		) => void;
+	}) => (
+		<div
+			data-testid={`timeline-element-${element.id}`}
+			data-timeline-element="true"
+			onContextMenu={(event) => onRequestContextMenu?.(event, element.id)}
+		>
+			{element.name}
+		</div>
+	),
 }));
 
 vi.mock("./components/TimelineRuler", () => ({
@@ -99,15 +138,24 @@ const createElement = ({
 	start,
 	end,
 	trackIndex,
+	type = "VideoClip",
+	sceneId,
 }: {
 	id: string;
 	start: number;
 	end: number;
 	trackIndex: number;
+	type?: "VideoClip" | "Composition" | "CompositionAudioClip";
+	sceneId?: string;
 }): TimelineElement => ({
 	id,
-	type: "VideoClip",
-	component: "video-clip",
+	type,
+	component:
+		type === "Composition"
+			? "composition"
+			: type === "CompositionAudioClip"
+				? "composition-audio"
+				: "video-clip",
 	name: id,
 	timeline: {
 		start,
@@ -117,8 +165,110 @@ const createElement = ({
 		trackIndex,
 	},
 	props: {
-		uri: `${id}.mp4`,
+		...(sceneId ? { sceneId } : { uri: `${id}.mp4` }),
 	},
+});
+
+const createProject = () => ({
+	id: "project-1",
+	revision: 0,
+	assets: [],
+	canvas: {
+		nodes: [
+			{
+				id: "node-scene-live",
+				type: "scene" as const,
+				sceneId: "scene-live",
+				name: "Scene Live",
+				x: 0,
+				y: 0,
+				width: 960,
+				height: 540,
+				siblingOrder: 0,
+				locked: false,
+				hidden: false,
+				createdAt: 1,
+				updatedAt: 1,
+			},
+		],
+	},
+	scenes: {
+		"scene-live": {
+			id: "scene-live",
+			name: "Scene Live",
+			timeline: {
+				fps: 30,
+				canvas: { width: 1920, height: 1080 },
+				settings: {
+					snapEnabled: true,
+					autoAttach: true,
+					rippleEditingEnabled: false,
+					previewAxisEnabled: true,
+					audio: {
+						exportSampleRate: 48000,
+						exportBlockSize: 512,
+						masterGainDb: 0,
+						compressor: {
+							enabled: true,
+							thresholdDb: -12,
+							ratio: 4,
+							kneeDb: 6,
+							attackMs: 10,
+							releaseMs: 80,
+							makeupGainDb: 0,
+						},
+					},
+				},
+				tracks: [],
+				elements: [],
+			},
+			posterFrame: 0,
+			createdAt: 1,
+			updatedAt: 1,
+		},
+		"scene-deleted": {
+			id: "scene-deleted",
+			name: "Scene Deleted",
+			timeline: {
+				fps: 30,
+				canvas: { width: 1920, height: 1080 },
+				settings: {
+					snapEnabled: true,
+					autoAttach: true,
+					rippleEditingEnabled: false,
+					previewAxisEnabled: true,
+					audio: {
+						exportSampleRate: 48000,
+						exportBlockSize: 512,
+						masterGainDb: 0,
+						compressor: {
+							enabled: true,
+							thresholdDb: -12,
+							ratio: 4,
+							kneeDb: 6,
+							attackMs: 10,
+							releaseMs: 80,
+							makeupGainDb: 0,
+						},
+					},
+				},
+				tracks: [],
+				elements: [],
+			},
+			posterFrame: 0,
+			createdAt: 1,
+			updatedAt: 1,
+		},
+	},
+	ui: {
+		activeSceneId: "scene-live",
+		focusedNodeId: null,
+		activeNodeId: "node-scene-live",
+		canvasSnapEnabled: true,
+		camera: { x: 0, y: 0, zoom: 1 },
+	},
+	createdAt: 1,
+	updatedAt: 1,
 });
 
 const TIMELINE_PADDING_LEFT = 48;
@@ -150,6 +300,16 @@ describe("TimelineEditor minimap sync", () => {
 			},
 			true,
 		);
+		latestContextMenuActionsRef.current = null;
+		useProjectStore.setState({
+			status: "ready",
+			projects: [],
+			currentProjectId: "project-1",
+			currentProject: createProject(),
+			focusedSceneDrafts: {},
+			sceneTimelineMutationOpIds: {},
+			error: null,
+		});
 	});
 
 	afterEach(() => {
@@ -158,6 +318,66 @@ describe("TimelineEditor minimap sync", () => {
 		vi.unstubAllGlobals();
 		resizeObserverCallback = null;
 		timelineStore.setState(initialState, true);
+	});
+
+	it("主 scene 未删除时菜单显示跳转到主 Scene", async () => {
+		timelineStore.setState({
+			...initialState,
+			elements: [
+				createElement({
+					id: "composition-live",
+					start: 0,
+					end: 60,
+					trackIndex: 0,
+					type: "Composition",
+					sceneId: "scene-live",
+				}),
+			],
+			selectedIds: ["composition-live"],
+			primarySelectedId: "composition-live",
+		});
+		render(<TimelineEditor onRestoreSceneReferenceToCanvas={vi.fn()} />, {
+			wrapper,
+		});
+
+		fireEvent.contextMenu(
+			screen.getByTestId("timeline-element-composition-live"),
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText("跳转到主 Scene")).toBeTruthy();
+		});
+		expect(screen.queryByText("还原主 Scene")).toBeNull();
+	});
+
+	it("主 scene 已删除时菜单显示还原主 Scene", async () => {
+		timelineStore.setState({
+			...initialState,
+			elements: [
+				createElement({
+					id: "composition-audio-deleted",
+					start: 0,
+					end: 60,
+					trackIndex: -1,
+					type: "CompositionAudioClip",
+					sceneId: "scene-deleted",
+				}),
+			],
+			selectedIds: ["composition-audio-deleted"],
+			primarySelectedId: "composition-audio-deleted",
+		});
+		render(<TimelineEditor onRestoreSceneReferenceToCanvas={vi.fn()} />, {
+			wrapper,
+		});
+
+		fireEvent.contextMenu(
+			screen.getByTestId("timeline-element-composition-audio-deleted"),
+		);
+
+		await waitFor(() => {
+			expect(screen.getByText("还原主 Scene")).toBeTruthy();
+		});
+		expect(screen.queryByText("跳转到主 Scene")).toBeNull();
 	});
 
 	it("挂载和卸载时会同步 TimelineEditor mounted 状态", () => {
@@ -247,9 +467,7 @@ describe("TimelineEditor minimap sync", () => {
 		render(<TimelineEditor />, { wrapper });
 
 		await waitFor(() => {
-			expect(timelineStore.getState().timelineMaxScrollLeft).toBeCloseTo(
-				4448,
-			);
+			expect(timelineStore.getState().timelineMaxScrollLeft).toBeCloseTo(4448);
 		});
 		expect(timelineStore.getState().scrollLeft).toBeCloseTo(4448);
 	});

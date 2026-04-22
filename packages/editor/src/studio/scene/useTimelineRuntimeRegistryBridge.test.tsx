@@ -78,6 +78,27 @@ const createTimeline = (
 	}),
 });
 
+const createSceneReferenceElement = (
+	id: string,
+	sceneId: string,
+	type: "Composition" | "CompositionAudioClip" = "Composition",
+) => ({
+	id,
+	type,
+	component: type === "Composition" ? "composition" : "composition-audio",
+	name: id,
+	props: { sceneId },
+	timeline: {
+		start: 0,
+		end: 30,
+		startTimecode: "00:00:00:00",
+		endTimecode: "00:00:01:00",
+		trackIndex: type === "CompositionAudioClip" ? -1 : 0,
+		role:
+			type === "CompositionAudioClip" ? ("audio" as const) : ("clip" as const),
+	},
+});
+
 const createProject = (): StudioProject => ({
 	id: "project-1",
 	revision: 0,
@@ -356,6 +377,62 @@ describe("useTimelineRuntimeRegistryBridge", () => {
 		await waitFor(() => {
 			expect(studioRuntime.listTimelineRuntimes()).toHaveLength(2);
 		});
+	});
+
+	it("被引用 scene 仅删除 node 时会保留 runtime", async () => {
+		const project = createProject();
+		const scene2 = project.scenes["scene-2"];
+		if (!scene2) {
+			throw new Error("scene-2 不存在");
+		}
+		project.scenes["scene-2"] = {
+			...scene2,
+			timeline: {
+				...scene2.timeline,
+				elements: [
+					createSceneReferenceElement("composition-scene-2", "scene-1"),
+					createSceneReferenceElement(
+						"composition-audio-scene-2",
+						"scene-1",
+						"CompositionAudioClip",
+					),
+				],
+			},
+		};
+		useProjectStore.setState({
+			status: "ready",
+			projects: [],
+			currentProjectId: "project-1",
+			currentProject: project,
+			focusedSceneDrafts: {},
+			sceneTimelineMutationOpIds: {},
+			error: null,
+		});
+
+		render(<BridgeMount />, { wrapper });
+
+		await waitFor(() => {
+			expect(studioRuntime.listTimelineRuntimes()).toHaveLength(2);
+		});
+
+		act(() => {
+			useProjectStore.getState().removeSceneNodeForHistory("scene-1", "node-1");
+		});
+
+		await waitFor(() => {
+			expect(studioRuntime.listTimelineRuntimes()).toHaveLength(2);
+		});
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-1"),
+		).toBe(false);
+		expect(
+			useProjectStore.getState().currentProject?.scenes["scene-1"],
+		).toBeTruthy();
+		expect(
+			studioRuntime.getTimelineRuntime(toSceneTimelineRef("scene-1")),
+		).toBeTruthy();
 	});
 
 	it("应用全局历史时不会重复采集历史", async () => {

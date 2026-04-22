@@ -1,4 +1,5 @@
 import type { TimelineElement } from "core/element/types";
+import { resolveSceneReferenceSceneIdFromElement } from "@/studio/scene/sceneComposition";
 
 type ClipKind = "AudioClip" | "VideoClip" | "CompositionAudioClip";
 
@@ -42,11 +43,8 @@ const hasMutedVideoSourceAudio = (element: TimelineElement): boolean => {
 
 const resolveAudioSourceKey = (element: TimelineElement): string | null => {
 	if (element.type === "CompositionAudioClip") {
-		const sceneId = (element.props as { sceneId?: unknown } | undefined)?.sceneId;
-		if (typeof sceneId !== "string" || sceneId.trim().length === 0) {
-			return null;
-		}
-		return `composition:${sceneId.trim()}`;
+		const sceneId = resolveSceneReferenceSceneIdFromElement(element);
+		return sceneId ? `composition:${sceneId}` : null;
 	}
 	if (!element.assetId) return null;
 	return `asset:${element.assetId}`;

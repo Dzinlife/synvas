@@ -53,6 +53,7 @@ export interface CanvasNodeDrawerProps<TNode extends CanvasNode = CanvasNode> {
 	onDropTimelineElementsToCanvas?: (
 		request: StudioTimelineCanvasDropRequest,
 	) => boolean;
+	onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
 }
 
 export interface CanvasNodeContextMenuAction {

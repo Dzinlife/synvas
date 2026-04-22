@@ -19,6 +19,7 @@ interface SceneTimelineDrawerContentProps {
 	onDropTimelineElementsToCanvas?: (
 		request: StudioTimelineCanvasDropRequest,
 	) => boolean;
+	onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
 }
 
 interface SceneTimelineDrawerProps extends SceneTimelineDrawerContentProps {
@@ -31,13 +32,18 @@ interface SceneTimelineDrawerProps extends SceneTimelineDrawerContentProps {
 
 export const SceneTimelineDrawerContent: React.FC<
 	SceneTimelineDrawerContentProps
-> = ({ onExitFocus, onDropTimelineElementsToCanvas }) => {
+> = ({
+	onExitFocus,
+	onDropTimelineElementsToCanvas,
+	onRestoreSceneReferenceToCanvas,
+}) => {
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<ScenePlaybackControlBar onExitFocus={onExitFocus} />
 			<div className="min-h-0 flex-1">
 				<TimelineEditor
 					onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
+					onRestoreSceneReferenceToCanvas={onRestoreSceneReferenceToCanvas}
 				/>
 			</div>
 		</div>
@@ -47,6 +53,7 @@ export const SceneTimelineDrawerContent: React.FC<
 const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
 	onExitFocus,
 	onDropTimelineElementsToCanvas,
+	onRestoreSceneReferenceToCanvas,
 	onHeightChange,
 	resizable = true,
 	defaultHeight = SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT,
@@ -66,6 +73,7 @@ const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
 			<SceneTimelineDrawerContent
 				onExitFocus={onExitFocus}
 				onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
+				onRestoreSceneReferenceToCanvas={onRestoreSceneReferenceToCanvas}
 			/>
 		</CanvasNodeDrawerShell>
 	);

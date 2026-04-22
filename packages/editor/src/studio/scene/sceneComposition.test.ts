@@ -2,13 +2,18 @@ import type { TimelineElement } from "core/element/types";
 import type { StudioProject } from "core/studio/types";
 import { describe, expect, it } from "vitest";
 import {
-	resolveCompositionSceneIdFromElement,
+	resolveDeletedSceneIdsToRetain,
+	resolveSceneReferenceSceneIdFromElement,
 	wouldCreateSceneCompositionCycle,
 } from "./sceneComposition";
 
-const createElement = (id: string, sceneId: string): TimelineElement => ({
+const createElement = (
+	id: string,
+	sceneId: string,
+	type: "Composition" | "CompositionAudioClip" = "Composition",
+): TimelineElement => ({
 	id,
-	type: "Composition",
+	type,
 	component: "composition",
 	name: id,
 	props: { sceneId },
@@ -86,24 +91,52 @@ const createProject = (
 };
 
 describe("sceneComposition", () => {
-	it("resolveCompositionSceneIdFromElement 仅解析 Composition.sceneId", () => {
+	it("resolveSceneReferenceSceneIdFromElement 解析 Composition 与 CompositionAudioClip 的 sceneId", () => {
 		expect(
-			resolveCompositionSceneIdFromElement(
+			resolveSceneReferenceSceneIdFromElement(
 				createElement("composition-1", "scene-1"),
 			),
 		).toBe("scene-1");
 		expect(
-			resolveCompositionSceneIdFromElement({
+			resolveSceneReferenceSceneIdFromElement(
+				createElement("composition-audio-1", "scene-2", "CompositionAudioClip"),
+			),
+		).toBe("scene-2");
+		expect(
+			resolveSceneReferenceSceneIdFromElement({
 				...createElement("composition-2", "scene-2"),
 				props: {},
 			}),
 		).toBeNull();
 		expect(
-			resolveCompositionSceneIdFromElement({
+			resolveSceneReferenceSceneIdFromElement({
 				...createElement("composition-3", "scene-3"),
 				type: "Image",
 			}),
 		).toBeNull();
+	});
+
+	it("resolveDeletedSceneIdsToRetain 会保留被未删除 scene 间接引用的 scene", () => {
+		const project = createProject({
+			a: ["b"],
+			b: ["c"],
+			c: [],
+			d: [],
+		});
+		project.scenes.a.timeline.elements.push(
+			createElement("composition-audio-a-1", "d", "CompositionAudioClip"),
+		);
+		expect(
+			Array.from(
+				resolveDeletedSceneIdsToRetain(project, ["b", "c", "d"]),
+			).sort(),
+		).toEqual(["b", "c", "d"]);
+		expect(
+			Array.from(resolveDeletedSceneIdsToRetain(project, ["b", "c"])).sort(),
+		).toEqual(["b", "c"]);
+		expect(
+			Array.from(resolveDeletedSceneIdsToRetain(project, ["a", "b", "c"])),
+		).toEqual([]);
 	});
 
 	it("wouldCreateSceneCompositionCycle 能检测自引用与间接环", () => {

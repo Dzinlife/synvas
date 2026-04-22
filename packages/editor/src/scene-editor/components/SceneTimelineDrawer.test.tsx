@@ -3,13 +3,22 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SceneTimelineDrawer from "./SceneTimelineDrawer";
 
+const timelineEditorPropsSpy = vi.fn();
+
 vi.mock("@/scene-editor/TimelineEditor", () => ({
-	default: () => <div data-testid="timeline-editor" />,
+	default: (props: unknown) => {
+		timelineEditorPropsSpy(props);
+		return <div data-testid="timeline-editor" />;
+	},
 }));
 
 vi.mock("./ScenePlaybackControlBar", () => ({
 	default: ({ onExitFocus }: { onExitFocus: () => void }) => (
-		<button type="button" onClick={onExitFocus} data-testid="scene-playback-bar">
+		<button
+			type="button"
+			onClick={onExitFocus}
+			data-testid="scene-playback-bar"
+		>
 			exit
 		</button>
 	),
@@ -17,6 +26,7 @@ vi.mock("./ScenePlaybackControlBar", () => ({
 
 afterEach(() => {
 	cleanup();
+	timelineEditorPropsSpy.mockReset();
 });
 
 describe("SceneTimelineDrawer", () => {
@@ -30,12 +40,27 @@ describe("SceneTimelineDrawer", () => {
 	it("退出回调可触发", () => {
 		const onExitFocus = vi.fn();
 		render(<SceneTimelineDrawer onExitFocus={onExitFocus} />);
-		fireEvent.click(screen.getAllByTestId("scene-playback-bar")[0]!);
+		fireEvent.click(screen.getByTestId("scene-playback-bar"));
 		expect(onExitFocus).toHaveBeenCalledTimes(1);
 	});
 
 	it("可通过配置关闭 resize", () => {
 		render(<SceneTimelineDrawer onExitFocus={vi.fn()} resizable={false} />);
 		expect(screen.queryByLabelText("调整时间线高度")).toBeNull();
+	});
+
+	it("会把 restore scene 引用回调透传给 TimelineEditor", () => {
+		const onRestoreSceneReferenceToCanvas = vi.fn();
+		render(
+			<SceneTimelineDrawer
+				onExitFocus={vi.fn()}
+				onRestoreSceneReferenceToCanvas={onRestoreSceneReferenceToCanvas}
+			/>,
+		);
+		expect(timelineEditorPropsSpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				onRestoreSceneReferenceToCanvas,
+			}),
+		);
 	});
 });

@@ -10,6 +10,7 @@ import type {
 	CanvasNode,
 	SceneDocument,
 	SceneNode,
+	StudioOtTombstoneScene,
 	StudioProject,
 } from "core/studio/types";
 import { create } from "zustand";
@@ -17,6 +18,12 @@ import {
 	getCanvasCamera,
 	setCanvasCameraFromProject,
 } from "@/studio/canvas/cameraStore";
+import {
+	allocateInsertSiblingOrder,
+	resolveLayerSiblingCount,
+} from "@/studio/canvas/layerOrderCoordinator";
+import { resolveDeletedSceneIdsToRetain } from "@/studio/scene/sceneComposition";
+import { isSameAssetLocator, normalizeAssetLocator } from "./assetLocator";
 import {
 	buildAutoProjectName,
 	buildEmptyProject,
@@ -27,11 +34,6 @@ import {
 	putProject,
 	setCurrentProjectId,
 } from "./projectDb";
-import { isSameAssetLocator, normalizeAssetLocator } from "./assetLocator";
-import {
-	allocateInsertSiblingOrder,
-	resolveLayerSiblingCount,
-} from "@/studio/canvas/layerOrderCoordinator";
 
 const DEFAULT_SCENE_NODE_WIDTH = 960;
 const DEFAULT_SCENE_NODE_HEIGHT = 540;
@@ -107,6 +109,15 @@ export interface EnsureProjectAssetInput {
 	meta?: TimelineAsset["meta"];
 }
 
+export interface CanvasGraphBatchEntry {
+	node: CanvasNode;
+	scene?: SceneDocument;
+}
+
+interface RestoreDetachedSceneNodeOptions {
+	layoutOverride?: CanvasNodeLayoutPatch;
+}
+
 interface ProjectStoreState {
 	status: ProjectStatus;
 	projects: ProjectSummary[];
@@ -154,10 +165,16 @@ interface ProjectStoreState {
 	flushFocusedSceneDraft: () => void;
 	removeCanvasNodeForHistory: (nodeId: string) => void;
 	restoreCanvasNodeForHistory: (node: CanvasNode) => void;
-	appendCanvasGraphBatch: (
-		entries: Array<{ node: CanvasNode; scene?: SceneDocument }>,
+	appendCanvasGraphBatch: (entries: CanvasGraphBatchEntry[]) => void;
+	removeCanvasGraphBatch: (
+		entriesOrNodeIds: CanvasGraphBatchEntry[] | string[],
 	) => void;
-	removeCanvasGraphBatch: (nodeIds: string[]) => void;
+	getSceneTombstone: (sceneId: string) => StudioOtTombstoneScene | null;
+	removeSceneNodeForHistory: (sceneId: string, nodeId: string) => void;
+	restoreDetachedSceneNodeForHistory: (
+		node: SceneNode,
+		options?: RestoreDetachedSceneNodeOptions,
+	) => void;
 	removeSceneGraphForHistory: (sceneId: string, nodeId: string) => void;
 	restoreSceneGraphForHistory: (scene: SceneDocument, node: SceneNode) => void;
 }
@@ -380,6 +397,14 @@ const findSceneNodeBySceneId = (
 			node.type === "scene" && node.sceneId === sceneId,
 	);
 	return found ?? null;
+};
+
+const getSceneTombstoneFromProject = (
+	project: StudioProject,
+	sceneId: string | null | undefined,
+): StudioOtTombstoneScene | null => {
+	if (!sceneId) return null;
+	return project.ot?.tombstones.scenes[sceneId] ?? null;
 };
 
 const cloneTimelineJson = (timeline: TimelineJSON): TimelineJSON => {
@@ -1309,10 +1334,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			);
 			if (existed) return state;
 			const nextNodes = normalizeCanvasNodeSiblingOrder(
-				repairCanvasNodeParentRelations([
-					...currentProject.canvas.nodes,
-					node,
-				]),
+				repairCanvasNodeParentRelations([...currentProject.canvas.nodes, node]),
 			);
 			const nextProject = withProjectRevision({
 				...currentProject,
@@ -1340,22 +1362,34 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const nextScenes = { ...currentProject.scenes };
 			const nextNodes = [...currentProject.canvas.nodes];
 			let nextOt = ensureStudioProjectOt(currentProject);
-			let didAppend = false;
+			let didMutate = false;
+			let firstRestoredNodeId: string | null = null;
 
 			for (const entry of entries) {
-				if (nodeIdSet.has(entry.node.id)) continue;
-				if (entry.node.type === "scene" && entry.scene) {
-					nextScenes[entry.scene.id] = entry.scene;
-					nextOt = clearSceneTombstone(
-						{ ...currentProject, ot: nextOt },
-						entry.scene.id,
-					);
+				if (entry.node.type === "scene") {
+					if (entry.scene) {
+						if (nextScenes[entry.scene.id] !== entry.scene) {
+							nextScenes[entry.scene.id] = entry.scene;
+							didMutate = true;
+						}
+					} else if (!nextScenes[entry.node.sceneId]) {
+						continue;
+					}
+					if (nextOt.tombstones.scenes[entry.node.sceneId]) {
+						nextOt = clearSceneTombstone(
+							{ ...currentProject, ot: nextOt },
+							entry.node.sceneId,
+						);
+						didMutate = true;
+					}
 				}
+				if (nodeIdSet.has(entry.node.id)) continue;
 				nextNodes.push(entry.node);
 				nodeIdSet.add(entry.node.id);
-				didAppend = true;
+				firstRestoredNodeId ??= entry.node.id;
+				didMutate = true;
 			}
-			if (!didAppend) return state;
+			if (!didMutate) return state;
 
 			const nextProject = withProjectRevision({
 				...currentProject,
@@ -1366,30 +1400,71 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						repairCanvasNodeParentRelations(nextNodes),
 					),
 				},
+				ui: {
+					...currentProject.ui,
+					activeNodeId: currentProject.ui.activeNodeId ?? firstRestoredNodeId,
+				},
 			});
 			return {
 				currentProject: nextProject,
 			};
 		});
 	},
-	removeCanvasGraphBatch: (nodeIds) => {
+	removeCanvasGraphBatch: (entriesOrNodeIds) => {
 		set((state) => {
 			if (!state.currentProject) return state;
-			if (nodeIds.length === 0) return state;
+			if (entriesOrNodeIds.length === 0) return state;
 			const currentProject = state.currentProject;
-			const nodeIdSet = new Set(nodeIds);
+			const normalizedEntries =
+				typeof entriesOrNodeIds[0] === "string"
+					? (entriesOrNodeIds as string[]).reduce<CanvasGraphBatchEntry[]>(
+							(entries, nodeId) => {
+								const node =
+									currentProject.canvas.nodes.find(
+										(candidate) => candidate.id === nodeId,
+									) ?? null;
+								if (!node) return entries;
+								entries.push({
+									node,
+									scene:
+										node.type === "scene"
+											? (currentProject.scenes[node.sceneId] ?? undefined)
+											: undefined,
+								});
+								return entries;
+							},
+							[],
+						)
+					: (entriesOrNodeIds as CanvasGraphBatchEntry[]);
+			if (normalizedEntries.length === 0) return state;
+			const nodeIdSet = new Set(
+				normalizedEntries.map((entry) => entry.node.id),
+			);
 			const removedNodes = currentProject.canvas.nodes.filter((node) =>
 				nodeIdSet.has(node.id),
 			);
 			if (removedNodes.length === 0) return state;
 
-			const removedSceneIdSet = new Set(
-				removedNodes
-					.filter((node): node is SceneNode => node.type === "scene")
-					.map((node) => node.sceneId),
-			);
 			const removedSceneNodes = removedNodes.filter(
 				(node): node is SceneNode => node.type === "scene",
+			);
+			const removedSceneIdSet = new Set(
+				removedSceneNodes.map((node) => node.sceneId),
+			);
+			const retainedSceneIdSet =
+				typeof entriesOrNodeIds[0] === "string"
+					? resolveDeletedSceneIdsToRetain(currentProject, removedSceneIdSet)
+					: new Set(
+							normalizedEntries.flatMap((entry) =>
+								entry.node.type === "scene" && entry.scene === undefined
+									? [entry.node.sceneId]
+									: [],
+							),
+						);
+			const fullyDeletedSceneIdSet = new Set(
+				removedSceneNodes
+					.map((node) => node.sceneId)
+					.filter((sceneId) => !retainedSceneIdSet.has(sceneId)),
 			);
 			let nextOt = ensureStudioProjectOt(currentProject);
 			const deletedAt = Date.now();
@@ -1403,7 +1478,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			}
 
 			const nextScenes = { ...currentProject.scenes };
-			for (const sceneId of removedSceneIdSet) {
+			for (const sceneId of fullyDeletedSceneIdSet) {
 				delete nextScenes[sceneId];
 			}
 			const filteredNodes = currentProject.canvas.nodes.filter(
@@ -1420,9 +1495,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const fallbackSceneId = Object.keys(nextScenes)[0] ?? null;
 			const activeSceneRemoved =
 				currentProject.ui.activeSceneId !== null &&
-				removedSceneIdSet.has(currentProject.ui.activeSceneId);
+				fullyDeletedSceneIdSet.has(currentProject.ui.activeSceneId);
 			const nextMutationOpIds = { ...state.sceneTimelineMutationOpIds };
-			for (const sceneId of removedSceneIdSet) {
+			for (const sceneId of fullyDeletedSceneIdSet) {
 				delete nextMutationOpIds[sceneId];
 			}
 
@@ -1458,6 +1533,104 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			};
 		});
 	},
+	getSceneTombstone: (sceneId) => {
+		const currentProject = get().currentProject;
+		if (!currentProject) return null;
+		return getSceneTombstoneFromProject(currentProject, sceneId);
+	},
+	removeSceneNodeForHistory: (sceneId, nodeId) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			const currentProject = state.currentProject;
+			if (!currentProject.scenes[sceneId]) return state;
+			const sceneNode =
+				currentProject.canvas.nodes.find(
+					(node): node is SceneNode =>
+						node.type === "scene" &&
+						node.id === nodeId &&
+						node.sceneId === sceneId,
+				) ?? findSceneNodeBySceneId(currentProject, sceneId);
+			if (!sceneNode) return state;
+
+			const filteredNodes = currentProject.canvas.nodes.filter(
+				(node) => node.id !== sceneNode.id,
+			);
+			const nextNodes = filteredNodes.map((node) => {
+				if ((node.parentId ?? null) !== sceneNode.id) return node;
+				return {
+					...node,
+					parentId: null,
+				};
+			});
+			const nextProject = withProjectRevision({
+				...currentProject,
+				ot: writeSceneTombstone(currentProject, sceneId, sceneNode, Date.now()),
+				canvas: {
+					nodes: normalizeCanvasNodeSiblingOrder(
+						repairCanvasNodeParentRelations(nextNodes),
+					),
+				},
+				ui: {
+					...currentProject.ui,
+					focusedNodeId:
+						currentProject.ui.focusedNodeId === sceneNode.id
+							? null
+							: currentProject.ui.focusedNodeId,
+					activeNodeId:
+						currentProject.ui.activeNodeId === sceneNode.id
+							? null
+							: currentProject.ui.activeNodeId,
+				},
+			});
+			return {
+				currentProject: nextProject,
+			};
+		});
+	},
+	restoreDetachedSceneNodeForHistory: (node, options) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			const currentProject = state.currentProject;
+			if (!currentProject.scenes[node.sceneId]) return state;
+			const existed = currentProject.canvas.nodes.some(
+				(item) => item.id === node.id,
+			);
+			const nextNode = options?.layoutOverride
+				? {
+						...node,
+						...options.layoutOverride,
+					}
+				: node;
+			const hasTombstone = Boolean(
+				getSceneTombstoneFromProject(currentProject, node.sceneId),
+			);
+			if (existed && !hasTombstone) return state;
+			const nextOt = hasTombstone
+				? clearSceneTombstone(currentProject, node.sceneId)
+				: ensureStudioProjectOt(currentProject);
+			const nextProject = withProjectRevision({
+				...currentProject,
+				ot: nextOt,
+				canvas: existed
+					? currentProject.canvas
+					: {
+							nodes: normalizeCanvasNodeSiblingOrder(
+								repairCanvasNodeParentRelations([
+									...currentProject.canvas.nodes,
+									nextNode,
+								]),
+							),
+						},
+				ui: {
+					...currentProject.ui,
+					activeNodeId: currentProject.ui.activeNodeId ?? nextNode.id,
+				},
+			});
+			return {
+				currentProject: nextProject,
+			};
+		});
+	},
 	removeSceneGraphForHistory: (sceneId, nodeId) => {
 		set((state) => {
 			if (!state.currentProject) return state;
@@ -1475,6 +1648,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						node.type === "scene" && node.sceneId === sceneId,
 				) ??
 				null;
+			const targetNodeId = sceneNode?.id ?? nodeId;
 			let nextOt = ensureStudioProjectOt(currentProject);
 			if (sceneNode) {
 				nextOt = writeSceneTombstone(
@@ -1487,10 +1661,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			const nextScenes = { ...currentProject.scenes };
 			delete nextScenes[sceneId];
 			const filteredNodes = currentProject.canvas.nodes.filter(
-				(node) => node.id !== nodeId,
+				(node) => node.id !== targetNodeId,
 			);
 			const nextNodes = filteredNodes.map((node) => {
-				if ((node.parentId ?? null) !== nodeId) return node;
+				if ((node.parentId ?? null) !== targetNodeId) return node;
 				return {
 					...node,
 					parentId: null,
@@ -1513,11 +1687,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 							? fallbackSceneId
 							: currentProject.ui.activeSceneId,
 					focusedNodeId:
-						currentProject.ui.focusedNodeId === nodeId
+						currentProject.ui.focusedNodeId === targetNodeId
 							? null
 							: currentProject.ui.focusedNodeId,
 					activeNodeId:
-						currentProject.ui.activeNodeId === nodeId
+						currentProject.ui.activeNodeId === targetNodeId
 							? null
 							: currentProject.ui.activeNodeId,
 				},
@@ -1534,8 +1708,17 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 		set((state) => {
 			if (!state.currentProject) return state;
 			const currentProject = state.currentProject;
-			if (currentProject.scenes[scene.id]) return state;
-			const nextOt = clearSceneTombstone(currentProject, scene.id);
+			const nodeExists = currentProject.canvas.nodes.some(
+				(item) => item.id === node.id,
+			);
+			const hasScene = Boolean(currentProject.scenes[scene.id]);
+			const hasTombstone = Boolean(
+				getSceneTombstoneFromProject(currentProject, scene.id),
+			);
+			if (hasScene && nodeExists && !hasTombstone) return state;
+			const nextOt = hasTombstone
+				? clearSceneTombstone(currentProject, scene.id)
+				: ensureStudioProjectOt(currentProject);
 			const nextProject = withProjectRevision({
 				...currentProject,
 				ot: nextOt,
@@ -1543,14 +1726,16 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					...currentProject.scenes,
 					[scene.id]: scene,
 				},
-				canvas: {
-					nodes: normalizeCanvasNodeSiblingOrder(
-						repairCanvasNodeParentRelations([
-							...currentProject.canvas.nodes,
-							node,
-						]),
-					),
-				},
+				canvas: nodeExists
+					? currentProject.canvas
+					: {
+							nodes: normalizeCanvasNodeSiblingOrder(
+								repairCanvasNodeParentRelations([
+									...currentProject.canvas.nodes,
+									node,
+								]),
+							),
+						},
 				ui: {
 					...currentProject.ui,
 					activeSceneId: currentProject.ui.activeSceneId ?? scene.id,

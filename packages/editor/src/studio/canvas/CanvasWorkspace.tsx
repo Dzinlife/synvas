@@ -16,8 +16,8 @@ import type { TrackedSkiaHostObjectSnapshot } from "react-skia-lite";
 import {
 	captureTrackedSkiaHostObjectsSnapshot,
 	diffTrackedSkiaHostObjectSnapshots,
-	flushSkiaWebGPUResourceCache,
 	flushSkiaDisposals,
+	flushSkiaWebGPUResourceCache,
 	getSkiaDisposalStats,
 	getSkiaResourceTrackerConfig,
 } from "react-skia-lite";
@@ -85,25 +85,16 @@ import {
 	type CanvasNodeLayoutSnapshot,
 	useStudioHistoryStore,
 } from "@/studio/history/studioHistoryStore";
-import { wouldCreateSceneCompositionCycle } from "@/studio/scene/sceneComposition";
+import {
+	resolveDeletedSceneIdsToRetain,
+	wouldCreateSceneCompositionCycle,
+} from "@/studio/scene/sceneComposition";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { secondsToFrames } from "@/utils/timecode";
+import type { CanvasNodeLabelHitTester } from "./CanvasNodeLabelLayer";
 import CanvasWorkspaceOverlay, {
 	type DrawerViewData,
 } from "./CanvasWorkspaceOverlay";
-import type { CanvasNodeLabelHitTester } from "./CanvasNodeLabelLayer";
-import {
-	CANVAS_DEFAULT_TOOL_MODE,
-	isCanvasToolModeEnabled,
-	type CanvasToolMode,
-} from "./canvasToolMode";
-import {
-	CANVAS_OVERLAY_GAP_PX,
-	CANVAS_OVERLAY_OUTER_PADDING_PX,
-	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
-	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
-	resolveCanvasOverlayLayout,
-} from "./canvasOverlayLayout";
 import {
 	collectCanvasDescendantNodeIds,
 	expandCanvasNodeIdsWithDescendants,
@@ -112,6 +103,13 @@ import {
 	resolveCanvasWorldRectFromPoints,
 	resolveInnermostContainingFrameId,
 } from "./canvasFrameUtils";
+import {
+	CANVAS_OVERLAY_GAP_PX,
+	CANVAS_OVERLAY_OUTER_PADDING_PX,
+	CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX,
+	CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
+	resolveCanvasOverlayLayout,
+} from "./canvasOverlayLayout";
 import {
 	resolveCanvasResizeAnchorAtRectWorldPoint,
 	resolveCanvasResizeAnchorAtWorldPoint,
@@ -133,14 +131,10 @@ import {
 	compareCanvasSpatialPaintOrder,
 } from "./canvasSpatialIndex";
 import {
-	allocateBatchInsertSiblingOrder,
-	allocateInsertSiblingOrder,
-	buildLayerTreeOrder,
-	LAYER_ORDER_REBALANCE_STEP,
-	resolveLayerSiblingCount,
-	sortBySiblingOrder,
-	sortByTreePaintOrder,
-} from "./layerOrderCoordinator";
+	CANVAS_DEFAULT_TOOL_MODE,
+	type CanvasToolMode,
+	isCanvasToolModeEnabled,
+} from "./canvasToolMode";
 import {
 	buildNodeFitCamera,
 	buildNodePanCamera,
@@ -173,6 +167,15 @@ import type {
 	CanvasSelectionResizeEvent,
 } from "./InfiniteSkiaCanvas";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
+import {
+	allocateBatchInsertSiblingOrder,
+	allocateInsertSiblingOrder,
+	buildLayerTreeOrder,
+	LAYER_ORDER_REBALANCE_STEP,
+	resolveLayerSiblingCount,
+	sortBySiblingOrder,
+	sortByTreePaintOrder,
+} from "./layerOrderCoordinator";
 import type { TileLodTransition } from "./tile";
 import {
 	TILE_MAX_TASKS_PER_TICK,
@@ -891,6 +894,13 @@ const CanvasWorkspace = () => {
 	const removeSceneGraphForHistory = useProjectStore(
 		(state) => state.removeSceneGraphForHistory,
 	);
+	const removeSceneNodeForHistory = useProjectStore(
+		(state) => state.removeSceneNodeForHistory,
+	);
+	const restoreDetachedSceneNodeForHistory = useProjectStore(
+		(state) => state.restoreDetachedSceneNodeForHistory,
+	);
+	const getSceneTombstone = useProjectStore((state) => state.getSceneTombstone);
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 	const runtime = useContext(EditorRuntimeContext);
 	const runtimeManager = useMemo<StudioRuntimeManager | null>(() => {
@@ -1345,7 +1355,8 @@ const CanvasWorkspace = () => {
 	const compareCanvasNodePaintOrder = useCallback(
 		(left: CanvasNode, right: CanvasNode): number => {
 			const leftIndex =
-				layerTreeOrder.paintOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+				layerTreeOrder.paintOrderByNodeId.get(left.id) ??
+				Number.MAX_SAFE_INTEGER;
 			const rightIndex =
 				layerTreeOrder.paintOrderByNodeId.get(right.id) ??
 				Number.MAX_SAFE_INTEGER;
@@ -2571,7 +2582,11 @@ const CanvasWorkspace = () => {
 			}
 			const labelHitTester = labelHitTesterRef.current;
 			if (!labelHitTester) return indexedTopHit;
-			const labelHitNodeIds = labelHitTester.hitTest(localX, localY, liveCamera);
+			const labelHitNodeIds = labelHitTester.hitTest(
+				localX,
+				localY,
+				liveCamera,
+			);
 			if (labelHitNodeIds.length <= 0) return indexedTopHit;
 			const labelHitNodes = labelHitNodeIds
 				.map((nodeId) => nodeById.get(nodeId) ?? null)
@@ -2654,29 +2669,29 @@ const CanvasWorkspace = () => {
 			const indexedItems = [...spatialIndex.queryRect(queryRect)].sort(
 				compareCanvasSpatialPaintOrder,
 			);
-				for (const item of indexedItems) {
-					const node = nodeById.get(item.nodeId);
-					if (!node || node.hidden || seen.has(node.id)) continue;
-					if (node.type === "frame") continue;
-					if (!isNodeIntersectRect(node, queryRect)) continue;
-					seen.add(node.id);
-					indexedNodeIds.push(node.id);
-				}
-				if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
-					const legacyNodeIds = sortedNodes
-						.filter((node) => node.type !== "frame")
-						.filter((node) =>
-							isNodeIntersectRect(node, {
-								left,
-								right,
-								top,
-								bottom,
-							}),
-						)
-						.map((node) => node.id);
-					warnCanvasSpatialIndexMismatch(
-						"marquee",
-						legacyNodeIds,
+			for (const item of indexedItems) {
+				const node = nodeById.get(item.nodeId);
+				if (!node || node.hidden || seen.has(node.id)) continue;
+				if (node.type === "frame") continue;
+				if (!isNodeIntersectRect(node, queryRect)) continue;
+				seen.add(node.id);
+				indexedNodeIds.push(node.id);
+			}
+			if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
+				const legacyNodeIds = sortedNodes
+					.filter((node) => node.type !== "frame")
+					.filter((node) =>
+						isNodeIntersectRect(node, {
+							left,
+							right,
+							top,
+							bottom,
+						}),
+					)
+					.map((node) => node.id);
+				warnCanvasSpatialIndexMismatch(
+					"marquee",
+					legacyNodeIds,
 					indexedNodeIds,
 				);
 			}
@@ -2844,10 +2859,10 @@ const CanvasWorkspace = () => {
 					createdFrame.id,
 					[nodeId],
 				);
-					const { siblingOrder, rebalancePatches } = allocateInsertSiblingOrder(
-						workingNodes,
-						{
-							parentId: createdFrame.id,
+				const { siblingOrder, rebalancePatches } = allocateInsertSiblingOrder(
+					workingNodes,
+					{
+						parentId: createdFrame.id,
 						index: siblingInsertIndex,
 						movingNodeIds: [nodeId],
 					},
@@ -2889,14 +2904,18 @@ const CanvasWorkspace = () => {
 			}
 			const childZIndices = orderedChangeIds
 				.map(
-					(nodeId) => workingNodes.find((node) => node.id === nodeId)?.siblingOrder,
+					(nodeId) =>
+						workingNodes.find((node) => node.id === nodeId)?.siblingOrder,
 				)
-				.filter((siblingOrder): siblingOrder is number => Number.isFinite(siblingOrder));
+				.filter((siblingOrder): siblingOrder is number =>
+					Number.isFinite(siblingOrder),
+				);
 			if (childZIndices.length > 0) {
 				const frameNode = workingNodes.find(
 					(node) => node.id === createdFrame.id,
 				);
-				const frameZIndex = frameNode?.siblingOrder ?? createdFrame.siblingOrder;
+				const frameZIndex =
+					frameNode?.siblingOrder ?? createdFrame.siblingOrder;
 				const nextFrameZIndex =
 					Math.min(...childZIndices) - LAYER_ORDER_REBALANCE_STEP;
 				if (nextFrameZIndex !== frameZIndex) {
@@ -3039,11 +3058,11 @@ const CanvasWorkspace = () => {
 					nextParentId,
 					[rootNodeId],
 				);
-					const { siblingOrder } = allocateInsertSiblingOrder(workingNodes, {
-						parentId: nextParentId,
-						index: siblingInsertIndex,
-						movingNodeIds: [rootNodeId],
-					});
+				const { siblingOrder } = allocateInsertSiblingOrder(workingNodes, {
+					parentId: nextParentId,
+					index: siblingInsertIndex,
+					movingNodeIds: [rootNodeId],
+				});
 				workingNodes = workingNodes.map((workingNode) => {
 					if (workingNode.id !== rootNodeId) return workingNode;
 					changeByNodeId.set(rootNodeId, {
@@ -3212,10 +3231,10 @@ const CanvasWorkspace = () => {
 			.forEach(({ entry }) => {
 				const parentId = entry.node.parentId ?? null;
 				const insertIndex = resolveLayerSiblingCount(workingNodes, parentId);
-					const { siblingOrder } = allocateInsertSiblingOrder(workingNodes, {
-						parentId,
-						index: insertIndex,
-					});
+				const { siblingOrder } = allocateInsertSiblingOrder(workingNodes, {
+					parentId,
+					index: insertIndex,
+				});
 				entry.node = {
 					...entry.node,
 					siblingOrder,
@@ -3432,11 +3451,10 @@ const CanvasWorkspace = () => {
 	const resetCanvasDragSession = useCallback(
 		(dragSession: NodeDragSession) => {
 			if (dragSession.copyEntries.length > 0) {
-				const copyNodeIds = dragSession.copyEntries.map(
+				removeCanvasGraphBatch(dragSession.copyEntries);
+				for (const copyNodeId of dragSession.copyEntries.map(
 					(entry) => entry.node.id,
-				);
-				removeCanvasGraphBatch(copyNodeIds);
-				for (const copyNodeId of copyNodeIds) {
+				)) {
 					delete dragSession.snapshots[copyNodeId];
 				}
 				dragSession.copyEntries = [];
@@ -3657,6 +3675,158 @@ const CanvasWorkspace = () => {
 			rect.top + rect.height / 2,
 		);
 	}, [getCamera, resolveWorldPoint]);
+
+	const resolveNearbyRestoredSceneNode = useCallback(
+		(baseNode: SceneNode): SceneNode => {
+			const latestProject = useProjectStore.getState().currentProject;
+			const anchor = resolveCanvasPasteWorldPoint();
+			const width =
+				Number.isFinite(baseNode.width) && Math.abs(baseNode.width) > 0
+					? baseNode.width
+					: 960;
+			const height =
+				Number.isFinite(baseNode.height) && Math.abs(baseNode.height) > 0
+					? baseNode.height
+					: 540;
+			const existingNodes = latestProject?.canvas.nodes ?? [];
+			const overlapsExistingNode = (candidate: SceneNode) => {
+				const candidateLeft = Math.min(
+					candidate.x,
+					candidate.x + candidate.width,
+				);
+				const candidateRight = Math.max(
+					candidate.x,
+					candidate.x + candidate.width,
+				);
+				const candidateTop = Math.min(
+					candidate.y,
+					candidate.y + candidate.height,
+				);
+				const candidateBottom = Math.max(
+					candidate.y,
+					candidate.y + candidate.height,
+				);
+				return existingNodes.some((node) => {
+					if (node.id === candidate.id) return false;
+					const nodeLeft = Math.min(node.x, node.x + node.width);
+					const nodeRight = Math.max(node.x, node.x + node.width);
+					const nodeTop = Math.min(node.y, node.y + node.height);
+					const nodeBottom = Math.max(node.y, node.y + node.height);
+					return (
+						candidateLeft < nodeRight &&
+						candidateRight > nodeLeft &&
+						candidateTop < nodeBottom &&
+						candidateBottom > nodeTop
+					);
+				});
+			};
+
+			for (let index = 0; index < DROP_GRID_COLUMNS * 24; index += 1) {
+				const column = index % DROP_GRID_COLUMNS;
+				const row = Math.floor(index / DROP_GRID_COLUMNS);
+				const candidate: SceneNode = {
+					...baseNode,
+					x: anchor.x + column * DROP_GRID_OFFSET_X,
+					y: anchor.y + row * DROP_GRID_OFFSET_Y,
+					width,
+					height,
+					parentId: null,
+					hidden: false,
+					locked: false,
+					siblingOrder: resolveLayerSiblingCount(existingNodes, null),
+				};
+				if (!overlapsExistingNode(candidate)) {
+					return candidate;
+				}
+			}
+
+			return {
+				...baseNode,
+				x: anchor.x,
+				y: anchor.y,
+				width,
+				height,
+				parentId: null,
+				hidden: false,
+				locked: false,
+				siblingOrder: resolveLayerSiblingCount(existingNodes, null),
+			};
+		},
+		[resolveCanvasPasteWorldPoint],
+	);
+
+	const handleRestoreSceneReferenceToCanvas = useCallback(
+		(sceneId: string): boolean => {
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return false;
+			const liveSceneNode = latestProject.canvas.nodes.find(
+				(node): node is SceneNode =>
+					node.type === "scene" && node.sceneId === sceneId,
+			);
+			setFocusedNode(null);
+			if (liveSceneNode) {
+				commitSelectedNodeIds([liveSceneNode.id]);
+				return true;
+			}
+			const scene = latestProject.scenes[sceneId];
+			if (!scene) return false;
+			const tombstone = getSceneTombstone(sceneId);
+			const baseNode: SceneNode = tombstone?.node ?? {
+				id:
+					typeof crypto !== "undefined" && "randomUUID" in crypto
+						? `node-${crypto.randomUUID()}`
+						: `node-${Date.now().toString(36)}-${Math.random()
+								.toString(36)
+								.slice(2, 8)}`,
+				type: "scene",
+				sceneId,
+				name: scene.name,
+				x: 0,
+				y: 0,
+				width:
+					scene.timeline.canvas.width > 0 ? scene.timeline.canvas.width : 960,
+				height:
+					scene.timeline.canvas.height > 0 ? scene.timeline.canvas.height : 540,
+				siblingOrder: 0,
+				locked: false,
+				hidden: false,
+				parentId: null,
+				createdAt: scene.createdAt,
+				updatedAt: scene.updatedAt,
+			};
+			const restoredNode = resolveNearbyRestoredSceneNode({
+				...baseNode,
+				name: tombstone?.node.name?.trim() || scene.name,
+			});
+			restoreDetachedSceneNodeForHistory(restoredNode, {
+				layoutOverride: {
+					x: restoredNode.x,
+					y: restoredNode.y,
+					width: restoredNode.width,
+					height: restoredNode.height,
+					parentId: null,
+					hidden: false,
+					locked: false,
+					siblingOrder: restoredNode.siblingOrder,
+				},
+			});
+			pushHistory({
+				kind: "canvas.node-create",
+				node: restoredNode,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+			commitSelectedNodeIds([restoredNode.id]);
+			return true;
+		},
+		[
+			commitSelectedNodeIds,
+			getSceneTombstone,
+			pushHistory,
+			resolveNearbyRestoredSceneNode,
+			restoreDetachedSceneNodeForHistory,
+			setFocusedNode,
+		],
+	);
 
 	const commitCreatedCanvasEntries = useCallback(
 		(entries: CanvasGraphHistoryEntry[]): boolean => {
@@ -4484,9 +4654,7 @@ const CanvasWorkspace = () => {
 			}
 			if (!dragSession.activated || !dragSession.moved) {
 				if (dragSession.copyEntries.length > 0) {
-					removeCanvasGraphBatch(
-						dragSession.copyEntries.map((entry) => entry.node.id),
-					);
+					removeCanvasGraphBatch(dragSession.copyEntries);
 				}
 				return;
 			}
@@ -5073,12 +5241,12 @@ const CanvasWorkspace = () => {
 				);
 			} else {
 				destinationParentId = targetNode.parentId ?? null;
-					const siblingNodes = sortBySiblingOrder(
-						allNodes.filter((node) => {
-							if (movingNodeIdSet.has(node.id)) return false;
-							return (node.parentId ?? null) === destinationParentId;
-						}),
-					);
+				const siblingNodes = sortBySiblingOrder(
+					allNodes.filter((node) => {
+						if (movingNodeIdSet.has(node.id)) return false;
+						return (node.parentId ?? null) === destinationParentId;
+					}),
+				);
 				const targetIndex = siblingNodes.findIndex(
 					(sibling) => sibling.id === targetNode.id,
 				);
@@ -5091,17 +5259,20 @@ const CanvasWorkspace = () => {
 				if (movingNodeIdSet.has(ancestorId)) return;
 				ancestorId = nodeById.get(ancestorId)?.parentId ?? null;
 			}
-				const { assignments, rebalancePatches } = allocateBatchInsertSiblingOrder(
-					allNodes,
-					{
-						parentId: destinationParentId,
+			const { assignments, rebalancePatches } = allocateBatchInsertSiblingOrder(
+				allNodes,
+				{
+					parentId: destinationParentId,
 					index: destinationIndex,
 					nodeIds: orderedDragNodeIds,
 					movingNodeIds: movingNodeIdSet,
 				},
 			);
 			const assignedZIndexByNodeId = new Map(
-				assignments.map((assignment) => [assignment.nodeId, assignment.siblingOrder]),
+				assignments.map((assignment) => [
+					assignment.nodeId,
+					assignment.siblingOrder,
+				]),
 			);
 			const rebalancedZIndexByNodeId = new Map(
 				rebalancePatches.map((patch) => [patch.nodeId, patch.siblingOrder]),
@@ -5217,6 +5388,18 @@ const CanvasWorkspace = () => {
 			const targetIds =
 				resolveExpandedNodeIdsWithDescendants(normalizedTargetIds);
 			if (targetIds.length === 0) return;
+			const retainedSceneIdSet = resolveDeletedSceneIdsToRetain(
+				latestProject,
+				targetIds
+					.map((nodeId) => {
+						const node = latestProject.canvas.nodes.find(
+							(candidate): candidate is SceneNode =>
+								candidate.id === nodeId && candidate.type === "scene",
+						);
+						return node?.sceneId ?? null;
+					})
+					.filter((sceneId): sceneId is string => Boolean(sceneId)),
+			);
 			const entries = targetIds
 				.map((nodeId) => {
 					const node =
@@ -5228,7 +5411,9 @@ const CanvasWorkspace = () => {
 						node,
 						scene:
 							node.type === "scene"
-								? (latestProject.scenes[node.sceneId] ?? undefined)
+								? retainedSceneIdSet.has(node.sceneId)
+									? undefined
+									: (latestProject.scenes[node.sceneId] ?? undefined)
 								: undefined,
 					};
 				})
@@ -5242,11 +5427,15 @@ const CanvasWorkspace = () => {
 					scene: entry.scene,
 					focusNodeId: latestProject.ui.focusedNodeId,
 				});
-				if (entry.node.type === "scene" && entry.scene) {
-					removeSceneGraphForHistory(entry.scene.id, entry.node.id);
-				} else {
-					removeCanvasNodeForHistory(entry.node.id);
+				if (entry.node.type === "scene") {
+					if (entry.scene) {
+						removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+						return;
+					}
+					removeSceneNodeForHistory(entry.node.sceneId, entry.node.id);
+					return;
 				}
+				removeCanvasNodeForHistory(entry.node.id);
 				return;
 			}
 			pushHistory({
@@ -5254,13 +5443,14 @@ const CanvasWorkspace = () => {
 				entries,
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
-			removeCanvasGraphBatch(entries.map((entry) => entry.node.id));
+			removeCanvasGraphBatch(entries);
 		},
 		[
 			pushHistory,
 			removeCanvasGraphBatch,
 			removeCanvasNodeForHistory,
 			removeSceneGraphForHistory,
+			removeSceneNodeForHistory,
 			resolveExpandedNodeIdsWithDescendants,
 		],
 	);
@@ -5935,15 +6125,14 @@ const CanvasWorkspace = () => {
 					shouldResolveTap &&
 					(pointerSession.gesture !== "node-drag" ||
 						(pointerSession.startNodeId &&
-								getTopHitNode({
-									worldX: world.x,
-									worldY: world.y,
-									localX: local.x,
-									localY: local.y,
-									liveCamera: getCamera(),
-									frameBodyHitMode: "selected-only",
-								})?.id ===
-									pointerSession.startNodeId))
+							getTopHitNode({
+								worldX: world.x,
+								worldY: world.y,
+								localX: local.x,
+								localY: local.y,
+								liveCamera: getCamera(),
+								frameBodyHitMode: "selected-only",
+							})?.id === pointerSession.startNodeId))
 				) {
 					handleCanvasSurfaceTap(tapMeta);
 				}
@@ -6465,6 +6654,7 @@ const CanvasWorkspace = () => {
 				onDrawerHeightChange={setVisibleDrawerHeight}
 				onCloseDrawer={handleCloseDrawer}
 				onDropTimelineElementsToCanvas={handleDropTimelineElementsToCanvas}
+				onRestoreSceneReferenceToCanvas={handleRestoreSceneReferenceToCanvas}
 				contextMenuOpen={contextMenuState.open}
 				contextMenuX={contextMenuState.open ? contextMenuState.x : 0}
 				contextMenuY={contextMenuState.open ? contextMenuState.y : 0}

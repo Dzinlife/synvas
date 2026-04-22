@@ -60,6 +60,7 @@ const { latestSceneDrawerPropsRef } = vi.hoisted(() => ({
 				clientX: number;
 				clientY: number;
 			}) => boolean;
+			onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
 		},
 	},
 }));
@@ -120,13 +121,15 @@ interface MockInfiniteSkiaCanvasProps {
 		anchor: "top-left" | "top-right" | "bottom-right" | "bottom-left";
 		event: MockCanvasNodeDragEvent;
 	}) => void;
-	onLabelHitTesterChange?: (tester: {
-		hitTest: (
-			localX: number,
-			localY: number,
-			liveCamera: CameraState,
-		) => string[];
-	} | null) => void;
+	onLabelHitTesterChange?: (
+		tester: {
+			hitTest: (
+				localX: number,
+				localY: number,
+				liveCamera: CameraState,
+			) => string[];
+		} | null,
+	) => void;
 }
 
 vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
@@ -236,6 +239,7 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 	const SceneDrawer = ({
 		onClose,
 		onDropTimelineElementsToCanvas,
+		onRestoreSceneReferenceToCanvas,
 	}: {
 		onClose: () => void;
 		onDropTimelineElementsToCanvas?: (request: {
@@ -243,9 +247,11 @@ vi.mock("@/studio/canvas/node-system/registry", () => {
 			clientX: number;
 			clientY: number;
 		}) => boolean;
+		onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
 	}) => {
 		latestSceneDrawerPropsRef.current = {
 			onDropTimelineElementsToCanvas,
+			onRestoreSceneReferenceToCanvas,
 		};
 		return (
 			<button
@@ -1237,7 +1243,8 @@ const getTopVisibleNodeAt = (clientX: number, clientY: number): CanvasNode => {
 	const sortedNodes = [...project.canvas.nodes]
 		.filter((node) => !node.hidden)
 		.sort((a, b) => {
-			if (a.siblingOrder !== b.siblingOrder) return a.siblingOrder - b.siblingOrder;
+			if (a.siblingOrder !== b.siblingOrder)
+				return a.siblingOrder - b.siblingOrder;
 			return a.id.localeCompare(b.id);
 		});
 	for (let i = sortedNodes.length - 1; i >= 0; i -= 1) {
@@ -1636,7 +1643,9 @@ const injectFrameHitFixture = (): void => {
 				canvas: {
 					...project.canvas,
 					nodes: [
-						...project.canvas.nodes.filter((node) => node.id !== "node-frame-hit-1"),
+						...project.canvas.nodes.filter(
+							(node) => node.id !== "node-frame-hit-1",
+						),
 						{
 							id: "node-frame-hit-1",
 							type: "frame",
@@ -1718,8 +1727,12 @@ describe("CanvasWorkspace", () => {
 
 	it("侧边栏 node label 前会显示类型图标，并移除右侧类型 badge", () => {
 		render(<CanvasWorkspace />);
-		const sceneItem = screen.getByTestId("canvas-sidebar-node-item-node-scene-1");
-		const videoItem = screen.getByTestId("canvas-sidebar-node-item-node-video-1");
+		const sceneItem = screen.getByTestId(
+			"canvas-sidebar-node-item-node-scene-1",
+		);
+		const videoItem = screen.getByTestId(
+			"canvas-sidebar-node-item-node-video-1",
+		);
 		expect(
 			screen.getByTestId("canvas-sidebar-node-icon-node-scene-1").textContent,
 		).toBe("\uF000");
@@ -1985,12 +1998,12 @@ describe("CanvasWorkspace", () => {
 			expect(screen.getByTestId("canvas-overlay-drawer")).toBeTruthy();
 		});
 		const drawer = screen.getByTestId("canvas-overlay-drawer");
-		expect(drawer.style.left).toBe("312px");
+		expect(drawer.style.left).toBe("290px");
 
 		fireEvent.click(screen.getByLabelText("收起侧边栏"));
 		await waitFor(() => {
 			expect(screen.getByTestId("canvas-overlay-drawer").style.left).toBe(
-				"12px",
+				"0px",
 			);
 		});
 		expect(screen.getByTestId("canvas-sidebar-expand-button")).toBeTruthy();
@@ -4454,14 +4467,18 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		const initialFrameNode = useProjectStore
 			.getState()
-			.currentProject?.canvas.nodes.find((node) => node.id === "node-frame-hit-1");
+			.currentProject?.canvas.nodes.find(
+				(node) => node.id === "node-frame-hit-1",
+			);
 		expect(initialFrameNode?.x).toBe(1080);
 		expect(initialFrameNode?.y).toBe(200);
 
 		dragNodeAt(1120, 240, 1180, 300);
 		const frameAfterUnselectedDrag = useProjectStore
 			.getState()
-			.currentProject?.canvas.nodes.find((node) => node.id === "node-frame-hit-1");
+			.currentProject?.canvas.nodes.find(
+				(node) => node.id === "node-frame-hit-1",
+			);
 		expect(frameAfterUnselectedDrag?.x).toBe(1080);
 		expect(frameAfterUnselectedDrag?.y).toBe(200);
 
@@ -4470,7 +4487,9 @@ describe("CanvasWorkspace", () => {
 		dragNodeAt(1120, 240, 1180, 300);
 		const frameAfterSelectedDrag = useProjectStore
 			.getState()
-			.currentProject?.canvas.nodes.find((node) => node.id === "node-frame-hit-1");
+			.currentProject?.canvas.nodes.find(
+				(node) => node.id === "node-frame-hit-1",
+			);
 		expect(frameAfterSelectedDrag?.x).toBe(1140);
 		expect(frameAfterSelectedDrag?.y).toBe(260);
 	});
@@ -5612,5 +5631,102 @@ describe("CanvasWorkspace", () => {
 		expect(node?.x).toBe(240);
 		expect(node?.y).toBe(120);
 		expect(project?.ui.activeNodeId).toBe("node-video-1");
+	});
+
+	it("restore scene 引用会退出 focus mode 并跳转到现有 scene node", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					ui: {
+						...project.ui,
+						focusedNodeId: "node-scene-1",
+						activeNodeId: "node-scene-1",
+						activeSceneId: "scene-1",
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+
+		let handled = false;
+		act(() => {
+			handled = Boolean(
+				latestSceneDrawerPropsRef.current?.onRestoreSceneReferenceToCanvas?.(
+					"scene-2",
+				),
+			);
+		});
+
+		expect(handled).toBe(true);
+		const project = useProjectStore.getState().currentProject;
+		expect(project?.ui.focusedNodeId).toBeNull();
+		expect(project?.ui.activeSceneId).toBe("scene-2");
+		expect(project?.ui.activeNodeId).toBe("node-scene-2");
+	});
+
+	it("restore scene 引用会在 scene node 已删除时重建 node", () => {
+		act(() => {
+			useProjectStore
+				.getState()
+				.removeSceneNodeForHistory("scene-2", "node-scene-2");
+		});
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					ui: {
+						...project.ui,
+						focusedNodeId: "node-scene-1",
+						activeNodeId: "node-scene-1",
+						activeSceneId: "scene-1",
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+
+		let handled = false;
+		act(() => {
+			handled = Boolean(
+				latestSceneDrawerPropsRef.current?.onRestoreSceneReferenceToCanvas?.(
+					"scene-2",
+				),
+			);
+		});
+
+		expect(handled).toBe(true);
+		const project = useProjectStore.getState().currentProject;
+		const restoredNode = project?.canvas.nodes.find(
+			(node): node is CanvasNode & { type: "scene"; sceneId: "scene-2" } =>
+				node.type === "scene" && node.sceneId === "scene-2",
+		);
+		expect(restoredNode).toBeTruthy();
+		expect(restoredNode?.parentId ?? null).toBeNull();
+		expect(restoredNode?.hidden).toBe(false);
+		expect(restoredNode?.locked).toBe(false);
+		expect(project?.ui.activeSceneId).toBe("scene-2");
+		expect(project?.ui.activeNodeId).toBe(restoredNode?.id ?? null);
+		expect(useProjectStore.getState().getSceneTombstone("scene-2")).toBeNull();
+		expect(
+			restoredNode ? restoredNode.y >= 560 || restoredNode.x >= 960 : false,
+		).toBe(true);
+		expect(
+			useStudioHistoryStore
+				.getState()
+				.past.some(
+					(entry) =>
+						entry.kind === "canvas.node-create" &&
+						entry.node.type === "scene" &&
+						entry.node.sceneId === "scene-2" &&
+						entry.scene === undefined,
+				),
+		).toBe(true);
 	});
 });

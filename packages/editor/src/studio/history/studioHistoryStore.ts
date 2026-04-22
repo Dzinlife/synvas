@@ -45,7 +45,14 @@ import { applyTimelineJsonToStore } from "@/studio/scene/timelineSession";
 
 export type CanvasNodeLayoutSnapshot = Pick<
 	CanvasNode,
-	"x" | "y" | "width" | "height" | "siblingOrder" | "hidden" | "locked" | "parentId"
+	| "x"
+	| "y"
+	| "width"
+	| "height"
+	| "siblingOrder"
+	| "hidden"
+	| "locked"
+	| "parentId"
 >;
 
 type CanvasGraphHistoryItem = {
@@ -906,12 +913,26 @@ const applyEntry = (
 		return;
 	}
 	if (entry.kind === "canvas.node-create") {
-		if (entry.node.type === "scene" && entry.scene) {
+		if (entry.node.type === "scene") {
 			if (mode === "undo") {
-				projectStore.removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+				if (entry.scene) {
+					projectStore.removeSceneGraphForHistory(
+						entry.scene.id,
+						entry.node.id,
+					);
+					return;
+				}
+				projectStore.removeSceneNodeForHistory(
+					entry.node.sceneId,
+					entry.node.id,
+				);
 				return;
 			}
-			projectStore.restoreSceneGraphForHistory(entry.scene, entry.node);
+			if (entry.scene) {
+				projectStore.restoreSceneGraphForHistory(entry.scene, entry.node);
+				return;
+			}
+			projectStore.restoreDetachedSceneNodeForHistory(entry.node);
 			return;
 		}
 		if (mode === "undo") {
@@ -923,21 +944,27 @@ const applyEntry = (
 	}
 	if (entry.kind === "canvas.node-create.batch") {
 		if (mode === "undo") {
-			projectStore.removeCanvasGraphBatch(
-				entry.entries.map((item) => item.node.id),
-			);
+			projectStore.removeCanvasGraphBatch(entry.entries);
 			return;
 		}
 		projectStore.appendCanvasGraphBatch(entry.entries);
 		return;
 	}
 	if (entry.kind === "canvas.node-delete") {
-		if (entry.node.type === "scene" && entry.scene) {
+		if (entry.node.type === "scene") {
 			if (mode === "undo") {
-				projectStore.restoreSceneGraphForHistory(entry.scene, entry.node);
+				if (entry.scene) {
+					projectStore.restoreSceneGraphForHistory(entry.scene, entry.node);
+					return;
+				}
+				projectStore.restoreDetachedSceneNodeForHistory(entry.node);
 				return;
 			}
-			projectStore.removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+			if (entry.scene) {
+				projectStore.removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+				return;
+			}
+			projectStore.removeSceneNodeForHistory(entry.node.sceneId, entry.node.id);
 			return;
 		}
 		if (mode === "undo") {
@@ -952,9 +979,7 @@ const applyEntry = (
 			projectStore.appendCanvasGraphBatch(entry.entries);
 			return;
 		}
-		projectStore.removeCanvasGraphBatch(
-			entry.entries.map((item) => item.node.id),
-		);
+		projectStore.removeCanvasGraphBatch(entry.entries);
 		return;
 	}
 	if (entry.kind === "canvas.frame-create") {

@@ -27,6 +27,7 @@ import type {
 	StudioTimelineClipboardPayload,
 } from "@/studio/clipboard/studioClipboardStore";
 import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
+import { resolveSceneReferenceSceneIdFromElement } from "@/studio/scene/sceneComposition";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { clampFrame } from "@/utils/timecode";
 import TimelineContextMenu, {
@@ -136,12 +137,11 @@ const getCompositionHasSourceAudioTrack = (
 	element: TimelineElementType | undefined,
 ): boolean => {
 	if (!element || element.type !== "Composition") return false;
-	const rawSceneId = (element.props as { sceneId?: unknown } | undefined)
-		?.sceneId;
-	if (typeof rawSceneId !== "string" || rawSceneId.trim().length === 0) {
+	const sceneId = resolveSceneReferenceSceneIdFromElement(element);
+	if (!sceneId) {
 		return false;
 	}
-	const sceneRef = toSceneTimelineRef(rawSceneId.trim());
+	const sceneRef = toSceneTimelineRef(sceneId);
 	const sceneRuntime =
 		runtimeManager.getTimelineRuntime(sceneRef) ??
 		runtimeManager.ensureTimelineRuntime(sceneRef);
@@ -206,10 +206,12 @@ interface TimelineEditorProps {
 	onDropTimelineElementsToCanvas?: (
 		request: StudioTimelineCanvasDropRequest,
 	) => boolean;
+	onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
 }
 
 const TimelineEditor: React.FC<TimelineEditorProps> = ({
 	onDropTimelineElementsToCanvas,
+	onRestoreSceneReferenceToCanvas,
 }) => {
 	const timelineStore = useTimelineStoreApi();
 	const modelRegistry = useModelRegistry();
@@ -1707,6 +1709,24 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 					: undefined;
 			const isSingleVideo = targetElement?.type === "VideoClip";
 			const isSingleComposition = targetElement?.type === "Composition";
+			const isSingleSceneReference =
+				targetElement?.type === "Composition" ||
+				targetElement?.type === "CompositionAudioClip";
+			const referencedSceneId = targetElement
+				? resolveSceneReferenceSceneIdFromElement(targetElement)
+				: null;
+			const hasLiveMainSceneNode = Boolean(
+				referencedSceneId &&
+					currentProject?.canvas.nodes.some(
+						(node) =>
+							node.type === "scene" && node.sceneId === referencedSceneId,
+					),
+			);
+			const canRestoreMainScene = Boolean(
+				referencedSceneId &&
+					currentProject?.scenes[referencedSceneId] &&
+					onRestoreSceneReferenceToCanvas,
+			);
 			const isSourceMuted = isVideoSourceAudioMuted(targetElement);
 			const hasSourceAudioTrack = getVideoClipHasSourceAudioTrack(
 				modelRegistry,
@@ -1721,9 +1741,28 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 			const videoUri = resolveElementSourceUri(targetElement, assets, {
 				projectId: currentProject?.id ?? null,
 			});
+			let insertActionIndex = 2;
+			if (isSingleSceneReference) {
+				actions.splice(insertActionIndex, 0, {
+					key: "restore-main-scene",
+					label: hasLiveMainSceneNode ? "跳转到主 Scene" : "还原主 Scene",
+					disabled: !canRestoreMainScene,
+					onSelect: () => {
+						if (
+							!referencedSceneId ||
+							!currentProject?.scenes[referencedSceneId] ||
+							!onRestoreSceneReferenceToCanvas
+						) {
+							return;
+						}
+						onRestoreSceneReferenceToCanvas(referencedSceneId);
+					},
+				});
+				insertActionIndex += 1;
+			}
 			if (isSingleVideo && hasSourceAudioTrack) {
 				const isActionDisabled = !videoUri;
-				actions.splice(2, 0, {
+				actions.splice(insertActionIndex, 0, {
 					key: isSourceMuted ? "restore-audio" : "detach-audio",
 					label: isSourceMuted ? "还原音频" : "分离音频",
 					disabled: isActionDisabled,
@@ -1749,7 +1788,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 				});
 			}
 			if (isSingleComposition) {
-				actions.splice(2, 0, {
+				actions.splice(insertActionIndex, 0, {
 					key: isCompositionSourceMuted
 						? "restore-composition-audio"
 						: "detach-composition-audio",
@@ -1812,6 +1851,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 		elements,
 		fps,
 		modelRegistry,
+		onRestoreSceneReferenceToCanvas,
 		runtimeManager,
 		pasteFromClipboard,
 		postProcessOptions,

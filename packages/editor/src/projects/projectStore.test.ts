@@ -6,8 +6,8 @@ import {
 	getAllProjects,
 	getCurrentProjectId,
 	getProject,
-	putProject,
 	type ProjectRecord,
+	putProject,
 } from "./projectDb";
 
 vi.mock("./projectDb", async () => {
@@ -128,6 +128,71 @@ const createProjectWithFocusedVideo = (): StudioProject => {
 	});
 	project.ui.focusedNodeId = videoId;
 	project.ui.activeNodeId = videoId;
+	return project;
+};
+
+const createSceneReferenceElement = (
+	id: string,
+	sceneId: string,
+	type: "Composition" | "CompositionAudioClip" = "Composition",
+) => ({
+	id,
+	type,
+	component: type === "Composition" ? "composition" : "composition-audio",
+	name: id,
+	props: { sceneId },
+	timeline: {
+		start: 0,
+		end: 30,
+		startTimecode: "00:00:00:00",
+		endTimecode: "00:00:01:00",
+		trackIndex: 0,
+		role:
+			type === "CompositionAudioClip" ? ("audio" as const) : ("clip" as const),
+	},
+});
+
+const createProjectWithReferencedScene = (): StudioProject => {
+	const project = createProject();
+	const scene1 = project.scenes["scene-1"];
+	if (!scene1) {
+		throw new Error("scene-1 不存在");
+	}
+	project.canvas.nodes.push({
+		id: "node-2",
+		type: "scene",
+		sceneId: "scene-2",
+		name: "Scene 2",
+		x: 1200,
+		y: 0,
+		width: 960,
+		height: 540,
+		siblingOrder: 1,
+		locked: false,
+		hidden: false,
+		createdAt: 2,
+		updatedAt: 2,
+	});
+	project.scenes["scene-2"] = {
+		id: "scene-2",
+		name: "Scene 2",
+		timeline: {
+			...scene1.timeline,
+			elements: [
+				createSceneReferenceElement("composition-scene-2", "scene-1"),
+				createSceneReferenceElement(
+					"composition-audio-scene-2",
+					"scene-1",
+					"CompositionAudioClip",
+				),
+			],
+		},
+		posterFrame: 0,
+		createdAt: 2,
+		updatedAt: 2,
+	};
+	project.ui.activeSceneId = "scene-1";
+	project.ui.activeNodeId = "node-1";
 	return project;
 };
 
@@ -488,6 +553,69 @@ describe("projectStore", () => {
 		).toBeNull();
 	});
 
+	it("removeCanvasGraphBatch 会保留仍被引用的 scene 文档，只移除 scene node", () => {
+		const project = createProjectWithReferencedScene();
+		useProjectStore.setState({
+			status: "ready",
+			projects: [],
+			currentProjectId: project.id,
+			currentProject: project,
+			focusedSceneDrafts: {},
+			sceneTimelineMutationOpIds: {},
+			error: null,
+		});
+
+		useProjectStore.getState().removeCanvasGraphBatch(["node-1"]);
+
+		const currentProject = useProjectStore.getState().currentProject;
+		expect(
+			currentProject?.canvas.nodes.some((node) => node.id === "node-1"),
+		).toBe(false);
+		expect(currentProject?.scenes["scene-1"]).toBeTruthy();
+		expect(currentProject?.ui.activeSceneId).toBe("scene-1");
+		expect(currentProject?.ui.activeNodeId).toBeNull();
+		expect(
+			useProjectStore.getState().getSceneTombstone("scene-1")?.node.id,
+		).toBe("node-1");
+	});
+
+	it("restoreDetachedSceneNodeForHistory 会恢复 detached scene node 并清理 tombstone", () => {
+		const project = createProjectWithReferencedScene();
+		useProjectStore.setState({
+			status: "ready",
+			projects: [],
+			currentProjectId: project.id,
+			currentProject: project,
+			focusedSceneDrafts: {},
+			sceneTimelineMutationOpIds: {},
+			error: null,
+		});
+
+		useProjectStore.getState().removeCanvasGraphBatch(["node-1"]);
+		const tombstone = useProjectStore.getState().getSceneTombstone("scene-1");
+		expect(tombstone).toBeTruthy();
+		if (!tombstone) return;
+
+		useProjectStore
+			.getState()
+			.restoreDetachedSceneNodeForHistory(tombstone.node);
+
+		const currentProject = useProjectStore.getState().currentProject;
+		expect(
+			currentProject?.canvas.nodes.some((node) => node.id === "node-1"),
+		).toBe(true);
+		expect(useProjectStore.getState().getSceneTombstone("scene-1")).toBeNull();
+	});
+
+	it("removeCanvasGraphBatch 会完整删除未被引用的 scene", () => {
+		useProjectStore.getState().removeCanvasGraphBatch(["node-1"]);
+		const currentProject = useProjectStore.getState().currentProject;
+		expect(currentProject?.scenes["scene-1"]).toBeUndefined();
+		expect(
+			currentProject?.canvas.nodes.some((node) => node.id === "node-1"),
+		).toBe(false);
+	});
+
 	it("initialize 会清理 focusedNodeId", async () => {
 		const project = createProjectWithFocusedVideo();
 		project.ui.camera = { x: 12, y: -18, zoom: 1.2 };
@@ -521,7 +649,9 @@ describe("projectStore", () => {
 	it("createProject 会把新项目 ui.camera 同步到 cameraStore", async () => {
 		useCanvasCameraStore.getState().setCamera({ x: 88, y: -32, zoom: 1.4 });
 
-		await expect(useProjectStore.getState().createProject()).resolves.toBeUndefined();
+		await expect(
+			useProjectStore.getState().createProject(),
+		).resolves.toBeUndefined();
 
 		const project = useProjectStore.getState().currentProject;
 		expect(project).toBeTruthy();

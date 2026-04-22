@@ -4,15 +4,16 @@ import { AudioGainBaselineControl } from "@/element/AudioGainBaselineControl";
 import { SceneThumbnailStripCanvas } from "@/element/SceneThumbnailStripCanvas";
 import { SceneWaveformCanvas } from "@/element/SceneWaveformCanvas";
 import { useSceneReferenceRuntimeState } from "@/element/useSceneReferenceRuntimeState";
+import { cn } from "@/lib/utils";
+import { hasSceneAudibleLeafAudio } from "@/scene-editor/audio/sceneReferenceAudio";
 import {
 	useFps,
 	useTimelineScale,
 	useTimelineStore,
 } from "@/scene-editor/contexts/TimelineContext";
-import { hasSceneAudibleLeafAudio } from "@/scene-editor/audio/sceneReferenceAudio";
-import { isTimelineTrackMuted } from "@/scene-editor/utils/trackAudibility";
 import { isCompositionSourceAudioMuted } from "@/scene-editor/utils/compositionAudioSeparation";
-import { cn } from "@/lib/utils";
+import { isTimelineTrackMuted } from "@/scene-editor/utils/trackAudibility";
+import { resolveSceneReferenceSceneIdFromElement } from "@/studio/scene/sceneComposition";
 import type { TimelineProps } from "../model/types";
 
 interface CompositionTimelineProps extends TimelineProps {
@@ -30,12 +31,9 @@ export const CompositionTimeline: React.FC<CompositionTimelineProps> = ({
 	const { timelineScale } = useTimelineScale();
 	const element = useTimelineStore((state) => state.getElementById(id));
 	const name = element?.name?.trim() || "Composition";
-	const sceneIdRaw =
-		(element?.props as { sceneId?: unknown } | undefined)?.sceneId ?? "";
-	const sceneId =
-		typeof sceneIdRaw === "string" && sceneIdRaw.trim().length > 0
-			? sceneIdRaw.trim()
-			: null;
+	const sceneId = element
+		? resolveSceneReferenceSceneIdFromElement(element)
+		: null;
 	const isSourceAudioMuted = isCompositionSourceAudioMuted(element);
 	const clipGainDb = element?.clip?.gainDb ?? 0;
 	const storeOffsetFrames = useTimelineStore(
@@ -65,7 +63,7 @@ export const CompositionTimeline: React.FC<CompositionTimelineProps> = ({
 			sceneRuntime: runtime,
 			runtimeManager,
 		});
-	}, [contentRevision, runtime, runtimeManager]);
+	}, [runtime, runtimeManager]);
 
 	const shouldShowWaveform = hasSourceAudioTrack && !isSourceAudioMuted;
 	const waveformColor = isTrackMuted
