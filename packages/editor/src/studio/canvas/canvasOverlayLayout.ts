@@ -34,10 +34,10 @@ export interface CanvasOverlayLayoutMetrics {
 	rightPanelReservedBottom: number;
 }
 
-export const CANVAS_OVERLAY_GAP_PX = 12;
-export const CANVAS_OVERLAY_OUTER_PADDING_PX = 12;
+export const CANVAS_OVERLAY_GAP_PX = 2;
+export const CANVAS_OVERLAY_OUTER_PADDING_PX = 0;
 export const CANVAS_OVERLAY_SIDEBAR_WIDTH_PX = 288;
-export const CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX = 320;
+export const CANVAS_OVERLAY_RIGHT_PANEL_WIDTH_PX = 280;
 
 const clampNonNegative = (value: number): number => {
 	if (!Number.isFinite(value)) return 0;
@@ -53,7 +53,10 @@ export const resolveCanvasOverlayLayout = (
 		input.outerPaddingPx ?? CANVAS_OVERLAY_OUTER_PADDING_PX,
 	);
 	const gapPx = clampNonNegative(input.gapPx ?? CANVAS_OVERLAY_GAP_PX);
-	const availableInnerHeight = Math.max(0, containerHeight - outerPaddingPx * 2);
+	const availableInnerHeight = Math.max(
+		0,
+		containerHeight - outerPaddingPx * 2,
+	);
 	const sidebarBaseWidth = clampNonNegative(
 		input.sidebarWidthPx ?? CANVAS_OVERLAY_SIDEBAR_WIDTH_PX,
 	);
@@ -73,7 +76,9 @@ export const resolveCanvasOverlayLayout = (
 		outerPaddingPx,
 		containerHeight - outerPaddingPx - drawerHeight,
 	);
-	const rightPanelReservedBottom = input.drawerVisible ? drawerHeight + gapPx : 0;
+	const rightPanelReservedBottom = input.drawerVisible
+		? drawerHeight + gapPx
+		: 0;
 	const rightPanelHeight = Math.max(
 		0,
 		availableInnerHeight - rightPanelReservedBottom,
@@ -104,8 +109,7 @@ export const resolveCanvasOverlayLayout = (
 		},
 		cameraSafeInsets: {
 			top: outerPaddingPx,
-			left:
-				outerPaddingPx + (sidebarWidth > 0 ? sidebarWidth + gapPx : 0),
+			left: outerPaddingPx + (sidebarWidth > 0 ? sidebarWidth + gapPx : 0),
 			right:
 				outerPaddingPx + (rightPanelWidth > 0 ? rightPanelWidth + gapPx : 0),
 			bottom: outerPaddingPx + (input.drawerVisible ? drawerHeight + gapPx : 0),

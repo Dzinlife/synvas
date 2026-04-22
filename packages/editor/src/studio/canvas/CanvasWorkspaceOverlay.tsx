@@ -20,15 +20,14 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 import { getOwner, releaseOwner, subscribeOwnerChange } from "@/audio/owner";
 import { SnapIcon } from "@/components/icons";
 import { useProjectStore } from "@/projects/projectStore";
-import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
 import ElementSettingsPanel from "@/scene-editor/components/ElementSettingsPanel";
 import TimelineContextMenu, {
 	type TimelineContextMenuAction,
 } from "@/scene-editor/components/TimelineContextMenu";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
-import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import CanvasNodeDrawerShell from "@/studio/canvas/CanvasNodeDrawerShell";
+import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
 import {
 	CANVAS_TOOL_DEFINITIONS,
 	type CanvasToolMode,
@@ -40,6 +39,7 @@ import CanvasSidebar, {
 	type CanvasSidebarNodeSelectOptions,
 	type CanvasSidebarTab,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
+import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
 import {
@@ -681,7 +681,7 @@ const CanvasWorkspaceOverlay = ({
 						{selectedTimelineElement ? (
 							<div
 								data-testid="canvas-timeline-element-settings-panel"
-								className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl [corner-shape:superellipse(1.2)] ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
+								className="flex h-full min-h-0 w-full flex-col overflow-hidden ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
 							>
 								<div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-white/90">
 									Element

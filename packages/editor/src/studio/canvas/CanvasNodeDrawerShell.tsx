@@ -122,7 +122,7 @@ const CanvasNodeDrawerShell: React.FC<CanvasNodeDrawerShellProps> = ({
 					<span className="mx-auto mt-1 block h-1 w-20 rounded-full bg-white/30" />
 				</button>
 			)}
-			<div className="h-full min-h-0 rounded-2xl [corner-shape:superellipse(1.2)] ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl">
+			<div className="h-full min-h-0 ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl">
 				{children}
 			</div>
 		</div>

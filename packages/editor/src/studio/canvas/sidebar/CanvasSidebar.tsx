@@ -611,9 +611,9 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 									onToggleCollapse(item.node.id);
 								}}
 								className={cn(
-									"group/toggle pl-1.5 pr-0 py-0.5 absolute -left-[23px]",
+									"group/toggle pl-1.5 pr-0 py-0.5 absolute -left-[22px]",
 									{
-										"absolute -left-[20px]": depth === 0,
+										"absolute -left-[18px]": depth === 0,
 									},
 								)}
 							>
@@ -625,7 +625,7 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 								>
 									<ChevronRight
 										className={cn(
-											"size-3 transition-transform",
+											"size-2.5 transition-transform",
 											!item.isCollapsed && "rotate-90",
 										)}
 									/>
@@ -1026,7 +1026,7 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 	return (
 		<div
 			data-testid="canvas-sidebar"
-			className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl [corner-shape:superellipse(1.2)] ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
+			className="flex h-full min-h-0 w-full flex-col overflow-hidden ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
 		>
 			<div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
 				<div className="text-xs font-medium text-white/90">{title}</div>

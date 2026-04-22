@@ -1,11 +1,11 @@
 import type React from "react";
 import TimelineEditor from "@/scene-editor/TimelineEditor";
-import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import CanvasNodeDrawerShell, {
 	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT,
 	CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO,
 	CANVAS_NODE_DRAWER_MIN_HEIGHT,
 } from "@/studio/canvas/CanvasNodeDrawerShell";
+import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import ScenePlaybackControlBar from "./ScenePlaybackControlBar";
 
 export const SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT =
@@ -35,7 +35,7 @@ export const SceneTimelineDrawerContent: React.FC<
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<ScenePlaybackControlBar onExitFocus={onExitFocus} />
-			<div className="min-h-0 flex-1 overflow-hidden rounded-2xl [corner-shape:superellipse(1.2)] mask-[url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAA5JREFUeNpiYGBgAAgwAAAEAAGbA+oJAAAAAElFTkSuQmCC)]">
+			<div className="min-h-0 flex-1">
 				<TimelineEditor
 					onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
 				/>

@@ -20,8 +20,8 @@ import {
 	useStudioRuntimeManager,
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
-import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
 import { sortByTreePaintOrder } from "@/studio/canvas/layerOrderCoordinator";
+import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
 import type {
 	StudioTimelineCanvasDropRequest,
 	StudioTimelineClipboardPayload,
@@ -59,11 +59,11 @@ import {
 	getTimelineDropTimeFromScreenX,
 } from "./drag/timelineDropTargets";
 import { useExternalMaterialDnd } from "./hooks/useExternalMaterialDnd";
-import type { TimelineDropToCanvasRequest } from "./timeline/useTimelineElementDnd";
 import {
 	DEFAULT_TRACK_HEIGHT,
 	TRACK_CONTENT_GAP,
 } from "./timeline/trackConfig";
+import type { TimelineDropToCanvasRequest } from "./timeline/useTimelineElementDnd";
 import { getAudioTrackControlState } from "./utils/audioTrackState";
 import {
 	detachCompositionAudio,
@@ -386,10 +386,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 				clipboardPayload.entries.map((entry) => entry.node),
 			)
 				.map((node) => entryByNodeId.get(node.id) ?? null)
-				.filter(
-					(
-						entry,
-					): entry is (typeof clipboardPayload.entries)[number] => Boolean(entry),
+				.filter((entry): entry is (typeof clipboardPayload.entries)[number] =>
+					Boolean(entry),
 				);
 			let nextStartFrame = 0;
 			const convertedElements: TimelineElementType[] = [];
@@ -2217,7 +2215,7 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 	return (
 		<div
 			data-testid="timeline-editor"
-			className="relative h-full flex flex-col min-h-0 w-full overflow-hidden bg-neutral-900"
+			className="relative h-full flex flex-col min-h-0 w-full overflow-hidden"
 			onMouseEnter={handleTimelineEditorMouseEnter}
 			onMouseMove={handleTimelineEditorMouseMove}
 			onMouseLeave={handleTimelineEditorMouseLeave}
