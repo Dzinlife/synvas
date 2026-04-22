@@ -44,6 +44,7 @@ const LABEL_TEXT_HEIGHT_PX = Math.ceil(LABEL_LINE_HEIGHT_PX);
 const LABEL_TEXT_CLIP_PADDING_TOP_PX = 1;
 const LABEL_TEXT_CLIP_PADDING_BOTTOM_PX = 1;
 const LABEL_TEXT_COLOR = "rgba(255,255,255,0.92)";
+const LABEL_SCENE_TEXT_COLOR = "#bbf451";
 const LABEL_LINE_HEIGHT_SAMPLE_TEXT = "Hg";
 const LABEL_GAP_PX = 5;
 const LABEL_DIMMED_OPACITY = 0.45;
@@ -109,11 +110,13 @@ interface CanvasNodeLabelCandidate {
 	nodeId: string;
 	node: CanvasNode;
 	text: string;
+	textColor: string;
 	opacity: number;
 }
 
 interface LabelParagraphCacheEntry {
 	text: string;
+	textColor: string;
 	fontRevision: number;
 	paragraph: SkParagraph;
 }
@@ -240,13 +243,20 @@ const resolveLabelPanCompensation = (
 	};
 };
 
+const resolveCanvasNodeLabelTextColor = (nodeType: CanvasNode["type"]): string => {
+	if (nodeType === "scene") return LABEL_SCENE_TEXT_COLOR;
+	return LABEL_TEXT_COLOR;
+};
+
 const buildLabelParagraph = ({
 	text,
+	textColor,
 	runPlan,
 	fontProvider,
 	ellipsisFontFamilies,
 }: {
 	text: string;
+	textColor: string;
 	runPlan: RunPlan[];
 	fontProvider: SkTypefaceFontProvider | null;
 	ellipsisFontFamilies: string[];
@@ -260,7 +270,7 @@ const buildLabelParagraph = ({
 		ellipsisFontFamilies,
 	);
 	const baseStyle = {
-		color: Skia.Color(LABEL_TEXT_COLOR),
+		color: Skia.Color(textColor),
 		fontSize: LABEL_FONT_SIZE_PX,
 		heightMultiplier: LABEL_LINE_HEIGHT_MULTIPLIER,
 		...(fontProvider ? { fontFamilies: baseFontFamilies } : {}),
@@ -324,6 +334,7 @@ export const CanvasNodeLabelLayer = ({
 					nodeId: node.id,
 					node,
 					text: labelText,
+					textColor: resolveCanvasNodeLabelTextColor(node.type),
 					opacity:
 						focusedNodeId && node.id !== focusedNodeId
 							? LABEL_DIMMED_OPACITY
@@ -391,6 +402,7 @@ export const CanvasNodeLabelLayer = ({
 		try {
 			const sampleParagraph = buildLabelParagraph({
 				text: LABEL_LINE_HEIGHT_SAMPLE_TEXT,
+				textColor: LABEL_TEXT_COLOR,
 				runPlan: fontRegistry.getParagraphRunPlan(
 					LABEL_LINE_HEIGHT_SAMPLE_TEXT,
 					{
@@ -590,12 +602,13 @@ export const CanvasNodeLabelLayer = ({
 	});
 
 	const ensureParagraph = useEffectEvent(
-		(nodeId: string, text: string): SkParagraph | null => {
+		(nodeId: string, text: string, textColor: string): SkParagraph | null => {
 			if (!fontProvider || !text) return null;
 			const cachedEntry = paragraphCacheByNodeIdRef.current.get(nodeId);
 			if (
 				cachedEntry &&
 				cachedEntry.text === text &&
+				cachedEntry.textColor === textColor &&
 				cachedEntry.fontRevision === fontRegistryRevision
 			) {
 				return cachedEntry.paragraph;
@@ -607,6 +620,7 @@ export const CanvasNodeLabelLayer = ({
 			try {
 				const paragraph = buildLabelParagraph({
 					text,
+					textColor,
 					runPlan: fontRegistry.getParagraphRunPlan(text, {
 						fallbackChain: LABEL_FONT_FALLBACK_CHAIN,
 					}),
@@ -615,6 +629,7 @@ export const CanvasNodeLabelLayer = ({
 				});
 				paragraphCacheByNodeIdRef.current.set(nodeId, {
 					text,
+					textColor,
 					fontRevision: fontRegistryRevision,
 					paragraph,
 				});
@@ -681,7 +696,11 @@ export const CanvasNodeLabelLayer = ({
 				if (!isVisibleByWidth || !isCanvasScreenRectVisible(frame, viewport)) {
 					continue;
 				}
-				const paragraph = ensureParagraph(candidate.nodeId, candidate.text);
+				const paragraph = ensureParagraph(
+					candidate.nodeId,
+					candidate.text,
+					candidate.textColor,
+				);
 				if (!paragraph) {
 					continue;
 				}

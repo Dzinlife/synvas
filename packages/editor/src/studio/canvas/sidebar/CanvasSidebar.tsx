@@ -600,7 +600,12 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 				}}
 			>
 				<div className="flex items-center justify-between">
-					<div className="flex min-w-0 items-center relative">
+					<div
+						className={cn(
+							"flex min-w-0 items-center relative",
+							item.node.type === "scene" && "text-lime-300",
+						)}
+					>
 						{item.node.type === "frame" && item.hasChildren ? (
 							<span
 								data-node-toggle="true"
@@ -634,7 +639,7 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 						) : null}
 						<span
 							data-testid={`canvas-sidebar-node-icon-${item.node.id}`}
-							className="canvas-sidebar-node-icon text-white/80 ml-1.5 mr-2"
+							className="canvas-sidebar-node-icon ml-1.5 mr-2"
 							aria-hidden="true"
 						>
 							{resolveCanvasNodeTypeIcon(item.node.type)}
