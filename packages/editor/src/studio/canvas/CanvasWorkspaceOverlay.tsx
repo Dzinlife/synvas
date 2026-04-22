@@ -126,17 +126,17 @@ interface CanvasWorkspaceOverlayProps {
 }
 
 const DRAWER_PRESENCE_TRANSITION = {
-	duration: 0.2,
+	duration: 0.25,
 	ease: [0.22, 1, 0.36, 1] as const,
 };
 
 const RIGHT_PANEL_PRESENCE_TRANSITION = {
-	duration: 0.18,
+	duration: 0.25,
 	ease: [0.22, 1, 0.36, 1] as const,
 };
 
 const ACTIVE_NODE_OVERLAY_PRESENCE_TRANSITION = {
-	duration: 0.16,
+	duration: 0.25,
 	ease: [0.22, 1, 0.36, 1] as const,
 };
 
@@ -180,9 +180,9 @@ const AnimatedRightPanel: React.FC<AnimatedRightPanelProps> = ({
 				width: rightPanelRect.width,
 				height: rightPanelRect.height,
 			}}
-			initial={{ x: 20, opacity: 0 }}
-			animate={{ x: 0, opacity: 1 }}
-			exit={{ x: 20, opacity: 0 }}
+			initial={{ x: "100%" }}
+			animate={{ x: "0%" }}
+			exit={{ x: "100%" }}
 			transition={RIGHT_PANEL_PRESENCE_TRANSITION}
 		>
 			<div
@@ -713,10 +713,11 @@ const CanvasWorkspaceOverlay = ({
 							left: drawerRect.x,
 							bottom: drawerBottomOffset,
 							width: drawerRect.width,
+							height: drawerRect.height,
 						}}
-						initial={{ y: 24, opacity: 0 }}
-						animate={{ y: 0, opacity: 1 }}
-						exit={{ y: 24, opacity: 0 }}
+						initial={{ y: "100%" }}
+						animate={{ y: "0%" }}
+						exit={{ y: "100%" }}
 						transition={DRAWER_PRESENCE_TRANSITION}
 					>
 						<CanvasNodeDrawerShell
