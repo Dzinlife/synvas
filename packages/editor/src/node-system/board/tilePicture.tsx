@@ -1,19 +1,19 @@
 import { renderNodeToPicture } from "core/render-system/renderNodeSnapshot";
-import type { FrameCanvasNode } from "@/studio/project/types";
+import type { BoardCanvasNode } from "@/studio/project/types";
 import { Rect } from "react-skia-lite";
 import type { CanvasNodeTilePictureCapability } from "../types";
 
-const resolveFrameTilePictureSignature = (node: FrameCanvasNode): string => {
+const resolveBoardTilePictureSignature = (node: BoardCanvasNode): string => {
 	return JSON.stringify({
 		width: Math.max(1, Math.round(Math.abs(node.width))),
 		height: Math.max(1, Math.round(Math.abs(node.height))),
 	});
 };
 
-export const frameNodeTilePictureCapability: CanvasNodeTilePictureCapability<FrameCanvasNode> =
+export const boardNodeTilePictureCapability: CanvasNodeTilePictureCapability<BoardCanvasNode> =
 	{
 		getSourceSignature: ({ node }) => {
-			return resolveFrameTilePictureSignature(node);
+			return resolveBoardTilePictureSignature(node);
 		},
 		generate: async ({ node }) => {
 			const sourceWidth = Math.max(1, Math.round(Math.abs(node.width)));
@@ -25,8 +25,7 @@ export const frameNodeTilePictureCapability: CanvasNodeTilePictureCapability<Fra
 					width={sourceWidth}
 					height={sourceHeight}
 					color="#222"
-				/>
-				,
+				/>,
 				{
 					width: sourceWidth,
 					height: sourceHeight,

@@ -153,6 +153,13 @@ const createValidProject = () => ({
 	updatedAt: 1,
 });
 
+const appendCanvasNode = (
+	project: ReturnType<typeof createValidProject>,
+	node: Record<string, unknown>,
+) => {
+	(project.canvas.nodes as Array<Record<string, unknown>>).push(node);
+};
+
 describe("studio schema", () => {
 	it("新项目结构校验通过", () => {
 		expect(() => parseStudioProject(createValidProject())).not.toThrow();
@@ -210,11 +217,11 @@ describe("studio schema", () => {
 
 	it("非法 parentId 与环引用会在加载时修复为 null", () => {
 		const project = createValidProject();
-		project.canvas.nodes.push({
-			id: "node-frame-a",
-			type: "frame",
-			name: "Frame A",
-			parentId: "node-frame-b",
+		appendCanvasNode(project, {
+			id: "node-board-a",
+			type: "board",
+			name: "Board A",
+			parentId: "node-board-b",
 			x: 0,
 			y: 0,
 			width: 400,
@@ -225,11 +232,11 @@ describe("studio schema", () => {
 			createdAt: 2,
 			updatedAt: 2,
 		});
-		project.canvas.nodes.push({
-			id: "node-frame-b",
-			type: "frame",
-			name: "Frame B",
-			parentId: "node-frame-a",
+		appendCanvasNode(project, {
+			id: "node-board-b",
+			type: "board",
+			name: "Board B",
+			parentId: "node-board-a",
 			x: 20,
 			y: 20,
 			width: 300,
@@ -240,7 +247,7 @@ describe("studio schema", () => {
 			createdAt: 2,
 			updatedAt: 2,
 		});
-		project.canvas.nodes.push({
+		appendCanvasNode(project, {
 			id: "node-text-child",
 			type: "text",
 			text: "child",
@@ -257,7 +264,7 @@ describe("studio schema", () => {
 			createdAt: 2,
 			updatedAt: 2,
 		});
-		project.canvas.nodes.push({
+		appendCanvasNode(project, {
 			id: "node-video-orphan",
 			type: "video",
 			assetId: "asset-video-1",
@@ -274,11 +281,11 @@ describe("studio schema", () => {
 			updatedAt: 2,
 		});
 		const parsed = parseStudioProject(project);
-		const frameA = parsed.canvas.nodes.find(
-			(node) => node.id === "node-frame-a",
+		const boardA = parsed.canvas.nodes.find(
+			(node) => node.id === "node-board-a",
 		);
-		const frameB = parsed.canvas.nodes.find(
-			(node) => node.id === "node-frame-b",
+		const boardB = parsed.canvas.nodes.find(
+			(node) => node.id === "node-board-b",
 		);
 		const textChild = parsed.canvas.nodes.find(
 			(node) => node.id === "node-text-child",
@@ -286,8 +293,8 @@ describe("studio schema", () => {
 		const orphan = parsed.canvas.nodes.find(
 			(node) => node.id === "node-video-orphan",
 		);
-		expect(frameA?.parentId).toBeNull();
-		expect(frameB?.parentId).toBeNull();
+		expect(boardA?.parentId).toBeNull();
+		expect(boardB?.parentId).toBeNull();
 		expect(textChild?.parentId).toBeNull();
 		expect(orphan?.parentId).toBeNull();
 	});

@@ -11,13 +11,15 @@ describe("canvasNodeIconLabel", () => {
 		const cases: Array<{ type: CanvasNodeType; expectedIcon: string }> = [
 			{ type: "scene", expectedIcon: "\uF000" },
 			{ type: "video", expectedIcon: "\uF001" },
-			{ type: "frame", expectedIcon: "\uF002" },
+			{ type: "board", expectedIcon: "\uF002" },
 			{ type: "audio", expectedIcon: "\uF003" },
 			{ type: "text", expectedIcon: "\uF004" },
 			{ type: "image", expectedIcon: "\uF005" },
 		];
 		for (const testCase of cases) {
-			expect(resolveCanvasNodeTypeIcon(testCase.type)).toBe(testCase.expectedIcon);
+			expect(resolveCanvasNodeTypeIcon(testCase.type)).toBe(
+				testCase.expectedIcon,
+			);
 		}
 		expect(CANVAS_NODE_ICON_FONT_FAMILY).toBe("SynvasIcon");
 	});
@@ -28,7 +30,7 @@ describe("canvasNodeIconLabel", () => {
 				type: "video",
 				name: "  Clip A  ",
 			}),
-		).toBe("\uF001 Clip A");
+		).toBe("\uF001  Clip A");
 		expect(
 			resolveCanvasNodeLabelText({
 				type: "video",

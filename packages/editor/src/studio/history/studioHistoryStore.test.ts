@@ -880,11 +880,11 @@ describe("studioHistoryStore", () => {
 		).toBeTruthy();
 	});
 
-	it("canvas.frame-create 可撤销和重做 frame 与 parentId 变更", () => {
-		const frameNode = {
-			id: "node-frame-1",
-			type: "frame" as const,
-			name: "Frame 1",
+	it("canvas.board-create 可撤销和重做 board 与 parentId 变更", () => {
+		const boardNode = {
+			id: "node-board-1",
+			type: "board" as const,
+			name: "Board 1",
 			x: 120,
 			y: 80,
 			width: 640,
@@ -896,7 +896,7 @@ describe("studioHistoryStore", () => {
 			createdAt: 1,
 			updatedAt: 1,
 		};
-		useProjectStore.getState().restoreCanvasNodeForHistory(frameNode);
+		useProjectStore.getState().restoreCanvasNodeForHistory(boardNode);
 		const nodeBeforeReparent = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find((node) => node.id === "node-2");
@@ -904,44 +904,44 @@ describe("studioHistoryStore", () => {
 			{
 				nodeId: "node-2",
 				patch: {
-					parentId: frameNode.id,
+					parentId: boardNode.id,
 				},
 			},
 		]);
 		useStudioHistoryStore.getState().push({
-			kind: "canvas.frame-create",
-			createdFrame: frameNode,
+			kind: "canvas.board-create",
+			createdBoard: boardNode,
 			reparentChanges: [
 				{
 					nodeId: "node-2",
 					beforeParentId: null,
-					afterParentId: frameNode.id,
+					afterParentId: boardNode.id,
 					beforeSiblingOrder: nodeBeforeReparent?.siblingOrder ?? 0,
 					afterSiblingOrder: nodeBeforeReparent?.siblingOrder ?? 0,
 				},
 			],
-			focusNodeId: frameNode.id,
+			focusNodeId: boardNode.id,
 		});
 
 		useStudioHistoryStore.getState().undo();
-		const frameAfterUndo = useProjectStore
+		const boardAfterUndo = useProjectStore
 			.getState()
-			.currentProject?.canvas.nodes.find((node) => node.id === frameNode.id);
+			.currentProject?.canvas.nodes.find((node) => node.id === boardNode.id);
 		const nodeAfterUndo = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find((node) => node.id === "node-2");
-		expect(frameAfterUndo).toBeUndefined();
+		expect(boardAfterUndo).toBeUndefined();
 		expect(nodeAfterUndo?.parentId ?? null).toBeNull();
 
 		useStudioHistoryStore.getState().redo();
-		const frameAfterRedo = useProjectStore
+		const boardAfterRedo = useProjectStore
 			.getState()
-			.currentProject?.canvas.nodes.find((node) => node.id === frameNode.id);
+			.currentProject?.canvas.nodes.find((node) => node.id === boardNode.id);
 		const nodeAfterRedo = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find((node) => node.id === "node-2");
-		expect(frameAfterRedo?.type).toBe("frame");
-		expect(nodeAfterRedo?.parentId ?? null).toBe(frameNode.id);
+		expect(boardAfterRedo?.type).toBe("board");
+		expect(nodeAfterRedo?.parentId ?? null).toBe(boardNode.id);
 	});
 
 	it("切换用户后 canUndo/canRedo 按当前用户历史栈切换", () => {

@@ -141,8 +141,8 @@ export type StudioHistoryEntry =
 			focusNodeId?: string | null;
 	  }
 	| {
-			kind: "canvas.frame-create";
-			createdFrame: CanvasNode;
+			kind: "canvas.board-create";
+			createdBoard: CanvasNode;
 			reparentChanges: Array<{
 				nodeId: string;
 				beforeParentId: string | null;
@@ -180,7 +180,7 @@ type CanvasOtCommand = OtCommand & {
 		| "canvas.node-create.batch"
 		| "canvas.node-delete"
 		| "canvas.node-delete.batch"
-		| "canvas.frame-create";
+		| "canvas.board-create";
 };
 
 type StudioNoopOtCommand = OtCommand & {
@@ -982,9 +982,9 @@ const applyEntry = (
 		projectStore.removeCanvasGraphBatch(entry.entries);
 		return;
 	}
-	if (entry.kind === "canvas.frame-create") {
+	if (entry.kind === "canvas.board-create") {
 		if (mode === "undo") {
-			projectStore.removeCanvasNodeForHistory(entry.createdFrame.id);
+			projectStore.removeCanvasNodeForHistory(entry.createdBoard.id);
 			if (entry.reparentChanges.length > 0) {
 				projectStore.updateCanvasNodeLayoutBatch(
 					entry.reparentChanges.map((change) => ({
@@ -998,7 +998,7 @@ const applyEntry = (
 			}
 			return;
 		}
-		projectStore.restoreCanvasNodeForHistory(entry.createdFrame);
+		projectStore.restoreCanvasNodeForHistory(entry.createdBoard);
 		if (entry.reparentChanges.length > 0) {
 			projectStore.updateCanvasNodeLayoutBatch(
 				entry.reparentChanges.map((change) => ({
@@ -1191,10 +1191,10 @@ const applyEntryToBaselineSnapshot = (
 		}
 		return;
 	}
-	if (entry.kind === "canvas.frame-create") {
+	if (entry.kind === "canvas.board-create") {
 		if (mode === "undo") {
 			snapshot.canvas.nodes = snapshot.canvas.nodes.filter(
-				(node) => node.id !== entry.createdFrame.id,
+				(node) => node.id !== entry.createdBoard.id,
 			);
 			if (entry.reparentChanges.length > 0) {
 				const parentById = new Map(
@@ -1214,9 +1214,9 @@ const applyEntryToBaselineSnapshot = (
 		}
 		snapshot.canvas.nodes = [
 			...snapshot.canvas.nodes.filter(
-				(node) => node.id !== entry.createdFrame.id,
+				(node) => node.id !== entry.createdBoard.id,
 			),
-			entry.createdFrame,
+			entry.createdBoard,
 		];
 		if (entry.reparentChanges.length > 0) {
 			const parentById = new Map(

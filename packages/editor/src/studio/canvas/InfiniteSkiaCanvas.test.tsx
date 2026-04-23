@@ -3,7 +3,7 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type {
 	AudioCanvasNode,
-	FrameCanvasNode,
+	BoardCanvasNode,
 	ImageCanvasNode,
 	StudioProject,
 	TextCanvasNode,
@@ -16,6 +16,7 @@ import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { TILE_MAX_TASKS_PER_TICK_DRAG } from "./tile/constants";
 import { StaticTileScheduler } from "./tile/scheduler";
+import type { TileFrameResult } from "./tile/types";
 
 const { rootRenderSpy } = vi.hoisted(() => ({
 	rootRenderSpy: vi.fn(),
@@ -58,11 +59,13 @@ const { textTilePictureGenerateMock } = vi.hoisted(() => ({
 }));
 const {
 	focusLayerPointerDownSpy,
+	focusLayerDoubleClickSpy,
 	focusLayerPointerMoveSpy,
 	focusLayerPointerUpSpy,
 	focusLayerPointerLeaveSpy,
 } = vi.hoisted(() => ({
 	focusLayerPointerDownSpy: vi.fn(),
+	focusLayerDoubleClickSpy: vi.fn(),
 	focusLayerPointerMoveSpy: vi.fn(),
 	focusLayerPointerUpSpy: vi.fn(),
 	focusLayerPointerLeaveSpy: vi.fn(),
@@ -334,7 +337,7 @@ vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
 						labelItems: [],
 						disabled: suspendHover ?? false,
 						onLayerPointerDown: focusLayerPointerDownSpy,
-						onLayerDoubleClick: vi.fn(),
+						onLayerDoubleClick: focusLayerDoubleClickSpy,
 						onLayerPointerMove: focusLayerPointerMoveSpy,
 						onLayerPointerUp: focusLayerPointerUpSpy,
 						onLayerPointerLeave: focusLayerPointerLeaveSpy,
@@ -375,6 +378,7 @@ type AnyElement = React.ReactElement<
 	Record<string, unknown>,
 	React.ElementType
 >;
+const mockGroupType = "group" as unknown as React.ElementType;
 
 const getElementProps = <T extends Record<string, unknown>>(
 	element: AnyElement | null | undefined,
@@ -480,7 +484,7 @@ const getStaticTileOpacityGroupElement = (
 ): AnyElement | null => {
 	return (
 		collectElements(tree, (element) => {
-			if (element.type !== "group") return false;
+			if (element.type !== mockGroupType) return false;
 			const props = getElementProps<{
 				opacity?: { _isSharedValue?: boolean; value?: number };
 				children?: React.ReactNode;
@@ -548,13 +552,13 @@ const createSceneNode = (id: string, siblingOrder: number) => ({
 	sceneId: "scene-1",
 });
 
-const createFrameNode = (
+const createBoardNode = (
 	id: string,
 	siblingOrder: number,
-	patch: Partial<FrameCanvasNode> = {},
-): FrameCanvasNode => ({
+	patch: Partial<BoardCanvasNode> = {},
+): BoardCanvasNode => ({
 	id,
-	type: "frame",
+	type: "board",
 	name: id,
 	x: 20,
 	y: 30,
@@ -687,6 +691,26 @@ const createDeferred = <T,>() => {
 
 const emptyScenes: StudioProject["scenes"] = {};
 
+const createEmptyTileFrameResult = (): TileFrameResult => ({
+	drawItems: [],
+	debugItems: [],
+	fallbackNodeIds: [],
+	hasPendingWork: false,
+	stats: {
+		visibleCount: 0,
+		readyVisibleCount: 0,
+		fallbackNodeCount: 0,
+		coverFallbackCount: 0,
+		queuedCount: 0,
+		renderingCount: 0,
+		readyCount: 0,
+		staleCount: 0,
+		frameTaskCount: 0,
+		targetLod: 0,
+		composeLod: 0,
+	},
+});
+
 describe("InfiniteSkiaCanvas", () => {
 	afterEach(() => {
 		cleanup();
@@ -730,6 +754,7 @@ describe("InfiniteSkiaCanvas", () => {
 			};
 		});
 		focusLayerPointerDownSpy.mockReset();
+		focusLayerDoubleClickSpy.mockReset();
 		focusLayerPointerMoveSpy.mockReset();
 		focusLayerPointerUpSpy.mockReset();
 		focusLayerPointerLeaveSpy.mockReset();
@@ -1079,7 +1104,9 @@ describe("InfiniteSkiaCanvas", () => {
 
 	it("focus 期间会暂停 tile tick 调度，退出后恢复", async () => {
 		tilePipelineMockState.enabled = true;
-		const beginFrameSpy = vi.spyOn(StaticTileScheduler.prototype, "beginFrame");
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockImplementation(() => createEmptyTileFrameResult());
 		const camera = createCameraShared({ x: 0, y: 0, zoom: 1 });
 		const sceneNode = {
 			...createSceneNode("node-scene", 0),
@@ -1433,15 +1460,15 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
-	it("active frame 不走 live 且仍保留在 tile 输入中", async () => {
+	it("active board 不走 live 且仍保留在 tile 输入中", async () => {
 		tilePipelineMockState.enabled = true;
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
 		try {
-			const frameNode = {
-				...createFrameNode("node-frame-active", 1),
+			const boardNode = {
+				...createBoardNode("node-board-active", 1),
 				thumbnail: {
-					assetId: "frame-thumb",
-					sourceSignature: "frame-v1",
+					assetId: "board-thumb",
+					sourceSignature: "board-v1",
 					frame: 0,
 					generatedAt: 1,
 					version: 1 as const,
@@ -1463,15 +1490,15 @@ describe("InfiniteSkiaCanvas", () => {
 								version: 1 as const,
 							},
 						},
-						frameNode,
+						boardNode,
 					]}
 					scenes={emptyScenes}
 					assets={[
 						createImageAsset("scene-under-thumb"),
-						createImageAsset("frame-thumb"),
+						createImageAsset("board-thumb"),
 					]}
-					activeNodeId="node-frame-active"
-					selectedNodeIds={["node-frame-active"]}
+					activeNodeId="node-board-active"
+					selectedNodeIds={["node-board-active"]}
 					focusedNodeId={null}
 				/>,
 			);
@@ -1485,11 +1512,11 @@ describe("InfiniteSkiaCanvas", () => {
 				);
 				expect(liveNodeIds).toEqual([]);
 			});
-			const containsFrameInput = setInputsSpy.mock.calls.some((call) => {
+			const containsBoardInput = setInputsSpy.mock.calls.some((call) => {
 				const inputs = call[0] as Array<{ nodeId?: string }>;
-				return inputs.some((input) => input.nodeId === "node-frame-active");
+				return inputs.some((input) => input.nodeId === "node-board-active");
 			});
-			expect(containsFrameInput).toBe(true);
+			expect(containsBoardInput).toBe(true);
 		} finally {
 			setInputsSpy.mockRestore();
 		}
@@ -1670,16 +1697,16 @@ describe("InfiniteSkiaCanvas", () => {
 		const secondPictureDispose = vi.fn();
 		const secondResultDispose = vi.fn();
 		const firstDeferred = createDeferred<{
-			picture: { dispose: () => void };
+			picture: { dispose: typeof firstPictureDispose };
 			sourceWidth: number;
 			sourceHeight: number;
-			dispose: () => void;
+			dispose: typeof firstResultDispose;
 		}>();
 		const secondDeferred = createDeferred<{
-			picture: { dispose: () => void };
+			picture: { dispose: typeof secondPictureDispose };
 			sourceWidth: number;
 			sourceHeight: number;
-			dispose: () => void;
+			dispose: typeof secondResultDispose;
 		}>();
 		let generateCount = 0;
 		textTilePictureGenerateMock.mockImplementation(() => {

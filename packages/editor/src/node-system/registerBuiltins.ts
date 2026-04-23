@@ -1,5 +1,5 @@
 import "./audio";
-import "./frame";
+import "./board";
 import "./image";
 import "./scene";
 import "./text";

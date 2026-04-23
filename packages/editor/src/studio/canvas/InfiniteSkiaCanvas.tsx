@@ -113,7 +113,7 @@ interface InfiniteSkiaCanvasProps {
 	activeNodeId: string | null;
 	selectedNodeIds: string[];
 	focusedNodeId: string | null;
-	hoveredNodeId: string | null;
+	hoveredNodeId?: string | null;
 	marqueeRectScreen?: CanvasMarqueeRectScreen | null;
 	snapGuidesScreen?: CanvasSnapGuidesScreen;
 	suspendHover?: boolean;
@@ -861,7 +861,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		return nodes.find((node) => node.id === focusedNodeId) ?? null;
 	}, [focusedNodeId, nodes]);
 	const activeLiveNodeId = useMemo(() => {
-		if (!activeNode || activeNode.type === "frame") return null;
+		if (!activeNode || activeNode.type === "board") return null;
 		return activeNode.id;
 	}, [activeNode]);
 	const liveRenderNodes = useMemo(() => {
@@ -1139,11 +1139,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const nextTileNodeIdSet = new Set<string>();
 		for (const node of tileNodes) {
 			nextTileNodeIdSet.add(node.id);
+			const nextAabb = resolveNodeWorldAabb(node);
+			const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 			if (node.id === activeLiveNodeId) {
-				const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
-				if (oldAabb) {
-					scheduler.markDirtyRect(oldAabb);
-					tileNodeAabbRef.current.delete(node.id);
+				if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
+					scheduler.markDirtyUnion(oldAabb, nextAabb);
+					tileNodeAabbRef.current.set(node.id, nextAabb);
 					shouldTick = true;
 				}
 				tileNodeSourceSignatureRef.current.delete(node.id);
@@ -1157,8 +1158,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				asset,
 				hasThumbnailCapability(node),
 			);
-			const nextAabb = resolveNodeWorldAabb(node);
-			const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 			if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
 				scheduler.markDirtyUnion(oldAabb, nextAabb);
 				tileNodeAabbRef.current.set(node.id, nextAabb);

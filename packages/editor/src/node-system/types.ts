@@ -34,6 +34,18 @@ export interface CanvasNodeToolbarProps<TNode extends CanvasNode = CanvasNode> {
 	setActiveScene: (sceneId: string | null) => void;
 }
 
+export interface CanvasNodeInspectorProps<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	node: TNode;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+	isFocused: boolean;
+	updateNode: (patch: Record<string, unknown>) => void;
+	setFocusedNode: (nodeId: string | null) => void;
+	setActiveScene: (sceneId: string | null) => void;
+}
+
 export type CanvasNodeDrawerTrigger = "focus" | "active";
 
 export interface CanvasNodeDrawerOptions {
@@ -220,6 +232,7 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	focusEditorLayer?: React.ComponentType<unknown>;
 	focusEditorBridge?: React.FC<CanvasNodeFocusEditorBridgeProps<TNode>>;
 	toolbar: React.FC<CanvasNodeToolbarProps<TNode>>;
+	inspector?: React.FC<CanvasNodeInspectorProps<TNode>>;
 	focusable?: boolean;
 	drawer?: React.FC<CanvasNodeDrawerProps<TNode>>;
 	drawerOptions?: CanvasNodeDrawerOptions;

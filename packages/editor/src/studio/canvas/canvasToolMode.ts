@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { Hand, MousePointer2, Square, Type } from "lucide-react";
 
-export type CanvasToolMode = "move" | "pan" | "text" | "frame";
+export type CanvasToolMode = "move" | "pan" | "text" | "board";
 
 export interface CanvasToolDefinition {
 	mode: CanvasToolMode;
@@ -36,8 +36,8 @@ export const CANVAS_TOOL_DEFINITIONS: readonly CanvasToolDefinition[] = [
 		enabled: false,
 	},
 	{
-		mode: "frame",
-		label: "Frame",
+		mode: "board",
+		label: "Board",
 		icon: Square,
 		cursor: "crosshair",
 		enabled: true,

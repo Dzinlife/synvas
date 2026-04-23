@@ -13,7 +13,7 @@ export type CanvasNodeType =
 	| "audio"
 	| "text"
 	| "image"
-	| "frame";
+	| "board";
 
 export interface CanvasNodeThumbnail {
 	assetId: string;
@@ -68,8 +68,8 @@ export interface ImageCanvasNode extends CanvasNodeBase {
 	assetId: string;
 }
 
-export interface FrameCanvasNode extends CanvasNodeBase {
-	type: "frame";
+export interface BoardCanvasNode extends CanvasNodeBase {
+	type: "board";
 }
 
 export type CanvasNode =
@@ -78,7 +78,7 @@ export type CanvasNode =
 	| AudioCanvasNode
 	| TextCanvasNode
 	| ImageCanvasNode
-	| FrameCanvasNode;
+	| BoardCanvasNode;
 
 // 兼容存量命名：scene 仍是一等节点
 export type SceneNode = SceneCanvasNode;

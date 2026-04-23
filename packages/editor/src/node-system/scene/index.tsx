@@ -10,6 +10,7 @@ import type {
 } from "../types";
 import { convertSceneNodeToTimelineElement } from "./clipboard";
 import { SceneNodeDrawer } from "./drawer";
+import { SceneNodeInspector } from "./inspector";
 import { SceneNodeSkiaRenderer } from "./renderer";
 import { sceneNodeThumbnailCapability } from "./thumbnail";
 import { SceneNodeToolbar } from "./toolbar";
@@ -26,6 +27,7 @@ const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
 			CanvasNodeFocusEditorBridgeProps<SceneNode>
 		>,
 	toolbar: SceneNodeToolbar,
+	inspector: SceneNodeInspector,
 	resolveResizeConstraints: ({ node, scene }) => {
 		const sourceWidth = scene?.timeline.canvas.width ?? node.width;
 		const sourceHeight = scene?.timeline.canvas.height ?? node.height;

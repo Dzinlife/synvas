@@ -62,8 +62,8 @@ const textNodeSchema = canvasNodeBaseSchema.extend({
 	fontSize: z.number().positive(),
 });
 
-const frameNodeSchema = canvasNodeBaseSchema.extend({
-	type: z.literal("frame"),
+const boardNodeSchema = canvasNodeBaseSchema.extend({
+	type: z.literal("board"),
 });
 
 const canvasDocumentSchema = z.object({
@@ -74,7 +74,7 @@ const canvasDocumentSchema = z.object({
 			audioNodeSchema,
 			imageNodeSchema,
 			textNodeSchema,
-			frameNodeSchema,
+			boardNodeSchema,
 		]),
 	),
 });
@@ -90,7 +90,7 @@ const repairCanvasNodeParentRelations = (nodes: CanvasNode[]): CanvasNode[] => {
 			continue;
 		}
 		const parentNode = nodeById.get(rawParentId);
-		if (!parentNode || parentNode.type !== "frame") {
+		if (!parentNode || parentNode.type !== "board") {
 			parentById.set(node.id, null);
 			continue;
 		}
@@ -287,7 +287,9 @@ const studioProjectSchema = z.object({
 
 export const parseStudioProject = (value: unknown): StudioProject => {
 	const parsed = studioProjectSchema.parse(value) as StudioProject;
-	const repairedCanvasNodes = repairCanvasNodeParentRelations(parsed.canvas.nodes);
+	const repairedCanvasNodes = repairCanvasNodeParentRelations(
+		parsed.canvas.nodes,
+	);
 	const normalizedProject: StudioProject =
 		repairedCanvasNodes === parsed.canvas.nodes
 			? parsed

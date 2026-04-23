@@ -288,8 +288,8 @@ const DEFAULT_AUDIO_NODE_HEIGHT = 180;
 const DEFAULT_TEXT_NODE_WIDTH = 500;
 const DEFAULT_TEXT_NODE_HEIGHT = 160;
 const DEFAULT_TEXT_FONT_SIZE = 48;
-const DEFAULT_FRAME_NODE_WIDTH = 960;
-const DEFAULT_FRAME_NODE_HEIGHT = 540;
+const DEFAULT_BOARD_NODE_WIDTH = 960;
+const DEFAULT_BOARD_NODE_HEIGHT = 540;
 
 const repairCanvasNodeParentRelations = (nodes: CanvasNode[]): CanvasNode[] => {
 	if (nodes.length === 0) return nodes;
@@ -302,7 +302,7 @@ const repairCanvasNodeParentRelations = (nodes: CanvasNode[]): CanvasNode[] => {
 			continue;
 		}
 		const parentNode = nodeById.get(rawParentId);
-		if (!parentNode || parentNode.type !== "frame") {
+		if (!parentNode || parentNode.type !== "board") {
 			parentById.set(node.id, null);
 			continue;
 		}
@@ -381,7 +381,10 @@ const normalizeCanvasNodeSiblingOrder = (nodes: CanvasNode[]): CanvasNode[] => {
 	let hasChanged = false;
 	const nextNodes = nodes.map((node) => {
 		const nextSiblingOrder = siblingOrderByNodeId.get(node.id);
-		if (nextSiblingOrder === undefined || node.siblingOrder === nextSiblingOrder) {
+		if (
+			nextSiblingOrder === undefined ||
+			node.siblingOrder === nextSiblingOrder
+		) {
 			return node;
 		}
 		hasChanged = true;
@@ -842,13 +845,13 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					};
 					break;
 				}
-				case "frame": {
-					const width = input.width ?? DEFAULT_FRAME_NODE_WIDTH;
-					const height = input.height ?? DEFAULT_FRAME_NODE_HEIGHT;
+				case "board": {
+					const width = input.width ?? DEFAULT_BOARD_NODE_WIDTH;
+					const height = input.height ?? DEFAULT_BOARD_NODE_HEIGHT;
 					node = {
 						id: nodeId,
-						type: "frame",
-						name: input.name?.trim() ? input.name.trim() : "Frame",
+						type: "board",
+						name: input.name?.trim() ? input.name.trim() : "Board",
 						parentId: input.parentId ?? null,
 						x: input.x ?? -width / 2,
 						y: input.y ?? -height / 2,

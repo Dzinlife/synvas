@@ -265,7 +265,8 @@ const LABEL_FONT_FALLBACK_CHAIN = [
 ];
 
 const VIDEO_LABEL_ICON = "\uF001";
-const withVideoLabelIcon = (text: string): string => `${VIDEO_LABEL_ICON} ${text}`;
+const withVideoLabelIcon = (text: string): string =>
+	`${VIDEO_LABEL_ICON}  ${text}`;
 
 const createVideoNode = (
 	patch: Partial<VideoCanvasNode> = {},
@@ -326,7 +327,7 @@ const createNodeByType = (
 				text: type,
 				fontSize: 24,
 			};
-		case "frame":
+		case "board":
 			return {
 				...base,
 				type,
@@ -409,7 +410,7 @@ describe("CanvasNodeLabelLayer", () => {
 		const nodes: CanvasNode[] = [
 			createNodeByType("scene", 0),
 			createNodeByType("video", 1),
-			createNodeByType("frame", 2),
+			createNodeByType("board", 2),
 			createNodeByType("audio", 3),
 			createNodeByType("text", 4),
 			createNodeByType("image", 5),
@@ -438,12 +439,12 @@ describe("CanvasNodeLabelLayer", () => {
 		const texts = paragraphInstances.map((paragraph) => paragraph.text);
 		expect(texts).toEqual(
 			expect.arrayContaining([
-				"\uF000 scene",
-				"\uF001 video",
-				"\uF002 frame",
-				"\uF003 audio",
-				"\uF004 text",
-				"\uF005 image",
+				"\uF000  scene",
+				"\uF001  video",
+				"\uF002  board",
+				"\uF003  audio",
+				"\uF004  text",
+				"\uF005  image",
 			]),
 		);
 	});
@@ -766,9 +767,7 @@ describe("CanvasNodeLabelLayer", () => {
 			throw new Error("label hit tester 未注册");
 		}
 		// 命中点位于 label 下边缘到 node 顶边之间的 gap 区域。
-		expect(tester.hitTest(24, -2, { x: 0, y: 0, zoom: 1 })).toEqual([
-			"node-a",
-		]);
+		expect(tester.hitTest(24, -2, { x: 0, y: 0, zoom: 1 })).toEqual(["node-a"]);
 	});
 
 	it("pan 补偿会同步应用到 label 命中区域", async () => {

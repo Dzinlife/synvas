@@ -10,6 +10,7 @@ import {
 import type { TimelineAsset } from "core/timeline-system/types";
 import type { CanvasNode, StudioProject } from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useCallback, useContext, useSyncExternalStore } from "react";
 import {
 	__resetAudioOwnerForTests,
 	getOwner,
@@ -24,6 +25,7 @@ import {
 	createRuntimeProviderWrapper,
 	createTestEditorRuntime,
 } from "@/scene-editor/runtime/testUtils";
+import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
 import { getCanvasNodeDefinition } from "@/node-system/registry";
@@ -236,6 +238,71 @@ vi.mock("@/node-system/registry", () => {
 	const createToolbar = (type: string) => () => (
 		<div data-testid={`node-toolbar-${type}`} />
 	);
+	const SceneInspector = ({
+		node,
+		scene,
+	}: {
+		node: { sceneId: string };
+		scene: {
+			id: string;
+			name: string;
+			timeline: {
+				canvas: { width: number; height: number };
+				fps: number;
+				elements: unknown[];
+			};
+		} | null;
+	}) => {
+		const runtime = useContext(EditorRuntimeContext);
+		const runtimeManager = runtime as Partial<{
+			getTimelineRuntime: (ref: { kind: "scene"; sceneId: string }) => {
+				timelineStore: {
+					subscribe: (
+						selector: (state: {
+							primarySelectedId: string | null;
+						}) => string | null,
+						listener: () => void,
+					) => () => void;
+					getState: () => { primarySelectedId: string | null };
+				};
+			} | null;
+		}> | null;
+		const timelineRuntime =
+			runtimeManager?.getTimelineRuntime?.({
+				kind: "scene",
+				sceneId: node.sceneId,
+			}) ?? null;
+		const selectedElementId = useSyncExternalStore(
+			useCallback(
+				(onStoreChange) => {
+					if (!timelineRuntime) return () => {};
+					return timelineRuntime.timelineStore.subscribe(
+						(state) => state.primarySelectedId,
+						() => {
+							onStoreChange();
+						},
+					);
+				},
+				[timelineRuntime],
+			),
+			() => timelineRuntime?.timelineStore.getState().primarySelectedId ?? null,
+			() => null,
+		);
+		if (selectedElementId) {
+			return (
+				<div data-testid="canvas-timeline-element-settings-panel">
+					Element {selectedElementId}
+				</div>
+			);
+		}
+		return (
+			<div data-testid="canvas-scene-node-meta-panel">
+				{scene?.name} {scene?.id} {scene?.timeline.canvas.width} x{" "}
+				{scene?.timeline.canvas.height} {scene?.timeline.fps}{" "}
+				{scene?.timeline.elements.length ?? 0}
+			</div>
+		);
+	};
 	const SceneDrawer = ({
 		onClose,
 		onDropTimelineElementsToCanvas,
@@ -309,6 +376,7 @@ vi.mock("@/node-system/registry", () => {
 			create: () => ({ type: "scene" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("scene"),
+			inspector: SceneInspector,
 			resolveResizeConstraints: ({
 				scene,
 				node,
@@ -773,12 +841,12 @@ vi.mock("@/node-system/registry", () => {
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("text"),
 		},
-		frame: {
-			type: "frame",
-			title: "Frame",
-			create: () => ({ type: "frame", name: "Frame" }),
+		board: {
+			type: "board",
+			title: "Board",
+			create: () => ({ type: "board", name: "Board" }),
 			skiaRenderer: GenericSkiaRenderer,
-			toolbar: createToolbar("frame"),
+			toolbar: createToolbar("board"),
 		},
 	};
 	return {
@@ -1379,7 +1447,7 @@ const dragSelectionBoundsAt = (
 	dragNodeAt(startClientX, startClientY, endClientX, endClientY, patch);
 };
 
-const dragCreateFrameAt = (
+const dragCreateBoardAt = (
 	startClientX: number,
 	startClientY: number,
 	endClientX: number,
@@ -1632,7 +1700,7 @@ const resolveNodeLabelPoint = (
 	};
 };
 
-const injectFrameHitFixture = (): void => {
+const injectBoardHitFixture = (): void => {
 	useProjectStore.setState((state) => {
 		const project = state.currentProject;
 		if (!project) return state;
@@ -1644,12 +1712,12 @@ const injectFrameHitFixture = (): void => {
 					...project.canvas,
 					nodes: [
 						...project.canvas.nodes.filter(
-							(node) => node.id !== "node-frame-hit-1",
+							(node) => node.id !== "node-board-hit-1",
 						),
 						{
-							id: "node-frame-hit-1",
-							type: "frame",
-							name: "Frame Hit",
+							id: "node-board-hit-1",
+							type: "board",
+							name: "Board Hit",
 							x: 1080,
 							y: 200,
 							width: 140,
@@ -1750,7 +1818,7 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
-	it("侧边栏会按 frame 的 parentId 树进行分组缩进", () => {
+	it("侧边栏会按 board 的 parentId 树进行分组缩进", () => {
 		useProjectStore.setState((state) => {
 			const project = state.currentProject;
 			if (!project) return state;
@@ -1763,13 +1831,13 @@ describe("CanvasWorkspace", () => {
 						nodes: [
 							...project.canvas.nodes.map((node) =>
 								node.id === "node-image-1"
-									? { ...node, parentId: "node-frame-1" }
+									? { ...node, parentId: "node-board-1" }
 									: node,
 							),
 							{
-								id: "node-frame-1",
-								type: "frame",
-								name: "Frame 1",
+								id: "node-board-1",
+								type: "board",
+								name: "Board 1",
 								x: 120,
 								y: 80,
 								width: 860,
@@ -1790,24 +1858,24 @@ describe("CanvasWorkspace", () => {
 
 		const nodeItems = screen.getAllByTestId(/canvas-sidebar-node-item-/);
 		const order = nodeItems.map((item) => item.getAttribute("data-node-id"));
-		const frameIndex = order.indexOf("node-frame-1");
-		expect(frameIndex).toBeGreaterThanOrEqual(0);
-		expect(order[frameIndex + 1]).toBe("node-image-1");
+		const boardIndex = order.indexOf("node-board-1");
+		expect(boardIndex).toBeGreaterThanOrEqual(0);
+		expect(order[boardIndex + 1]).toBe("node-image-1");
 
-		const frameItem = screen.getByTestId(
-			"canvas-sidebar-node-item-node-frame-1",
+		const boardItem = screen.getByTestId(
+			"canvas-sidebar-node-item-node-board-1",
 		);
 		const childItem = screen.getByTestId(
 			"canvas-sidebar-node-item-node-image-1",
 		);
-		const frameGroup = screen.getByTestId(
-			"canvas-sidebar-node-group-node-frame-1",
+		const boardGroup = screen.getByTestId(
+			"canvas-sidebar-node-group-node-board-1",
 		);
-		expect(frameGroup.contains(frameItem)).toBe(true);
-		expect(frameGroup.contains(childItem)).toBe(true);
+		expect(boardGroup.contains(boardItem)).toBe(true);
+		expect(boardGroup.contains(childItem)).toBe(true);
 	});
 
-	it("frame 收起后不会把子节点提升到根层，且可再次展开", () => {
+	it("board 收起后不会把子节点提升到根层，且可再次展开", () => {
 		useProjectStore.setState((state) => {
 			const project = state.currentProject;
 			if (!project) return state;
@@ -1820,13 +1888,13 @@ describe("CanvasWorkspace", () => {
 						nodes: [
 							...project.canvas.nodes.map((node) =>
 								node.id === "node-image-1"
-									? { ...node, parentId: "node-frame-1" }
+									? { ...node, parentId: "node-board-1" }
 									: node,
 							),
 							{
-								id: "node-frame-1",
-								type: "frame",
-								name: "Frame 1",
+								id: "node-board-1",
+								type: "board",
+								name: "Board 1",
 								x: 120,
 								y: 80,
 								width: 860,
@@ -1845,30 +1913,30 @@ describe("CanvasWorkspace", () => {
 		});
 		render(<CanvasWorkspace />);
 
-		const frameToggle = screen.getByTestId(
-			"canvas-sidebar-node-toggle-node-frame-1",
+		const boardToggle = screen.getByTestId(
+			"canvas-sidebar-node-toggle-node-board-1",
 		);
-		fireEvent.pointerDown(frameToggle, createPointerPatch(16, 16));
+		fireEvent.pointerDown(boardToggle, createPointerPatch(16, 16));
 
 		expect(
 			screen.queryByTestId("canvas-sidebar-node-item-node-image-1"),
 		).toBeNull();
 		expect(
-			screen.getByTestId("canvas-sidebar-node-toggle-node-frame-1"),
+			screen.getByTestId("canvas-sidebar-node-toggle-node-board-1"),
 		).toBeTruthy();
 
 		fireEvent.pointerDown(
-			screen.getByTestId("canvas-sidebar-node-toggle-node-frame-1"),
+			screen.getByTestId("canvas-sidebar-node-toggle-node-board-1"),
 			createPointerPatch(16, 16),
 		);
 
 		const childItem = screen.getByTestId(
 			"canvas-sidebar-node-item-node-image-1",
 		);
-		const frameGroup = screen.getByTestId(
-			"canvas-sidebar-node-group-node-frame-1",
+		const boardGroup = screen.getByTestId(
+			"canvas-sidebar-node-group-node-board-1",
 		);
-		expect(frameGroup.contains(childItem)).toBe(true);
+		expect(boardGroup.contains(childItem)).toBe(true);
 	});
 
 	it("侧边栏列表不使用 gap 间距，节点行使用 padding 作为插入通道", () => {
@@ -1898,20 +1966,20 @@ describe("CanvasWorkspace", () => {
 		expect(secondProps?.height).toBe(800);
 	});
 
-	it("右侧面板展示 active node 元数据并在无 active 时隐藏", () => {
+	it("active scene node 会渲染 scene metadata inspector 并在无 active 时隐藏", () => {
 		render(<CanvasWorkspace />);
-		const panel = screen.getByTestId("canvas-active-node-meta-panel");
+		const panel = screen.getByTestId("canvas-scene-node-meta-panel");
 		expect(panel.textContent).toContain("Scene 1");
-		expect(panel.textContent).toContain("node-scene-1");
+		expect(panel.textContent).toContain("scene-1");
 
 		clickCanvasAt(1120, 700);
 		expect(
 			useProjectStore.getState().currentProject?.ui.activeNodeId,
 		).toBeNull();
-		expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
+		expect(screen.queryByTestId("canvas-scene-node-meta-panel")).toBeNull();
 	});
 
-	it("timeline element 选中时右侧优先展示 element 属性面板并可回退 Active Node", async () => {
+	it("scene inspector 会根据当前 scene runtime 的 element 选中切换面板", async () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const selectedElement = createTimelineSelectionElement();
 		runtime.getActiveEditTimelineRuntime()?.timelineStore.setState({
@@ -1926,7 +1994,7 @@ describe("CanvasWorkspace", () => {
 		expect(
 			screen.getByTestId("canvas-timeline-element-settings-panel"),
 		).toBeTruthy();
-		expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
+		expect(screen.queryByTestId("canvas-scene-node-meta-panel")).toBeNull();
 
 		act(() => {
 			runtime
@@ -1940,10 +2008,10 @@ describe("CanvasWorkspace", () => {
 				screen.queryByTestId("canvas-timeline-element-settings-panel"),
 			).toBeNull();
 		});
-		expect(screen.getByTestId("canvas-active-node-meta-panel")).toBeTruthy();
+		expect(screen.getByTestId("canvas-scene-node-meta-panel")).toBeTruthy();
 	});
 
-	it("无 active node 时只要 timeline element 仍被选中，右侧属性面板仍显示", async () => {
+	it("无 active node 时即使 scene runtime 仍有选中 element 也会隐藏右侧面板", async () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const selectedElement = createTimelineSelectionElement();
 		runtime.getActiveEditTimelineRuntime()?.timelineStore.setState({
@@ -1959,26 +2027,27 @@ describe("CanvasWorkspace", () => {
 			useProjectStore.getState().setActiveNode(null);
 		});
 
-		expect(
-			screen.getByTestId("canvas-timeline-element-settings-panel"),
-		).toBeTruthy();
-
-		act(() => {
-			runtime
-				.getActiveEditTimelineRuntime()
-				?.timelineStore.getState()
-				.setSelectedIds([], null);
-		});
-
 		await waitFor(() => {
 			expect(screen.queryByTestId("canvas-overlay-right-panel")).toBeNull();
 		});
 	});
 
+	it("非 scene active node 会继续 fallback 到 debug meta panel", () => {
+		render(<CanvasWorkspace />);
+
+		act(() => {
+			useProjectStore.getState().setActiveNode("node-video-1");
+		});
+
+		const panel = screen.getByTestId("canvas-active-node-meta-panel");
+		expect(panel.textContent).toContain("Video 1");
+		expect(screen.queryByTestId("canvas-scene-node-meta-panel")).toBeNull();
+	});
+
 	it("在右侧面板滚轮不会触发画布 camera 平移", () => {
 		render(<CanvasWorkspace />);
 		const before = useCanvasCameraStore.getState().camera;
-		const panel = screen.getByTestId("canvas-active-node-meta-panel");
+		const panel = screen.getByTestId("canvas-scene-node-meta-panel");
 		fireEvent.wheel(panel, {
 			deltaY: 120,
 		});
@@ -2067,7 +2136,7 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(80, 80);
 		await waitFor(() => {
-			expect(screen.getByTestId("canvas-active-node-meta-panel")).toBeTruthy();
+			expect(screen.getByTestId("canvas-scene-node-meta-panel")).toBeTruthy();
 		});
 		await waitFor(() => {
 			const zoom = useCanvasCameraStore.getState().camera.zoom ?? 1;
@@ -2083,7 +2152,7 @@ describe("CanvasWorkspace", () => {
 			useProjectStore.getState().setActiveNode(null);
 		});
 		await waitFor(() => {
-			expect(screen.queryByTestId("canvas-active-node-meta-panel")).toBeNull();
+			expect(screen.queryByTestId("canvas-scene-node-meta-panel")).toBeNull();
 		});
 		await waitFor(() => {
 			const zoom = useCanvasCameraStore.getState().camera.zoom ?? 0;
@@ -2187,7 +2256,9 @@ describe("CanvasWorkspace", () => {
 		expect(screen.getByTestId("node-toolbar-video")).toBeTruthy();
 		const afterOverlay = screen
 			.getByTestId("node-toolbar-video")
-			.closest('[data-testid="canvas-active-node-overlay"]');
+			.closest(
+				'[data-testid="canvas-active-node-overlay"]',
+			) as HTMLElement | null;
 		expect(afterOverlay).toBeTruthy();
 		expect(afterOverlay?.style.left).toBe("240px");
 		expect(afterOverlay?.style.top).toBe("120px");
@@ -2359,20 +2430,14 @@ describe("CanvasWorkspace", () => {
 			const past = useStudioHistoryStore.getState().past;
 			expect(past.at(-1)?.kind).toBe("canvas.node-create.batch");
 		} finally {
-			if (typeof originalElementFromPoint === "function") {
-				Object.defineProperty(document, "elementFromPoint", {
-					configurable: true,
-					value: originalElementFromPoint,
-				});
-			} else {
-				delete (
-					document as Document & {
-						elementFromPoint?:
-							| ((x: number, y: number) => Element | null)
-							| undefined;
-					}
-				).elementFromPoint;
-			}
+				if (typeof originalElementFromPoint === "function") {
+					Object.defineProperty(document, "elementFromPoint", {
+						configurable: true,
+						value: originalElementFromPoint,
+					});
+				} else {
+					Reflect.deleteProperty(document, "elementFromPoint");
+				}
 		}
 	});
 
@@ -2456,20 +2521,14 @@ describe("CanvasWorkspace", () => {
 			expect(afterNodeCount).toBe(beforeNodeCount);
 			timelineZone.remove();
 		} finally {
-			if (typeof originalElementFromPoint === "function") {
-				Object.defineProperty(document, "elementFromPoint", {
-					configurable: true,
-					value: originalElementFromPoint,
-				});
-			} else {
-				delete (
-					document as Document & {
-						elementFromPoint?:
-							| ((x: number, y: number) => Element | null)
-							| undefined;
-					}
-				).elementFromPoint;
-			}
+				if (typeof originalElementFromPoint === "function") {
+					Object.defineProperty(document, "elementFromPoint", {
+						configurable: true,
+						value: originalElementFromPoint,
+					});
+				} else {
+					Reflect.deleteProperty(document, "elementFromPoint");
+				}
 		}
 	});
 
@@ -2554,20 +2613,14 @@ describe("CanvasWorkspace", () => {
 			expect(afterNodeCount).toBe(beforeNodeCount);
 			timelineEditor.remove();
 		} finally {
-			if (typeof originalElementFromPoint === "function") {
-				Object.defineProperty(document, "elementFromPoint", {
-					configurable: true,
-					value: originalElementFromPoint,
-				});
-			} else {
-				delete (
-					document as Document & {
-						elementFromPoint?:
-							| ((x: number, y: number) => Element | null)
-							| undefined;
-					}
-				).elementFromPoint;
-			}
+				if (typeof originalElementFromPoint === "function") {
+					Object.defineProperty(document, "elementFromPoint", {
+						configurable: true,
+						value: originalElementFromPoint,
+					});
+				} else {
+					Reflect.deleteProperty(document, "elementFromPoint");
+				}
 		}
 	});
 
@@ -2694,13 +2747,13 @@ describe("CanvasWorkspace", () => {
 		expect(afterCamera).toEqual(beforeCamera);
 	});
 
-	it("工具模式按钮仅启用 Move/Frame，Pan/Text 为禁用态", () => {
+	it("工具模式按钮仅启用 Move/Board，Pan/Text 为禁用态", () => {
 		render(<CanvasWorkspace />);
 		const moveButton = screen.getByTestId(
 			"canvas-tool-mode-move",
 		) as HTMLButtonElement;
-		const frameButton = screen.getByTestId(
-			"canvas-tool-mode-frame",
+		const boardButton = screen.getByTestId(
+			"canvas-tool-mode-board",
 		) as HTMLButtonElement;
 		const panButton = screen.getByTestId(
 			"canvas-tool-mode-pan",
@@ -2709,93 +2762,93 @@ describe("CanvasWorkspace", () => {
 			"canvas-tool-mode-text",
 		) as HTMLButtonElement;
 		expect(moveButton.disabled).toBe(false);
-		expect(frameButton.disabled).toBe(false);
+		expect(boardButton.disabled).toBe(false);
 		expect(panButton.disabled).toBe(true);
 		expect(textButton.disabled).toBe(true);
 		expect(moveButton.getAttribute("aria-pressed")).toBe("true");
 
-		fireEvent.click(frameButton);
+		fireEvent.click(boardButton);
 		const workspace = screen.getByTestId("canvas-workspace");
-		expect(frameButton.getAttribute("aria-pressed")).toBe("true");
+		expect(boardButton.getAttribute("aria-pressed")).toBe("true");
 		expect(workspace.style.cursor).toBe("crosshair");
 	});
 
-	it("Frame 模式下小拖拽不创建 frame 且保持当前模式", () => {
+	it("Board 模式下小拖拽不创建 board 且保持当前模式", () => {
 		render(<CanvasWorkspace />);
-		const frameButton = screen.getByTestId(
-			"canvas-tool-mode-frame",
+		const boardButton = screen.getByTestId(
+			"canvas-tool-mode-board",
 		) as HTMLButtonElement;
-		fireEvent.click(frameButton);
-		dragCreateFrameAt(100, 100, 103, 103);
+		fireEvent.click(boardButton);
+		dragCreateBoardAt(100, 100, 103, 103);
 
-		const frameNodes = (
+		const boardNodes = (
 			useProjectStore.getState().currentProject?.canvas.nodes ?? []
-		).filter((node) => node.type === "frame");
-		expect(frameNodes).toHaveLength(0);
-		expect(frameButton.getAttribute("aria-pressed")).toBe("true");
+		).filter((node) => node.type === "board");
+		expect(boardNodes).toHaveLength(0);
+		expect(boardButton.getAttribute("aria-pressed")).toBe("true");
 		expect(screen.getByTestId("canvas-workspace").style.cursor).toBe(
 			"crosshair",
 		);
 		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
 	});
 
-	it("Frame 拉框创建会自动收编并写入单条原子历史，undo/redo 一次回滚", () => {
+	it("Board 拉框创建会自动收编并写入单条原子历史，undo/redo 一次回滚", () => {
 		render(<CanvasWorkspace />);
-		const frameButton = screen.getByTestId(
-			"canvas-tool-mode-frame",
+		const boardButton = screen.getByTestId(
+			"canvas-tool-mode-board",
 		) as HTMLButtonElement;
 		const moveButton = screen.getByTestId(
 			"canvas-tool-mode-move",
 		) as HTMLButtonElement;
-		fireEvent.click(frameButton);
-		dragCreateFrameAt(220, 100, 580, 340);
+		fireEvent.click(boardButton);
+		dragCreateBoardAt(220, 100, 580, 340);
 
-		const createdFrame = useProjectStore
+		const createdBoard = useProjectStore
 			.getState()
-			.currentProject?.canvas.nodes.find((node) => node.type === "frame");
-		expect(createdFrame).toBeTruthy();
-		if (!createdFrame) return;
+			.currentProject?.canvas.nodes.find((node) => node.type === "board");
+		expect(createdBoard).toBeTruthy();
+		if (!createdBoard) return;
 		const adoptedVideoNode = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find((node) => node.id === "node-video-1");
 		expect(adoptedVideoNode).toBeTruthy();
-		expect(adoptedVideoNode?.parentId ?? null).toBe(createdFrame.id);
+		expect(adoptedVideoNode?.parentId ?? null).toBe(createdBoard.id);
 		expect(moveButton.getAttribute("aria-pressed")).toBe("true");
 		const past = useStudioHistoryStore.getState().past;
 		expect(past).toHaveLength(1);
-		expect(past[0]?.kind).toBe("canvas.frame-create");
-		if (past[0]?.kind !== "canvas.frame-create") return;
+		expect(past[0]?.kind).toBe("canvas.board-create");
+		if (past[0]?.kind !== "canvas.board-create") return;
 		expect(
 			past[0].reparentChanges.some(
 				(change) =>
 					change.nodeId === "node-video-1" &&
-					change.afterParentId === createdFrame.id,
+					change.afterParentId === createdBoard.id,
 			),
 		).toBe(true);
 
 		act(() => {
 			useStudioHistoryStore.getState().undo();
 		});
-		const frameAfterUndo = useProjectStore
+		const boardAfterUndo = useProjectStore
 			.getState()
-			.currentProject?.canvas.nodes.find((node) => node.id === createdFrame.id);
+			.currentProject?.canvas.nodes.find((node) => node.id === createdBoard.id);
 		const videoAfterUndo = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find((node) => node.id === "node-video-1");
-		expect(frameAfterUndo).toBeUndefined();
+		expect(boardAfterUndo).toBeUndefined();
 		expect(videoAfterUndo?.parentId ?? null).toBeNull();
 
 		act(() => {
 			useStudioHistoryStore.getState().redo();
 		});
-		const frameAfterRedo = useProjectStore
+		const boardAfterRedo = useProjectStore
 			.getState()
-			.currentProject?.canvas.nodes.find((node) => node.id === createdFrame.id);
+			.currentProject?.canvas.nodes.find((node) => node.id === createdBoard.id);
 		const videoAfterRedo = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find((node) => node.id === "node-video-1");
-		expect(frameAfterRedo?.type).toBe("frame");
-		expect(videoAfterRedo?.parentId ?? null).toBe(createdFrame.id);
+		expect(boardAfterRedo?.type).toBe("board");
+		expect(videoAfterRedo?.parentId ?? null).toBe(createdBoard.id);
 	});
 
 	it("双击非 focusable 节点仅调整 camera，不进入 focus", async () => {
@@ -4422,76 +4475,76 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
-	it("frame body 不参与 hover/click，label 可命中 frame", () => {
-		injectFrameHitFixture();
+	it("board body 不参与 hover/click，label 可命中 board", () => {
+		injectBoardHitFixture();
 		render(<CanvasWorkspace />);
-		const frameBodyPoint = { x: 1120, y: 240 };
-		movePointerAt(frameBodyPoint.x, frameBodyPoint.y);
+		const boardBodyPoint = { x: 1120, y: 240 };
+		movePointerAt(boardBodyPoint.x, boardBodyPoint.y);
 		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBeNull();
-		clickNodeAt(frameBodyPoint.x, frameBodyPoint.y);
+		clickNodeAt(boardBodyPoint.x, boardBodyPoint.y);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).not.toBe(
-			"node-frame-hit-1",
+			"node-board-hit-1",
 		);
-		const frameLabelPoint = resolveNodeLabelPoint("node-frame-hit-1", 24);
-		movePointerAt(frameLabelPoint.x, frameLabelPoint.y);
+		const boardLabelPoint = resolveNodeLabelPoint("node-board-hit-1", 24);
+		movePointerAt(boardLabelPoint.x, boardLabelPoint.y);
 		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBe(
-			"node-frame-hit-1",
+			"node-board-hit-1",
 		);
-		clickNodeAt(frameLabelPoint.x, frameLabelPoint.y);
+		clickNodeAt(boardLabelPoint.x, boardLabelPoint.y);
 		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
-			"node-frame-hit-1",
+			"node-board-hit-1",
 		);
 	});
 
-	it("marquee 不会选中 frame body", () => {
-		injectFrameHitFixture();
+	it("marquee 不会选中 board body", () => {
+		injectBoardHitFixture();
 		render(<CanvasWorkspace />);
 		marqueeCanvasAt(1060, 180, 1240, 340);
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).not.toContain(
-			"node-frame-hit-1",
+			"node-board-hit-1",
 		);
 	});
 
-	it("frame body 右键可打开 node menu 并同步选中 frame", async () => {
-		injectFrameHitFixture();
+	it("board body 右键可打开 node menu 并同步选中 board", async () => {
+		injectBoardHitFixture();
 		render(<CanvasWorkspace />);
 		rightClickNodeAt(1120, 240);
 		expect(await screen.findByRole("menuitem", { name: "复制" })).toBeTruthy();
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
-			"node-frame-hit-1",
+			"node-board-hit-1",
 		]);
 	});
 
-	it("frame body 仅在已选中后可起手拖拽", () => {
-		injectFrameHitFixture();
+	it("board body 仅在已选中后可起手拖拽", () => {
+		injectBoardHitFixture();
 		render(<CanvasWorkspace />);
-		const initialFrameNode = useProjectStore
+		const initialBoardNode = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find(
-				(node) => node.id === "node-frame-hit-1",
+				(node) => node.id === "node-board-hit-1",
 			);
-		expect(initialFrameNode?.x).toBe(1080);
-		expect(initialFrameNode?.y).toBe(200);
+		expect(initialBoardNode?.x).toBe(1080);
+		expect(initialBoardNode?.y).toBe(200);
 
 		dragNodeAt(1120, 240, 1180, 300);
-		const frameAfterUnselectedDrag = useProjectStore
+		const boardAfterUnselectedDrag = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find(
-				(node) => node.id === "node-frame-hit-1",
+				(node) => node.id === "node-board-hit-1",
 			);
-		expect(frameAfterUnselectedDrag?.x).toBe(1080);
-		expect(frameAfterUnselectedDrag?.y).toBe(200);
+		expect(boardAfterUnselectedDrag?.x).toBe(1080);
+		expect(boardAfterUnselectedDrag?.y).toBe(200);
 
-		const frameLabelPoint = resolveNodeLabelPoint("node-frame-hit-1", 24);
-		clickNodeAt(frameLabelPoint.x, frameLabelPoint.y);
+		const boardLabelPoint = resolveNodeLabelPoint("node-board-hit-1", 24);
+		clickNodeAt(boardLabelPoint.x, boardLabelPoint.y);
 		dragNodeAt(1120, 240, 1180, 300);
-		const frameAfterSelectedDrag = useProjectStore
+		const boardAfterSelectedDrag = useProjectStore
 			.getState()
 			.currentProject?.canvas.nodes.find(
-				(node) => node.id === "node-frame-hit-1",
+				(node) => node.id === "node-board-hit-1",
 			);
-		expect(frameAfterSelectedDrag?.x).toBe(1140);
-		expect(frameAfterSelectedDrag?.y).toBe(260);
+		expect(boardAfterSelectedDrag?.x).toBe(1140);
+		expect(boardAfterSelectedDrag?.y).toBe(260);
 	});
 
 	it("Shift 点击可多选和反选，主选中随最后一个选中节点切换", () => {
@@ -4836,20 +4889,14 @@ describe("CanvasWorkspace", () => {
 			expect(past).toHaveLength(1);
 			expect(past[0]?.kind).toBe("canvas.node-layout");
 		} finally {
-			if (typeof originalElementFromPoint === "function") {
-				Object.defineProperty(document, "elementFromPoint", {
-					configurable: true,
-					value: originalElementFromPoint,
-				});
-			} else {
-				delete (
-					document as Document & {
-						elementFromPoint?:
-							| ((x: number, y: number) => Element | null)
-							| undefined;
-					}
-				).elementFromPoint;
-			}
+				if (typeof originalElementFromPoint === "function") {
+					Object.defineProperty(document, "elementFromPoint", {
+						configurable: true,
+						value: originalElementFromPoint,
+					});
+				} else {
+					Reflect.deleteProperty(document, "elementFromPoint");
+				}
 			removeDropZone();
 		}
 	});

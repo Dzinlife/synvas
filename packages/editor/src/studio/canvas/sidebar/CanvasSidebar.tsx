@@ -276,7 +276,7 @@ const resolveDropIntentFromLayouts = ({
 		0,
 		Math.min(1, relativeY / Math.max(targetLayout.rect.height, 1)),
 	);
-	if (targetNode.type === "frame") {
+	if (targetNode.type === "board") {
 		const beforeBoundaryY = targetLayout.rect.height * ROW_INSIDE_TOP_RATIO;
 		const afterBoundaryY = targetLayout.rect.height * ROW_INSIDE_BOTTOM_RATIO;
 		const canKeepBeforeOrInside =
@@ -343,13 +343,13 @@ const resolveParentId = (
 	const rawParentId = node.parentId ?? null;
 	if (!rawParentId) return null;
 	const parent = nodeById.get(rawParentId);
-	if (!parent || parent.type !== "frame") return null;
+	if (!parent || parent.type !== "board") return null;
 	return parent.id;
 };
 
 const buildNestedNodeItems = (
 	nodes: CanvasNode[],
-	collapsedFrameIds: Set<string>,
+	collapsedBoardIds: Set<string>,
 ): NestedNodeItem[] => {
 	if (nodes.length === 0) return [];
 	const layerTreeOrder = buildLayerTreeOrder(nodes);
@@ -387,12 +387,12 @@ const buildNestedNodeItems = (
 		for (const childNode of childNodes) {
 			if (visited.has(childNode.id)) continue;
 			visited.add(childNode.id);
-			const isCollapsed = collapsedFrameIds.has(childNode.id);
+			const isCollapsed = collapsedBoardIds.has(childNode.id);
 			const hasChildren =
-				childNode.type === "frame" &&
+				childNode.type === "board" &&
 				(childrenByParentId.get(childNode.id)?.length ?? 0) > 0;
 			const nextChildren =
-				childNode.type === "frame" && hasChildren ? visit(childNode.id) : [];
+				childNode.type === "board" && hasChildren ? visit(childNode.id) : [];
 			const nestedChildren = !isCollapsed ? nextChildren : [];
 			children.push({
 				node: childNode,
@@ -406,12 +406,12 @@ const buildNestedNodeItems = (
 	items.push(...visit(null));
 	for (const node of [...nodes].sort(compareNodeTreePaintOrder).reverse()) {
 		if (visited.has(node.id)) continue;
-		const isCollapsed = collapsedFrameIds.has(node.id);
+		const isCollapsed = collapsedBoardIds.has(node.id);
 		const hasChildren =
-			node.type === "frame" &&
+			node.type === "board" &&
 			(childrenByParentId.get(node.id)?.length ?? 0) > 0;
 		const nextChildren =
-			node.type === "frame" && hasChildren ? visit(node.id) : [];
+			node.type === "board" && hasChildren ? visit(node.id) : [];
 		items.push({
 			node,
 			children: !isCollapsed ? nextChildren : [],
@@ -592,7 +592,7 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 						"group-hover:bg-white/5",
 					disabled && "opacity-60",
 					showInsideIndicator &&
-						item.node.type === "frame" &&
+						item.node.type === "board" &&
 						"ring-1 ring-white ring-inset rounded-none",
 				)}
 				style={{
@@ -606,7 +606,7 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 							item.node.type === "scene" && "text-lime-300",
 						)}
 					>
-						{item.node.type === "frame" && item.hasChildren ? (
+						{item.node.type === "board" && item.hasChildren ? (
 							<span
 								data-node-toggle="true"
 								data-testid={`canvas-sidebar-node-toggle-${item.node.id}`}
@@ -666,7 +666,7 @@ const NodeList: React.FC<NodeListProps> = ({
 	const autoExpandTimerRef = useRef<number | null>(null);
 	const pointerRef = useRef<{ x: number; y: number } | null>(null);
 	const dragStateRef = useRef<NodeListDragState | null>(null);
-	const [collapsedFrameIds, setCollapsedFrameIds] = useState<Set<string>>(
+	const [collapsedBoardIds, setCollapsedBoardIds] = useState<Set<string>>(
 		new Set(),
 	);
 	const [dragState, setDragState] = useState<NodeListDragState | null>(null);
@@ -682,29 +682,29 @@ const NodeList: React.FC<NodeListProps> = ({
 	}, [selectedNodeIds]);
 
 	const nestedItems = useMemo(() => {
-		return buildNestedNodeItems(nodes, collapsedFrameIds);
-	}, [collapsedFrameIds, nodes]);
+		return buildNestedNodeItems(nodes, collapsedBoardIds);
+	}, [collapsedBoardIds, nodes]);
 
 	useEffect(() => {
 		dragStateRef.current = dragState;
 	}, [dragState]);
 
 	useEffect(() => {
-		if (collapsedFrameIds.size === 0) return;
-		const frameIdSet = new Set(
-			nodes.filter((node) => node.type === "frame").map((node) => node.id),
+		if (collapsedBoardIds.size === 0) return;
+		const boardIdSet = new Set(
+			nodes.filter((node) => node.type === "board").map((node) => node.id),
 		);
-		setCollapsedFrameIds((prev) => {
+		setCollapsedBoardIds((prev) => {
 			const next = new Set<string>();
 			for (const nodeId of prev) {
-				if (frameIdSet.has(nodeId)) {
+				if (boardIdSet.has(nodeId)) {
 					next.add(nodeId);
 				}
 			}
 			if (next.size === prev.size) return prev;
 			return next;
 		});
-	}, [collapsedFrameIds.size, nodes]);
+	}, [collapsedBoardIds.size, nodes]);
 
 	const clearAutoExpandTimer = useCallback(() => {
 		if (autoExpandTimerRef.current === null) return;
@@ -786,7 +786,7 @@ const NodeList: React.FC<NodeListProps> = ({
 	}, [dragState, resolveGlobalDropLineTop]);
 
 	const toggleCollapse = useCallback((nodeId: string) => {
-		setCollapsedFrameIds((prev) => {
+		setCollapsedBoardIds((prev) => {
 			const next = new Set(prev);
 			if (next.has(nodeId)) {
 				next.delete(nodeId);
@@ -832,10 +832,10 @@ const NodeList: React.FC<NodeListProps> = ({
 			if (
 				nextIntent?.targetNodeId &&
 				nextIntent.position === "inside" &&
-				collapsedFrameIds.has(nextIntent.targetNodeId)
+				collapsedBoardIds.has(nextIntent.targetNodeId)
 			) {
 				autoExpandTimerRef.current = window.setTimeout(() => {
-					setCollapsedFrameIds((prev) => {
+					setCollapsedBoardIds((prev) => {
 						if (!prev.has(nextIntent.targetNodeId as string)) return prev;
 						const next = new Set(prev);
 						next.delete(nextIntent.targetNodeId as string);
@@ -844,7 +844,7 @@ const NodeList: React.FC<NodeListProps> = ({
 				}, AUTO_EXPAND_DELAY_MS);
 			}
 		},
-		[clearAutoExpandTimer, collapsedFrameIds],
+		[clearAutoExpandTimer, collapsedBoardIds],
 	);
 
 	const clearDragState = useCallback(() => {
@@ -940,7 +940,7 @@ const NodeList: React.FC<NodeListProps> = ({
 		depth: number,
 	): React.ReactNode => {
 		const isSelected = selectedNodeIdSet.has(item.node.id);
-		const highlightFrameGroup = item.node.type === "frame" && isSelected;
+		const highlightBoardGroup = item.node.type === "board" && isSelected;
 		return (
 			<div
 				key={item.node.id}
@@ -949,7 +949,7 @@ const NodeList: React.FC<NodeListProps> = ({
 			>
 				<div
 					className={cn(
-						highlightFrameGroup &&
+						highlightBoardGroup &&
 							"absolute inset-0 inset-y-1 rounded-md bg-mauve-500/10",
 					)}
 				/>

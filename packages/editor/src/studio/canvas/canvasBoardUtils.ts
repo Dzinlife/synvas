@@ -13,10 +13,11 @@ const resolveNodeArea = (node: CanvasNode): number => {
 	return Math.max(0, Math.abs(node.width) * Math.abs(node.height));
 };
 
-const compareInnermostFrame = (left: CanvasNode, right: CanvasNode): number => {
+const compareInnermostBoard = (left: CanvasNode, right: CanvasNode): number => {
 	const areaDelta = resolveNodeArea(left) - resolveNodeArea(right);
 	if (areaDelta !== 0) return areaDelta;
-	if (left.siblingOrder !== right.siblingOrder) return right.siblingOrder - left.siblingOrder;
+	if (left.siblingOrder !== right.siblingOrder)
+		return right.siblingOrder - left.siblingOrder;
 	return right.id.localeCompare(left.id);
 };
 
@@ -40,7 +41,9 @@ export const resolveCanvasWorldRectFromPoints = (
 	};
 };
 
-export const resolveCanvasNodeWorldRect = (node: CanvasNode): CanvasWorldRect => {
+export const resolveCanvasNodeWorldRect = (
+	node: CanvasNode,
+): CanvasWorldRect => {
 	return resolveCanvasWorldRectFromPoints(
 		node.x,
 		node.y,
@@ -108,7 +111,7 @@ export const expandCanvasNodeIdsWithDescendants = (
 	return [...expanded];
 };
 
-export const resolveInnermostContainingFrameId = (
+export const resolveInnermostContainingBoardId = (
 	nodes: CanvasNode[],
 	targetRect: CanvasWorldRect,
 	options?: {
@@ -117,7 +120,7 @@ export const resolveInnermostContainingFrameId = (
 ): string | null => {
 	const excludeNodeIds = options?.excludeNodeIds;
 	const candidates = nodes
-		.filter((node) => node.type === "frame")
+		.filter((node) => node.type === "board")
 		.filter((node) => !excludeNodeIds?.has(node.id))
 		.filter((node) => {
 			return isCanvasWorldRectFullyContained(
@@ -125,6 +128,6 @@ export const resolveInnermostContainingFrameId = (
 				resolveCanvasNodeWorldRect(node),
 			);
 		})
-		.sort(compareInnermostFrame);
+		.sort(compareInnermostBoard);
 	return candidates[0]?.id ?? null;
 };

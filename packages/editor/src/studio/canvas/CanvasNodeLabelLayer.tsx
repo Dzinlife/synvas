@@ -93,7 +93,7 @@ interface CanvasNodeLabelHitTranslate {
 export interface CanvasNodeLabelHitEntry {
 	nodeId: string;
 	siblingOrder: number;
-	isFrame: boolean;
+	isBoard: boolean;
 	rect: CanvasNodeLabelHitRect;
 	cameraSnapshot: CanvasCameraState;
 }
@@ -243,7 +243,9 @@ const resolveLabelPanCompensation = (
 	};
 };
 
-const resolveCanvasNodeLabelTextColor = (nodeType: CanvasNode["type"]): string => {
+const resolveCanvasNodeLabelTextColor = (
+	nodeType: CanvasNode["type"],
+): string => {
 	if (nodeType === "scene") return LABEL_SCENE_TEXT_COLOR;
 	return LABEL_TEXT_COLOR;
 };
@@ -749,7 +751,7 @@ export const CanvasNodeLabelLayer = ({
 				nextLabelHitEntries.push({
 					nodeId: candidate.nodeId,
 					siblingOrder: candidate.node.siblingOrder,
-					isFrame: candidate.node.type === "frame",
+					isBoard: candidate.node.type === "board",
 					rect: {
 						x: labelRect.x,
 						y: labelRect.y,

@@ -1,6 +1,10 @@
 import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
 import type { TimelineElement, TrackRole } from "core/timeline-system/types";
-import type { CanvasNode, SceneDocument, SceneNode } from "@/studio/project/types";
+import type {
+	CanvasNode,
+	SceneDocument,
+	SceneNode,
+} from "@/studio/project/types";
 import type React from "react";
 import {
 	startTransition,
@@ -101,8 +105,8 @@ import {
 	isCanvasWorldRectFullyContained,
 	resolveCanvasNodeWorldRect,
 	resolveCanvasWorldRectFromPoints,
-	resolveInnermostContainingFrameId,
-} from "./canvasFrameUtils";
+	resolveInnermostContainingBoardId,
+} from "./canvasBoardUtils";
 import {
 	CANVAS_OVERLAY_GAP_PX,
 	CANVAS_OVERLAY_OUTER_PADDING_PX,
@@ -247,7 +251,7 @@ interface CanvasMarqueeSession {
 	activated: boolean;
 }
 
-interface FrameCreateSession {
+interface BoardCreateSession {
 	startWorldX: number;
 	startWorldY: number;
 	startLocalX: number;
@@ -314,7 +318,7 @@ interface PendingCanvasClickSuppression {
 interface CanvasBasePointerSession {
 	pointerId: number;
 	pointerType: string;
-	gesture: "tap" | "node-drag" | "selection-drag" | "marquee" | "frame-create";
+	gesture: "tap" | "node-drag" | "selection-drag" | "marquee" | "board-create";
 	startClientX: number;
 	startClientY: number;
 	startNodeId: string | null;
@@ -373,7 +377,7 @@ const DOUBLE_TAP_MAX_DISTANCE_PX = 24;
 const TAP_MOVE_THRESHOLD_PX = 3;
 const FOCUS_EXIT_MIN_ZOOM_RATIO = 0.5;
 const FOCUS_TILE_LOD_TRANSITION: TileLodTransition = { mode: "freeze" };
-const FRAME_CREATE_MIN_SIZE_PX = 6;
+const BOARD_CREATE_MIN_SIZE_PX = 6;
 const SKIA_RESOURCE_TRACKER_LOG_TAG = "[skia-resource-tracker]";
 const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
 	import.meta.env.DEV &&
@@ -519,16 +523,16 @@ const isNodeIntersectRect = (
 	);
 };
 
-type CanvasFrameBodyHitMode = "include" | "exclude" | "selected-only";
+type CanvasBoardBodyHitMode = "include" | "exclude" | "selected-only";
 
-const canFrameBodyReceivePointHit = (
-	frameNodeId: string,
-	frameBodyHitMode: CanvasFrameBodyHitMode,
+const canBoardBodyReceivePointHit = (
+	boardNodeId: string,
+	boardBodyHitMode: CanvasBoardBodyHitMode,
 	selectedNodeIds: string[],
 ): boolean => {
-	if (frameBodyHitMode === "include") return true;
-	if (frameBodyHitMode === "exclude") return false;
-	return selectedNodeIds.includes(frameNodeId);
+	if (boardBodyHitMode === "include") return true;
+	if (boardBodyHitMode === "exclude") return false;
+	return selectedNodeIds.includes(boardNodeId);
 };
 
 const resolveTopHitNodeByLinearScan = (
@@ -537,7 +541,7 @@ const resolveTopHitNodeByLinearScan = (
 	worldY: number,
 	isCanvasInteractionLocked: boolean,
 	focusedNodeId: string | null,
-	frameBodyHitMode: CanvasFrameBodyHitMode,
+	boardBodyHitMode: CanvasBoardBodyHitMode,
 	selectedNodeIds: string[],
 ): CanvasNode | null => {
 	for (let index = nodes.length - 1; index >= 0; index -= 1) {
@@ -547,8 +551,8 @@ const resolveTopHitNodeByLinearScan = (
 			!isCanvasInteractionLocked || node.id === focusedNodeId;
 		if (!canInteractNode) continue;
 		if (
-			node.type === "frame" &&
-			!canFrameBodyReceivePointHit(node.id, frameBodyHitMode, selectedNodeIds)
+			node.type === "board" &&
+			!canBoardBodyReceivePointHit(node.id, boardBodyHitMode, selectedNodeIds)
 		) {
 			continue;
 		}
@@ -953,8 +957,6 @@ const CanvasWorkspace = () => {
 	const [canvasResizeCursor, setCanvasResizeCursor] = useState<
 		"nwse-resize" | "nesw-resize" | null
 	>(null);
-	const [selectedTimelineElement, setSelectedTimelineElement] =
-		useState<TimelineElement | null>(null);
 	const [marqueeRect, setMarqueeRect] = useState<CanvasMarqueeRect>({
 		visible: false,
 		x1: 0,
@@ -985,7 +987,7 @@ const CanvasWorkspace = () => {
 	const nodeResizeSessionRef = useRef<NodeResizeSession | null>(null);
 	const selectionResizeSessionRef = useRef<SelectionResizeSession | null>(null);
 	const marqueeSessionRef = useRef<CanvasMarqueeSession | null>(null);
-	const frameCreateSessionRef = useRef<FrameCreateSession | null>(null);
+	const boardCreateSessionRef = useRef<BoardCreateSession | null>(null);
 	const pendingClickSuppressionRef =
 		useRef<PendingCanvasClickSuppression | null>(null);
 	const pointerSessionRef = useRef<CanvasBasePointerSession | null>(null);
@@ -1367,10 +1369,10 @@ const CanvasWorkspace = () => {
 	);
 	const compareCanvasNodeHitPriority = useCallback(
 		(left: CanvasNode, right: CanvasNode): number => {
-			const leftIsFrame = left.type === "frame";
-			const rightIsFrame = right.type === "frame";
-			if (leftIsFrame !== rightIsFrame) {
-				return leftIsFrame ? 1 : -1;
+			const leftIsBoard = left.type === "board";
+			const rightIsBoard = right.type === "board";
+			if (leftIsBoard !== rightIsBoard) {
+				return leftIsBoard ? 1 : -1;
 			}
 			const leftIndex =
 				layerTreeOrder.hitOrderByNodeId.get(left.id) ?? Number.MAX_SAFE_INTEGER;
@@ -1490,44 +1492,6 @@ const CanvasWorkspace = () => {
 		stageSize.width,
 		compareCanvasNodePaintOrder,
 	]);
-	useEffect(() => {
-		if (!runtimeManager) {
-			setSelectedTimelineElement(null);
-			return;
-		}
-		const timelineRuntime =
-			runtimeManager.getActiveEditTimelineRuntime() ??
-			(activeSceneId
-				? runtimeManager.getTimelineRuntime(toSceneTimelineRef(activeSceneId))
-				: null);
-		if (!timelineRuntime) {
-			setSelectedTimelineElement(null);
-			return;
-		}
-		const timelineStore = timelineRuntime.timelineStore;
-		const syncSelectedTimelineElement = () => {
-			const timelineState = timelineStore.getState();
-			const primarySelectedId = timelineState.primarySelectedId;
-			if (!primarySelectedId) {
-				setSelectedTimelineElement(null);
-				return;
-			}
-			setSelectedTimelineElement(
-				timelineState.getElementById(primarySelectedId),
-			);
-		};
-		syncSelectedTimelineElement();
-		return timelineStore.subscribe(
-			(state) => [state.primarySelectedId, state.elements] as const,
-			() => {
-				syncSelectedTimelineElement();
-			},
-			{
-				equalityFn: (left, right) =>
-					left[0] === right[0] && left[1] === right[1],
-			},
-		);
-	}, [activeSceneId, runtimeManager]);
 	const selectedNodes = useMemo(() => {
 		if (!currentProject || normalizedSelectedNodeIds.length === 0) return [];
 		return normalizedSelectedNodeIds
@@ -1852,7 +1816,7 @@ const CanvasWorkspace = () => {
 		resolvedDrawerTarget?.options.defaultHeight ??
 		CANVAS_NODE_DRAWER_DEFAULT_HEIGHT;
 	const drawerVisible = Boolean(resolvedDrawerTarget);
-	const rightPanelVisible = Boolean(activeNode || selectedTimelineElement);
+	const rightPanelVisible = Boolean(activeNode);
 	const overlayLayout = useMemo(() => {
 		return resolveCanvasOverlayLayout({
 			containerWidth: stageSize.width,
@@ -1967,8 +1931,8 @@ const CanvasWorkspace = () => {
 			y2: marqueeRectRef.current.y2,
 		});
 	}, [updateMarqueeRectState]);
-	const clearFrameCreatePreview = useCallback(() => {
-		frameCreateSessionRef.current = null;
+	const clearBoardCreatePreview = useCallback(() => {
+		boardCreateSessionRef.current = null;
 		updateMarqueeRectState({
 			visible: false,
 			x1: marqueeRectRef.current.x1,
@@ -2389,10 +2353,10 @@ const CanvasWorkspace = () => {
 		(mode: CanvasToolMode) => {
 			if (!isCanvasToolModeEnabled(mode)) return;
 			if (mode === canvasToolMode) return;
-			if (pointerSessionRef.current?.gesture === "frame-create") {
+			if (pointerSessionRef.current?.gesture === "board-create") {
 				pointerSessionRef.current = null;
 			}
-			clearFrameCreatePreview();
+			clearBoardCreatePreview();
 			clearCanvasMarquee();
 			clearCanvasSnapGuides();
 			setCanvasToolMode(mode);
@@ -2401,7 +2365,7 @@ const CanvasWorkspace = () => {
 			canvasToolMode,
 			clearCanvasMarquee,
 			clearCanvasSnapGuides,
-			clearFrameCreatePreview,
+			clearBoardCreatePreview,
 		],
 	);
 
@@ -2531,7 +2495,7 @@ const CanvasWorkspace = () => {
 			localX: number;
 			localY: number;
 			liveCamera: CameraState;
-			frameBodyHitMode?: CanvasFrameBodyHitMode;
+			boardBodyHitMode?: CanvasBoardBodyHitMode;
 		}): CanvasNode | null => {
 			const {
 				worldX,
@@ -2539,7 +2503,7 @@ const CanvasWorkspace = () => {
 				localX,
 				localY,
 				liveCamera,
-				frameBodyHitMode = "include",
+				boardBodyHitMode = "include",
 			} = input;
 			const indexedHitNodes = [...spatialIndex.queryPoint(worldX, worldY)]
 				.sort(compareCanvasSpatialHitPriority)
@@ -2551,10 +2515,10 @@ const CanvasWorkspace = () => {
 						!isCanvasInteractionLocked || node.id === focusedNodeId;
 					if (!canInteractNode) return false;
 					if (
-						node.type === "frame" &&
-						!canFrameBodyReceivePointHit(
+						node.type === "board" &&
+						!canBoardBodyReceivePointHit(
 							node.id,
-							frameBodyHitMode,
+							boardBodyHitMode,
 							normalizedSelectedNodeIds,
 						)
 					) {
@@ -2571,7 +2535,7 @@ const CanvasWorkspace = () => {
 					worldY,
 					isCanvasInteractionLocked,
 					focusedNodeId,
-					frameBodyHitMode,
+					boardBodyHitMode,
 					normalizedSelectedNodeIds,
 				);
 				warnCanvasSpatialIndexMismatch(
@@ -2599,10 +2563,10 @@ const CanvasWorkspace = () => {
 				})
 				.sort(compareCanvasNodeHitPriority);
 			if (labelHitNodes.length <= 0) return indexedTopHit;
-			const topFrameLabelHitNode =
-				labelHitNodes.find((node) => node.type === "frame") ?? null;
-			if (topFrameLabelHitNode) {
-				return topFrameLabelHitNode;
+			const topBoardLabelHitNode =
+				labelHitNodes.find((node) => node.type === "board") ?? null;
+			if (topBoardLabelHitNode) {
+				return topBoardLabelHitNode;
 			}
 			// label 与 body 命中并行参与，统一按现有优先级选 top。
 			const mergedHitNodes = [...indexedHitNodes, ...labelHitNodes]
@@ -2672,14 +2636,14 @@ const CanvasWorkspace = () => {
 			for (const item of indexedItems) {
 				const node = nodeById.get(item.nodeId);
 				if (!node || node.hidden || seen.has(node.id)) continue;
-				if (node.type === "frame") continue;
+				if (node.type === "board") continue;
 				if (!isNodeIntersectRect(node, queryRect)) continue;
 				seen.add(node.id);
 				indexedNodeIds.push(node.id);
 			}
 			if (ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION) {
 				const legacyNodeIds = sortedNodes
-					.filter((node) => node.type !== "frame")
+					.filter((node) => node.type !== "board")
 					.filter((node) =>
 						isNodeIntersectRect(node, {
 							left,
@@ -2740,41 +2704,41 @@ const CanvasWorkspace = () => {
 		[],
 	);
 
-	const resolveFrameCreateReparentChanges = useCallback(
+	const resolveBoardCreateReparentChanges = useCallback(
 		(
 			nodes: CanvasNode[],
-			createdFrameId: string,
+			createdBoardId: string,
 		): Array<{
 			nodeId: string;
 			beforeParentId: string | null;
 			beforeSiblingOrder: number;
 		}> => {
-			const createdFrame = nodes.find(
-				(node) => node.id === createdFrameId && node.type === "frame",
+			const createdBoard = nodes.find(
+				(node) => node.id === createdBoardId && node.type === "board",
 			);
-			if (!createdFrame) return [];
-			const createdFrameRect = resolveCanvasNodeWorldRect(createdFrame);
+			if (!createdBoard) return [];
+			const createdBoardRect = resolveCanvasNodeWorldRect(createdBoard);
 			const reparentChanges: Array<{
 				nodeId: string;
 				beforeParentId: string | null;
 				beforeSiblingOrder: number;
 			}> = [];
 			for (const node of nodes) {
-				if (node.id === createdFrameId) continue;
+				if (node.id === createdBoardId) continue;
 				const nodeRect = resolveCanvasNodeWorldRect(node);
-				if (!isCanvasWorldRectFullyContained(nodeRect, createdFrameRect)) {
+				if (!isCanvasWorldRectFullyContained(nodeRect, createdBoardRect)) {
 					continue;
 				}
-				const targetParentId = resolveInnermostContainingFrameId(
+				const targetParentId = resolveInnermostContainingBoardId(
 					nodes,
 					nodeRect,
 					{
 						excludeNodeIds: new Set([node.id]),
 					},
 				);
-				if (targetParentId !== createdFrameId) continue;
+				if (targetParentId !== createdBoardId) continue;
 				const beforeParentId = node.parentId ?? null;
-				if (beforeParentId === createdFrameId) continue;
+				if (beforeParentId === createdBoardId) continue;
 				reparentChanges.push({
 					nodeId: node.id,
 					beforeParentId,
@@ -2786,45 +2750,45 @@ const CanvasWorkspace = () => {
 		[],
 	);
 
-	const commitFrameCreateFromSession = useCallback((): boolean => {
-		const frameSession = frameCreateSessionRef.current;
-		if (!frameSession) return false;
+	const commitBoardCreateFromSession = useCallback((): boolean => {
+		const boardSession = boardCreateSessionRef.current;
+		if (!boardSession) return false;
 		const currentZoom = getCamera().zoom;
 		const minWorldSize =
-			FRAME_CREATE_MIN_SIZE_PX / Math.max(currentZoom, CAMERA_ZOOM_EPSILON);
-		const frameRect = resolveCanvasWorldRectFromPoints(
-			frameSession.startWorldX,
-			frameSession.startWorldY,
-			frameSession.currentWorldX,
-			frameSession.currentWorldY,
+			BOARD_CREATE_MIN_SIZE_PX / Math.max(currentZoom, CAMERA_ZOOM_EPSILON);
+		const boardRect = resolveCanvasWorldRectFromPoints(
+			boardSession.startWorldX,
+			boardSession.startWorldY,
+			boardSession.currentWorldX,
+			boardSession.currentWorldY,
 		);
-		if (frameRect.width < minWorldSize || frameRect.height < minWorldSize) {
+		if (boardRect.width < minWorldSize || boardRect.height < minWorldSize) {
 			return false;
 		}
 		const latestProject = useProjectStore.getState().currentProject;
 		if (!latestProject) return false;
-		const frameParentId = resolveInnermostContainingFrameId(
+		const boardParentId = resolveInnermostContainingBoardId(
 			latestProject.canvas.nodes,
-			frameRect,
+			boardRect,
 		);
-		const frameId = createCanvasNode({
-			type: "frame",
-			x: frameRect.left,
-			y: frameRect.top,
-			width: frameRect.width,
-			height: frameRect.height,
-			parentId: frameParentId,
+		const boardId = createCanvasNode({
+			type: "board",
+			x: boardRect.left,
+			y: boardRect.top,
+			width: boardRect.width,
+			height: boardRect.height,
+			parentId: boardParentId,
 		});
 		const projectAfterCreate = useProjectStore.getState().currentProject;
 		if (!projectAfterCreate) return false;
-		const createdFrame =
+		const createdBoard =
 			projectAfterCreate.canvas.nodes.find(
-				(node) => node.id === frameId && node.type === "frame",
+				(node) => node.id === boardId && node.type === "board",
 			) ?? null;
-		if (!createdFrame) return false;
-		const reparentChanges = resolveFrameCreateReparentChanges(
+		if (!createdBoard) return false;
+		const reparentChanges = resolveBoardCreateReparentChanges(
 			projectAfterCreate.canvas.nodes,
-			createdFrame.id,
+			createdBoard.id,
 		);
 		let finalizedReparentChanges: Array<{
 			nodeId: string;
@@ -2856,13 +2820,13 @@ const CanvasWorkspace = () => {
 				if (!currentNode) continue;
 				const siblingInsertIndex = resolveLayerSiblingCount(
 					workingNodes,
-					createdFrame.id,
+					createdBoard.id,
 					[nodeId],
 				);
 				const { siblingOrder, rebalancePatches } = allocateInsertSiblingOrder(
 					workingNodes,
 					{
-						parentId: createdFrame.id,
+						parentId: createdBoard.id,
 						index: siblingInsertIndex,
 						movingNodeIds: [nodeId],
 					},
@@ -2892,12 +2856,12 @@ const CanvasWorkspace = () => {
 					const nextPatch = layoutPatchByNodeId.get(node.id) ?? {};
 					layoutPatchByNodeId.set(node.id, {
 						...nextPatch,
-						parentId: createdFrame.id,
+						parentId: createdBoard.id,
 						siblingOrder,
 					});
 					return {
 						...node,
-						parentId: createdFrame.id,
+						parentId: createdBoard.id,
 						siblingOrder,
 					};
 				});
@@ -2911,24 +2875,24 @@ const CanvasWorkspace = () => {
 					Number.isFinite(siblingOrder),
 				);
 			if (childZIndices.length > 0) {
-				const frameNode = workingNodes.find(
-					(node) => node.id === createdFrame.id,
+				const boardNode = workingNodes.find(
+					(node) => node.id === createdBoard.id,
 				);
-				const frameZIndex =
-					frameNode?.siblingOrder ?? createdFrame.siblingOrder;
-				const nextFrameZIndex =
+				const boardZIndex =
+					boardNode?.siblingOrder ?? createdBoard.siblingOrder;
+				const nextBoardZIndex =
 					Math.min(...childZIndices) - LAYER_ORDER_REBALANCE_STEP;
-				if (nextFrameZIndex !== frameZIndex) {
+				if (nextBoardZIndex !== boardZIndex) {
 					workingNodes = workingNodes.map((node) => {
-						if (node.id !== createdFrame.id) return node;
+						if (node.id !== createdBoard.id) return node;
 						const nextPatch = layoutPatchByNodeId.get(node.id) ?? {};
 						layoutPatchByNodeId.set(node.id, {
 							...nextPatch,
-							siblingOrder: nextFrameZIndex,
+							siblingOrder: nextBoardZIndex,
 						});
 						return {
 							...node,
-							siblingOrder: nextFrameZIndex,
+							siblingOrder: nextBoardZIndex,
 						};
 					});
 				}
@@ -2976,24 +2940,24 @@ const CanvasWorkspace = () => {
 		}
 		const projectAfterReparent = useProjectStore.getState().currentProject;
 		if (!projectAfterReparent) return false;
-		const historyFrameNode =
+		const historyBoardNode =
 			projectAfterReparent.canvas.nodes.find(
-				(node) => node.id === createdFrame.id && node.type === "frame",
-			) ?? createdFrame;
+				(node) => node.id === createdBoard.id && node.type === "board",
+			) ?? createdBoard;
 		pushHistory({
-			kind: "canvas.frame-create",
-			createdFrame: historyFrameNode,
+			kind: "canvas.board-create",
+			createdBoard: historyBoardNode,
 			reparentChanges: finalizedReparentChanges,
 			focusNodeId: projectAfterReparent.ui.focusedNodeId,
 		});
-		commitSelectedNodeIds([historyFrameNode.id]);
+		commitSelectedNodeIds([historyBoardNode.id]);
 		return true;
 	}, [
 		commitSelectedNodeIds,
 		createCanvasNode,
 		getCamera,
 		pushHistory,
-		resolveFrameCreateReparentChanges,
+		resolveBoardCreateReparentChanges,
 		updateCanvasNodeLayoutBatch,
 	]);
 
@@ -3009,7 +2973,7 @@ const CanvasWorkspace = () => {
 		[],
 	);
 
-	const resolveFrameReparentChangesAfterDrag = useCallback(
+	const resolveBoardReparentChangesAfterDrag = useCallback(
 		(nodes: CanvasNode[], movedNodeIds: string[]) => {
 			const rootNodeIds = resolveRootNodeIdsFromMovedSet(nodes, movedNodeIds);
 			if (rootNodeIds.length === 0)
@@ -3044,7 +3008,7 @@ const CanvasWorkspace = () => {
 					rootNodeId,
 					...descendantNodeIds,
 				]);
-				const nextParentId = resolveInnermostContainingFrameId(
+				const nextParentId = resolveInnermostContainingBoardId(
 					workingNodes,
 					nodeRect,
 					{
@@ -4363,7 +4327,7 @@ const CanvasWorkspace = () => {
 		}) => {
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return false;
-			const expandableFrameNodeIds = input.pendingSelectedNodeIds
+			const expandableBoardNodeIds = input.pendingSelectedNodeIds
 				.map((nodeId) => {
 					return (
 						latestProject.canvas.nodes.find((node) => node.id === nodeId) ??
@@ -4371,18 +4335,18 @@ const CanvasWorkspace = () => {
 					);
 				})
 				.filter((node): node is CanvasNode => Boolean(node))
-				.filter((node) => node.type === "frame" && !node.locked)
+				.filter((node) => node.type === "board" && !node.locked)
 				.map((node) => node.id);
 			const expandedNodeIds = new Set([
 				...input.pendingSelectedNodeIds,
 				...expandCanvasNodeIdsWithDescendants(
 					latestProject.canvas.nodes,
-					expandableFrameNodeIds,
+					expandableBoardNodeIds,
 				),
 			]);
 			const forcedNodeIds = collectCanvasDescendantNodeIds(
 				latestProject.canvas.nodes,
-				expandableFrameNodeIds,
+				expandableBoardNodeIds,
 			);
 			const dragNodes = [...expandedNodeIds]
 				.map(
@@ -4664,7 +4628,7 @@ const CanvasWorkspace = () => {
 				dragSession.copyEntries.length > 0
 					? dragSession.copyEntries.map((entry) => entry.node.id)
 					: dragSession.dragNodeIds;
-			const reparentChanges = resolveFrameReparentChangesAfterDrag(
+			const reparentChanges = resolveBoardReparentChangesAfterDrag(
 				latestProject.canvas.nodes,
 				movedTargetNodeIds,
 			);
@@ -4753,7 +4717,7 @@ const CanvasWorkspace = () => {
 			commitCanvasTimelineDrop,
 			pushHistory,
 			removeCanvasGraphBatch,
-			resolveFrameReparentChangesAfterDrag,
+			resolveBoardReparentChangesAfterDrag,
 			resetCanvasDragSession,
 			setPendingClickSuppression,
 			stopCanvasTimelineDropPreview,
@@ -5232,7 +5196,7 @@ const CanvasWorkspace = () => {
 						? resolveLayerSiblingCount(allNodes, null, movingNodeIdSet)
 						: 0;
 			} else if (request.position === "inside") {
-				if (targetNode.type !== "frame") return;
+				if (targetNode.type !== "board") return;
 				destinationParentId = targetNode.id;
 				destinationIndex = resolveLayerSiblingCount(
 					allNodes,
@@ -5624,7 +5588,7 @@ const CanvasWorkspace = () => {
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
-				frameBodyHitMode: "exclude",
+				boardBodyHitMode: "exclude",
 			});
 			const keepMultiSelectionBounds = Boolean(
 				selectedBounds &&
@@ -5707,7 +5671,7 @@ const CanvasWorkspace = () => {
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
-				frameBodyHitMode: "exclude",
+				boardBodyHitMode: "exclude",
 			});
 			commitHoveredNodeId(node?.id ?? null);
 		},
@@ -5735,7 +5699,7 @@ const CanvasWorkspace = () => {
 			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
 			if (pointerSessionRef.current) return;
-			if (canvasToolMode === "frame") {
+			if (canvasToolMode === "board") {
 				if (isCanvasInteractionLocked) {
 					clearHoveredNode();
 					commitCanvasResizeCursor(null);
@@ -5751,7 +5715,7 @@ const CanvasWorkspace = () => {
 				commitCanvasResizeCursor(null);
 				clearPendingClickSuppression();
 				const local = resolveLocalPoint(event.clientX, event.clientY);
-				frameCreateSessionRef.current = {
+				boardCreateSessionRef.current = {
 					startWorldX: world.x,
 					startWorldY: world.y,
 					startLocalX: local.x,
@@ -5772,7 +5736,7 @@ const CanvasWorkspace = () => {
 				pointerSessionRef.current = {
 					pointerId: event.pointerId,
 					pointerType: event.pointerType || "mouse",
-					gesture: "frame-create",
+					gesture: "board-create",
 					startClientX: event.clientX,
 					startClientY: event.clientY,
 					startNodeId: null,
@@ -5812,7 +5776,7 @@ const CanvasWorkspace = () => {
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
-				frameBodyHitMode: "selected-only",
+				boardBodyHitMode: "selected-only",
 			});
 			const isInSelectionBounds = Boolean(
 				selectedBounds &&
@@ -5986,29 +5950,29 @@ const CanvasWorkspace = () => {
 					commitCanvasResizeCursor(null);
 					return;
 				}
-				if (pointerSession.gesture === "frame-create") {
-					const frameSession = frameCreateSessionRef.current;
-					if (!frameSession) {
+				if (pointerSession.gesture === "board-create") {
+					const boardSession = boardCreateSessionRef.current;
+					if (!boardSession) {
 						clearHoveredNode();
 						commitCanvasResizeCursor(null);
 						return;
 					}
 					const local = resolveLocalPoint(event.clientX, event.clientY);
-					const deltaX = local.x - frameSession.startLocalX;
-					const deltaY = local.y - frameSession.startLocalY;
+					const deltaX = local.x - boardSession.startLocalX;
+					const deltaY = local.y - boardSession.startLocalY;
 					const hasActivated =
-						frameSession.activated ||
+						boardSession.activated ||
 						Math.abs(deltaX) >= CANVAS_MARQUEE_ACTIVATION_PX ||
 						Math.abs(deltaY) >= CANVAS_MARQUEE_ACTIVATION_PX;
-					frameSession.activated = hasActivated;
-					frameSession.currentWorldX = world.x;
-					frameSession.currentWorldY = world.y;
-					frameSession.currentLocalX = local.x;
-					frameSession.currentLocalY = local.y;
+					boardSession.activated = hasActivated;
+					boardSession.currentWorldX = world.x;
+					boardSession.currentWorldY = world.y;
+					boardSession.currentLocalX = local.x;
+					boardSession.currentLocalY = local.y;
 					const nextRect: CanvasMarqueeRect = {
 						visible: hasActivated,
-						x1: frameSession.startLocalX,
-						y1: frameSession.startLocalY,
+						x1: boardSession.startLocalX,
+						y1: boardSession.startLocalY,
 						x2: local.x,
 						y2: local.y,
 					};
@@ -6018,7 +5982,7 @@ const CanvasWorkspace = () => {
 					return;
 				}
 			}
-			if (canvasToolMode === "frame") {
+			if (canvasToolMode === "board") {
 				clearHoveredNode();
 				commitCanvasResizeCursor(null);
 				return;
@@ -6091,10 +6055,10 @@ const CanvasWorkspace = () => {
 				event.clientX,
 				event.clientY,
 			);
-			if (pointerSession.gesture === "frame-create") {
-				const didCreateFrame = commitFrameCreateFromSession();
-				clearFrameCreatePreview();
-				if (didCreateFrame) {
+			if (pointerSession.gesture === "board-create") {
+				const didCreateBoard = commitBoardCreateFromSession();
+				clearBoardCreatePreview();
+				if (didCreateBoard) {
 					setCanvasToolMode("move");
 				}
 				clearHoveredNode();
@@ -6131,7 +6095,7 @@ const CanvasWorkspace = () => {
 								localX: local.x,
 								localY: local.y,
 								liveCamera: getCamera(),
-								frameBodyHitMode: "selected-only",
+								boardBodyHitMode: "selected-only",
 							})?.id === pointerSession.startNodeId))
 				) {
 					handleCanvasSurfaceTap(tapMeta);
@@ -6174,9 +6138,9 @@ const CanvasWorkspace = () => {
 			);
 		},
 		[
-			clearFrameCreatePreview,
+			clearBoardCreatePreview,
 			commitCanvasResizeCursorByAnchor,
-			commitFrameCreateFromSession,
+			commitBoardCreateFromSession,
 			finishCanvasDragSession,
 			finishCanvasMarquee,
 			getTopHitNode,
@@ -6223,8 +6187,8 @@ const CanvasWorkspace = () => {
 				commitCanvasResizeCursor(null);
 				return;
 			}
-			if (pointerSession.gesture === "frame-create") {
-				clearFrameCreatePreview();
+			if (pointerSession.gesture === "board-create") {
+				clearBoardCreatePreview();
 				clearHoveredNode();
 				commitCanvasResizeCursor(null);
 				return;
@@ -6236,7 +6200,7 @@ const CanvasWorkspace = () => {
 			commitCanvasResizeCursor(null);
 		},
 		[
-			clearFrameCreatePreview,
+			clearBoardCreatePreview,
 			clearHoveredNode,
 			commitCanvasResizeCursor,
 			finishCanvasDragSession,
@@ -6269,7 +6233,7 @@ const CanvasWorkspace = () => {
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
-				frameBodyHitMode: "include",
+				boardBodyHitMode: "include",
 			});
 			if (
 				normalizedSelectedNodeIds.length > 1 &&
@@ -6572,7 +6536,7 @@ const CanvasWorkspace = () => {
 		tileLodTransition ??
 		(shouldFreezeTileLodForFocus ? FOCUS_TILE_LOD_TRANSITION : null);
 	const resolvedCanvasCursor =
-		canvasToolMode === "frame" ? "crosshair" : canvasResizeCursor;
+		canvasToolMode === "board" ? "crosshair" : canvasResizeCursor;
 
 	return (
 		<div
@@ -6645,7 +6609,6 @@ const CanvasWorkspace = () => {
 				onCollapseSidebar={() => setSidebarExpanded(false)}
 				onExpandSidebar={() => setSidebarExpanded(true)}
 				rightPanelShouldRender={rightPanelShouldRender}
-				selectedTimelineElement={selectedTimelineElement}
 				rightPanelRect={overlayLayout.rightPanelRect}
 				resolvedDrawer={resolvedDrawer}
 				drawerIdentity={drawerIdentity}

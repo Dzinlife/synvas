@@ -5,7 +5,7 @@ export const CANVAS_NODE_ICON_FONT_FAMILY = "SynvasIcon";
 export const CANVAS_NODE_ICON_BY_TYPE: Record<CanvasNodeType, string> = {
 	scene: "\uF000",
 	video: "\uF001",
-	frame: "\uF002",
+	board: "\uF002",
 	audio: "\uF003",
 	text: "\uF004",
 	image: "\uF005",
