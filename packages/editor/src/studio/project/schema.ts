@@ -18,8 +18,7 @@ const canvasNodeBaseSchema = z.object({
 	y: finiteNumberSchema,
 	width: z.number().positive(),
 	height: z.number().positive(),
-	siblingOrder: finiteNumberSchema.optional(),
-	zIndex: finiteNumberSchema.optional(),
+	siblingOrder: finiteNumberSchema,
 	locked: z.boolean(),
 	hidden: z.boolean(),
 	createdAt: z.number(),
@@ -134,61 +133,6 @@ const repairCanvasNodeParentRelations = (nodes: CanvasNode[]): CanvasNode[] => {
 		return {
 			...node,
 			parentId: nextParentId,
-		};
-	});
-	return hasChanged ? nextNodes : nodes;
-};
-
-const normalizeCanvasNodeSiblingOrder = (nodes: CanvasNode[]): CanvasNode[] => {
-	if (nodes.length === 0) return nodes;
-	const nodeById = new Map(nodes.map((node) => [node.id, node]));
-	const siblingsByParentId = new Map<string | null, CanvasNode[]>();
-	for (const node of nodes) {
-		const rawParentId = node.parentId ?? null;
-		const parentId =
-			rawParentId && nodeById.has(rawParentId) ? rawParentId : null;
-		const siblings = siblingsByParentId.get(parentId) ?? [];
-		siblings.push(node);
-		siblingsByParentId.set(parentId, siblings);
-	}
-	const siblingOrderByNodeId = new Map<string, number>();
-	for (const siblings of siblingsByParentId.values()) {
-		const orderedSiblings = [...siblings]
-			.map((node) => {
-				const legacyNode = node as CanvasNode & { zIndex?: number };
-				const siblingOrder =
-					typeof node.siblingOrder === "number"
-						? node.siblingOrder
-						: (legacyNode.zIndex ?? 0);
-				return {
-					node,
-					siblingOrder,
-				};
-			})
-			.sort((left, right) => {
-				if (left.siblingOrder !== right.siblingOrder) {
-					return left.siblingOrder - right.siblingOrder;
-				}
-				return left.node.id.localeCompare(right.node.id);
-			});
-		orderedSiblings.forEach((item, index) => {
-			siblingOrderByNodeId.set(item.node.id, index);
-		});
-	}
-	let hasChanged = false;
-	const nextNodes = nodes.map((node) => {
-		const nextSiblingOrder = siblingOrderByNodeId.get(node.id) ?? 0;
-		const legacyNode = node as CanvasNode & { zIndex?: number };
-		const hasLegacyZIndex = Object.hasOwn(legacyNode, "zIndex");
-		if (!hasLegacyZIndex && node.siblingOrder === nextSiblingOrder) {
-			return node;
-		}
-		hasChanged = true;
-		const { zIndex: _legacyZIndex, ...restNode } = legacyNode;
-		void _legacyZIndex;
-		return {
-			...restNode,
-			siblingOrder: nextSiblingOrder,
 		};
 	});
 	return hasChanged ? nextNodes : nodes;
@@ -343,20 +287,15 @@ const studioProjectSchema = z.object({
 
 export const parseStudioProject = (value: unknown): StudioProject => {
 	const parsed = studioProjectSchema.parse(value) as StudioProject;
-	const repairedCanvasNodes = repairCanvasNodeParentRelations(
-		parsed.canvas.nodes,
-	);
-	const normalizedCanvasNodes = normalizeCanvasNodeSiblingOrder(
-		repairedCanvasNodes,
-	);
+	const repairedCanvasNodes = repairCanvasNodeParentRelations(parsed.canvas.nodes);
 	const normalizedProject: StudioProject =
-		normalizedCanvasNodes === parsed.canvas.nodes
+		repairedCanvasNodes === parsed.canvas.nodes
 			? parsed
 			: {
 					...parsed,
 					canvas: {
 						...parsed.canvas,
-						nodes: normalizedCanvasNodes,
+						nodes: repairedCanvasNodes,
 					},
 				};
 	if (normalizedProject.ot) return normalizedProject;

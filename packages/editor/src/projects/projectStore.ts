@@ -363,6 +363,10 @@ const normalizeCanvasNodeSiblingOrder = (nodes: CanvasNode[]): CanvasNode[] => {
 	}
 	const siblingOrderByNodeId = new Map<string, number>();
 	for (const siblings of siblingsByParentId.values()) {
+		// 保留历史小数层级，只对纯整数分组做致密化。
+		if (siblings.some((node) => !Number.isInteger(node.siblingOrder))) {
+			continue;
+		}
 		[...siblings]
 			.sort((left, right) => {
 				if (left.siblingOrder !== right.siblingOrder) {
@@ -376,8 +380,10 @@ const normalizeCanvasNodeSiblingOrder = (nodes: CanvasNode[]): CanvasNode[] => {
 	}
 	let hasChanged = false;
 	const nextNodes = nodes.map((node) => {
-		const nextSiblingOrder = siblingOrderByNodeId.get(node.id) ?? 0;
-		if (node.siblingOrder === nextSiblingOrder) return node;
+		const nextSiblingOrder = siblingOrderByNodeId.get(node.id);
+		if (nextSiblingOrder === undefined || node.siblingOrder === nextSiblingOrder) {
+			return node;
+		}
 		hasChanged = true;
 		return {
 			...node,
