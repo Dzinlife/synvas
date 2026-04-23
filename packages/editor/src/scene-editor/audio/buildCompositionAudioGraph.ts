@@ -18,7 +18,6 @@ import { isVideoSourceAudioMuted } from "@/scene-editor/utils/videoClipAudioSepa
 import { resolveSceneReferenceSceneIdFromElement } from "@/studio/scene/sceneComposition";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import type { AudioMixTarget } from "./TimelineAudioMixRunner";
-import type { AudioMixInstruction } from "./transitionAudioMix";
 
 const DEFAULT_MAX_COMPOSITION_DEPTH = 16;
 const DEFAULT_FPS = 30;
@@ -55,7 +54,7 @@ type PendingPreviewTarget = {
 	audioDuration: number;
 	enabled: boolean;
 	applyAudioMix: (
-		instruction: AudioMixInstruction | null,
+		instruction: AudioPlaybackMixInstruction | null,
 	) => void | Promise<void>;
 };
 
@@ -815,12 +814,13 @@ export const buildCompositionAudioGraph = (options: {
 		);
 		const runtimeKey = `composition:${clipNode.physical.runtimeId}:${sessionKey}`;
 		sessionKeyMap.set(clipNode.virtualId, sessionKey);
-		if (!clipNode.previewTarget) continue;
+		const previewTarget = clipNode.previewTarget;
+		if (!previewTarget) continue;
 		previewTargets.set(clipNode.virtualId, {
-			id: clipNode.previewTarget.id,
-			timeline: clipNode.previewTarget.timeline,
-			audioDuration: clipNode.previewTarget.audioDuration,
-			enabled: clipNode.previewTarget.enabled,
+			id: previewTarget.id,
+			timeline: previewTarget.timeline,
+			audioDuration: previewTarget.audioDuration,
+			enabled: previewTarget.enabled,
 			sessionKey,
 			applyAudioMix: (instruction) => {
 				const instructionWithRuntime: AudioPlaybackMixInstruction = instruction
@@ -834,7 +834,7 @@ export const buildCompositionAudioGraph = (options: {
 							activeWindow: { start: 0, end: 0 },
 							runtimeKey,
 						};
-				return clipNode.previewTarget.applyAudioMix(instructionWithRuntime);
+				return previewTarget.applyAudioMix(instructionWithRuntime);
 			},
 		});
 	}

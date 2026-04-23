@@ -57,10 +57,7 @@ type InternalSurfacePrototype = Omit<
 	"drawOnce" | "flush" | "requestAnimationFrame"
 > & {
 	__synvasWebGPUPatched?: boolean;
-	drawOnce: (
-		callback: (_: Canvas) => void,
-		dirtyRect?: number[],
-	) => void;
+	drawOnce: (callback: (_: Canvas) => void, dirtyRect?: number[]) => void;
 	flush: (dirtyRect?: number[]) => void;
 	requestAnimationFrame: (
 		callback: (_: Canvas) => void,
@@ -93,7 +90,10 @@ type InternalWebGPUSurface = Surface & {
 		callback: (_: Canvas) => void,
 		dirtyRect?: number[],
 	) => number;
-	_drawOnceInternal?: (callback: (_: Canvas) => void, dirtyRect?: number[]) => void;
+	_drawOnceInternal?: (
+		callback: (_: Canvas) => void,
+		dirtyRect?: number[],
+	) => void;
 	requestAnimationFrame: (
 		callback: (_: Canvas) => void,
 		dirtyRect?: number[],
@@ -185,7 +185,12 @@ type InternalSkImagesFactory = {
 			colorInfo: ColorInfo;
 			origin?: unknown;
 			isVolatile?: boolean;
-			fulfill: (imageContext: unknown) => { texture: GPUTexture; releaseContext?: unknown } | GPUTexture | null;
+			fulfill: (
+				imageContext: unknown,
+			) =>
+				| { texture: GPUTexture; releaseContext?: unknown }
+				| GPUTexture
+				| null;
 			imageRelease?: (imageContext: unknown) => void;
 			textureRelease?: (releaseContext: unknown) => void;
 			imageContext?: unknown;
@@ -296,7 +301,9 @@ type InternalCanvasKitWebGPU = Omit<
 	RescaleMode?: {
 		Linear: unknown;
 	};
-	MakeGPUDeviceContext?: (device: GPUDevice) => InternalWebGPUDeviceContext | null;
+	MakeGPUDeviceContext?: (
+		device: GPUDevice,
+	) => InternalWebGPUDeviceContext | null;
 	MakeGPUCanvasContext?: (
 		context: InternalWebGPUDeviceContext,
 		canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -467,7 +474,9 @@ const patchWebGPUDeviceContextApi = (context: InternalWebGPUDeviceContext) => {
 	const originalSubmit =
 		typeof context.submit === "function" ? context.submit.bind(context) : null;
 	const internalSubmit =
-		typeof context._submit === "function" ? context._submit.bind(context) : null;
+		typeof context._submit === "function"
+			? context._submit.bind(context)
+			: null;
 	context.submit = (syncToCpu?: boolean) =>
 		internalSubmit?.(syncToCpu) ?? originalSubmit?.(syncToCpu) ?? false;
 
@@ -623,10 +632,7 @@ const toSimpleIRect = (
 		};
 	}
 	const rectArrayLike = rect as ArrayLike<number>;
-	if (
-		typeof rectArrayLike.length === "number" &&
-		rectArrayLike.length >= 4
-	) {
+	if (typeof rectArrayLike.length === "number" && rectArrayLike.length >= 4) {
 		return {
 			left: rectArrayLike[0] ?? 0,
 			top: rectArrayLike[1] ?? 0,
@@ -749,10 +755,7 @@ const makePromiseTextureSourceImage = (
 			};
 		},
 		imageRelease: () => {
-			if (
-				typeof VideoFrame !== "undefined" &&
-				source instanceof VideoFrame
-			) {
+			if (typeof VideoFrame !== "undefined" && source instanceof VideoFrame) {
 				source.close();
 			}
 		},
@@ -799,7 +802,9 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 		srcIsPremul?: boolean,
 	) {
 		if (!this._deviceContext) {
-			return canvasKit.MakeImageFromCanvasImageSource(source as CanvasImageSource);
+			return canvasKit.MakeImageFromCanvasImageSource(
+				source as CanvasImageSource,
+			);
 		}
 		return (
 			makePromiseTextureSourceImage(
@@ -841,11 +846,13 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 		if (!this.reportBackendTypeIsGPU?.()) {
 			return this._requestAnimationFrameInternal?.(callback, dirtyRect) ?? 0;
 		}
-		return getRequestAnimationFrame()(() => {
+		const rafId = getRequestAnimationFrame()(() => {
 			if (this._canvasContext) {
 				const surface = canvasKit.MakeGPUCanvasSurface?.(this._canvasContext);
 				if (!surface) {
-					console.error("Failed to initialize Surface for current canvas swapchain texture");
+					console.error(
+						"Failed to initialize Surface for current canvas swapchain texture",
+					);
 					return;
 				}
 				callback(surface.getCanvas());
@@ -856,6 +863,7 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 			callback(this.getCanvas());
 			this.flush(dirtyRect);
 		});
+		return Number(rafId);
 	};
 	surfacePrototype.drawOnce = function (
 		this: InternalWebGPUSurface,
@@ -870,7 +878,9 @@ const patchSurfacePrototype = (canvasKit: InternalCanvasKitWebGPU) => {
 			if (this._canvasContext) {
 				const surface = canvasKit.MakeGPUCanvasSurface?.(this._canvasContext);
 				if (!surface) {
-					console.error("Failed to initialize Surface for current canvas swapchain texture");
+					console.error(
+						"Failed to initialize Surface for current canvas swapchain texture",
+					);
 					return;
 				}
 				callback(surface.getCanvas());
@@ -984,7 +994,10 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 			releaseContext,
 			label,
 		) => {
-			const textureFormatIndex = getTextureFormatIndex(canvasKit, texture.format);
+			const textureFormatIndex = getTextureFormatIndex(
+				canvasKit,
+				texture.format,
+			);
 			if (textureFormatIndex < 0) {
 				return null;
 			}
@@ -1028,7 +1041,10 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 			releaseContext,
 			label,
 		) => {
-			const textureFormatIndex = getTextureFormatIndex(canvasKit, texture.format);
+			const textureFormatIndex = getTextureFormatIndex(
+				canvasKit,
+				texture.format,
+			);
 			if (textureFormatIndex < 0) {
 				return null;
 			}
@@ -1065,11 +1081,10 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 					if (!fulfilled) {
 						return 0;
 					}
-					const texture = "texture" in fulfilled ? fulfilled.texture : fulfilled;
+					const texture =
+						"texture" in fulfilled ? fulfilled.texture : fulfilled;
 					const releaseContext =
-						"texture" in fulfilled
-							? fulfilled.releaseContext
-							: fulfilled;
+						"texture" in fulfilled ? fulfilled.releaseContext : fulfilled;
 					const handle = jsValStore.add(texture);
 					releaseContexts.set(handle, releaseContext);
 					return handle;
@@ -1143,7 +1158,9 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 				getRequestAnimationFrame()(() => {
 					const surface = canvasKit.MakeGPUCanvasSurface?.(webgpuCanvasContext);
 					if (!surface) {
-						console.error("Failed to initialize Surface for current canvas swapchain texture");
+						console.error(
+							"Failed to initialize Surface for current canvas swapchain texture",
+						);
 						return;
 					}
 					callback(surface.getCanvas());
@@ -1155,7 +1172,12 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 		return webgpuCanvasContext;
 	};
 
-	canvasKit.MakeGPUCanvasSurface = (canvasContext, colorSpace, width, height) => {
+	canvasKit.MakeGPUCanvasSurface = (
+		canvasContext,
+		colorSpace,
+		width,
+		height,
+	) => {
 		const currentTexture = canvasContext._inner.getCurrentTexture();
 		const textureFormatIndex = getTextureFormatIndex(
 			canvasKit,

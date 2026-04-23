@@ -366,7 +366,7 @@ describe("projectStore", () => {
 				source: {
 					type: "asset",
 					assetId: "asset-1",
-					kind: "image",
+					kind: "video",
 					uri: "https://example.com/asset-1.png",
 					fileName: "asset-1.png",
 					duration: 1,

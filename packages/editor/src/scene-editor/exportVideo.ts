@@ -4,6 +4,7 @@ import {
 } from "core/render-system/exportVideo";
 import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
 import type { TimelineElement } from "core/timeline-system/types";
+import type { ComponentModelStore as CoreComponentModelStore } from "core/timeline-system/model/types";
 import { type ComponentType, createElement, type ReactNode } from "react";
 import type { ModelRegistryClass } from "@/element-system/model/registry";
 import {
@@ -195,7 +196,10 @@ export const exportTimelineAsVideo = async (options: {
 							tracks: childState.tracks,
 							fps: childState.fps,
 							canvasSize: childState.canvasSize,
-							getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
+							getModelStore: (id: string) =>
+								childRuntime.modelRegistry.get(id) as
+									| CoreComponentModelStore
+									| undefined,
 							wrapRenderNode: (node) =>
 								createElement(
 									RuntimeProvider,
@@ -248,7 +252,10 @@ export const exportTimelineAsVideo = async (options: {
 							tracks: childState.tracks,
 							fps: childState.fps,
 							canvasSize: childState.canvasSize,
-							getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
+							getModelStore: (id: string) =>
+								childRuntime.modelRegistry.get(id) as
+									| CoreComponentModelStore
+									| undefined,
 							wrapRenderNode: (node) =>
 								createElement(
 									RuntimeProvider,
@@ -262,11 +269,13 @@ export const exportTimelineAsVideo = async (options: {
 				},
 			).then((renderState) => ({
 				...renderState,
-				children: createElement(
-					RuntimeProvider,
-					{ runtime: options.runtime },
-					renderState.children,
-				),
+				children: [
+					createElement(
+						RuntimeProvider,
+						{ runtime: options.runtime },
+						renderState.children,
+					),
+				],
 			}));
 		};
 		await exportTimelineAsVideoCore({
@@ -279,7 +288,8 @@ export const exportTimelineAsVideo = async (options: {
 			filename: options?.filename,
 			buildSkiaFrameSnapshot: buildFrameSnapshot,
 			buildSkiaRenderState: buildFrameRenderState,
-			getModelStore: (id) => modelRegistry.get(id),
+			getModelStore: (id) =>
+				modelRegistry.get(id) as CoreComponentModelStore | undefined,
 			audio: {
 				audioTrackStates: timelineState.audioTrackStates,
 				getAudioSourceByElementId: (elementId) =>

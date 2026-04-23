@@ -25,9 +25,8 @@ vi.mock("../contexts/TimelineContext", () => {
 		audioTrackStates: {},
 	};
 	return {
-		useTimelineStore: (
-			selector: (state: typeof storeState) => unknown,
-		) => selector(storeState),
+		useTimelineStore: (selector: (state: typeof storeState) => unknown) =>
+			selector(storeState),
 	};
 });
 
@@ -41,7 +40,9 @@ vi.mock("../runtime/EditorRuntimeProvider", () => ({
 
 interface HarnessProps {
 	options: Parameters<typeof useTimelineElementDnd>[0];
-	onReady: (bindBodyDrag: ReturnType<typeof useTimelineElementDnd>["bindBodyDrag"]) => void;
+	onReady: (
+		bindBodyDrag: ReturnType<typeof useTimelineElementDnd>["bindBodyDrag"],
+	) => void;
 }
 
 const Harness: React.FC<HarnessProps> = ({ options, onReady }) => {
@@ -66,7 +67,13 @@ const createElement = (): TimelineElement => ({
 		endTimecode: "",
 		trackIndex: 0,
 	},
-	transform: {},
+	transform: {
+		baseSize: { width: 100, height: 100 },
+		position: { x: 0, y: 0, space: "canvas" },
+		anchor: { x: 0.5, y: 0.5, space: "normalized" },
+		scale: { x: 1, y: 1 },
+		rotation: { value: 0, unit: "deg" },
+	},
 	render: {
 		zIndex: 0,
 		visible: true,
@@ -86,7 +93,9 @@ describe("useTimelineElementDnd", () => {
 		const setActiveDropTarget = vi.fn();
 		const setDragGhosts = vi.fn();
 		const stopAutoScroll = vi.fn();
-		const elementRef = { current: null } as React.RefObject<HTMLDivElement | null>;
+		const elementRef = {
+			current: null,
+		} as React.RefObject<HTMLDivElement | null>;
 		const timelineElementHost = document.createElement("div");
 		timelineElementHost.setAttribute("data-timeline-element", "true");
 		Object.defineProperty(timelineElementHost, "getBoundingClientRect", {
@@ -111,7 +120,9 @@ describe("useTimelineElementDnd", () => {
 		document.body.appendChild(canvasSurface);
 		const originalElementFromPoint = (
 			document as Document & {
-				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+				elementFromPoint?:
+					| ((x: number, y: number) => Element | null)
+					| undefined;
 			}
 		).elementFromPoint;
 		Object.defineProperty(document, "elementFromPoint", {
@@ -158,8 +169,9 @@ describe("useTimelineElementDnd", () => {
 			transitionDuration: 0,
 		};
 
-		let bindBodyDrag: ReturnType<typeof useTimelineElementDnd>["bindBodyDrag"] | null =
-			null;
+		let bindBodyDrag:
+			| ReturnType<typeof useTimelineElementDnd>["bindBodyDrag"]
+			| null = null;
 		render(
 			<Harness
 				options={options}
@@ -212,11 +224,7 @@ describe("useTimelineElementDnd", () => {
 				value: originalElementFromPoint,
 			});
 		} else {
-			delete (
-				document as Document & {
-					elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
-				}
-			).elementFromPoint;
+			Reflect.deleteProperty(document, "elementFromPoint");
 		}
 	});
 
@@ -225,7 +233,9 @@ describe("useTimelineElementDnd", () => {
 		const requestDropToCanvas = vi.fn(() => false);
 		const setActiveDropTarget = vi.fn();
 		const stopAutoScroll = vi.fn();
-		const elementRef = { current: null } as React.RefObject<HTMLDivElement | null>;
+		const elementRef = {
+			current: null,
+		} as React.RefObject<HTMLDivElement | null>;
 		const timelineElementHost = document.createElement("div");
 		timelineElementHost.setAttribute("data-timeline-element", "true");
 		Object.defineProperty(timelineElementHost, "getBoundingClientRect", {
@@ -267,7 +277,9 @@ describe("useTimelineElementDnd", () => {
 		document.body.appendChild(canvasSurface);
 		const originalElementFromPoint = (
 			document as Document & {
-				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+				elementFromPoint?:
+					| ((x: number, y: number) => Element | null)
+					| undefined;
 			}
 		).elementFromPoint;
 		Object.defineProperty(document, "elementFromPoint", {
@@ -314,8 +326,9 @@ describe("useTimelineElementDnd", () => {
 			transitionDuration: 0,
 		};
 
-		let bindBodyDrag: ReturnType<typeof useTimelineElementDnd>["bindBodyDrag"] | null =
-			null;
+		let bindBodyDrag:
+			| ReturnType<typeof useTimelineElementDnd>["bindBodyDrag"]
+			| null = null;
 		render(
 			<Harness
 				options={options}
@@ -371,11 +384,7 @@ describe("useTimelineElementDnd", () => {
 				value: originalElementFromPoint,
 			});
 		} else {
-			delete (
-				document as Document & {
-					elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
-				}
-			).elementFromPoint;
+			Reflect.deleteProperty(document, "elementFromPoint");
 		}
 	});
 
@@ -394,7 +403,9 @@ describe("useTimelineElementDnd", () => {
 		const setLocalOffsetFrames = vi.fn();
 		const setLocalTransitionDuration = vi.fn();
 		const stopAutoScroll = vi.fn();
-		const elementRef = { current: null } as React.RefObject<HTMLDivElement | null>;
+		const elementRef = {
+			current: null,
+		} as React.RefObject<HTMLDivElement | null>;
 		const timelineElementHost = document.createElement("div");
 		timelineElementHost.setAttribute("data-timeline-element", "true");
 		Object.defineProperty(timelineElementHost, "getBoundingClientRect", {
@@ -419,7 +430,9 @@ describe("useTimelineElementDnd", () => {
 		document.body.appendChild(canvasSurface);
 		const originalElementFromPoint = (
 			document as Document & {
-				elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
+				elementFromPoint?:
+					| ((x: number, y: number) => Element | null)
+					| undefined;
 			}
 		).elementFromPoint;
 		Object.defineProperty(document, "elementFromPoint", {
@@ -466,8 +479,9 @@ describe("useTimelineElementDnd", () => {
 			transitionDuration: 0,
 		};
 
-		let bindBodyDrag: ReturnType<typeof useTimelineElementDnd>["bindBodyDrag"] | null =
-			null;
+		let bindBodyDrag:
+			| ReturnType<typeof useTimelineElementDnd>["bindBodyDrag"]
+			| null = null;
 		render(
 			<Harness
 				options={options}
@@ -536,11 +550,7 @@ describe("useTimelineElementDnd", () => {
 				value: originalElementFromPoint,
 			});
 		} else {
-			delete (
-				document as Document & {
-					elementFromPoint?: ((x: number, y: number) => Element | null) | undefined;
-				}
-			).elementFromPoint;
+			Reflect.deleteProperty(document, "elementFromPoint");
 		}
 	});
 });

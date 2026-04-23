@@ -342,19 +342,7 @@ describe("FancyText model", () => {
 	});
 
 	it("epoch 竞争下保留最新文本构建结果", async () => {
-		let resolveFirstContext:
-			| ((value: {
-					fontProvider: { registerFont: ReturnType<typeof vi.fn> };
-					primaryTypeface: { id: string };
-					runPlan: Array<{
-						text: string;
-						fontFamilies: string[];
-						status: "primary";
-					}>;
-					primaryFamily: "Noto Sans SC";
-			  }) => void)
-			| null = null;
-		const firstContextPromise = new Promise<{
+		type RenderContext = {
 			fontProvider: { registerFont: ReturnType<typeof vi.fn> };
 			primaryTypeface: { id: string };
 			runPlan: Array<{
@@ -363,8 +351,12 @@ describe("FancyText model", () => {
 				status: "primary";
 			}>;
 			primaryFamily: "Noto Sans SC";
-		}>((resolve) => {
-			resolveFirstContext = resolve;
+		};
+		const firstContextResolver: {
+			current?: (value: RenderContext) => void;
+		} = {};
+		const firstContextPromise = new Promise<RenderContext>((resolve) => {
+			firstContextResolver.current = resolve;
 		});
 		mocks.resolveRenderContext
 			.mockImplementationOnce(() => firstContextPromise)
@@ -384,10 +376,10 @@ describe("FancyText model", () => {
 		);
 		const initPromise = store.getState().init();
 		store.getState().setProps({ text: "second" });
-		if (!resolveFirstContext) {
+		if (!firstContextResolver.current) {
 			throw new Error("resolveFirstContext is not initialized");
 		}
-		resolveFirstContext({
+		firstContextResolver.current({
 			fontProvider: { registerFont: vi.fn() },
 			primaryTypeface: { id: "primary-typeface" },
 			runPlan: [

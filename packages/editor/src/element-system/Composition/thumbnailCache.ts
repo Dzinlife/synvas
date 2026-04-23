@@ -1,4 +1,5 @@
 import type { TimelineElement } from "core/timeline-system/types";
+import type { ComponentModelStore as CoreComponentModelStore } from "core/timeline-system/model/types";
 import { type ComponentType, createElement, type ReactNode } from "react";
 import {
 	AlphaType,
@@ -404,7 +405,10 @@ export const getCompositionThumbnail = async (params: {
 				prepareTransitionPictures: false,
 				forcePrepareFrames: true,
 				awaitReady: true,
-				getModelStore: (id: string) => sceneRuntime.modelRegistry.get(id),
+				getModelStore: (id: string) =>
+					sceneRuntime.modelRegistry.get(id) as
+						| CoreComponentModelStore
+						| undefined,
 				compositionPath: [sceneRuntime.ref.sceneId],
 				frameChannel: "offscreen" as const,
 			},
@@ -430,7 +434,10 @@ export const getCompositionThumbnail = async (params: {
 					tracks: childState.tracks,
 					fps: childState.fps,
 					canvasSize: childState.canvasSize,
-					getModelStore: (id: string) => childRuntime.modelRegistry.get(id),
+					getModelStore: (id: string) =>
+						childRuntime.modelRegistry.get(id) as
+							| CoreComponentModelStore
+							| undefined,
 					wrapRenderNode: (childNode: ReactNode) =>
 						createElement(
 							RuntimeProvider,

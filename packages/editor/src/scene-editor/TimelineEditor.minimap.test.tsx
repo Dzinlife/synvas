@@ -8,6 +8,7 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import type { TimelineElement } from "core/timeline-system/types";
+import type { StudioProject } from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createEditorRuntimeWrapper,
@@ -169,7 +170,7 @@ const createElement = ({
 	},
 });
 
-const createProject = () => ({
+const createProject = (): StudioProject => ({
 	id: "project-1",
 	revision: 0,
 	assets: [],

@@ -149,7 +149,7 @@ class WebGPUReadbackSession {
 	private disposed = false;
 
 	constructor(
-		private readonly canvasKit: CanvasKitType,
+		canvasKit: CanvasKitType,
 		private readonly deviceContext: WebGPUDeviceContextWithAsyncRead,
 		private readonly surfaceRef: CanvasKitSurface,
 		private readonly width: number,
@@ -268,14 +268,14 @@ const resolveWebGPUBackend = (
 	return activeBackend.kind === "webgpu" ? activeBackend : null;
 };
 
-const resolveCanvasKit = (
-	canvasKit?: CanvasKitType,
-): CanvasKitType | null => {
+const resolveCanvasKit = (canvasKit?: CanvasKitType): CanvasKitType | null => {
 	if (canvasKit) {
 		return canvasKit;
 	}
-	return ((globalThis as typeof globalThis & { CanvasKit?: CanvasKitType })
-		.CanvasKit ?? null);
+	return (
+		(globalThis as typeof globalThis & { CanvasKit?: CanvasKitType })
+			.CanvasKit ?? null
+	);
 };
 
 export const createSkiaWebGPUReadbackSurface = (

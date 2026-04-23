@@ -82,10 +82,13 @@ describe("PreviewLoudnessMeterCanvas", () => {
 		};
 		const contextSpy = vi
 			.spyOn(HTMLCanvasElement.prototype, "getContext")
-			.mockImplementation((contextId: string) => {
+			.mockImplementation(function (
+				this: HTMLCanvasElement,
+				contextId: string,
+			) {
 				if (contextId !== "2d") return null;
 				return canvas2dContextStub as unknown as CanvasRenderingContext2D;
-			});
+			} as HTMLCanvasElement["getContext"]);
 		restoreCanvasContext = () => {
 			contextSpy.mockRestore();
 		};

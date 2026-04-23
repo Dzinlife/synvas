@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
 	modelState: {
 		internal: {
-			paragraph: null as unknown,
+			paragraph: null as {
+				layout: ReturnType<typeof vi.fn>;
+				getShapedLines: ReturnType<typeof vi.fn>;
+				paint: ReturnType<typeof vi.fn>;
+			} | null,
 			font: null as unknown,
 			typeface: null as unknown,
 			wordSegments: [] as Array<{ text: string; start: number; end: number }>,
@@ -176,6 +180,7 @@ describe("FancyText renderer", () => {
 		);
 
 		const paragraph = mocks.modelState.internal.paragraph;
+		if (!paragraph) throw new Error("paragraph is not initialized");
 		expect(paragraph.layout).toHaveBeenCalledWith(240);
 		expect(paragraph.getShapedLines).toHaveBeenCalledTimes(1);
 		expect(paragraph.paint).not.toHaveBeenCalled();

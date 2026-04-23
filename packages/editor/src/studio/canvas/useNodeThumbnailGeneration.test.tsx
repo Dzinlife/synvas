@@ -132,8 +132,7 @@ const createSceneProject = (options?: {
 				updatedAt: 1,
 				thumbnail: {
 					assetId: "asset-thumb-1",
-					sourceSignature:
-						options?.thumbnailSourceSignature ?? "scene-1:1",
+					sourceSignature: options?.thumbnailSourceSignature ?? "scene-1:1",
 					frame: 0,
 					generatedAt: 1,
 					version: 1,
@@ -146,11 +145,30 @@ const createSceneProject = (options?: {
 			id: "scene-1",
 			name: "Scene 1",
 			timeline: {
-				version: "3",
 				fps: 30,
 				canvas: {
 					width: 1920,
 					height: 1080,
+				},
+				settings: {
+					snapEnabled: true,
+					autoAttach: true,
+					rippleEditingEnabled: true,
+					previewAxisEnabled: true,
+					audio: {
+						exportSampleRate: 48000,
+						exportBlockSize: 512,
+						masterGainDb: 0,
+						compressor: {
+							enabled: true,
+							thresholdDb: -12,
+							ratio: 4,
+							kneeDb: 6,
+							attackMs: 10,
+							releaseMs: 80,
+							makeupGainDb: 0,
+						},
+					},
 				},
 				elements: [],
 				tracks: [],

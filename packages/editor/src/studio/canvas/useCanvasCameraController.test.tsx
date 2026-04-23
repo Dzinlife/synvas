@@ -35,12 +35,19 @@ const CameraControllerProbe = ({
 	return null;
 };
 
+const requireController = (
+	controller: UseCanvasCameraControllerResult | null,
+): UseCanvasCameraControllerResult => {
+	if (!controller) throw new Error("camera controller is not ready");
+	return controller;
+};
+
 describe("useCanvasCameraController", () => {
 	let rafClock = 0;
 	let rafSeed = 1;
 	let nativeRequestAnimationFrame: typeof window.requestAnimationFrame;
 	let nativeCancelAnimationFrame: typeof window.cancelAnimationFrame;
-	const rafTimers = new Map<number, ReturnType<typeof setTimeout>>();
+	const rafTimers = new Map<number, number>();
 
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -101,9 +108,9 @@ describe("useCanvasCameraController", () => {
 		});
 
 		expect(controller).not.toBeNull();
-		if (!controller) return;
-		expect(controller.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
-		expect(controller.cameraSharedValue.value).toEqual({
+		const controllerApi = requireController(controller);
+		expect(controllerApi.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
+		expect(controllerApi.cameraSharedValue.value).toEqual({
 			x: 120,
 			y: -48,
 			zoom: 1.5,
@@ -134,7 +141,7 @@ describe("useCanvasCameraController", () => {
 		});
 
 		expect(controller).not.toBeNull();
-		if (!controller) return;
+		const controllerApi = requireController(controller);
 		expect(onAnimationStateChange).toHaveBeenCalledTimes(1);
 		expect(onAnimationStateChange).toHaveBeenLastCalledWith(true);
 		expect(onChange).not.toHaveBeenCalled();
@@ -145,8 +152,8 @@ describe("useCanvasCameraController", () => {
 
 		expect(onChange.mock.calls.length).toBeGreaterThan(1);
 		expect(onChange).toHaveBeenLastCalledWith({ x: 120, y: -48, zoom: 1.5 });
-		expect(controller.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
-		expect(controller.cameraSharedValue.value).toEqual({
+		expect(controllerApi.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
+		expect(controllerApi.cameraSharedValue.value).toEqual({
 			x: 120,
 			y: -48,
 			zoom: 1.5,
@@ -179,7 +186,7 @@ describe("useCanvasCameraController", () => {
 		});
 
 		expect(controller).not.toBeNull();
-		if (!controller) return;
+		const controllerApi = requireController(controller);
 		expect(onChange).not.toHaveBeenCalled();
 		expect(onAnimationStateChange).toHaveBeenCalledWith(true);
 
@@ -187,8 +194,8 @@ describe("useCanvasCameraController", () => {
 			vi.advanceTimersByTime(120);
 		});
 		expect(onChange).not.toHaveBeenCalled();
-		expect(controller.cameraSharedValue.value.zoom).toBeGreaterThan(1);
-		expect(controller.cameraSharedValue.value.zoom).toBeLessThan(1.5);
+		expect(controllerApi.cameraSharedValue.value.zoom).toBeGreaterThan(1);
+		expect(controllerApi.cameraSharedValue.value.zoom).toBeLessThan(1.5);
 
 		act(() => {
 			vi.advanceTimersByTime(180);
@@ -196,7 +203,7 @@ describe("useCanvasCameraController", () => {
 
 		expect(onChange).toHaveBeenCalledTimes(1);
 		expect(onChange).toHaveBeenLastCalledWith({ x: 120, y: -48, zoom: 1.5 });
-		expect(controller.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
+		expect(controllerApi.getCamera()).toEqual({ x: 120, y: -48, zoom: 1.5 });
 		expect(onAnimationStateChange).toHaveBeenLastCalledWith(false);
 	});
 
