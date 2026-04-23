@@ -1,5 +1,4 @@
 import { useDrag } from "@use-gesture/react";
-import type { CanvasNode } from "@/studio/project/types";
 import { ChevronRight } from "lucide-react";
 import type React from "react";
 import {
@@ -15,6 +14,7 @@ import {
 	buildLayerTreeOrder,
 	compareSiblingOrderDesc,
 } from "@/studio/canvas/layerOrderCoordinator";
+import type { CanvasNode } from "@/studio/project/types";
 import { resolveCanvasNodeTypeIcon } from "../canvasNodeIconLabel";
 import CanvasElementLibrary from "./CanvasElementLibrary";
 
@@ -94,7 +94,7 @@ interface ResolveDropIntentFromLayoutsOptions {
 
 interface ResolveDropLineTopOptions {
 	overIntent: DropIntent | null;
-	container: HTMLElement;
+	positioningContainer: HTMLElement;
 	rowLayouts: NodeRowLayout[];
 }
 
@@ -130,17 +130,17 @@ const collectNodeRowLayouts = (container: HTMLElement): NodeRowLayout[] => {
 
 const resolveDropLineTop = ({
 	overIntent,
-	container,
+	positioningContainer,
 	rowLayouts,
 }: ResolveDropLineTopOptions): number | null => {
 	if (!overIntent || overIntent.position === "inside") return null;
 	const clampLineTop = (value: number): number => {
-		const maxTop = Math.max(container.clientHeight - 1, 0);
+		const maxTop = Math.max(positioningContainer.clientHeight - 1, 0);
 		return Math.max(0, Math.min(Math.round(value), maxTop));
 	};
 	if (!overIntent.targetNodeId) {
 		if (overIntent.position === "before") return 0;
-		return clampLineTop(container.clientHeight);
+		return clampLineTop(positioningContainer.clientHeight);
 	}
 	if (rowLayouts.length === 0) return null;
 	const targetIndex = rowLayouts.findIndex((layout) => {
@@ -165,8 +165,8 @@ const resolveDropLineTop = ({
 			boundaryY = (targetLayout.rect.bottom + nextLayout.rect.top) * 0.5;
 		}
 	}
-	const containerRect = container.getBoundingClientRect();
-	const viewportTop = boundaryY - containerRect.top;
+	const positioningRect = positioningContainer.getBoundingClientRect();
+	const viewportTop = boundaryY - positioningRect.top;
 	return clampLineTop(viewportTop);
 };
 
@@ -662,6 +662,7 @@ const NodeList: React.FC<NodeListProps> = ({
 	onNodeReorder,
 }) => {
 	const listRef = useRef<HTMLDivElement | null>(null);
+	const dropLineContainerRef = useRef<HTMLDivElement | null>(null);
 	const autoExpandTimerRef = useRef<number | null>(null);
 	const pointerRef = useRef<{ x: number; y: number } | null>(null);
 	const dragStateRef = useRef<NodeListDragState | null>(null);
@@ -726,10 +727,11 @@ const NodeList: React.FC<NodeListProps> = ({
 	const resolveGlobalDropLineTop = useCallback(
 		(overIntent: DropIntent | null): number | null => {
 			const container = listRef.current;
-			if (!container) return null;
+			const positioningContainer = dropLineContainerRef.current;
+			if (!container || !positioningContainer) return null;
 			return resolveDropLineTop({
 				overIntent,
-				container,
+				positioningContainer,
 				rowLayouts: collectNodeRowLayouts(container),
 			});
 		},
@@ -986,7 +988,10 @@ const NodeList: React.FC<NodeListProps> = ({
 					暂无节点
 				</div>
 			) : (
-				<div className="relative flex min-h-0 flex-1">
+				<div
+					ref={dropLineContainerRef}
+					className="relative flex min-h-0 flex-1"
+				>
 					<div
 						ref={listRef}
 						data-testid="canvas-sidebar-node-list"
