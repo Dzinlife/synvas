@@ -6,14 +6,18 @@
   "exports": {
     ".": "./src/index.ts",
     "./asr/*": "./src/asr/*",
-    "./element/*": "./src/element/*",
-    "./element/*/*": "./src/element/*/*",
-    "./studio/*": "./src/studio/*",
-    "./editor/command": "./src/editor/command/index.ts",
-    "./editor/command/*": "./src/editor/command/*",
-    "./editor/*": "./src/editor/*",
-    "./editor/*/*": "./src/editor/*/*",
-    "./utils/*": "./src/utils/*"
+    "./audio-system/*": "./src/audio-system/*",
+    "./audio-system/*/*": "./src/audio-system/*/*",
+    "./audio-system/*/*/*": "./src/audio-system/*/*/*",
+    "./render-system/*": "./src/render-system/*",
+    "./render-system/*/*": "./src/render-system/*/*",
+    "./timeline-system/commands": "./src/timeline-system/commands/index.ts",
+    "./timeline-system/commands/*": "./src/timeline-system/commands/*",
+    "./timeline-system/ot": "./src/timeline-system/ot/index.ts",
+    "./timeline-system/ot/*": "./src/timeline-system/ot/*",
+    "./timeline-system/*": "./src/timeline-system/*",
+    "./timeline-system/*/*": "./src/timeline-system/*/*",
+    "./timeline-system/*/*/*": "./src/timeline-system/*/*/*"
   },
   "types": "./src/index.ts",
   "scripts": {

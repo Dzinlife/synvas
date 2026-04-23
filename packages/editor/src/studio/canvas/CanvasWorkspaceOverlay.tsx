@@ -1,5 +1,5 @@
-import type { TimelineAsset, TimelineElement } from "core/element/types";
-import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
+import type { TimelineAsset, TimelineElement } from "core/timeline-system/types";
+import type { CanvasNode, SceneDocument, SceneNode } from "@/studio/project/types";
 import { Bug, PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import { AnimatePresence, motion, usePresence } from "motion/react";
 import type React from "react";
@@ -32,8 +32,8 @@ import {
 	CANVAS_TOOL_DEFINITIONS,
 	type CanvasToolMode,
 } from "@/studio/canvas/canvasToolMode";
-import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
-import type { CanvasNodeDrawerProps } from "@/studio/canvas/node-system/types";
+import { getCanvasNodeDefinition } from "@/node-system/registry";
+import type { CanvasNodeDrawerProps } from "@/node-system/types";
 import CanvasSidebar, {
 	type CanvasSidebarNodeReorderRequest,
 	type CanvasSidebarNodeSelectOptions,

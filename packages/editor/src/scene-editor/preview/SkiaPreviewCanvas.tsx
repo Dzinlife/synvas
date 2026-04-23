@@ -1,10 +1,10 @@
 import {
 	toDisplayTimeFromFrameIndex,
 	toFrameIndex,
-} from "core/editor/preview/framePrecompileBuffer";
-import { createFramePrecompileController } from "core/editor/preview/framePrecompileController";
-import { schedulePrecompileTask } from "core/editor/preview/framePrecompileScheduler";
-import type { TimelineElement } from "core/element/types";
+} from "core/render-system/framePrecompileBuffer";
+import { createFramePrecompileController } from "core/render-system/framePrecompileController";
+import { schedulePrecompileTask } from "core/render-system/framePrecompileScheduler";
+import type { TimelineElement } from "core/timeline-system/types";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {

@@ -1,4 +1,4 @@
-export * from "core/editor/timeline/types";
+export * from "core/timeline-system/timeline";
 
 export type SnapPointType = "element-start" | "element-end" | "playhead";
 

@@ -1,5 +1,5 @@
 import { useDrag } from "@use-gesture/react";
-import type { TimelineElement as TimelineElementType } from "core/element/types";
+import type { TimelineElement as TimelineElementType } from "core/timeline-system/types";
 import type React from "react";
 import {
 	startTransition,
@@ -21,7 +21,7 @@ import {
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import { sortByTreePaintOrder } from "@/studio/canvas/layerOrderCoordinator";
-import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
+import { getCanvasNodeDefinition } from "@/node-system/registry";
 import type {
 	StudioTimelineCanvasDropRequest,
 	StudioTimelineClipboardPayload,

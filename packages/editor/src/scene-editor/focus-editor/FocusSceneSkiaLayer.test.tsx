@@ -3,12 +3,12 @@ import { act, renderHook } from "@testing-library/react";
 import {
 	canvasPointToTransformPosition,
 	transformPositionToCanvasPoint,
-} from "core/element/position";
-import type { TimelineElement } from "core/element/types";
-import type { SceneNode } from "core/studio/types";
+} from "core/timeline-system/position";
+import type { TimelineElement } from "core/timeline-system/types";
+import type { SceneNode } from "@/studio/project/types";
 import type { SkiaPointerEvent } from "react-skia-lite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { componentRegistry } from "@/element/model/componentRegistry";
+import { componentRegistry } from "@/element-system/model/componentRegistry";
 import {
 	createRuntimeProviderWrapper,
 	createTestEditorRuntime,

@@ -6,8 +6,8 @@ import { useDrag } from "@use-gesture/react";
 import {
 	insertElementIntoMainTrack,
 	insertElementsIntoMainTrackGroup,
-} from "core/editor/utils/mainTrackMagnet";
-import type { TimelineElement } from "core/element/types";
+} from "core/timeline-system/utils/mainTrackMagnet";
+import type { TimelineElement } from "core/timeline-system/types";
 import { useCallback, useMemo, useRef } from "react";
 import {
 	type DragGhostState,

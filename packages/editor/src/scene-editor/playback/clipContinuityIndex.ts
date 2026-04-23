@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { resolveSceneReferenceSceneIdFromElement } from "@/studio/scene/sceneComposition";
 
 type ClipKind = "AudioClip" | "VideoClip" | "CompositionAudioClip";

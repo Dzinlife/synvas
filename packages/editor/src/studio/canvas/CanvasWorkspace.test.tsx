@@ -7,17 +7,17 @@ import {
 	screen,
 	waitFor,
 } from "@testing-library/react";
-import type { TimelineAsset } from "core/element/types";
-import type { CanvasNode, StudioProject } from "core/studio/types";
+import type { TimelineAsset } from "core/timeline-system/types";
+import type { CanvasNode, StudioProject } from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	__resetAudioOwnerForTests,
 	getOwner,
 	requestOwner,
 } from "@/audio/owner";
-import { resolveClipboardNodeGeometry } from "@/element/model/clipboardTransform";
-import { componentRegistry } from "@/element/model/componentRegistry";
-import { createTransformMeta } from "@/element/transform";
+import { resolveClipboardNodeGeometry } from "@/element-system/model/clipboardTransform";
+import { componentRegistry } from "@/element-system/model/componentRegistry";
+import { createTransformMeta } from "@/element-system/transform";
 import { useProjectStore } from "@/projects/projectStore";
 import { useDragStore } from "@/scene-editor/drag";
 import {
@@ -26,7 +26,7 @@ import {
 } from "@/scene-editor/runtime/testUtils";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
-import { getCanvasNodeDefinition } from "@/studio/canvas/node-system/registry";
+import { getCanvasNodeDefinition } from "@/node-system/registry";
 import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import CanvasWorkspace from "./CanvasWorkspace";
@@ -231,7 +231,7 @@ vi.mock("@/studio/canvas/sidebar/CanvasElementLibrary", () => ({
 	default: () => <div data-testid="canvas-element-library" />,
 }));
 
-vi.mock("@/studio/canvas/node-system/registry", () => {
+vi.mock("@/node-system/registry", () => {
 	const GenericSkiaRenderer = () => null;
 	const createToolbar = (type: string) => () => (
 		<div data-testid={`node-toolbar-${type}`} />

@@ -2,9 +2,9 @@ import {
 	type BuildSkiaDeps,
 	buildSkiaFrameSnapshotCore,
 	buildSkiaRenderStateCore,
-} from "core/editor/preview/buildSkiaTree";
-import type { TimelineTrack } from "core/editor/timeline/types";
-import type { TimelineElement, TransformMeta } from "core/element/types";
+} from "core/render-system/buildSkiaTree";
+import type { TimelineTrack } from "core/timeline-system/timeline";
+import type { TimelineElement, TransformMeta } from "core/timeline-system/types";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -1,7 +1,7 @@
 import type {
 	TimelineAsset,
 	TimelineAssetLocator,
-} from "core/element/types";
+} from "core/timeline-system/types";
 import {
 	buildProjectOpfsUri,
 	OPFS_PREFIX,

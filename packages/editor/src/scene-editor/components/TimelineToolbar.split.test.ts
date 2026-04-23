@@ -1,5 +1,5 @@
-import { buildSplitElements } from "core/editor/command/split";
-import type { TimelineElement } from "core/element/types";
+import { buildSplitElements } from "core/timeline-system/commands/split";
+import type { TimelineElement } from "core/timeline-system/types";
 import { describe, expect, it } from "vitest";
 
 const createVideoClip = ({

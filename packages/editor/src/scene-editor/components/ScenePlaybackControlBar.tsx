@@ -1,4 +1,4 @@
-import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
+import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
 import { EllipsisIcon } from "lucide-react";
 import type React from "react";
 import { useCallback, useMemo, useState } from "react";
@@ -15,7 +15,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { exportCanvasAsImage } from "@/element/export";
+import { exportCanvasAsImage } from "@/element-system/export";
 import { usePreview } from "@/scene-editor/contexts/PreviewProvider";
 import { useTimelineStore } from "@/scene-editor/contexts/TimelineContext";
 import { exportTimelineAsVideo } from "@/scene-editor/exportVideo";

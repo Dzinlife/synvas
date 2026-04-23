@@ -97,7 +97,7 @@ scene-editor/
   吸附/联动开关等。
 - `PreviewProvider`：预览画布尺寸、缩放、平移与 canvas 引用。
 - `studioStore/canvasStore`：主视图切换与 Canvas 资产引用状态。
-- `core/editor/timelineLoader`：JSON 校验 + timecode 维护，加载 `timeline.json` 作为示例数据。
+- `core/timeline-system/loader`：JSON 校验 + timecode 维护，加载 `timeline.json` 作为示例数据。
 
 ## 导出与渲染准备
 

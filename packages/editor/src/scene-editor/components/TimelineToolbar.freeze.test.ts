@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { describe, expect, it, vi } from "vitest";
 import { applyFreezeFrame, resolveFreezeCandidate } from "./timelineFreeze";
 

@@ -1,5 +1,5 @@
-import type { TimelineAsset, TimelineElement } from "core/element/types";
-import { buildSplitElements } from "core/editor/command/split";
+import type { TimelineAsset, TimelineElement } from "core/timeline-system/types";
+import { buildSplitElements } from "core/timeline-system/commands/split";
 import { acquireVideoAsset, type VideoAsset } from "@/assets/videoAsset";
 import {
 	closeVideoSample,

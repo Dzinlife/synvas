@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { getElementRole } from "./trackAssignment";
 
 export type MainTrackPreviewMode = "box" | "insert-line";

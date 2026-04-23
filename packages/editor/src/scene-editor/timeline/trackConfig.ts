@@ -3,8 +3,8 @@
  * 定义不同类型轨道的属性和兼容性规则
  */
 
-import type { TrackRole } from "core/element/types";
-import { componentRegistry } from "@/element/model/componentRegistry";
+import type { TrackRole } from "core/timeline-system/types";
+import { componentRegistry } from "@/element-system/model/componentRegistry";
 import type { TrackConfig, TrackInstance } from "./types";
 
 // ============================================================================

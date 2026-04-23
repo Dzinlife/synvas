@@ -1,4 +1,4 @@
-import type { StudioProject } from "core/studio/types";
+import type { StudioProject } from "@/studio/project/types";
 import { describe, expect, it } from "vitest";
 import {
 	buildCanvasClipboardEntries,

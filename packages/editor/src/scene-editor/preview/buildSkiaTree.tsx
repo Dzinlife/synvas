@@ -3,14 +3,14 @@ import {
 	buildSkiaFrameSnapshotCore,
 	buildSkiaRenderStateCore,
 	buildSkiaTreeCore,
-} from "core/editor/preview/buildSkiaTree";
+} from "core/render-system/buildSkiaTree";
 import {
 	renderNodeToImage,
 	renderNodeToPicture,
-} from "core/editor/preview/renderNodeSnapshot";
-import type { RendererPrepareFrameContext } from "core/element/model/types";
+} from "core/render-system/renderNodeSnapshot";
+import type { RendererPrepareFrameContext } from "core/timeline-system/model/types";
 import type { ReactNode } from "react";
-import { componentRegistry } from "@/element/model/componentRegistry";
+import { componentRegistry } from "@/element-system/model/componentRegistry";
 import { isTransitionElement } from "@/scene-editor/utils/transitions";
 
 type BuildSkiaOverrides = {

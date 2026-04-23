@@ -1,4 +1,4 @@
-import type { VideoCanvasNode } from "core/studio/types";
+import type { VideoCanvasNode } from "@/studio/project/types";
 import { describe, expect, it } from "vitest";
 import {
 	resolveCanvasCameraTransformMatrix,

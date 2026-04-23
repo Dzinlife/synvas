@@ -6,7 +6,7 @@ import {
 	render,
 	screen,
 } from "@testing-library/react";
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createEditorRuntimeWrapper,

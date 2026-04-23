@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import type { TimelineJSON } from "core/editor/timelineLoader";
-import type { StudioProject } from "core/studio/types";
-import { framesToTimecode } from "core/utils/timecode";
+import type { TimelineJSON } from "core/timeline-system/loader";
+import type { StudioProject } from "@/studio/project/types";
+import { framesToTimecode } from "core/timeline-system/timecode";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import {

@@ -1,4 +1,4 @@
-import { createFramePrecompileBuffer } from "core/editor/preview/framePrecompileBuffer";
+import { createFramePrecompileBuffer } from "core/render-system/framePrecompileBuffer";
 import { describe, expect, it, vi } from "vitest";
 
 type MockFrameState = {

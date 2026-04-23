@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineAsset } from "core/timeline-system/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AsrProvider } from "@/asr";
 import type { AsrClient } from "@/asr/AsrContext";

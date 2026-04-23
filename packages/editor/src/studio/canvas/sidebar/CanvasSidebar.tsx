@@ -1,5 +1,5 @@
 import { useDrag } from "@use-gesture/react";
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode } from "@/studio/project/types";
 import { ChevronRight } from "lucide-react";
 import type React from "react";
 import {

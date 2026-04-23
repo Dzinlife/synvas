@@ -2,7 +2,7 @@ import {
 	DEFAULT_EXPORT_AUDIO_DSP_SETTINGS,
 	type ExportAudioDspSettings,
 	resolveExportAudioDspSettings,
-} from "core/editor/audio/dsp/types";
+} from "core/audio-system/settings";
 import type { PreviewLoudnessSnapshot } from "@/audio/types";
 import { PREVIEW_DSP_WORKLET_PROCESSOR_NAME } from "./previewDspConstants";
 

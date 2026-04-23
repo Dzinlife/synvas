@@ -4,7 +4,7 @@
  */
 
 import { useDrag } from "@use-gesture/react";
-import type { TimelineElement as TimelineElementType } from "core/element/types";
+import type { TimelineElement as TimelineElementType } from "core/timeline-system/types";
 import React, {
 	useCallback,
 	useEffect,
@@ -13,8 +13,8 @@ import React, {
 	useRef,
 	useState,
 } from "react";
-import { componentRegistry } from "@/element/model/componentRegistry";
-import { useModelExists } from "@/element/model/registry";
+import { componentRegistry } from "@/element-system/model/componentRegistry";
+import { useModelExists } from "@/element-system/model/registry";
 import { cn } from "@/lib/utils";
 import {
 	useModelRegistry,

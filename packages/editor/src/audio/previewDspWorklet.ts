@@ -2,12 +2,12 @@ import {
 	type CompressorState,
 	createCompressorState,
 	processCompressorInPlace,
-} from "core/editor/audio/dsp/effects/compressor";
+} from "core/audio-system/dsp/effects/compressor";
 import {
 	type ExportAudioDspSettings,
 	type PartialExportAudioDspSettings,
 	resolveExportAudioDspSettings,
-} from "core/editor/audio/dsp/types";
+} from "core/audio-system/settings";
 import { PREVIEW_DSP_WORKLET_PROCESSOR_NAME } from "./previewDspConstants";
 
 declare const sampleRate: number;

@@ -1,18 +1,18 @@
-import type { TimelineJSON } from "core/editor/timelineLoader";
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineJSON } from "core/timeline-system/loader";
+import type { TimelineAsset } from "core/timeline-system/types";
 import {
 	clearSceneTombstone,
 	ensureStudioProjectOt,
 	writeSceneTombstone,
-} from "core/studio/ot";
-import { parseStudioProject } from "core/studio/schema";
+} from "@/studio/project/ot";
+import { parseStudioProject } from "@/studio/project/schema";
 import type {
 	CanvasNode,
 	SceneDocument,
 	SceneNode,
 	StudioOtTombstoneScene,
 	StudioProject,
-} from "core/studio/types";
+} from "@/studio/project/types";
 import { create } from "zustand";
 import {
 	getCanvasCamera,

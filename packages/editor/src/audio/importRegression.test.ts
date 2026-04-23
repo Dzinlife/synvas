@@ -15,8 +15,8 @@ const CORE_FILES = [
 		EDITOR_SRC_DIR,
 		"scene-editor/audio/TimelineAudioMixManager.tsx",
 	),
-	path.join(EDITOR_SRC_DIR, "element/AudioClip/model.ts"),
-	path.join(EDITOR_SRC_DIR, "element/VideoClip/model.ts"),
+	path.join(EDITOR_SRC_DIR, "element-system/AudioClip/model.ts"),
+	path.join(EDITOR_SRC_DIR, "element-system/VideoClip/model.ts"),
 	path.join(
 		EDITOR_SRC_DIR,
 		"scene-editor/components/PreviewLoudnessMeterCanvas.tsx",

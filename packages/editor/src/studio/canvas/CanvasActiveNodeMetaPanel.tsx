@@ -1,5 +1,5 @@
-import type { TimelineAsset } from "core/element/types";
-import type { CanvasNode, SceneDocument } from "core/studio/types";
+import type { TimelineAsset } from "core/timeline-system/types";
+import type { CanvasNode, SceneDocument } from "@/studio/project/types";
 import type React from "react";
 import { useMemo } from "react";
 import { resolveAssetDisplayLabel } from "@/projects/assetLocator";

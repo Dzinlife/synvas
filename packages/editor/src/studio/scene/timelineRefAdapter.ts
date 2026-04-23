@@ -1,5 +1,5 @@
-import type { TimelineJSON } from "core/editor/timelineLoader";
-import type { StudioProject } from "core/studio/types";
+import type { TimelineJSON } from "core/timeline-system/loader";
+import type { StudioProject } from "@/studio/project/types";
 import type {
 	TimelineRef,
 	TimelineRuntimeId,

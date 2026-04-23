@@ -2,20 +2,20 @@ import {
 	createTrackLockedMap,
 	resolveMovedChildrenTracks,
 	resolveTrackPlacementWithStoredAssignments,
-} from "core/editor/command/move";
+} from "core/timeline-system/commands/move";
 import {
 	buildTimelineBatchCommandFromSnapshots,
 	type TimelineOtCommand,
 	type TimelineOtIntent,
-} from "core/editor/ot";
-import { pruneAudioTrackStates } from "core/editor/command/postProcess";
-import type { TimelineCommandSnapshot } from "core/editor/command/types";
+} from "core/timeline-system/ot";
+import { pruneAudioTrackStates } from "core/timeline-system/commands/postProcess";
+import type { TimelineCommandSnapshot } from "core/timeline-system/commands/types";
 import {
 	DEFAULT_TIMELINE_SETTINGS,
 	type TimelineSettings,
-} from "core/editor/timelineLoader";
-import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import type { TimelineElement } from "core/element/types";
+} from "core/timeline-system/loader";
+import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
+import type { TimelineElement } from "core/timeline-system/types";
 import {
 	createContext,
 	useCallback,

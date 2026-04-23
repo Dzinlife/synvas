@@ -1,6 +1,6 @@
-import type { SceneNode } from "core/studio/types";
+import type { SceneNode } from "@/studio/project/types";
 import { useEffect } from "react";
-import type { CanvasNodeFocusEditorBridgeProps } from "@/studio/canvas/node-system/types";
+import type { CanvasNodeFocusEditorBridgeProps } from "@/node-system/types";
 import { HeadlessTextInputBridge } from "@/studio/canvas/text-editing";
 import { useSceneFocusEditorLayer } from "./useSceneFocusEditorLayer";
 

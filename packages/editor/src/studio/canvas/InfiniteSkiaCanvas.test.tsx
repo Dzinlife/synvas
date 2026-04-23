@@ -8,7 +8,7 @@ import type {
 	StudioProject,
 	TextCanvasNode,
 	VideoCanvasNode,
-} from "core/studio/types";
+} from "@/studio/project/types";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
@@ -296,7 +296,7 @@ vi.mock("@/assets/imageAsset", () => ({
 	acquireImageAsset: acquireImageAssetMock,
 }));
 
-vi.mock("core/editor/preview/renderNodeSnapshot", () => ({
+vi.mock("core/render-system/renderNodeSnapshot", () => ({
 	renderNodeToPicture: renderNodeToPictureMock,
 }));
 
@@ -344,7 +344,7 @@ vi.mock("@/scene-editor/focus-editor/useSceneFocusEditorLayer", () => ({
 	},
 }));
 
-vi.mock("./node-system/registry", async () => {
+vi.mock("@/node-system/registry", async () => {
 	const { FocusSceneSkiaLayer } = await import(
 		"@/scene-editor/focus-editor/FocusSceneSkiaLayer"
 	);

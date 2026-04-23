@@ -6,8 +6,8 @@ import {
 	type MainTrackMagnetOptions,
 	shiftMainTrackElementsAfter as shiftMainTrackElementsAfterCore,
 	type TimelinePostProcessOptions,
-} from "core/editor/utils/mainTrackMagnet";
-import type { TimelineElement } from "core/element/types";
+} from "core/timeline-system/utils/mainTrackMagnet";
+import type { TimelineElement } from "core/timeline-system/types";
 import { resolveTimelineElementRole } from "./resolveRole";
 
 const withResolveRole = (

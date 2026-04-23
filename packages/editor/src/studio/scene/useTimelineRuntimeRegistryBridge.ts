@@ -1,4 +1,4 @@
-import type { TimelineJSON } from "core/editor/timelineLoader";
+import type { TimelineJSON } from "core/timeline-system/loader";
 import { useEffect, useMemo, useRef } from "react";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";

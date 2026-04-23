@@ -1,4 +1,4 @@
-import type { SceneNode } from "core/studio/types";
+import type { SceneNode } from "@/studio/project/types";
 import { useMemo } from "react";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import type { CameraState } from "@/studio/canvas/canvasWorkspaceUtils";

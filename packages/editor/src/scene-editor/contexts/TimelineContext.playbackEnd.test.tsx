@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as audioEngine from "@/audio/engine";
 import {

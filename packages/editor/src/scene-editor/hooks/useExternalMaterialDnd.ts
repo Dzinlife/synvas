@@ -1,12 +1,12 @@
-import { insertElementIntoMainTrack } from "core/editor/utils/mainTrackMagnet";
+import { insertElementIntoMainTrack } from "core/timeline-system/utils/mainTrackMagnet";
 import type {
 	TimelineElement as TimelineElementType,
 	TrackRole,
-} from "core/element/types";
+} from "core/timeline-system/types";
 import type React from "react";
 import { useCallback, useRef } from "react";
 import { isAudioFile, readAudioMetadata } from "@/asr/opfsAudio";
-import { createTransformMeta } from "@/element/transform";
+import { createTransformMeta } from "@/element-system/transform";
 import { toast } from "@/lib/toast";
 import { ingestExternalFileAsset as ingestProjectExternalFile } from "@/projects/assetIngest";
 import { isElectronEnv, resolveExternalFilePath } from "@/projects/assetLocator";

@@ -1,9 +1,9 @@
 import {
 	DEFAULT_TIMELINE_SETTINGS,
 	type TimelineJSON,
-} from "core/editor/timelineLoader";
-import { createEmptyStudioOt } from "core/studio/ot";
-import type { StudioProject } from "core/studio/types";
+} from "core/timeline-system/loader";
+import { createEmptyStudioOt } from "@/studio/project/ot";
+import type { StudioProject } from "@/studio/project/types";
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
 
 export interface ProjectRecord {

@@ -15,7 +15,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { exportCanvasAsImage } from "@/element/export";
+import { exportCanvasAsImage } from "@/element-system/export";
 import { usePreview } from "@/scene-editor/contexts/PreviewProvider";
 import {
 	usePlaybackControl,

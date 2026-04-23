@@ -1,10 +1,10 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import type React from "react";
 import { useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { useModelSelectorSafe } from "@/element/model";
-import { componentRegistry } from "@/element/model/componentRegistry";
-import { getTransformSize } from "@/element/transform";
+import { useModelSelectorSafe } from "@/element-system/model";
+import { componentRegistry } from "@/element-system/model/componentRegistry";
+import { getTransformSize } from "@/element-system/transform";
 import { framesToTimecode } from "@/utils/timecode";
 import {
 	useElements,

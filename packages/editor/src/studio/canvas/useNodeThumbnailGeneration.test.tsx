@@ -5,16 +5,16 @@ import type {
 	SceneCanvasNode,
 	StudioProject,
 	VideoCanvasNode,
-} from "core/studio/types";
+} from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeProjectFileToOpfsAtPath } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
-import type { CanvasNodeThumbnailCapability } from "@/studio/canvas/node-system/types";
+import type { CanvasNodeThumbnailCapability } from "@/node-system/types";
 import { useNodeThumbnailGeneration } from "./useNodeThumbnailGeneration";
 
 const getCanvasNodeDefinitionMock = vi.fn();
 
-vi.mock("./node-system/registry", () => ({
+vi.mock("@/node-system/registry", () => ({
 	getCanvasNodeDefinition: (type: string) => getCanvasNodeDefinitionMock(type),
 }));
 

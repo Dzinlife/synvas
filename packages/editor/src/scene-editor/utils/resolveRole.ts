@@ -1,5 +1,5 @@
-import type { TimelineElement } from "core/element/types";
-import type { ResolveRole } from "core/editor/utils/trackAssignment";
+import type { TimelineElement } from "core/timeline-system/types";
+import type { ResolveRole } from "core/timeline-system/utils/trackAssignment";
 import { getElementRoleFromComponent } from "../timeline/trackConfig";
 
 /**

@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import {
 	collectLinkedTransitions as collectLinkedTransitionsCore,
 	getTransitionBoundary,
@@ -8,7 +8,7 @@ import {
 	isTransitionElement,
 	reconcileTransitions as reconcileTransitionsCore,
 	TRANSITION_TYPE,
-} from "core/editor/utils/transitions";
+} from "core/timeline-system/utils/transitions";
 import { resolveTimelineElementRole } from "./resolveRole";
 
 export {

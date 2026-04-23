@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestEditorRuntime } from "../runtime/testUtils";
 

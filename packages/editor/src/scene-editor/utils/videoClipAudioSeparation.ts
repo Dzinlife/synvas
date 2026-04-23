@@ -1,5 +1,5 @@
-import type { TimelineElement } from "core/element/types";
-import { isVideoSourceAudioMuted as isVideoSourceAudioMutedCore } from "core/editor/utils/videoSourceAudio";
+import type { TimelineElement } from "core/timeline-system/types";
+import { isVideoSourceAudioMuted as isVideoSourceAudioMutedCore } from "core/timeline-system/utils/videoSourceAudio";
 import { clampFrame, framesToTimecode } from "../../utils/timecode";
 
 const MAIN_TRACK_INDEX = 0;

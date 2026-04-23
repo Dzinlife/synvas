@@ -1,5 +1,5 @@
-import type { TimelineElement, TrackRole } from "core/element/types";
-import type { DropTarget } from "core/editor/timeline/types";
+import type { TimelineElement, TrackRole } from "core/timeline-system/types";
+import type { DropTarget } from "core/timeline-system/timeline";
 import {
 	applyTrackAssignments as applyTrackAssignmentsCore,
 	assignTracks as assignTracksCore,
@@ -21,7 +21,7 @@ import {
 	normalizeStoredTrackIndices,
 	normalizeTrackAssignments,
 	resolveDropTargetForRole as resolveDropTargetForRoleCore,
-} from "core/editor/utils/trackAssignment";
+} from "core/timeline-system/utils/trackAssignment";
 import { getTrackConfig } from "../timeline/trackConfig";
 import type { TimelineTrack } from "../timeline/types";
 import { resolveTimelineElementRole } from "./resolveRole";
@@ -264,7 +264,7 @@ export function getYFromTrack(
  */
 export const GAP_THRESHOLD = 12;
 
-export type { DropTarget, DropTargetType } from "core/editor/timeline/types";
+export type { DropTarget, DropTargetType } from "core/timeline-system/timeline";
 
 export interface TrackHitResult {
 	trackIndex: number;

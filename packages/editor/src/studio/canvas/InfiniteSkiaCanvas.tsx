@@ -1,6 +1,6 @@
-import { renderNodeToPicture } from "core/editor/preview/renderNodeSnapshot";
-import type { TimelineAsset } from "core/element/types";
-import type { CanvasNode, StudioProject } from "core/studio/types";
+import { renderNodeToPicture } from "core/render-system/renderNodeSnapshot";
+import type { TimelineAsset } from "core/timeline-system/types";
+import type { CanvasNode, StudioProject } from "@/studio/project/types";
 import type React from "react";
 import {
 	memo,
@@ -54,14 +54,14 @@ import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 import type { CanvasSnapGuidesScreen } from "./canvasSnapUtils";
 import type { CameraState } from "./canvasWorkspaceUtils";
 import type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
-import { getCanvasNodeDefinition } from "./node-system/registry";
+import { getCanvasNodeDefinition } from "@/node-system/registry";
 import type {
 	CanvasNodeFocusEditorBridgeProps,
 	CanvasNodeFocusEditorLayerState,
 	CanvasNodeSkiaRenderProps,
 	CanvasNodeTilePictureCapability,
 	CanvasNodeTilePictureCapabilityContext,
-} from "./node-system/types";
+} from "@/node-system/types";
 import {
 	createTileAabb,
 	StaticTileScheduler,

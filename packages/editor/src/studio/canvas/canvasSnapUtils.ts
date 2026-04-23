@@ -1,4 +1,4 @@
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode } from "@/studio/project/types";
 import { resolveCanvasCameraScreenOffset } from "./canvasNodeLabelUtils";
 
 const CAMERA_ZOOM_EPSILON = 1e-6;

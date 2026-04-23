@@ -1,1 +1,1 @@
-export * from "core/editor/utils/timelineTime";
+export * from "core/timeline-system/utils/timelineTime";

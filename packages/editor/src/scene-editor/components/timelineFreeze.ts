@@ -1,12 +1,12 @@
-import type { TimelineElement } from "core/element/types";
-import type { FreezeFrameProps } from "@/element/FreezeFrame/model";
-import { calculateVideoTime } from "@/element/VideoClip/model";
+import type { TimelineElement } from "core/timeline-system/types";
+import type { FreezeFrameProps } from "@/element-system/FreezeFrame/model";
+import { calculateVideoTime } from "@/element-system/VideoClip/model";
 import { framesToSeconds, secondsToFrames } from "@/utils/timecode";
 import { insertElementIntoMainTrack } from "../utils/mainTrackMagnet";
 import { buildTimelineMeta } from "../utils/timelineTime";
 import { reflowInsertedElementsOnTracks } from "../utils/insertedTrackReflow";
 import { isTransitionElement, reconcileTransitions } from "../utils/transitions";
-import { buildSplitElements } from "core/editor/command/split";
+import { buildSplitElements } from "core/timeline-system/commands/split";
 
 const MAIN_TRACK_INDEX = 0;
 const DEFAULT_FREEZE_DURATION_SECONDS = 3;

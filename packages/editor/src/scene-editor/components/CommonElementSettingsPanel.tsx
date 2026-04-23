@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { useCallback, useRef } from "react";
 import { DialSlider } from "@/components/ui/dial-slider";
 import { Input } from "@/components/ui/input";

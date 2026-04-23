@@ -1,4 +1,4 @@
-import { createDisposeScope } from "core/editor/preview/disposeScope";
+import { createDisposeScope } from "core/render-system/disposeScope";
 import { describe, expect, it, vi } from "vitest";
 
 describe("disposeScope", () => {

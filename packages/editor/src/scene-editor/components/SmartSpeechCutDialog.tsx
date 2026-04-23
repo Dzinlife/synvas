@@ -1,4 +1,4 @@
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineAsset } from "core/timeline-system/types";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAsrClient } from "@/asr";

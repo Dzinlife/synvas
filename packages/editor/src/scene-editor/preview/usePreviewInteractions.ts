@@ -1,12 +1,12 @@
 import {
 	canvasPointToTransformPosition,
 	transformPositionToCanvasPoint,
-} from "core/element/position";
-import { buildTimelineBatchCommandFromSnapshots } from "core/editor/ot";
-import type { TimelineElement, TransformMeta } from "core/element/types";
+} from "core/timeline-system/position";
+import { buildTimelineBatchCommandFromSnapshots } from "core/timeline-system/ot";
+import type { TimelineElement, TransformMeta } from "core/timeline-system/types";
 import Konva from "konva";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { transformMetaToRenderLayout } from "@/element/layout";
+import { transformMetaToRenderLayout } from "@/element-system/layout";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStore } from "@/scene-editor/contexts/TimelineContext";
 import {

@@ -1,4 +1,4 @@
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode } from "@/studio/project/types";
 import RBush from "rbush";
 import { buildLayerTreeOrder } from "./layerOrderCoordinator";
 

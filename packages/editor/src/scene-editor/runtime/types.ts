@@ -1,4 +1,4 @@
-import type { ModelRegistryClass } from "@/element/model/registry";
+import type { ModelRegistryClass } from "@/element-system/model/registry";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 
 export type TimelineRef = {

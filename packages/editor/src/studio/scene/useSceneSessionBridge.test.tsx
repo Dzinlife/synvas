@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import type { StudioProject } from "core/studio/types";
+import type { StudioProject } from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import {

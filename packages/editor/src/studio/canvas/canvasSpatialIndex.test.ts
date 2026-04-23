@@ -1,4 +1,4 @@
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode } from "@/studio/project/types";
 import { describe, expect, it } from "vitest";
 import {
 	CanvasSpatialIndex,

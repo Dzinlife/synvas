@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, render } from "@testing-library/react";
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelineProvider, useTimelineStore } from "@/scene-editor/contexts/TimelineContext";
 import { createEditorRuntime } from "./createEditorRuntime";

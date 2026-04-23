@@ -1,5 +1,5 @@
 import { useDrag } from "@use-gesture/react";
-import type { TimelineElement, TrackRole } from "core/element/types";
+import type { TimelineElement, TrackRole } from "core/timeline-system/types";
 import { useMemo, useRef } from "react";
 import { toast } from "@/lib/toast";
 import { clampFrame, secondsToFrames } from "@/utils/timecode";

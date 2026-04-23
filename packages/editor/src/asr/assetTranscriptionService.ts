@@ -1,4 +1,4 @@
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineAsset } from "core/timeline-system/types";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { readVideoMetadata } from "@/scene-editor/utils/externalVideo";
 import type { AsrClient } from "./AsrContext";

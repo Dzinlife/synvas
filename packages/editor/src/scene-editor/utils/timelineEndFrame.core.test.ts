@@ -1,5 +1,5 @@
-import type { TimelineElement } from "core/element/types";
-import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
+import type { TimelineElement } from "core/timeline-system/types";
+import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
 import { describe, expect, it } from "vitest";
 
 const createElement = ({

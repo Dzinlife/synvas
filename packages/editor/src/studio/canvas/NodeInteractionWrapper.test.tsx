@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode } from "@/studio/project/types";
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NodeInteractionWrapper } from "./NodeInteractionWrapper";

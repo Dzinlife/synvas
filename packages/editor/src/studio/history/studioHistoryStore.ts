@@ -1,5 +1,5 @@
-import { createTrackLockedMap } from "core/editor/command/move";
-import { pruneAudioTrackStates } from "core/editor/command/postProcess";
+import { createTrackLockedMap } from "core/timeline-system/commands/move";
+import { pruneAudioTrackStates } from "core/timeline-system/commands/postProcess";
 import {
 	applyTimelineOtCommand,
 	createOtEngine,
@@ -11,22 +11,22 @@ import {
 	type TimelineOtCommand,
 	type TimelineOtIntent,
 	transformTimelineOtCommand,
-} from "core/editor/ot";
-import type { TimelineTrack } from "core/editor/timeline/types";
+} from "core/timeline-system/ot";
+import type { TimelineTrack } from "core/timeline-system/timeline";
 import {
 	DEFAULT_TIMELINE_SETTINGS,
 	loadTimelineFromObject,
 	saveTimelineToObject,
 	type TimelineJSON,
 	type TimelineTrackJSON,
-} from "core/editor/timelineLoader";
-import { mergeStudioOtSnapshot } from "core/studio/ot";
+} from "core/timeline-system/loader";
+import { mergeStudioOtSnapshot } from "@/studio/project/ot";
 import type {
 	CanvasDocument,
 	CanvasNode,
 	SceneDocument,
 	StudioProject,
-} from "core/studio/types";
+} from "@/studio/project/types";
 import { create } from "zustand";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";

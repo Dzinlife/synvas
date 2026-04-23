@@ -1,6 +1,6 @@
-import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import type { TimelineElement, TrackRole } from "core/element/types";
-import type { CanvasNode, SceneDocument, SceneNode } from "core/studio/types";
+import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
+import type { TimelineElement, TrackRole } from "core/timeline-system/types";
+import type { CanvasNode, SceneDocument, SceneNode } from "@/studio/project/types";
 import type React from "react";
 import {
 	startTransition,
@@ -22,8 +22,8 @@ import {
 	getSkiaResourceTrackerConfig,
 } from "react-skia-lite";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import { componentRegistry } from "@/element/model/componentRegistry";
-import { createTransformMeta } from "@/element/transform";
+import { componentRegistry } from "@/element-system/model/componentRegistry";
+import { createTransformMeta } from "@/element-system/transform";
 import { ingestExternalFileAsset } from "@/projects/assetIngest";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
@@ -59,12 +59,12 @@ import {
 import {
 	canvasNodeDefinitionList,
 	getCanvasNodeDefinition,
-} from "@/studio/canvas/node-system/registry";
+} from "@/node-system/registry";
 import type {
 	CanvasNodeDrawerProps,
 	CanvasNodeDrawerTrigger,
 	CanvasNodeResizeConstraints,
-} from "@/studio/canvas/node-system/types";
+} from "@/node-system/types";
 import type {
 	CanvasSidebarNodeReorderRequest,
 	CanvasSidebarNodeSelectOptions,

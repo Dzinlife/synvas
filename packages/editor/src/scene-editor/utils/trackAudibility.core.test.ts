@@ -1,6 +1,6 @@
-import type { TimelineMeta } from "core/element/types";
-import type { AudioTrackControlStateMap } from "core/editor/utils/audioTrackState";
-import { isTimelineTrackAudible } from "core/editor/utils/trackAudibility";
+import type { TimelineMeta } from "core/timeline-system/types";
+import type { AudioTrackControlStateMap } from "core/timeline-system/utils/audioTrackState";
+import { isTimelineTrackAudible } from "core/timeline-system/utils/trackAudibility";
 import { describe, expect, it } from "vitest";
 import type { TimelineTrack } from "../timeline/types";
 

@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import type { SnapPoint } from "@/scene-editor/timeline/types";
 
 export const SNAP_THRESHOLD_PX = 10;

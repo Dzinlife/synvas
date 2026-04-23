@@ -1,8 +1,8 @@
 import {
 	CLIP_GAIN_DB_DEFAULT,
 	resolveClipGainDb,
-} from "core/editor/audio/clipGain";
-import type { ClipMeta, TimelineElement } from "core/element/types";
+} from "core/audio-system/clipGain";
+import type { ClipMeta, TimelineElement } from "core/timeline-system/types";
 import { clampFrame, framesToTimecode } from "../../utils/timecode";
 
 const MAIN_TRACK_INDEX = 0;

@@ -1,16 +1,16 @@
 import type {
 	ExportElementAudioSource,
 	ExportTimelineAsVideoOptions,
-} from "core/editor/exportVideo";
+} from "core/render-system/exportVideo";
 import {
 	__applyAudioMixPlanAtFrameForTests,
 	__chooseSessionInstructionForTests,
 	__collectExportAudioTargetsForTests,
 	__resolveExportAudioTransitionFrameStateForTests,
-} from "core/editor/exportVideo";
-import type { TransitionFrameState } from "core/editor/preview/transitionFrameState";
-import type { TimelineTrack } from "core/editor/timeline/types";
-import type { TimelineElement, TimelineMeta } from "core/element/types";
+} from "core/render-system/exportVideo";
+import type { TransitionFrameState } from "core/timeline-system/transitionFrameState";
+import type { TimelineTrack } from "core/timeline-system/timeline";
+import type { TimelineElement, TimelineMeta } from "core/timeline-system/types";
 import type { AudioBufferSink } from "mediabunny";
 import { describe, expect, it, vi } from "vitest";
 import { getAudioPlaybackSessionKey } from "./playback/clipContinuityIndex";

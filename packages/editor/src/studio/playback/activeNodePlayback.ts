@@ -1,9 +1,9 @@
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineAsset } from "core/timeline-system/types";
 import type {
 	AudioCanvasNode,
 	StudioProject,
 	VideoCanvasNode,
-} from "core/studio/types";
+} from "@/studio/project/types";
 import type {
 	StudioRuntimeManager,
 	TimelineRef,
@@ -11,7 +11,7 @@ import type {
 import {
 	getVideoNodePlaybackController,
 	type VideoNodePlaybackController,
-} from "@/studio/canvas/node-system/video/playbackController";
+} from "@/node-system/video/playbackController";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 

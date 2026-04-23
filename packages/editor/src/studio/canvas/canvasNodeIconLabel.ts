@@ -1,4 +1,4 @@
-import type { CanvasNode, CanvasNodeType } from "core/studio/types";
+import type { CanvasNode, CanvasNodeType } from "@/studio/project/types";
 
 export const CANVAS_NODE_ICON_FONT_FAMILY = "SynvasIcon";
 

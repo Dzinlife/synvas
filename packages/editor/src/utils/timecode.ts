@@ -1,1 +1,1 @@
-export * from "core/utils/timecode";
+export * from "core/timeline-system/timecode";

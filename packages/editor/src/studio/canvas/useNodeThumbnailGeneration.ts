@@ -1,19 +1,19 @@
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineAsset } from "core/timeline-system/types";
 import type {
 	CanvasNode,
 	SceneDocument,
 	StudioProject,
-} from "core/studio/types";
+} from "@/studio/project/types";
 import { useEffect, useEffectEvent, useRef } from "react";
 import { writeProjectFileToOpfsAtPath } from "@/lib/projectOpfsStorage";
 import { useProjectStore } from "@/projects/projectStore";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
-import { getCanvasNodeDefinition } from "./node-system/registry";
+import { getCanvasNodeDefinition } from "@/node-system/registry";
 import {
 	NODE_THUMBNAIL_FRAME,
 	NODE_THUMBNAIL_VERSION,
-} from "./node-system/thumbnail/utils";
-import type { CanvasNodeThumbnailCapabilityContext } from "./node-system/types";
+} from "@/node-system/thumbnail/utils";
+import type { CanvasNodeThumbnailCapabilityContext } from "@/node-system/types";
 
 interface UseNodeThumbnailGenerationOptions {
 	project: StudioProject | null;

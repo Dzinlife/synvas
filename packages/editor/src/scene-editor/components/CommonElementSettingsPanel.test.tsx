@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTransformMeta } from "@/element/transform";
+import { createTransformMeta } from "@/element-system/transform";
 import CommonElementSettingsPanel from "./CommonElementSettingsPanel";
 
 vi.mock("@/components/ui/dial-slider", () => ({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CanvasNodeType } from "core/studio/types";
+import type { CanvasNodeType } from "@/studio/project/types";
 import {
 	CANVAS_NODE_ICON_FONT_FAMILY,
 	resolveCanvasNodeLabelText,

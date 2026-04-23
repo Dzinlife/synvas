@@ -1,8 +1,8 @@
-import { resolveTimelineElementClipGainLinear } from "core/editor/audio/clipGain";
-import { chooseSessionInstructionCandidate } from "core/editor/audio/sessionInstructionSelector";
-import { resolveTransitionFrameState } from "core/editor/preview/transitionFrameState";
-import type { TimelineElement, TimelineMeta } from "core/element/types";
-import type { TransitionAudioCurve } from "../../element/Transition/model";
+import { resolveTimelineElementClipGainLinear } from "core/audio-system/clipGain";
+import { chooseSessionInstructionCandidate } from "core/audio-system/sessionInstructionSelector";
+import { resolveTransitionFrameState } from "core/timeline-system/transitionFrameState";
+import type { TimelineElement, TimelineMeta } from "core/timeline-system/types";
+import type { TransitionAudioCurve } from "../../element-system/Transition/model";
 import type { TimelineTrack } from "../timeline/types";
 import type { AudioTrackControlStateMap } from "../utils/audioTrackState";
 import type { AudioMixInstruction } from "./transitionAudioMix";

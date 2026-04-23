@@ -2,7 +2,7 @@ import type {
 	CanvasNode,
 	SceneDocument,
 	StudioProject,
-} from "core/studio/types";
+} from "@/studio/project/types";
 import {
 	allocateInsertSiblingOrder,
 	resolveLayerSiblingCount,

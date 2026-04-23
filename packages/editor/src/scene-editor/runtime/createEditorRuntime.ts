@@ -1,4 +1,4 @@
-import { createModelRegistry } from "@/element/model/registry";
+import { createModelRegistry } from "@/element-system/model/registry";
 import { createTimelineStore } from "@/scene-editor/contexts/TimelineContext";
 import type {
 	EditorRuntime,

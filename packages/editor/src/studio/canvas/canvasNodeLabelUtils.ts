@@ -1,4 +1,4 @@
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode } from "@/studio/project/types";
 
 const CAMERA_ZOOM_EPSILON = 1e-6;
 export interface CanvasCameraState {

@@ -3,7 +3,7 @@ import type React from "react";
 import { useEffect, useMemo, useRef } from "react";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ModelManager } from "@/element/model";
+import { ModelManager } from "@/element-system/model";
 import { useProjectStore } from "@/projects/projectStore";
 import { useSceneSessionBridge } from "@/studio/scene/useSceneSessionBridge";
 import { useTimelineRuntimeRegistryBridge } from "@/studio/scene/useTimelineRuntimeRegistryBridge";
@@ -19,23 +19,23 @@ import type { EditorRuntime, StudioRuntimeManager } from "./runtime/types";
 import ViewportHost from "./ViewportHost";
 
 // 导入所有组件以触发注册
-import "@/element/AudioClip";
-import "@/element/Composition";
-import "@/element/CompositionAudioClip";
-import "@/element/VideoClip";
-import "@/element/ColorFilterLayer";
-import "@/element/FreezeFrame";
-import "@/element/FancyText";
-import "@/element/HalationFilterLayer";
-import "@/element/Image";
-import "@/element/Lottie";
-import "@/element/Text";
-import "@/element/Transition";
-import "@/element/PixelShaderTransition";
-import "@/element/RippleDissolveTransition";
+import "@/element-system/AudioClip";
+import "@/element-system/Composition";
+import "@/element-system/CompositionAudioClip";
+import "@/element-system/VideoClip";
+import "@/element-system/ColorFilterLayer";
+import "@/element-system/FreezeFrame";
+import "@/element-system/FancyText";
+import "@/element-system/HalationFilterLayer";
+import "@/element-system/Image";
+import "@/element-system/Lottie";
+import "@/element-system/Text";
+import "@/element-system/Transition";
+import "@/element-system/PixelShaderTransition";
+import "@/element-system/RippleDissolveTransition";
 
 // 调试：检查组件注册情况
-import { componentRegistry } from "@/element/model/componentRegistry";
+import { componentRegistry } from "@/element-system/model/componentRegistry";
 
 console.log(
 	"[Editor] Registered components:",

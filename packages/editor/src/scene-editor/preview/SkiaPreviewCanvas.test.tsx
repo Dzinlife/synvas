@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, waitFor } from "@testing-library/react";
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import type React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TimelineTrack } from "@/scene-editor/timeline/types";

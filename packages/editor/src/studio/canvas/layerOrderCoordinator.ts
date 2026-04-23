@@ -1,4 +1,4 @@
-import type { CanvasNode } from "core/studio/types";
+import type { CanvasNode } from "@/studio/project/types";
 
 export const LAYER_ORDER_REBALANCE_STEP = 1;
 

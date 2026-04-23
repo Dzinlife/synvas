@@ -1,1 +1,1 @@
-export * from "core/editor/audio/transitionAudioMix";
+export * from "core/audio-system/transitionAudioMix";

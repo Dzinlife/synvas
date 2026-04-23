@@ -4,7 +4,7 @@
  */
 
 import { useDrag } from "@use-gesture/react";
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { useRef } from "react";
 import { calculateDragResult, calculateFinalTrack } from "./dragCalculations";
 import { getElementHeightForTrack } from "./trackConfig";

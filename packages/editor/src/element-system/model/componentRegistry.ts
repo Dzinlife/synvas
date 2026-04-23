@@ -1,0 +1,175 @@
+import type { RendererPrepareFrameContext } from "core/timeline-system/model/types";
+import type {
+	ElementType,
+	TimelineElement,
+	TrackRole,
+} from "core/timeline-system/types";
+import type React from "react";
+import type { CanvasNodeCreateInput } from "@/projects/projectStore";
+import type { EditorRuntime } from "@/scene-editor/runtime/types";
+import type { ComponentModelStore } from "./types";
+
+export interface ElementComponentSettingProps<Props = Record<string, unknown>> {
+	element: TimelineElement<Props>;
+	updateProps: (partial: Partial<Props>) => void;
+}
+
+export interface ElementToCanvasClipboardNodeContext<
+	Props = Record<string, unknown>,
+> {
+	element: TimelineElement<Props>;
+	sourceCanvasSize: {
+		width: number;
+		height: number;
+	} | null;
+	fps: number;
+}
+
+export type ElementResizeBehavior = "default" | "text-width-reflow";
+export type TransitionInputMode = "node" | "texture";
+
+/**
+ * 组件定义接口
+ */
+export interface ElementComponentDefinition<Props = any, Internal = any> {
+	// 组件类型名称（大类）
+	type: ElementType;
+	// 组件实现标识（区分具体实现）
+	component: string;
+
+	// Model 工厂函数
+	createModel: (
+		id: string,
+		props: Props,
+		runtime: EditorRuntime,
+	) => ComponentModelStore<Props, Internal>;
+
+	// 渲染组件（用于 Preview 和导出）
+	Renderer: React.ComponentType<any>;
+
+	prepareRenderFrame?: (
+		context: RendererPrepareFrameContext,
+	) => Promise<void> | void;
+	transitionInputMode?: TransitionInputMode;
+	toCanvasClipboardNode?: (
+		context: ElementToCanvasClipboardNodeContext<Props>,
+	) => CanvasNodeCreateInput | null;
+
+	// 时间线组件
+	Timeline: React.ComponentType<any>;
+
+	// 元素设置面板组件
+	Setting?: React.ComponentType<ElementComponentSettingProps<Props>>;
+
+	// 组件元数据
+	meta: {
+		name: string; // 显示名称
+		category: string; // 分类
+		trackRole?: TrackRole; // 轨道角色
+		resizeBehavior?: ElementResizeBehavior; // resize 交互模式
+		icon?: React.ComponentType; // 图标组件
+		description?: string; // 描述
+		defaultProps?: Partial<Props>; // 默认 props
+		hiddenInMaterialLibrary?: boolean; // 是否在素材库隐藏
+	};
+}
+
+/**
+ * 组件注册表（单例）
+ */
+class ComponentRegistryClass {
+	private components = new Map<string, ElementComponentDefinition>();
+	// Renderer -> component 的反向映射
+	private componentToId = new Map<React.ComponentType<any>, string>();
+
+	/**
+	 * 注册组件
+	 */
+	register<Props = any>(definition: ElementComponentDefinition<Props>): void {
+		console.log("register", definition.component, definition);
+		if (this.components.has(definition.component)) {
+			console.warn(
+				`Component "${definition.component}" already registered, replacing...`,
+			);
+		}
+		this.components.set(definition.component, definition);
+		// 建立 Renderer -> component 的反向映射
+		this.componentToId.set(definition.Renderer, definition.component);
+	}
+
+	/**
+	 * 获取组件定义
+	 */
+	get(component: string): ElementComponentDefinition | undefined {
+		return this.components.get(component);
+	}
+
+	/**
+	 * 通过 Renderer 组件获取 type
+	 */
+	getComponentIdByRenderer(
+		component: React.ComponentType<any>,
+	): string | undefined {
+		return this.componentToId.get(component);
+	}
+
+	/**
+	 * 通过 Renderer 组件获取完整定义
+	 */
+	getByComponent(
+		component: React.ComponentType<any>,
+	): ElementComponentDefinition | undefined {
+		const componentId = this.componentToId.get(component);
+		return componentId ? this.components.get(componentId) : undefined;
+	}
+
+	/**
+	 * 检查是否已注册
+	 */
+	has(component: string): boolean {
+		return this.components.has(component);
+	}
+
+	/**
+	 * 获取所有已注册的组件类型
+	 */
+	getComponentIds(): string[] {
+		return Array.from(this.components.keys());
+	}
+
+	getTypes(): ElementType[] {
+		const types = new Set<ElementType>(
+			Array.from(this.components.values()).map((def) => def.type),
+		);
+		return Array.from(types);
+	}
+
+	/**
+	 * 获取所有组件定义
+	 */
+	getAll(): ElementComponentDefinition[] {
+		return Array.from(this.components.values());
+	}
+
+	/**
+	 * 按分类获取组件
+	 */
+	getByCategory(category: string): ElementComponentDefinition[] {
+		return this.getAll().filter((def) => def.meta.category === category);
+	}
+
+	getByType(type: ElementType): ElementComponentDefinition[] {
+		return this.getAll().filter((def) => def.type === type);
+	}
+
+	/**
+	 * 获取所有分类
+	 */
+	getCategories(): string[] {
+		const categories = new Set(this.getAll().map((def) => def.meta.category));
+		return Array.from(categories);
+	}
+}
+
+// 导出单例
+export const componentRegistry = new ComponentRegistryClass();

@@ -3,7 +3,7 @@
  * 提取拖拽过程中的核心计算逻辑
  */
 
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import {
 	getElementRole,
 	hasRoleConflictOnStoredTrack,

@@ -1,4 +1,4 @@
-import type { CanvasNode, SceneDocument } from "core/studio/types";
+import type { CanvasNode, SceneDocument } from "@/studio/project/types";
 import { create } from "zustand";
 import type {
 	TimelineClipboardPayload,

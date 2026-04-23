@@ -1,5 +1,5 @@
-import type { TimelineTrack } from "core/editor/timeline/types";
-import type { TimelineElement, TimelineMeta } from "core/element/types";
+import type { TimelineTrack } from "core/timeline-system/timeline";
+import type { TimelineElement, TimelineMeta } from "core/timeline-system/types";
 import { describe, expect, it, vi } from "vitest";
 import { runTimelineAudioMixFrame } from "./TimelineAudioMixRunner";
 

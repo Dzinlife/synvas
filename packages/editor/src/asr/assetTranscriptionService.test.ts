@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineAsset } from "core/timeline-system/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AsrClient } from "./AsrContext";
 import type { TranscriptSegment } from "./types";

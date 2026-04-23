@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveInteractiveTimelineElements } from "@/scene-editor/preview/buildSkiaTree";

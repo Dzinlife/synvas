@@ -1,10 +1,10 @@
-import { buildTimelineBatchCommandFromSnapshots } from "core/editor/ot";
+import { buildTimelineBatchCommandFromSnapshots } from "core/timeline-system/ot";
 import {
 	loadTimelineFromObject,
 	type TimelineJSON,
-} from "core/editor/timelineLoader";
-import type { StudioProject } from "core/studio/types";
-import { framesToTimecode } from "core/utils/timecode";
+} from "core/timeline-system/loader";
+import type { StudioProject } from "@/studio/project/types";
+import { framesToTimecode } from "core/timeline-system/timecode";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";

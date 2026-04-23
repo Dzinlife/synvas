@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import type { CanvasNode, VideoCanvasNode } from "core/studio/types";
+import type { CanvasNode, VideoCanvasNode } from "@/studio/project/types";
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeLabelLayer } from "./CanvasNodeLabelLayer";

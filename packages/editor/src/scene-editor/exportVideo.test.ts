@@ -1,9 +1,9 @@
 import type {
 	BuildSkiaFrameSnapshot,
 	BuildSkiaRenderState,
-} from "core/editor/exportVideo";
+} from "core/render-system/exportVideo";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModelRegistryClass } from "@/element/model/registry";
+import type { ModelRegistryClass } from "@/element-system/model/registry";
 import type { EditorRuntime } from "@/scene-editor/runtime/types";
 
 let timelineState: {
@@ -56,7 +56,7 @@ vi.mock("@/scene-editor/audio/buildCompositionAudioGraph", () => ({
 	buildCompositionAudioGraph: buildCompositionAudioGraphMock,
 }));
 
-vi.mock("core/editor/exportVideo", () => ({
+vi.mock("core/render-system/exportVideo", () => ({
 	exportTimelineAsVideoCore: exportTimelineAsVideoCoreMock,
 }));
 

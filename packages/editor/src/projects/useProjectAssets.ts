@@ -1,4 +1,4 @@
-import type { TimelineAsset } from "core/element/types";
+import type { TimelineAsset } from "core/timeline-system/types";
 import { useProjectStore } from "./projectStore";
 
 const EMPTY_ASSETS: TimelineAsset[] = [];

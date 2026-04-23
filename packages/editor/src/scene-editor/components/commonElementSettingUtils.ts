@@ -1,4 +1,4 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 
 export const clampNumber = (value: number, min: number, max: number): number => {
 	if (!Number.isFinite(value)) return min;

@@ -2,7 +2,7 @@ import {
 	loadTimelineFromObject,
 	saveTimelineToObject,
 	type TimelineJSON,
-} from "core/editor/timelineLoader";
+} from "core/timeline-system/loader";
 import type {
 	TimelineStore,
 	TimelineStoreApi,

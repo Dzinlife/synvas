@@ -1,10 +1,10 @@
-import { buildTimelineBatchCommandFromSnapshots } from "core/editor/ot";
+import { buildTimelineBatchCommandFromSnapshots } from "core/timeline-system/ot";
 import {
 	canvasPointToTransformPosition,
 	transformPositionToCanvasPoint,
-} from "core/element/position";
-import type { TimelineElement, TransformMeta } from "core/element/types";
-import type { SceneNode } from "core/studio/types";
+} from "core/timeline-system/position";
+import type { TimelineElement, TransformMeta } from "core/timeline-system/types";
+import type { SceneNode } from "@/studio/project/types";
 import type React from "react";
 import {
 	useCallback,
@@ -15,11 +15,11 @@ import {
 	useState,
 } from "react";
 import type { SkiaPointerEvent, SkParagraph } from "react-skia-lite";
-import { transformMetaToRenderLayout } from "@/element/layout";
+import { transformMetaToRenderLayout } from "@/element-system/layout";
 import {
 	componentRegistry,
 	type ElementResizeBehavior,
-} from "@/element/model/componentRegistry";
+} from "@/element-system/model/componentRegistry";
 import { useProjectStore } from "@/projects/projectStore";
 import type { TimelineStoreApi } from "@/scene-editor/contexts/TimelineContext";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";

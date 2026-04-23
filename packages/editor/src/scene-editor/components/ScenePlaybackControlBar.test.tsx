@@ -52,7 +52,7 @@ vi.mock("@/scene-editor/contexts/PreviewProvider", () => ({
 	usePreview: () => previewState,
 }));
 
-vi.mock("@/element/export", () => ({
+vi.mock("@/element-system/export", () => ({
 	exportCanvasAsImage: vi.fn(async () => {}),
 }));
 

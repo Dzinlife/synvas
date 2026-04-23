@@ -6,7 +6,7 @@ import {
 	renderHook,
 	waitFor,
 } from "@testing-library/react";
-import type { StudioProject } from "core/studio/types";
+import type { StudioProject } from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectStore } from "@/projects/projectStore";
 import {
@@ -29,7 +29,7 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 	}),
 }));
 
-vi.mock("@/studio/canvas/node-system/video/playbackController", () => ({
+vi.mock("@/node-system/video/playbackController", () => ({
 	getVideoNodePlaybackController: mocks.getVideoController,
 }));
 

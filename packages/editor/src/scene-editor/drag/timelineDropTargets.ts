@@ -1,4 +1,4 @@
-import { canvasPointToTransformPosition } from "core/element/position";
+import { canvasPointToTransformPosition } from "core/timeline-system/position";
 import { clampFrame } from "@/utils/timecode";
 import { DEFAULT_TRACK_HEIGHT } from "../timeline/trackConfig";
 import type { DropTarget } from "../timeline/types";

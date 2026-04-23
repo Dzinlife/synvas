@@ -1,6 +1,6 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import { describe, expect, it } from "vitest";
-import { createTransformMeta } from "@/element/transform";
+import { createTransformMeta } from "@/element-system/transform";
 import {
 	detachVideoClipAudio,
 	isVideoSourceAudioMuted,

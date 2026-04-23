@@ -1,11 +1,11 @@
 import {
 	type ExportElementAudioSource,
 	exportTimelineAsVideoCore,
-} from "core/editor/exportVideo";
-import { resolveTimelineEndFrame } from "core/editor/utils/timelineEndFrame";
-import type { TimelineElement } from "core/element/types";
+} from "core/render-system/exportVideo";
+import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
+import type { TimelineElement } from "core/timeline-system/types";
 import { type ComponentType, createElement, type ReactNode } from "react";
-import type { ModelRegistryClass } from "@/element/model/registry";
+import type { ModelRegistryClass } from "@/element-system/model/registry";
 import {
 	buildCompositionAudioGraph,
 	type CompositionAudioGraph,

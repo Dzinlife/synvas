@@ -1,8 +1,8 @@
-import type { TimelineElement } from "core/element/types";
+import type { TimelineElement } from "core/timeline-system/types";
 import type Konva from "konva";
 import type React from "react";
 import { useCallback, useEffect, useState } from "react";
-import { transformMetaToRenderLayout } from "@/element/layout";
+import { transformMetaToRenderLayout } from "@/element-system/layout";
 import type { PinchState } from "../contexts/PreviewProvider";
 import type { CanvasConvertOptions } from "./utils";
 

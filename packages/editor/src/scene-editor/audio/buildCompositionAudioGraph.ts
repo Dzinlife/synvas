@@ -1,10 +1,10 @@
 import {
 	CLIP_GAIN_DB_DEFAULT,
 	resolveClipGainDb,
-} from "core/editor/audio/clipGain";
-import type { ExportElementAudioSource } from "core/editor/exportVideo";
-import { isTimelineTrackAudible } from "core/editor/utils/trackAudibility";
-import type { TimelineElement, TimelineMeta } from "core/element/types";
+} from "core/audio-system/clipGain";
+import type { ExportElementAudioSource } from "core/render-system/exportVideo";
+import { isTimelineTrackAudible } from "core/timeline-system/utils/trackAudibility";
+import type { TimelineElement, TimelineMeta } from "core/timeline-system/types";
 import type { AudioBufferSink } from "mediabunny";
 import type { AudioPlaybackMixInstruction } from "@/audio/types";
 import { getAudioPlaybackSessionKey } from "@/scene-editor/playback/clipContinuityIndex";

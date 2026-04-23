@@ -1,4 +1,4 @@
-import type { SceneNode } from "core/studio/types";
+import type { SceneNode } from "@/studio/project/types";
 import { describe, expect, it } from "vitest";
 import {
 	DEFAULT_MIN_ZOOM,
