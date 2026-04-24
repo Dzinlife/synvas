@@ -402,6 +402,7 @@ const BOARD_CREATE_MIN_SIZE_PX = 6;
 const BOARD_AUTO_FIT_PADDING_WORLD = CANVAS_BOARD_AUTO_LAYOUT_GAP;
 const BOARD_AUTO_LAYOUT_ANIMATION_RESET_MS = 280;
 const SKIA_RESOURCE_TRACKER_LOG_TAG = "[skia-resource-tracker]";
+const EMPTY_STRING_ARRAY: string[] = [];
 const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
 	import.meta.env.DEV &&
 	(import.meta.env as Record<string, unknown>)
@@ -414,6 +415,27 @@ const isTileLodTransitionEqual = (
 	if (left === right) return true;
 	if (!left || !right) return false;
 	return left.mode === right.mode && left.zoom === right.zoom;
+};
+
+const resolveCanvasAutoLayoutFrozenNodeIds = (
+	nodes: CanvasNode[],
+	boardIds: string[],
+): string[] => {
+	if (boardIds.length === 0) return [];
+	const boardIdSet = new Set(boardIds);
+	const visibleNodeIdSet = new Set(
+		nodes.filter((node) => !node.hidden).map((node) => node.id),
+	);
+	const directChildNodeIds = nodes
+		.filter((node) => {
+			if (node.hidden) return false;
+			const parentId = node.parentId ?? null;
+			return parentId !== null && boardIdSet.has(parentId);
+		})
+		.map((node) => node.id);
+	return expandCanvasNodeIdsWithDescendants(nodes, directChildNodeIds).filter(
+		(nodeId) => visibleNodeIdSet.has(nodeId) && !boardIdSet.has(nodeId),
+	);
 };
 
 const resolveCameraCenterWorld = (
@@ -993,6 +1015,9 @@ const CanvasWorkspace = () => {
 	const [boardAutoLayoutIndicator, setBoardAutoLayoutIndicator] =
 		useState<CanvasBoardAutoLayoutIndicator | null>(null);
 	const [autoLayoutAnimatedNodeIds, setAutoLayoutAnimatedNodeIds] = useState<
+		string[]
+	>([]);
+	const [autoLayoutFrozenNodeIds, setAutoLayoutFrozenNodeIds] = useState<
 		string[]
 	>([]);
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1943,10 +1968,14 @@ const CanvasWorkspace = () => {
 		setBoardAutoLayoutIndicator(null);
 	}, []);
 	const commitCanvasAutoLayoutEntries = useCallback(
-		(entries: CanvasBoardAutoLayoutPatch[]) => {
+		(
+			entries: CanvasBoardAutoLayoutPatch[],
+			options?: { frozenNodeIds?: string[] },
+		) => {
 			if (entries.length === 0) return;
 			const animatedNodeIds = entries.map((entry) => entry.nodeId);
 			setAutoLayoutAnimatedNodeIds(animatedNodeIds);
+			setAutoLayoutFrozenNodeIds(options?.frozenNodeIds ?? []);
 			updateCanvasNodeLayoutBatch(
 				entries.map((entry) => ({
 					nodeId: entry.nodeId,
@@ -1959,6 +1988,7 @@ const CanvasWorkspace = () => {
 			autoLayoutAnimationResetTimerRef.current = window.setTimeout(() => {
 				autoLayoutAnimationResetTimerRef.current = null;
 				setAutoLayoutAnimatedNodeIds([]);
+				setAutoLayoutFrozenNodeIds([]);
 			}, BOARD_AUTO_LAYOUT_ANIMATION_RESET_MS);
 		},
 		[updateCanvasNodeLayoutBatch],
@@ -3615,6 +3645,7 @@ const CanvasWorkspace = () => {
 			dragSession.axisLock = null;
 			dragSession.autoLayoutInsertion = null;
 			dragSession.guideValuesCache = null;
+			setAutoLayoutFrozenNodeIds([]);
 			clearCanvasSnapGuides();
 			clearBoardAutoLayoutIndicator();
 		},
@@ -4832,6 +4863,22 @@ const CanvasWorkspace = () => {
 						)
 					: null;
 			dragSession.autoLayoutInsertion = autoLayoutInsertion;
+			const nextFrozenNodeIds =
+				targetAutoBoardIds.length === 1
+					? resolveCanvasAutoLayoutFrozenNodeIds(
+							workingNodes,
+							targetAutoBoardIds,
+						)
+					: [];
+			setAutoLayoutFrozenNodeIds((prev) => {
+				if (
+					prev.length === nextFrozenNodeIds.length &&
+					prev.every((nodeId, index) => nodeId === nextFrozenNodeIds[index])
+				) {
+					return prev;
+				}
+				return nextFrozenNodeIds;
+			});
 			setBoardAutoLayoutIndicator(autoLayoutInsertion?.indicator ?? null);
 			const nextLayoutEntries = [...layoutEntryByNodeId.entries()].map(
 				([nodeId, patch]) => ({
@@ -4886,6 +4933,7 @@ const CanvasWorkspace = () => {
 				if (dragSession.copyEntries.length > 0) {
 					removeCanvasGraphBatch(dragSession.copyEntries);
 				}
+				setAutoLayoutFrozenNodeIds([]);
 				return;
 			}
 			let latestProject = useProjectStore.getState().currentProject;
@@ -4926,6 +4974,7 @@ const CanvasWorkspace = () => {
 					),
 					copyHistoryProject.canvas.nodes,
 				);
+				setAutoLayoutFrozenNodeIds([]);
 				return;
 			}
 			const projectBeforeBoardLayout = latestProject;
@@ -4963,10 +5012,16 @@ const CanvasWorkspace = () => {
 				},
 			);
 			if (autoLayoutEntries.length > 0) {
-				commitCanvasAutoLayoutEntries(autoLayoutEntries);
+				commitCanvasAutoLayoutEntries(autoLayoutEntries, {
+					frozenNodeIds: resolveCanvasAutoLayoutFrozenNodeIds(
+						projectBeforeBoardLayout.canvas.nodes,
+						autoLayoutExtraBoardIds,
+					),
+				});
 				latestProject = useProjectStore.getState().currentProject;
 				if (!latestProject) return;
 			} else {
+				setAutoLayoutFrozenNodeIds([]);
 				const boardAutoFitEntries = resolveBoardAutoFitEntriesAfterDrag(
 					projectBeforeBoardLayout.canvas.nodes,
 					movedTargetNodeIds,
@@ -6962,6 +7017,16 @@ const CanvasWorkspace = () => {
 		(shouldFreezeTileLodForFocus ? FOCUS_TILE_LOD_TRANSITION : null);
 	const resolvedCanvasCursor =
 		canvasToolMode === "board" ? "crosshair" : canvasResizeCursor;
+	const frozenCanvasNodeIds =
+		autoLayoutFrozenNodeIds.length === 0 &&
+		autoLayoutAnimatedNodeIds.length === 0
+			? EMPTY_STRING_ARRAY
+			: [
+					...new Set([
+						...autoLayoutFrozenNodeIds,
+						...autoLayoutAnimatedNodeIds,
+					]),
+				];
 
 	return (
 		<div
@@ -7001,6 +7066,7 @@ const CanvasWorkspace = () => {
 				snapGuidesScreen={snapGuidesScreen}
 				boardAutoLayoutIndicator={boardAutoLayoutIndicator}
 				animatedLayoutNodeIds={autoLayoutAnimatedNodeIds}
+				frozenNodeIds={frozenCanvasNodeIds}
 				suspendHover={isCameraAnimating}
 				tileDebugEnabled={tileDebugEnabled}
 				tileMaxTasksPerTick={tileMaxTasksPerTick}

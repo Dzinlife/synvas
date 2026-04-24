@@ -68,7 +68,9 @@ import {
 	createTileAabb,
 	StaticTileScheduler,
 	TILE_CAMERA_EPSILON,
+	TILE_LOD_MAX,
 	TILE_PIXEL_SIZE,
+	resolveTileWorldSize,
 	type TileAabb,
 	type TileDebugItem,
 	type TileDrawItem,
@@ -120,6 +122,7 @@ interface InfiniteSkiaCanvasProps {
 	snapGuidesScreen?: CanvasSnapGuidesScreen;
 	boardAutoLayoutIndicator?: CanvasBoardAutoLayoutIndicator | null;
 	animatedLayoutNodeIds?: string[];
+	frozenNodeIds?: string[];
 	suspendHover?: boolean;
 	tileDebugEnabled?: boolean;
 	tileMaxTasksPerTick?: number;
@@ -133,6 +136,7 @@ const EMPTY_SNAP_GUIDES_SCREEN: CanvasSnapGuidesScreen = {
 	horizontal: [],
 };
 const EMPTY_ANIMATED_LAYOUT_NODE_IDS: string[] = [];
+const EMPTY_FROZEN_NODE_IDS: string[] = [];
 
 const LAYOUT_EPSILON = 1e-6;
 const TILE_AABB_EPSILON = 1e-4;
@@ -144,6 +148,8 @@ const TILE_DEBUG_TEXT_COLOR = "rgba(255,255,255,0.96)";
 const TILE_DEBUG_LABEL_OFFSET_X = 4;
 const TILE_DEBUG_LABEL_OFFSET_Y = 4;
 const TILE_DRAW_BLEED_TEXEL = 0.5;
+const FROZEN_NODE_SNAPSHOT_MAX_EDGE_PX = 2048;
+const FROZEN_NODE_SNAPSHOT_MAX_PIXELS = 1024 * 1024;
 const NODE_HUD_FADE_IN_DURATION_MS = 180;
 const STATIC_TILE_FOCUS_FADE_DURATION_MS = 220;
 const AUTO_LAYOUT_TIMING = {
@@ -166,6 +172,13 @@ interface TileInputCacheEntry {
 	mode: "raster" | "fallback-picture";
 	rasterImage: SkImage | null;
 	input: TileInput | null;
+}
+
+interface FrozenNodeRasterSnapshot {
+	image: SkImage;
+	sourceWidth: number;
+	sourceHeight: number;
+	dispose: () => void;
 }
 
 interface TileAsyncPictureCacheEntry {
@@ -284,6 +297,111 @@ const disposeTileInput = (input: TileInput | null | undefined) => {
 	try {
 		input.dispose?.();
 	} catch {}
+};
+
+const disposeFrozenNodeRasterSnapshot = (
+	snapshot: FrozenNodeRasterSnapshot | null | undefined,
+) => {
+	if (!snapshot) return;
+	try {
+		snapshot.dispose();
+	} catch {}
+};
+
+const resolveFrozenNodeSnapshotSize = (
+	input: TileInput,
+	cameraZoom: number,
+): { width: number; height: number } => {
+	const safeZoom = Math.max(cameraZoom, TILE_CAMERA_EPSILON);
+	const lod = Math.min(TILE_LOD_MAX, Math.round(Math.log2(safeZoom)));
+	// frozen snapshot 使用 tile LOD 的像素密度，避免动画期间突然变成高清源图。
+	const pixelPerWorld = TILE_PIXEL_SIZE / resolveTileWorldSize(lod);
+	const rawWidth = Math.max(
+		1,
+		Math.ceil(Math.abs(input.aabb.width) * pixelPerWorld),
+	);
+	const rawHeight = Math.max(
+		1,
+		Math.ceil(Math.abs(input.aabb.height) * pixelPerWorld),
+	);
+	const pixelScale = Math.min(
+		1,
+		FROZEN_NODE_SNAPSHOT_MAX_EDGE_PX / rawWidth,
+		FROZEN_NODE_SNAPSHOT_MAX_EDGE_PX / rawHeight,
+		Math.sqrt(FROZEN_NODE_SNAPSHOT_MAX_PIXELS / (rawWidth * rawHeight)),
+	);
+	return {
+		width: Math.max(1, Math.round(rawWidth * pixelScale)),
+		height: Math.max(1, Math.round(rawHeight * pixelScale)),
+	};
+};
+
+const createFrozenNodeRasterSnapshot = (
+	input: TileInput,
+	cameraZoom: number,
+): FrozenNodeRasterSnapshot | null => {
+	const { width, height } = resolveFrozenNodeSnapshotSize(input, cameraZoom);
+	const surface = Skia.Surface.MakeOffscreen(width, height);
+	if (!surface) return null;
+	let image: SkImage | null = null;
+	let imagePaint: ReturnType<typeof Skia.Paint> | null = null;
+	try {
+		const canvas = surface.getCanvas();
+		canvas.clear(Float32Array.of(0, 0, 0, 0));
+		canvas.save();
+		if (input.kind === "picture") {
+			canvas.scale(
+				width / Math.max(1, input.sourceWidth),
+				height / Math.max(1, input.sourceHeight),
+			);
+			canvas.drawPicture(input.picture);
+		} else {
+			imagePaint = Skia.Paint();
+			canvas.drawImageRect(
+				input.image,
+				{
+					x: 0,
+					y: 0,
+					width: Math.max(1, input.sourceWidth),
+					height: Math.max(1, input.sourceHeight),
+				},
+				{
+					x: 0,
+					y: 0,
+					width,
+					height,
+				},
+				imagePaint,
+				true,
+			);
+		}
+		canvas.restore();
+		surface.flush();
+		image = surface.asImageCopy?.() ?? surface.makeImageSnapshot();
+		if (!image) return null;
+		return {
+			image,
+			sourceWidth: width,
+			sourceHeight: height,
+			dispose: () => {
+				try {
+					image?.dispose?.();
+				} catch {}
+			},
+		};
+	} catch {
+		try {
+			image?.dispose?.();
+		} catch {}
+		return null;
+	} finally {
+		try {
+			imagePaint?.dispose?.();
+		} catch {}
+		try {
+			surface.dispose?.();
+		} catch {}
+	}
 };
 
 const isTileAabbEqual = (left: TileAabb, right: TileAabb): boolean => {
@@ -550,6 +668,77 @@ const CanvasNodeRenderItemComponent = ({
 const CanvasNodeRenderItem = memo(CanvasNodeRenderItemComponent);
 CanvasNodeRenderItem.displayName = "CanvasNodeRenderItem";
 
+interface CanvasNodeFrozenRenderItemProps {
+	node: CanvasNode;
+	layout: SharedValue<CanvasNodeLayoutState>;
+	snapshot: FrozenNodeRasterSnapshot;
+}
+
+const CanvasNodeFrozenRenderItemComponent = ({
+	node,
+	layout,
+	snapshot,
+}: CanvasNodeFrozenRenderItemProps) => {
+	const clip = useDerivedValue(() => {
+		const worldRect = resolveCanvasNodeLayoutWorldRect(layout.value);
+		return {
+			x: worldRect.left,
+			y: worldRect.top,
+			width: worldRect.width,
+			height: worldRect.height,
+		};
+	});
+	const renderTransform = useDerivedValue(() => {
+		const safeWidth = Math.max(Math.abs(node.width), LAYOUT_EPSILON);
+		const safeHeight = Math.max(Math.abs(node.height), LAYOUT_EPSILON);
+		const scaleX = layout.value.width / safeWidth;
+		const scaleY = layout.value.height / safeHeight;
+		const matrix: Matrix4 = [
+			scaleX,
+			0,
+			0,
+			layout.value.x,
+			0,
+			scaleY,
+			0,
+			layout.value.y,
+			0,
+			0,
+			1,
+			0,
+			0,
+			0,
+			0,
+			1,
+		];
+		return [
+			{
+				matrix,
+			},
+		];
+	});
+	const width = Math.max(1, Math.abs(node.width));
+	const height = Math.max(1, Math.abs(node.height));
+
+	return (
+		<Group clip={clip}>
+			<Group transform={renderTransform}>
+				<Image
+					image={snapshot.image}
+					x={0}
+					y={0}
+					width={width}
+					height={height}
+					fit="fill"
+				/>
+			</Group>
+		</Group>
+	);
+};
+
+const CanvasNodeFrozenRenderItem = memo(CanvasNodeFrozenRenderItemComponent);
+CanvasNodeFrozenRenderItem.displayName = "CanvasNodeFrozenRenderItem";
+
 const StaticTileLayerComponent = ({
 	drawItems,
 }: {
@@ -768,6 +957,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	snapGuidesScreen = EMPTY_SNAP_GUIDES_SCREEN,
 	boardAutoLayoutIndicator = null,
 	animatedLayoutNodeIds = EMPTY_ANIMATED_LAYOUT_NODE_IDS,
+	frozenNodeIds = EMPTY_FROZEN_NODE_IDS,
 	suspendHover = false,
 	tileDebugEnabled = false,
 	tileMaxTasksPerTick,
@@ -782,6 +972,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const animatedLayoutNodeIdSet = useMemo(() => {
 		return new Set(animatedLayoutNodeIds);
 	}, [animatedLayoutNodeIds]);
+	const frozenNodeIdSet = useMemo(() => {
+		if (frozenNodeIds.length === 0 && animatedLayoutNodeIds.length === 0) {
+			return new Set<string>();
+		}
+		return new Set([...frozenNodeIds, ...animatedLayoutNodeIds]);
+	}, [animatedLayoutNodeIds, frozenNodeIds]);
 	const isFocusMode = Boolean(focusedNodeId);
 	const latestNodeById = useMemo(() => {
 		return new Map(tileNodes.map((node) => [node.id, node]));
@@ -837,6 +1033,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const tileNodeSourceSignatureRef = useRef(new Map<string, string>());
 	const tileInputEpochRef = useRef(new Map<string, number>());
 	const tileInputCacheRef = useRef(new Map<string, TileInputCacheEntry>());
+	const frozenNodeSnapshotRef = useRef(
+		new Map<string, FrozenNodeRasterSnapshot>(),
+	);
 	const tileAsyncPictureCacheRef = useRef(
 		new Map<string, TileAsyncPictureCacheEntry>(),
 	);
@@ -860,6 +1059,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			for (const entry of tileInputCacheRef.current.values()) {
 				disposeTileInput(entry.input);
 			}
+			for (const snapshot of frozenNodeSnapshotRef.current.values()) {
+				disposeFrozenNodeRasterSnapshot(snapshot);
+			}
 			for (const entry of tileAsyncPictureCacheRef.current.values()) {
 				disposeTileAsyncPictureCacheEntry(entry);
 			}
@@ -869,6 +1071,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			tileNodeSourceSignatureRef.current.clear();
 			tileInputEpochRef.current.clear();
 			tileInputCacheRef.current.clear();
+			frozenNodeSnapshotRef.current.clear();
 			tileAsyncPictureCacheRef.current.clear();
 			tileAsyncPictureTaskIdRef.current = 0;
 			tileInputIdRef.current.clear();
@@ -939,16 +1142,35 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, [focusedNodeId, nodes]);
 	const activeLiveNodeId = useMemo(() => {
 		if (!activeNode || activeNode.type === "board") return null;
+		if (frozenNodeIdSet.has(activeNode.id)) return null;
 		return activeNode.id;
-	}, [activeNode]);
-	const liveRenderNodes = useMemo(() => {
-		const liveNodeIds = new Set(animatedLayoutNodeIds);
+	}, [activeNode, frozenNodeIdSet]);
+	const liveNodeIdSet = useMemo(() => {
+		const liveNodeIds = new Set<string>();
 		if (activeLiveNodeId) {
 			liveNodeIds.add(activeLiveNodeId);
 		}
+		return liveNodeIds;
+	}, [activeLiveNodeId]);
+	const staticTileExcludedNodeIdSet = useMemo(() => {
+		const excludedNodeIds = new Set(frozenNodeIdSet);
+		if (activeLiveNodeId) {
+			excludedNodeIds.add(activeLiveNodeId);
+		}
+		return excludedNodeIds;
+	}, [activeLiveNodeId, frozenNodeIdSet]);
+	const liveRenderNodes = useMemo(() => {
+		const liveNodeIds = liveNodeIdSet;
 		if (liveNodeIds.size === 0) return [];
-		return renderNodes.filter((node) => liveNodeIds.has(node.id));
-	}, [activeLiveNodeId, animatedLayoutNodeIds, renderNodes]);
+		return renderNodes.filter((node) => {
+			if (frozenNodeIdSet.has(node.id)) return false;
+			return liveNodeIds.has(node.id);
+		});
+	}, [frozenNodeIdSet, liveNodeIdSet, renderNodes]);
+	const frozenLayoutRenderNodes = useMemo(() => {
+		if (frozenNodeIdSet.size === 0) return [];
+		return renderNodes.filter((node) => frozenNodeIdSet.has(node.id));
+	}, [frozenNodeIdSet, renderNodes]);
 	const focusedNodeDefinition = useMemo(() => {
 		if (!focusedNode) return null;
 		return getCanvasNodeDefinition(focusedNode.type);
@@ -1107,8 +1329,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		for (const node of tileNodes) {
 			// 这里直接使用当帧 tileNodes，避免读取 ref 带来一帧滞后。
 			const latestNode = node;
-			if (latestNode.id === activeLiveNodeId) {
-				nextNodeRasterUri.set(latestNode.id, null);
+			if (staticTileExcludedNodeIdSet.has(latestNode.id)) {
+				const uri = resolveNodeRasterUri(latestNode);
+				nextNodeRasterUri.set(latestNode.id, uri);
+				if (uri) {
+					requiredUris.add(uri);
+				}
 				continue;
 			}
 			const uri = resolveNodeRasterUri(latestNode);
@@ -1174,7 +1400,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			disposed = true;
 		};
 	}, [
-		activeLiveNodeId,
+		staticTileExcludedNodeIdSet,
 		tileNodes,
 		resolveNodeRasterUri,
 		scheduleTileTick,
@@ -1210,6 +1436,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		}
 	}, [animatedLayoutNodeIdSet, tileNodes]);
 
+	useEffect(() => {
+		for (const [nodeId, snapshot] of frozenNodeSnapshotRef.current.entries()) {
+			if (frozenNodeIdSet.has(nodeId)) continue;
+			disposeFrozenNodeRasterSnapshot(snapshot);
+			frozenNodeSnapshotRef.current.delete(nodeId);
+		}
+	}, [frozenNodeIdSet]);
+
 	useLayoutEffect(() => {
 		if (!supportsTilePipeline) return;
 		const scheduler = tileSchedulerRef.current;
@@ -1223,7 +1457,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			const visibleAabb = resolveClippedTileInputAabb(nextAabb, clipAabbs);
 			const clipSignature = resolveTileClipSignature(clipAabbs, visibleAabb);
 			const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
-			if (node.id === activeLiveNodeId) {
+			if (staticTileExcludedNodeIdSet.has(node.id)) {
 				if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
 					scheduler.markDirtyUnion(oldAabb, nextAabb);
 					tileNodeAabbRef.current.set(node.id, nextAabb);
@@ -1266,12 +1500,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			scheduleTileTick();
 		}
 	}, [
-		activeLiveNodeId,
 		assetById,
 		scenes,
 		scheduleTileTick,
 		supportsTilePipeline,
 		latestNodeById,
+		staticTileExcludedNodeIdSet,
 		tileNodes,
 	]);
 
@@ -1300,7 +1534,25 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		for (const node of tileNodes) {
 			// 这里直接使用当帧 tileNodes，避免 undo/redo 与拖拽时 tile 输入落后一帧。
 			const latestNode = node;
-			if (latestNode.id === activeLiveNodeId) {
+			if (frozenNodeIdSet.has(latestNode.id)) {
+				const cachedInput =
+					tileInputCacheRef.current.get(latestNode.id)?.input ?? null;
+				if (cachedInput && !frozenNodeSnapshotRef.current.has(latestNode.id)) {
+					const snapshot = createFrozenNodeRasterSnapshot(
+						cachedInput,
+						camera.value.zoom,
+					);
+					if (snapshot) {
+						frozenNodeSnapshotRef.current.set(latestNode.id, snapshot);
+					}
+				}
+				// frozen 节点使用当前帧 raster snapshot，缓存保留到动画结束后再更新静态 tile。
+				visitedNodeIds.add(latestNode.id);
+				continue;
+			}
+			if (liveNodeIdSet.has(latestNode.id)) {
+				// 拖拽中的 live 节点保留上一帧 tile input，drop 后的布局动画会复用它。
+				visitedNodeIds.add(latestNode.id);
 				continue;
 			}
 			visitedNodeIds.add(latestNode.id);
@@ -1478,9 +1730,11 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			asyncPictureRequests,
 		};
 	}, [
-		activeLiveNodeId,
 		assetById,
+		camera,
+		frozenNodeIdSet,
 		latestNodeById,
+		liveNodeIdSet,
 		rasterCacheVersion,
 		resolveNodeRasterUri,
 		resolveTileInputId,
@@ -1676,6 +1930,21 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							cameraZoom={camera.value.zoom}
 						/>
 					)}
+					{frozenLayoutRenderNodes.map((node) => {
+						const layout = getNodeLayoutValue(node.id);
+						if (!layout) return null;
+						const latestNode = getLatestNodeById(node.id) ?? node;
+						const snapshot = frozenNodeSnapshotRef.current.get(node.id) ?? null;
+						if (!snapshot) return null;
+						return (
+							<CanvasNodeFrozenRenderItem
+								key={`canvas-node-frozen-render-${node.id}`}
+								node={latestNode}
+								layout={layout}
+								snapshot={snapshot}
+							/>
+						);
+					})}
 					{liveRenderNodes.map((node) => {
 						const layout = getNodeLayoutValue(node.id);
 						if (!layout) return null;
@@ -1746,6 +2015,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		boardAutoLayoutIndicator,
 		getNodeLayoutValue,
 		focusedNodeId,
+		frozenLayoutRenderNodes,
 		focusEditorLayerState.layerProps,
 		focusLayerEnabled,
 		handleOverlayNodeResize,

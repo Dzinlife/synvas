@@ -126,6 +126,7 @@ interface MockInfiniteSkiaCanvasProps {
 		y2: number;
 	} | null;
 	animatedLayoutNodeIds?: string[];
+	frozenNodeIds?: string[];
 	suspendHover?: boolean;
 	onNodeResize?: (event: {
 		phase: "start" | "move" | "end";
@@ -5181,6 +5182,13 @@ describe("CanvasWorkspace", () => {
 				y2: 144,
 			},
 		);
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining([
+				"node-auto-a",
+				"node-auto-b",
+				"node-auto-moving",
+			]),
+		);
 
 		act(() => {
 			fireEvent.pointerUp(canvas, {
@@ -5210,6 +5218,70 @@ describe("CanvasWorkspace", () => {
 				"node-auto-moving",
 				"node-auto-b",
 				"node-board-auto",
+			]),
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining([
+				"node-auto-a",
+				"node-auto-b",
+				"node-auto-moving",
+			]),
+		);
+	});
+
+	it("auto board 跨行拖拽时冻结所有 direct children，避免行间混合分辨率闪烁", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 400,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-moving", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 208,
+				width: 80,
+				height: 40,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(100, 228),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(180, 176),
+				buttons: 1,
+			});
+		});
+
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining([
+				"node-auto-a",
+				"node-auto-b",
+				"node-auto-moving",
 			]),
 		);
 	});
