@@ -228,6 +228,7 @@ interface NodeDragSession {
 			before: CanvasNodeLayoutSnapshot;
 		}
 	>;
+	layoutBeforeByNodeId: Record<string, CanvasNodeLayoutSnapshot>;
 	copyEntries: CanvasGraphHistoryEntry[];
 	activated: boolean;
 	moved: boolean;
@@ -3448,13 +3449,15 @@ const CanvasWorkspace = () => {
 				dragSession.copyEntries = [];
 				dragSession.copyMode = false;
 			}
-			const rollbackEntries = dragSession.dragNodeIds
-				.map((nodeId) => {
-					const snapshot = dragSession.snapshots[nodeId];
-					if (!snapshot) return null;
+			const latestProject = useProjectStore.getState().currentProject;
+			const rollbackEntries = (latestProject?.canvas.nodes ?? [])
+				.map((node) => {
+					const before = dragSession.layoutBeforeByNodeId[node.id];
+					if (!before) return null;
+					if (isLayoutEqual(pickLayout(node), before)) return null;
 					return {
-						nodeId,
-						patch: snapshot.before,
+						nodeId: node.id,
+						patch: before,
 					};
 				})
 				.filter(
@@ -4407,6 +4410,9 @@ const CanvasWorkspace = () => {
 						},
 					]),
 				),
+				layoutBeforeByNodeId: Object.fromEntries(
+					latestProject.canvas.nodes.map((node) => [node.id, pickLayout(node)]),
+				),
 				copyEntries: [],
 				activated: false,
 				moved: false,
@@ -4714,32 +4720,20 @@ const CanvasWorkspace = () => {
 				projectBeforeBoardAutoFit.canvas.nodes,
 				movedTargetNodeIds,
 			);
-			const boardAutoFitBeforeByNodeId = new Map(
-				boardAutoFitEntries.map((entry) => {
-					const node =
-						projectBeforeBoardAutoFit.canvas.nodes.find(
-							(item) => item.id === entry.nodeId,
-						) ?? null;
-					return [entry.nodeId, node ? pickLayout(node) : null] as const;
-				}),
-			);
 			if (boardAutoFitEntries.length > 0) {
 				updateCanvasNodeLayoutBatch(boardAutoFitEntries);
 				latestProject = useProjectStore.getState().currentProject;
 				if (!latestProject) return;
 			}
-			const nextEntries = dragSession.dragNodeIds
-				.map((nodeId) => {
-					const snapshot = dragSession.snapshots[nodeId];
-					const latestNode =
-						latestProject.canvas.nodes.find((item) => item.id === nodeId) ??
-						null;
-					if (!snapshot || !latestNode) return null;
-					const after = pickLayout(latestNode);
-					if (isLayoutEqual(snapshot.before, after)) return null;
+			const historyEntries = latestProject.canvas.nodes
+				.map((node) => {
+					const before = dragSession.layoutBeforeByNodeId[node.id];
+					if (!before) return null;
+					const after = pickLayout(node);
+					if (isLayoutEqual(before, after)) return null;
 					return {
-						nodeId,
-						before: snapshot.before,
+						nodeId: node.id,
+						before,
 						after,
 					};
 				})
@@ -4751,29 +4745,7 @@ const CanvasWorkspace = () => {
 						before: CanvasNodeLayoutSnapshot;
 						after: CanvasNodeLayoutSnapshot;
 					} => Boolean(entry),
-					);
-			const historyEntryByNodeId = new Map(
-				nextEntries.map((entry) => [entry.nodeId, entry]),
-			);
-			for (const boardAutoFitEntry of boardAutoFitEntries) {
-				const latestNode =
-					latestProject.canvas.nodes.find(
-						(node) => node.id === boardAutoFitEntry.nodeId,
-					) ?? null;
-				if (!latestNode) continue;
-				const before =
-					dragSession.snapshots[boardAutoFitEntry.nodeId]?.before ??
-					boardAutoFitBeforeByNodeId.get(boardAutoFitEntry.nodeId);
-				if (!before) continue;
-				const after = pickLayout(latestNode);
-				if (isLayoutEqual(before, after)) continue;
-				historyEntryByNodeId.set(boardAutoFitEntry.nodeId, {
-					nodeId: boardAutoFitEntry.nodeId,
-					before,
-					after,
-				});
-			}
-			const historyEntries = [...historyEntryByNodeId.values()];
+				);
 			if (historyEntries.length === 0) return;
 			if (historyEntries.length === 1) {
 				const entry = historyEntries[0];

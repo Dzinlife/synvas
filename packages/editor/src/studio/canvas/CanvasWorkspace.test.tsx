@@ -5068,6 +5068,69 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
+	it("拖拽到更高层级 board 后 undo 会恢复原始 siblingOrder", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			const orderByNodeId = new Map([
+				["node-scene-1", 0],
+				["node-video-1", 1],
+				["node-scene-2", 2],
+				["node-video-offscreen", 3],
+				["node-image-1", 4],
+				["node-image-hidden", 5],
+			]);
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: [
+							...project.canvas.nodes.map((node) => ({
+								...node,
+								siblingOrder: orderByNodeId.get(node.id) ?? node.siblingOrder,
+							})),
+							createTestBoardNode("node-board-undo-order", {
+								x: 500,
+								y: 100,
+								width: 180,
+								height: 120,
+								siblingOrder: 6,
+							}),
+						],
+					},
+					ui: {
+						...project.ui,
+						canvasSnapEnabled: false,
+					},
+				},
+			};
+		});
+		render(<CanvasWorkspace />);
+
+		dragNodeAt(300, 160, 520, 160);
+		expect(getCanvasNodeForTest("node-video-1").parentId).toBe(
+			"node-board-undo-order",
+		);
+
+		useStudioHistoryStore.getState().undo();
+
+		expect(getCanvasNodeForTest("node-video-1")).toMatchObject({
+			parentId: null,
+			siblingOrder: 1,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-undo-order"),
+		).toMatchObject({
+			siblingOrder: 6,
+			x: 500,
+			y: 100,
+			width: 180,
+			height: 120,
+		});
+	});
+
 	it("节点拖拽吸附时会显示 guide，并在 dragEnd 后清空", () => {
 		render(<CanvasWorkspace />);
 		const canvas = screen.getByTestId("infinite-skia-canvas");

@@ -906,10 +906,12 @@ const applyEntry = (
 		return;
 	}
 	if (entry.kind === "canvas.node-layout.batch") {
-		for (const layoutEntry of entry.entries) {
-			const patch = mode === "undo" ? layoutEntry.before : layoutEntry.after;
-			projectStore.updateCanvasNodeLayout(layoutEntry.nodeId, patch);
-		}
+		projectStore.updateCanvasNodeLayoutBatch(
+			entry.entries.map((layoutEntry) => ({
+				nodeId: layoutEntry.nodeId,
+				patch: mode === "undo" ? layoutEntry.before : layoutEntry.after,
+			})),
+		);
 		return;
 	}
 	if (entry.kind === "canvas.node-create") {
