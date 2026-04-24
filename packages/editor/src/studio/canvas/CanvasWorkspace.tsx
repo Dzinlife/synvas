@@ -515,6 +515,15 @@ const resolveCanvasAutoLayoutRowsByBoardId = (
 	return rowsByBoardId;
 };
 
+const removeCanvasAutoLayoutRowNodeIds = (
+	rows: string[][],
+	nodeIds: Set<string>,
+): string[][] => {
+	return rows
+		.map((row) => row.filter((nodeId) => !nodeIds.has(nodeId)))
+		.filter((row) => row.length > 0);
+};
+
 const resolveCameraCenterWorld = (
 	camera: CameraState,
 	stageWidth: number,
@@ -5159,36 +5168,89 @@ const CanvasWorkspace = () => {
 				return;
 			}
 			const projectBeforeBoardLayout = latestProject;
-			const autoLayoutRowsByBoardId = dragSession.autoLayoutInsertion
-				? new Map([
-						[
-							dragSession.autoLayoutInsertion.boardId,
-							dragSession.autoLayoutInsertion.rows,
-						],
-					])
-				: undefined;
-			const sourceAutoBoardIds = movedTargetNodeIds
-				.map((nodeId) => {
-					const beforeParentId =
-						dragSession.layoutBeforeByNodeId[nodeId]?.parentId ?? null;
-					const beforeParent = beforeParentId
-						? (projectBeforeBoardLayout.canvas.nodes.find(
-								(node) => node.id === beforeParentId,
-							) ?? null)
-						: null;
-					return isCanvasBoardAutoLayoutNode(beforeParent)
-						? beforeParent.id
-						: null;
-				})
-				.filter((boardId): boardId is string => Boolean(boardId));
-			const autoLayoutExtraBoardIds = dragSession.autoLayoutInsertion
-				? [dragSession.autoLayoutInsertion.boardId, ...sourceAutoBoardIds]
-				: sourceAutoBoardIds;
+			const movedTargetNodeIdSet = new Set(movedTargetNodeIds);
+			if (
+				dragSession.autoLayoutInsertion &&
+				!dragSession.autoLayoutInsertion.changesRows
+			) {
+				const nodeById = new Map(
+					projectBeforeBoardLayout.canvas.nodes.map((node) => [node.id, node]),
+				);
+				const restoreEntries = movedTargetNodeIds
+					.map((nodeId) => {
+						const before = dragSession.layoutBeforeByNodeId[nodeId];
+						const node = nodeById.get(nodeId) ?? null;
+						if (!before || !node) return null;
+						if (isLayoutEqual(before, pickLayout(node))) return null;
+						return {
+							nodeId,
+							patch: before,
+						};
+					})
+					.filter(
+						(
+							entry,
+						): entry is {
+							nodeId: string;
+							patch: CanvasNodeLayoutSnapshot;
+						} => Boolean(entry),
+					);
+				if (restoreEntries.length > 0) {
+					updateCanvasNodeLayoutBatch(restoreEntries);
+				}
+				setAutoLayoutFrozenNodeIds([]);
+				return;
+			}
+			const sourceAutoBoardIds = [
+				...new Set(
+					movedTargetNodeIds
+						.map((nodeId) => {
+							const beforeParentId =
+								dragSession.layoutBeforeByNodeId[nodeId]?.parentId ?? null;
+							const beforeParent = beforeParentId
+								? (projectBeforeBoardLayout.canvas.nodes.find(
+										(node) => node.id === beforeParentId,
+									) ?? null)
+								: null;
+							return isCanvasBoardAutoLayoutNode(beforeParent)
+								? beforeParent.id
+								: null;
+						})
+						.filter((boardId): boardId is string => Boolean(boardId)),
+				),
+			];
+			const autoLayoutRowsByBoardId = new Map<string, string[][]>();
+			if (dragSession.autoLayoutInsertion?.changesRows) {
+				autoLayoutRowsByBoardId.set(
+					dragSession.autoLayoutInsertion.boardId,
+					dragSession.autoLayoutInsertion.rows,
+				);
+			}
+			for (const boardId of sourceAutoBoardIds) {
+				if (boardId === dragSession.autoLayoutInsertion?.boardId) continue;
+				const originalRows = dragSession.autoLayoutRowsByBoardId.get(boardId);
+				if (!originalRows) continue;
+				autoLayoutRowsByBoardId.set(
+					boardId,
+					removeCanvasAutoLayoutRowNodeIds(originalRows, movedTargetNodeIdSet),
+				);
+			}
+			const autoLayoutExtraBoardIds = [
+				...new Set([
+					...(dragSession.autoLayoutInsertion?.changesRows
+						? [dragSession.autoLayoutInsertion.boardId]
+						: []),
+					...sourceAutoBoardIds,
+				]),
+			];
 			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
 				projectBeforeBoardLayout.canvas.nodes,
 				movedTargetNodeIds,
 				{
-					rowsByBoardId: autoLayoutRowsByBoardId,
+					rowsByBoardId:
+						autoLayoutRowsByBoardId.size > 0
+							? autoLayoutRowsByBoardId
+							: undefined,
 					extraBoardIds: autoLayoutExtraBoardIds,
 				},
 			);

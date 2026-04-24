@@ -5164,11 +5164,11 @@ describe("CanvasWorkspace", () => {
 		const canvas = screen.getByTestId("infinite-skia-canvas");
 		act(() => {
 			fireEvent.pointerDown(canvas, {
-				...createPointerPatch(430, 80),
+				...createPointerPatch(430, 104),
 				buttons: 1,
 			});
 			fireEvent.pointerMove(canvas, {
-				...createPointerPatch(190, 80),
+				...createPointerPatch(190, 104),
 				buttons: 1,
 			});
 		});
@@ -5193,7 +5193,7 @@ describe("CanvasWorkspace", () => {
 
 		act(() => {
 			fireEvent.pointerUp(canvas, {
-				...createPointerPatch(190, 80),
+				...createPointerPatch(190, 104),
 				buttons: 0,
 			});
 		});
@@ -5294,7 +5294,7 @@ describe("CanvasWorkspace", () => {
 		}
 	});
 
-	it("auto board 中间 child 拖回原本行内位置时不显示插入 indicator", () => {
+	it("auto board 中间 child 拖回原本行内位置时显示 indicator 但 drop 后不重排", () => {
 		setCanvasNodesForTest([
 			createTestBoardNode("node-board-auto", {
 				layoutMode: "auto",
@@ -5338,18 +5338,55 @@ describe("CanvasWorkspace", () => {
 				buttons: 1,
 			});
 			fireEvent.pointerMove(canvas, {
-				...createPointerPatch(300, 80),
+				...createPointerPatch(300, 104),
 				buttons: 1,
 			});
 		});
 
 		expect(getCanvasNodeForTest("node-auto-moving")).toMatchObject({
 			x: 250,
-			y: 64,
+			y: 88,
 		});
 		expect(
 			getLatestInfiniteSkiaCanvasProps().boardAutoLayoutIndicator,
-		).toBeNull();
+		).toMatchObject({
+			boardId: "node-board-auto",
+			orientation: "vertical",
+			x1: 278,
+			y1: 64,
+			x2: 278,
+			y2: 144,
+		});
+
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(300, 104),
+				buttons: 0,
+			});
+		});
+
+		expect(getCanvasNodeForTest("node-auto-a")).toMatchObject({
+			x: 64,
+			y: 64,
+			siblingOrder: 0,
+		});
+		expect(getCanvasNodeForTest("node-auto-moving")).toMatchObject({
+			x: 228,
+			y: 64,
+			siblingOrder: 1,
+		});
+		expect(getCanvasNodeForTest("node-auto-c")).toMatchObject({
+			x: 392,
+			y: 64,
+			siblingOrder: 2,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 700,
+			height: 300,
+		});
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
 	});
 
 	it("auto board 跨行拖拽时冻结所有 direct children，避免行间混合分辨率闪烁", () => {
@@ -5861,7 +5898,7 @@ describe("CanvasWorkspace", () => {
 		]);
 		render(<CanvasWorkspace />);
 
-		dragNodeAt(440, 80, 260, 80);
+		dragNodeAt(440, 104, 260, 104);
 
 		expect(getCanvasNodeForTest("node-auto-outside")).toMatchObject({
 			parentId: "node-board-auto",
@@ -5873,6 +5910,70 @@ describe("CanvasWorkspace", () => {
 			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
 		).toMatchObject({
 			width: 372,
+			height: 208,
+		});
+	});
+
+	it("从 auto board 拖出 child 时按原 rows 移除 dragged node 后重排源 board", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-moving", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 392,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+
+		dragNodeAt(278, 104, 620, 104);
+
+		expect(getCanvasNodeForTest("node-auto-moving")).toMatchObject({
+			parentId: null,
+			x: 570,
+			y: 64,
+		});
+		expect(getCanvasNodeForTest("node-auto-a")).toMatchObject({
+			parentId: "node-board-auto",
+			x: 64,
+			y: 64,
+			siblingOrder: 0,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			parentId: "node-board-auto",
+			x: 228,
+			y: 64,
+			siblingOrder: 1,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 392,
 			height: 208,
 		});
 	});
@@ -6586,11 +6687,11 @@ describe("CanvasWorkspace", () => {
 
 		act(() => {
 			fireEvent.pointerDown(canvas, {
-				...createPointerPatch(430, 80),
+				...createPointerPatch(430, 104),
 				buttons: 1,
 			});
 			fireEvent.pointerMove(canvas, {
-				...createPointerPatch(190, 80),
+				...createPointerPatch(190, 104),
 				buttons: 1,
 			});
 		});
@@ -6600,7 +6701,7 @@ describe("CanvasWorkspace", () => {
 
 		act(() => {
 			fireEvent.pointerUp(canvas, {
-				...createPointerPatch(190, 80),
+				...createPointerPatch(190, 104),
 				buttons: 0,
 			});
 		});

@@ -195,7 +195,7 @@ describe("canvasBoardAutoLayout", () => {
 		]);
 	});
 
-	it("解析行内和行间插入位置，并以 gap/2 放置 indicator", () => {
+	it("解析行内、行边缘和行间插入位置，并以 gap/2 放置 indicator", () => {
 		const nodes: CanvasNode[] = [
 			createBoardNode("board", { x: 0, y: 0, width: 500, height: 400 }),
 			createTextNode("a", {
@@ -228,17 +228,56 @@ describe("canvasBoardAutoLayout", () => {
 			}),
 		];
 
+		const beforeFirstRow = resolveCanvasBoardAutoLayoutInsertion(
+			nodes,
+			"board",
+			["moving"],
+			{ x: 100, y: 20 },
+		);
+		expect(beforeFirstRow?.rows).toEqual([["moving"], ["a", "b"], ["c"]]);
+		expect(beforeFirstRow?.indicator).toMatchObject({
+			orientation: "horizontal",
+			y1: 32,
+			y2: 32,
+		});
+
+		const rowTopEdge = resolveCanvasBoardAutoLayoutInsertion(
+			nodes,
+			"board",
+			["moving"],
+			{ x: 190, y: 76 },
+		);
+		expect(rowTopEdge?.rows).toEqual([["moving"], ["a", "b"], ["c"]]);
+		expect(rowTopEdge?.indicator).toMatchObject({
+			orientation: "horizontal",
+			y1: 32,
+			y2: 32,
+		});
+
 		const betweenChildren = resolveCanvasBoardAutoLayoutInsertion(
 			nodes,
 			"board",
 			["moving"],
-			{ x: 190, y: 80 },
+			{ x: 190, y: 104 },
 		);
 		expect(betweenChildren?.rows[0]).toEqual(["a", "moving", "b"]);
 		expect(betweenChildren?.indicator).toMatchObject({
 			orientation: "vertical",
 			x1: 196,
 			x2: 196,
+		});
+
+		const rowBottomEdge = resolveCanvasBoardAutoLayoutInsertion(
+			nodes,
+			"board",
+			["moving"],
+			{ x: 190, y: 132 },
+		);
+		expect(rowBottomEdge?.rows).toEqual([["a", "b"], ["moving"], ["c"]]);
+		expect(rowBottomEdge?.indicator).toMatchObject({
+			orientation: "horizontal",
+			y1: 176,
+			y2: 176,
 		});
 
 		const betweenRows = resolveCanvasBoardAutoLayoutInsertion(
@@ -253,9 +292,22 @@ describe("canvasBoardAutoLayout", () => {
 			y1: 176,
 			y2: 176,
 		});
+
+		const afterLastRow = resolveCanvasBoardAutoLayoutInsertion(
+			nodes,
+			"board",
+			["moving"],
+			{ x: 100, y: 340 },
+		);
+		expect(afterLastRow?.rows).toEqual([["a", "b"], ["c"], ["moving"]]);
+		expect(afterLastRow?.indicator).toMatchObject({
+			orientation: "horizontal",
+			y1: 320,
+			y2: 320,
+		});
 	});
 
-	it("拖拽到原本行内位置时不返回插入 indicator", () => {
+	it("拖拽到原本行内位置时返回 indicator 但标记为未改变 rows", () => {
 		const nodes: CanvasNode[] = [
 			createBoardNode("board", { x: 0, y: 0, width: 700, height: 300 }),
 			createTextNode("a", {
@@ -290,19 +342,30 @@ describe("canvasBoardAutoLayout", () => {
 				nodes,
 				"board",
 				["moving"],
-				{ x: 300, y: 80 },
+				{ x: 300, y: 104 },
 				{ originalRows },
 			),
-		).toBeNull();
+		).toMatchObject({
+			rows: originalRows,
+			changesRows: false,
+			indicator: {
+				orientation: "vertical",
+				x1: 278,
+				x2: 278,
+			},
+		});
 
 		expect(
 			resolveCanvasBoardAutoLayoutInsertion(
 				nodes,
 				"board",
 				["moving"],
-				{ x: 560, y: 80 },
+				{ x: 560, y: 104 },
 				{ originalRows },
-			)?.rows,
-		).toEqual([["a", "c", "moving"]]);
+			),
+		).toMatchObject({
+			rows: [["a", "c", "moving"]],
+			changesRows: true,
+		});
 	});
 });
