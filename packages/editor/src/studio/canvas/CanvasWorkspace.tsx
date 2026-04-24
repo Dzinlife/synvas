@@ -524,6 +524,17 @@ const removeCanvasAutoLayoutRowNodeIds = (
 		.filter((row) => row.length > 0);
 };
 
+const appendCanvasAutoLayoutRowsByBoardId = (
+	rowsByBoardId: Map<string, string[][]>,
+	nodes: CanvasNode[],
+	boardIds: string[],
+): void => {
+	for (const boardId of [...new Set(boardIds)]) {
+		if (rowsByBoardId.has(boardId)) continue;
+		rowsByBoardId.set(boardId, deriveCanvasBoardAutoLayoutRows(nodes, boardId));
+	}
+};
+
 const resolveCameraCenterWorld = (
 	camera: CameraState,
 	stageWidth: number,
@@ -3269,10 +3280,14 @@ const CanvasWorkspace = () => {
 				if (!node) return [];
 				return collectCanvasAncestorBoardIds(nodes, node.parentId ?? null);
 			});
-			if (boardIds.length === 0) return [];
+			const freeBoardIds = boardIds.filter((boardId) => {
+				const board = nodes.find((item) => item.id === boardId) ?? null;
+				return !isCanvasBoardAutoLayoutNode(board);
+			});
+			if (freeBoardIds.length === 0) return [];
 			return resolveCanvasBoardExpandToFitPatches(
 				nodes,
-				boardIds,
+				freeBoardIds,
 				BOARD_AUTO_FIT_PADDING_WORLD,
 			);
 		},
@@ -5225,6 +5240,10 @@ const CanvasWorkspace = () => {
 						.filter((boardId): boardId is string => Boolean(boardId)),
 				),
 			];
+			const changedAutoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
+				projectBeforeBoardLayout.canvas.nodes,
+				movedRootNodeIds,
+			);
 			const autoLayoutRowsByBoardId = new Map<string, string[][]>();
 			if (dragSession.autoLayoutInsertion?.changesRows) {
 				autoLayoutRowsByBoardId.set(
@@ -5241,12 +5260,18 @@ const CanvasWorkspace = () => {
 					removeCanvasAutoLayoutRowNodeIds(originalRows, movedRootNodeIdSet),
 				);
 			}
+			appendCanvasAutoLayoutRowsByBoardId(
+				autoLayoutRowsByBoardId,
+				projectBeforeBoardLayout.canvas.nodes,
+				changedAutoLayoutBoardIds,
+			);
 			const autoLayoutExtraBoardIds = [
 				...new Set([
 					...(dragSession.autoLayoutInsertion?.changesRows
 						? [dragSession.autoLayoutInsertion.boardId]
 						: []),
 					...sourceAutoBoardIds,
+					...changedAutoLayoutBoardIds,
 				]),
 			];
 			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
@@ -5282,9 +5307,51 @@ const CanvasWorkspace = () => {
 					movedTargetNodeIds,
 				);
 				if (boardAutoFitEntries.length > 0) {
+					const boardAutoFitNodeIds = boardAutoFitEntries.map(
+						(entry) => entry.nodeId,
+					);
+					const boardAutoFitAutoLayoutBoardIds =
+						collectCanvasAutoLayoutAncestorBoardIds(
+							projectBeforeBoardLayout.canvas.nodes,
+							boardAutoFitNodeIds,
+						);
+					const boardAutoFitRowsByBoardId = new Map(autoLayoutRowsByBoardId);
+					appendCanvasAutoLayoutRowsByBoardId(
+						boardAutoFitRowsByBoardId,
+						projectBeforeBoardLayout.canvas.nodes,
+						boardAutoFitAutoLayoutBoardIds,
+					);
 					updateCanvasNodeLayoutBatch(boardAutoFitEntries);
 					latestProject = useProjectStore.getState().currentProject;
 					if (!latestProject) return;
+					const boardAutoFitAutoLayoutEntries =
+						resolveAutoLayoutEntriesForChangedNodes(
+							latestProject.canvas.nodes,
+							boardAutoFitNodeIds,
+							{
+								rowsByBoardId:
+									boardAutoFitRowsByBoardId.size > 0
+										? boardAutoFitRowsByBoardId
+										: undefined,
+								extraBoardIds: boardAutoFitAutoLayoutBoardIds,
+							},
+						);
+					if (boardAutoFitAutoLayoutEntries.length > 0) {
+						commitCanvasAutoLayoutEntries(boardAutoFitAutoLayoutEntries, {
+							frozenNodeIds: resolveCanvasAutoLayoutFrozenNodeIds(
+								latestProject.canvas.nodes,
+								boardAutoFitAutoLayoutBoardIds,
+								{
+									excludeNodeIds:
+										activeNodeId && !movedTargetNodeIds.includes(activeNodeId)
+											? new Set([activeNodeId])
+											: undefined,
+								},
+							),
+						});
+						latestProject = useProjectStore.getState().currentProject;
+						if (!latestProject) return;
+					}
 				}
 			}
 			const historyEntries = latestProject.canvas.nodes

@@ -5914,6 +5914,144 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
+	it("拖入嵌套 auto child board 后外层 auto board 保持原 rows", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 256,
+				height: 400,
+				siblingOrder: -1,
+			}),
+			createTestBoardNode("node-auto-child-board", {
+				layoutMode: "auto",
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 128,
+				height: 128,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 256,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-outside", {
+				x: 520,
+				y: 64,
+				width: 80,
+				height: 240,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+
+		dragNodeAt(560, 104, 100, 104);
+
+		expect(getCanvasNodeForTest("node-auto-outside")).toMatchObject({
+			parentId: "node-auto-child-board",
+			x: 128,
+			y: 128,
+			siblingOrder: 0,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-auto-child-board"),
+		).toMatchObject({
+			parentId: "node-board-auto",
+			x: 64,
+			y: 64,
+			width: 208,
+			height: 368,
+			siblingOrder: 0,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			parentId: "node-board-auto",
+			x: 64,
+			y: 496,
+			siblingOrder: 1,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 336,
+			height: 640,
+		});
+	});
+
+	it("拖入嵌套 free child board auto-fit 后会触发外层 auto board reflow", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 256,
+				height: 400,
+				siblingOrder: -1,
+			}),
+			createTestBoardNode("node-free-child-board", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 128,
+				height: 128,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 256,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-outside", {
+				x: 520,
+				y: 64,
+				width: 80,
+				height: 240,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+
+		dragNodeAt(560, 104, 100, 104);
+
+		expect(getCanvasNodeForTest("node-auto-outside")).toMatchObject({
+			parentId: "node-free-child-board",
+			x: 128,
+			y: 128,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-free-child-board"),
+		).toMatchObject({
+			parentId: "node-board-auto",
+			x: 64,
+			y: 64,
+			width: 208,
+			height: 368,
+			siblingOrder: 0,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			parentId: "node-board-auto",
+			x: 64,
+			y: 496,
+			siblingOrder: 1,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			x: 0,
+			y: 0,
+			width: 336,
+			height: 640,
+		});
+	});
+
 	it("从 auto board 拖出 child 时按原 rows 移除 dragged node 后重排源 board", () => {
 		setCanvasNodesForTest([
 			createTestBoardNode("node-board-auto", {
