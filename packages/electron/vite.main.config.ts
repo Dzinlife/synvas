@@ -1,7 +1,6 @@
 import { builtinModules } from "node:module";
 import path from "node:path";
 import { defineConfig } from "vite";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 const builtins = new Set(builtinModules);
 for (const mod of builtinModules) {
@@ -9,7 +8,9 @@ for (const mod of builtinModules) {
 }
 
 export default defineConfig({
-	plugins: [tsconfigPaths()],
+	resolve: {
+		tsconfigPaths: true,
+	},
 	build: {
 		target: "es2022",
 		sourcemap: true,
@@ -21,7 +22,7 @@ export default defineConfig({
 			formats: ["es"],
 			fileName: () => "main.js",
 		},
-		rollupOptions: {
+		rolldownOptions: {
 			external: ["electron", ...builtins],
 		},
 	},

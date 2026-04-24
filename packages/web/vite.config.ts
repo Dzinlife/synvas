@@ -7,10 +7,6 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { defineConfig } from "vite";
 import topLevelAwait from "vite-plugin-top-level-await";
-import wasm from "vite-plugin-wasm";
-import viteTsConfigPaths from "vite-tsconfig-paths";
-
-// import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const canvaskitPackageDir = path.resolve(__dirname, "../canvaskit-wasm");
@@ -19,30 +15,17 @@ const canvaskitBrokenWorkspaceDir = path.resolve(__dirname, "../../canvaskit-was
 export default defineConfig(() => {
 	return {
 		plugins: [
-			// WASM 支持插件必须在最前面（用于 canvaskit-wasm）
-			wasm(),
+			// CanvasKit WebGPU bundle 仍包含 top-level await。
 			topLevelAwait(),
-			// canvaskit ESM 插件必须在最前面
-			// nodePolyfills({
-			//   include: ['events'],
-			//   globals: {
-			//     global: true,
-			//     process: true,
-			//   },
-			// }),
 			devtools(),
 			cloudflare({ viteEnvironment: { name: "ssr" } }),
-			// this is the plugin that enables path aliases
-			viteTsConfigPaths({
-				projects: ["./tsconfig.json"],
-				projectDiscovery: "lazy",
-			}),
 			tailwindcss(),
 			tanstackStart(),
 			viteReact(),
 		],
 
 		resolve: {
+			tsconfigPaths: true,
 			alias: [
 				{
 					find: "@synvas/editor",
@@ -92,15 +75,6 @@ export default defineConfig(() => {
 				"canvaskit-wasm/bin/full-webgl/canvaskit",
 				"canvaskit-wasm/bin/full-webgpu/canvaskit",
 			],
-			esbuildOptions: {
-				target: "esnext",
-			},
-		},
-		build: {
-			commonjsOptions: {
-				include: [/node_modules/, /events/, /canvaskit-wasm/],
-				transformMixedEsModules: true,
-			},
 		},
 		ssr: {
 			noExternal: ["@shopify/react-native-skia", "events"],
@@ -108,6 +82,5 @@ export default defineConfig(() => {
 				conditions: ["workerd", "worker", "browser"],
 			},
 		},
-		assetsInclude: ["**/*.wasm"],
 	};
 });

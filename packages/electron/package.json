@@ -25,12 +25,10 @@
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^5.0.4",
+    "@vitejs/plugin-react": "^6.0.1",
     "electron": "^34.0.0",
     "typescript": "^5.7.2",
-    "vite": "^7.1.7",
-    "vite-plugin-top-level-await": "^1.6.0",
-    "vite-plugin-wasm": "^3.5.0",
-    "vite-tsconfig-paths": "^6.0.2"
+    "vite": "^8.0.10",
+    "vite-plugin-top-level-await": "^1.6.0"
   }
 }
