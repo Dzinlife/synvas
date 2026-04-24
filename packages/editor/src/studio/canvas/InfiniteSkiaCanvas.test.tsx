@@ -2767,6 +2767,120 @@ describe("InfiniteSkiaCanvas", () => {
 		}
 	});
 
+	it("auto layout 动画结束后 tile 未 ready 时继续保留 frozen snapshot", async () => {
+		tilePipelineMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const tileImage = {
+			width: vi.fn(() => 384),
+			height: vi.fn(() => 384),
+			dispose: vi.fn(),
+		};
+		let frameReady = true;
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockImplementation(() => {
+				const baseFrame = createEmptyTileFrameResult();
+				return {
+					...baseFrame,
+					drawItems: frameReady
+						? [
+								{
+									key: 1,
+									lod: 0,
+									sourceLod: 0,
+									tx: 0,
+									ty: 0,
+									left: 0,
+									top: 0,
+									size: 512,
+									image: tileImage as unknown as TileDrawItem["image"],
+								},
+							]
+						: [],
+					hasPendingWork: !frameReady,
+					stats: {
+						...baseFrame.stats,
+						visibleCount: 1,
+						readyVisibleCount: frameReady ? 1 : 0,
+						queuedCount: frameReady ? 0 : 1,
+					},
+				};
+			});
+		const releaseMock = vi.fn();
+		const image = {
+			id: "auto-layout-retain-image",
+			width: 256,
+			height: 144,
+			dispose: vi.fn(),
+		};
+		acquireImageAssetMock.mockResolvedValue({
+			asset: { image },
+			release: releaseMock,
+		});
+		try {
+			const animatedNode = createImageNode("node-image-retained-layout", 0);
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [animatedNode],
+				scenes: emptyScenes,
+				assets: [createImageAsset(animatedNode.assetId)],
+				activeNodeId: null,
+				selectedNodeIds: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === animatedNode.id),
+				).toBe(true);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					animatedLayoutNodeIds={[animatedNode.id]}
+				/>,
+			);
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).toContain(
+					animatedNode.id,
+				);
+			});
+
+			frameReady = false;
+			rerender(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const tree = getLatestRenderTree();
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(getFrozenRenderedNodeIds(tree)).toContain(animatedNode.id);
+				expect(
+					latestInputs.some((input) => input.nodeId === animatedNode.id),
+				).toBe(true);
+			});
+
+			frameReady = true;
+			rerender(<InfiniteSkiaCanvas {...baseProps} width={129} />);
+
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					animatedNode.id,
+				);
+			});
+		} finally {
+			setInputsSpy.mockRestore();
+			beginFrameSpy.mockRestore();
+		}
+	});
+
 	it("默认不渲染 TileDebugLayer", async () => {
 		tilePipelineMockState.enabled = true;
 		render(

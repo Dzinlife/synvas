@@ -1132,6 +1132,17 @@ const isLayerValueEqual = (left: unknown, right: unknown): boolean => {
 	return false;
 };
 
+const isStaticTileFrameFullyReady = (frameResult: TileFrameResult): boolean => {
+	const stats = frameResult.stats;
+	return (
+		!frameResult.hasPendingWork &&
+		stats.visibleCount === stats.readyVisibleCount &&
+		stats.coverFallbackCount === 0 &&
+		stats.queuedCount === 0 &&
+		stats.renderingCount === 0
+	);
+};
+
 const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	width,
 	height,
@@ -1378,6 +1389,56 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		}
 		return nextFrozenNodeIds;
 	}, [frozenNodeIdSet, liveNodeIdSet]);
+	const previousEffectiveFrozenNodeIdSetRef =
+		useRef<ReadonlySet<string>>(EMPTY_NODE_ID_SET);
+	const [retainedFrozenNodeIds, setRetainedFrozenNodeIds] = useState<string[]>(
+		[],
+	);
+	const [frozenRetentionVersion, setFrozenRetentionVersion] = useState(0);
+	const releasedFrozenNodeIdSet = useMemo(() => {
+		void frozenRetentionVersion;
+		if (!supportsTilePipeline) return EMPTY_NODE_ID_SET;
+		const releasedNodeIds = new Set<string>();
+		for (const nodeId of previousEffectiveFrozenNodeIdSetRef.current) {
+			if (effectiveFrozenNodeIdSet.has(nodeId)) continue;
+			if (!latestNodeById.has(nodeId)) continue;
+			releasedNodeIds.add(nodeId);
+		}
+		if (releasedNodeIds.size === 0) return EMPTY_NODE_ID_SET;
+		return releasedNodeIds;
+	}, [
+		effectiveFrozenNodeIdSet,
+		frozenRetentionVersion,
+		latestNodeById,
+		supportsTilePipeline,
+	]);
+	const retainedFrozenNodeIdSet = useMemo(() => {
+		if (!supportsTilePipeline || retainedFrozenNodeIds.length === 0) {
+			return releasedFrozenNodeIdSet;
+		}
+		const retainedNodeIds = new Set(releasedFrozenNodeIdSet);
+		for (const nodeId of retainedFrozenNodeIds) {
+			if (effectiveFrozenNodeIdSet.has(nodeId)) continue;
+			if (!latestNodeById.has(nodeId)) continue;
+			retainedNodeIds.add(nodeId);
+		}
+		if (retainedNodeIds.size === 0) return EMPTY_NODE_ID_SET;
+		return retainedNodeIds;
+	}, [
+		effectiveFrozenNodeIdSet,
+		latestNodeById,
+		releasedFrozenNodeIdSet,
+		retainedFrozenNodeIds,
+		supportsTilePipeline,
+	]);
+	const renderFrozenNodeIdSet = useMemo(() => {
+		if (retainedFrozenNodeIdSet.size === 0) return effectiveFrozenNodeIdSet;
+		const nextFrozenNodeIds = new Set(effectiveFrozenNodeIdSet);
+		for (const nodeId of retainedFrozenNodeIdSet) {
+			nextFrozenNodeIds.add(nodeId);
+		}
+		return nextFrozenNodeIds;
+	}, [effectiveFrozenNodeIdSet, retainedFrozenNodeIdSet]);
 	const staticTileExcludedNodeIdSet = useMemo(() => {
 		const excludedNodeIds = new Set(effectiveFrozenNodeIdSet);
 		for (const nodeId of liveNodeIdSet) {
@@ -1394,9 +1455,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		});
 	}, [effectiveFrozenNodeIdSet, liveNodeIdSet, renderNodes]);
 	const frozenLayoutRenderNodes = useMemo(() => {
-		if (effectiveFrozenNodeIdSet.size === 0) return [];
-		return renderNodes.filter((node) => effectiveFrozenNodeIdSet.has(node.id));
-	}, [effectiveFrozenNodeIdSet, renderNodes]);
+		if (renderFrozenNodeIdSet.size === 0) return [];
+		return renderNodes.filter((node) => renderFrozenNodeIdSet.has(node.id));
+	}, [renderFrozenNodeIdSet, renderNodes]);
 	const focusedNodeDefinition = useMemo(() => {
 		if (!focusedNode) return null;
 		return getCanvasNodeDefinition(focusedNode.type);
@@ -1662,13 +1723,58 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		}
 	}, [animatedLayoutNodeIdSet, tileNodes]);
 
+	useLayoutEffect(() => {
+		if (!supportsTilePipeline) {
+			previousEffectiveFrozenNodeIdSetRef.current = new Set(
+				effectiveFrozenNodeIdSet,
+			);
+			setRetainedFrozenNodeIds((previous) =>
+				previous.length === 0 ? previous : [],
+			);
+			return;
+		}
+		if (releasedFrozenNodeIdSet.size > 0 || retainedFrozenNodeIds.length > 0) {
+			setRetainedFrozenNodeIds((previous) => {
+				const nextNodeIds = new Set(previous);
+				for (const nodeId of releasedFrozenNodeIdSet) {
+					nextNodeIds.add(nodeId);
+				}
+				for (const nodeId of [...nextNodeIds]) {
+					if (
+						effectiveFrozenNodeIdSet.has(nodeId) ||
+						!latestNodeById.has(nodeId)
+					) {
+						nextNodeIds.delete(nodeId);
+					}
+				}
+				const next = [...nextNodeIds];
+				if (
+					next.length === previous.length &&
+					next.every((nodeId, index) => nodeId === previous[index])
+				) {
+					return previous;
+				}
+				return next;
+			});
+		}
+		previousEffectiveFrozenNodeIdSetRef.current = new Set(
+			effectiveFrozenNodeIdSet,
+		);
+	}, [
+		effectiveFrozenNodeIdSet,
+		latestNodeById,
+		releasedFrozenNodeIdSet,
+		retainedFrozenNodeIds.length,
+		supportsTilePipeline,
+	]);
+
 	useEffect(() => {
 		for (const [nodeId, snapshot] of frozenNodeSnapshotRef.current.entries()) {
-			if (effectiveFrozenNodeIdSet.has(nodeId)) continue;
+			if (renderFrozenNodeIdSet.has(nodeId)) continue;
 			disposeFrozenNodeRasterSnapshot(snapshot);
 			frozenNodeSnapshotRef.current.delete(nodeId);
 		}
-	}, [effectiveFrozenNodeIdSet]);
+	}, [renderFrozenNodeIdSet]);
 
 	useLayoutEffect(() => {
 		if (!supportsTilePipeline) return;
@@ -2235,6 +2341,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (!root) return;
 		let staticTileDrawItems: TileDrawItem[] = [];
 		let tileDebugItems: TileDebugItem[] = [];
+		let shouldReleaseRetainedFrozenNodes = false;
 		const scheduler = supportsTilePipeline ? tileSchedulerRef.current : null;
 		if (scheduler) {
 			if (!isFocusMode) {
@@ -2256,6 +2363,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				if (frameResult.hasPendingWork) {
 					scheduleTileTick();
 				}
+				shouldReleaseRetainedFrozenNodes =
+					retainedFrozenNodeIdSet.size > 0 &&
+					isStaticTileFrameFullyReady(frameResult);
 			} else {
 				const previousFrameResult = latestTileFrameResultRef.current;
 				if (previousFrameResult) {
@@ -2282,6 +2392,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						/>
 					)}
 					{frozenLayoutRenderNodes.map((node) => {
+						if (
+							shouldReleaseRetainedFrozenNodes &&
+							retainedFrozenNodeIdSet.has(node.id) &&
+							!effectiveFrozenNodeIdSet.has(node.id)
+						) {
+							return null;
+						}
 						const layout = getNodeLayoutValue(node.id);
 						if (!layout) return null;
 						const latestNode = getLatestNodeById(node.id) ?? node;
@@ -2359,6 +2476,24 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					)}
 			</Group>,
 		);
+		if (shouldReleaseRetainedFrozenNodes) {
+			previousEffectiveFrozenNodeIdSetRef.current = new Set(
+				effectiveFrozenNodeIdSet,
+			);
+			setFrozenRetentionVersion((previous) => previous + 1);
+			setRetainedFrozenNodeIds((previous) => {
+				const next = previous.filter((nodeId) => {
+					return effectiveFrozenNodeIdSet.has(nodeId);
+				});
+				if (
+					next.length === previous.length &&
+					next.every((nodeId, index) => nodeId === previous[index])
+				) {
+					return previous;
+				}
+				return next;
+			});
+		}
 	}, [
 		activeNode,
 		activeNodeId,
@@ -2376,6 +2511,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		onLabelHitTesterChange,
 		liveRenderNodes,
 		marqueeRectScreen,
+		effectiveFrozenNodeIdSet,
+		retainedFrozenNodeIdSet,
 		scheduleTileTick,
 		snapGuidesScreen,
 		staticTileSnapshot,
