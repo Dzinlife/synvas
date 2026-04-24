@@ -29,7 +29,11 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 import { componentRegistry } from "@/element-system/model/componentRegistry";
 import { createTransformMeta } from "@/element-system/transform";
 import { ingestExternalFileAsset } from "@/projects/assetIngest";
-import { useProjectStore } from "@/projects/projectStore";
+import {
+	type CanvasNodeLayoutBatchEntry,
+	type CanvasNodeLayoutPatch,
+	useProjectStore,
+} from "@/projects/projectStore";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
 import {
 	calculateAutoScrollSpeed,
@@ -101,11 +105,14 @@ import CanvasWorkspaceOverlay, {
 } from "./CanvasWorkspaceOverlay";
 import {
 	collectCanvasDescendantNodeIds,
+	collectCanvasAncestorBoardIds,
 	expandCanvasNodeIdsWithDescendants,
 	isCanvasWorldRectFullyContained,
+	resolveCanvasBoardExpandToFitPatches,
 	resolveCanvasNodeWorldRect,
 	resolveCanvasWorldRectFromPoints,
 	resolveInnermostContainingBoardId,
+	resolvePointerContainingBoardId,
 } from "./canvasBoardUtils";
 import {
 	CANVAS_OVERLAY_GAP_PX,
@@ -378,6 +385,7 @@ const TAP_MOVE_THRESHOLD_PX = 3;
 const FOCUS_EXIT_MIN_ZOOM_RATIO = 0.5;
 const FOCUS_TILE_LOD_TRANSITION: TileLodTransition = { mode: "freeze" };
 const BOARD_CREATE_MIN_SIZE_PX = 6;
+const BOARD_AUTO_FIT_PADDING_WORLD = 24;
 const SKIA_RESOURCE_TRACKER_LOG_TAG = "[skia-resource-tracker]";
 const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
 	import.meta.env.DEV &&
@@ -2980,86 +2988,95 @@ const CanvasWorkspace = () => {
 		[],
 	);
 
-	const resolveBoardReparentChangesAfterDrag = useCallback(
-		(nodes: CanvasNode[], movedNodeIds: string[]) => {
+	const resolvePointerBoardReparentEntries = useCallback(
+		(
+			nodes: CanvasNode[],
+			movedNodeIds: string[],
+			worldX: number,
+			worldY: number,
+		): CanvasNodeLayoutBatchEntry[] => {
 			const rootNodeIds = resolveRootNodeIdsFromMovedSet(nodes, movedNodeIds);
-			if (rootNodeIds.length === 0)
-				return [] as Array<{
-					nodeId: string;
-					afterParentId: string | null;
-					afterSiblingOrder: number;
-				}>;
-			let workingNodes = [...nodes];
-			const changeByNodeId = new Map<
-				string,
-				{
-					afterParentId: string | null;
-					afterSiblingOrder: number;
-				}
-			>();
-			const orderedRootNodeIds = sortByTreePaintOrder(
+			if (rootNodeIds.length === 0) return [];
+			const orderedRootNodes = sortByTreePaintOrder(
 				rootNodeIds
-					.map(
-						(nodeId) => workingNodes.find((node) => node.id === nodeId) ?? null,
-					)
+					.map((nodeId) => nodes.find((node) => node.id === nodeId) ?? null)
 					.filter((node): node is CanvasNode => Boolean(node)),
-			).map((node) => node.id);
-			for (const rootNodeId of orderedRootNodeIds) {
-				const node = workingNodes.find((item) => item.id === rootNodeId);
-				if (!node) continue;
-				const nodeRect = resolveCanvasNodeWorldRect(node);
-				const descendantNodeIds = collectCanvasDescendantNodeIds(workingNodes, [
-					rootNodeId,
-				]);
-				const excludedNodeIds = new Set<string>([
-					rootNodeId,
-					...descendantNodeIds,
-				]);
-				const nextParentId = resolveInnermostContainingBoardId(
-					workingNodes,
-					nodeRect,
-					{
-						excludeNodeIds: excludedNodeIds,
-					},
-				);
-				const currentParentId = node.parentId ?? null;
-				if (nextParentId === currentParentId) continue;
-				const siblingInsertIndex = resolveLayerSiblingCount(
-					workingNodes,
-					nextParentId,
-					[rootNodeId],
-				);
-				const { siblingOrder } = allocateInsertSiblingOrder(workingNodes, {
-					parentId: nextParentId,
-					index: siblingInsertIndex,
-					movingNodeIds: [rootNodeId],
-				});
-				workingNodes = workingNodes.map((workingNode) => {
-					if (workingNode.id !== rootNodeId) return workingNode;
-					changeByNodeId.set(rootNodeId, {
-						afterParentId: nextParentId,
-						afterSiblingOrder: siblingOrder,
-					});
-					return {
-						...workingNode,
-						parentId: nextParentId,
-						siblingOrder,
-					};
+			);
+			if (orderedRootNodes.length === 0) return [];
+			const orderedRootNodeIds = orderedRootNodes.map((node) => node.id);
+			const movingRootNodeIdSet = new Set(orderedRootNodeIds);
+			const excludedNodeIds = new Set<string>([
+				...orderedRootNodeIds,
+				...collectCanvasDescendantNodeIds(nodes, orderedRootNodeIds),
+			]);
+			const nextParentId = resolvePointerContainingBoardId(
+				nodes,
+				worldX,
+				worldY,
+				{
+					excludeNodeIds: excludedNodeIds,
+				},
+			);
+			const shouldReparent = orderedRootNodes.some(
+				(node) => (node.parentId ?? null) !== nextParentId,
+			);
+			if (!shouldReparent) return [];
+			const destinationIndex = resolveLayerSiblingCount(
+				nodes,
+				nextParentId,
+				movingRootNodeIdSet,
+			);
+			const { assignments } = allocateBatchInsertSiblingOrder(nodes, {
+				parentId: nextParentId,
+				index: destinationIndex,
+				nodeIds: orderedRootNodeIds,
+				movingNodeIds: movingRootNodeIdSet,
+			});
+			const assignmentByNodeId = new Map(
+				assignments.map((assignment) => [
+					assignment.nodeId,
+					assignment.siblingOrder,
+				]),
+			);
+			const entries: CanvasNodeLayoutBatchEntry[] = [];
+			for (const node of orderedRootNodes) {
+				const patch: CanvasNodeLayoutPatch = {};
+				if ((node.parentId ?? null) !== nextParentId) {
+					patch.parentId = nextParentId;
+				}
+				const assignedSiblingOrder = assignmentByNodeId.get(node.id);
+				if (
+					assignedSiblingOrder !== undefined &&
+					node.siblingOrder !== assignedSiblingOrder
+				) {
+					patch.siblingOrder = assignedSiblingOrder;
+				}
+				if (Object.keys(patch).length === 0) continue;
+				entries.push({
+					nodeId: node.id,
+					patch,
 				});
 			}
-			const changes: Array<{
-				nodeId: string;
-				afterParentId: string | null;
-				afterSiblingOrder: number;
-			}> = [];
-			for (const [nodeId, change] of changeByNodeId) {
-				changes.push({
-					nodeId,
-					afterParentId: change.afterParentId,
-					afterSiblingOrder: change.afterSiblingOrder,
-				});
-			}
-			return changes;
+			return entries;
+		},
+		[resolveRootNodeIdsFromMovedSet],
+	);
+
+	const resolveBoardAutoFitEntriesAfterDrag = useCallback(
+		(nodes: CanvasNode[], movedNodeIds: string[]): CanvasNodeLayoutBatchEntry[] => {
+			const rootNodeIds = resolveRootNodeIdsFromMovedSet(nodes, movedNodeIds);
+			if (rootNodeIds.length === 0) return [];
+			const boardIds = rootNodeIds.flatMap((nodeId) => {
+				const node = nodes.find((item) => item.id === nodeId) ?? null;
+				if (!node) return [];
+				return collectCanvasAncestorBoardIds(nodes, node.parentId ?? null);
+			});
+			if (boardIds.length === 0) return [];
+			return resolveCanvasBoardExpandToFitPatches(
+				nodes,
+				boardIds,
+				BOARD_AUTO_FIT_PADDING_WORLD,
+			);
 		},
 		[resolveRootNodeIdsFromMovedSet],
 	);
@@ -3437,17 +3454,16 @@ const CanvasWorkspace = () => {
 					if (!snapshot) return null;
 					return {
 						nodeId,
-						patch: {
-							x: snapshot.startNodeX,
-							y: snapshot.startNodeY,
-						},
+						patch: snapshot.before,
 					};
 				})
 				.filter(
 					(
 						entry,
-					): entry is { nodeId: string; patch: { x: number; y: number } } =>
-						Boolean(entry),
+					): entry is {
+						nodeId: string;
+						patch: CanvasNodeLayoutSnapshot;
+					} => Boolean(entry),
 				);
 			if (rollbackEntries.length > 0) {
 				updateCanvasNodeLayoutBatch(rollbackEntries);
@@ -4564,13 +4580,10 @@ const CanvasWorkspace = () => {
 				clearCanvasSnapGuides();
 			}
 			let didMove = false;
-			const nextLayoutEntries: Array<{
-				nodeId: string;
-				patch: {
-					x: number;
-					y: number;
-				};
-			}> = [];
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			let workingNodes = latestProject.canvas.nodes;
+			const layoutEntryByNodeId = new Map<string, CanvasNodeLayoutPatch>();
 			for (const targetNodeId of targetNodeIds) {
 				const snapshot = dragSession.snapshots[targetNodeId];
 				if (!snapshot) continue;
@@ -4579,14 +4592,43 @@ const CanvasWorkspace = () => {
 				if (nextX !== snapshot.startNodeX || nextY !== snapshot.startNodeY) {
 					didMove = true;
 				}
-				nextLayoutEntries.push({
-					nodeId: targetNodeId,
-					patch: {
-						x: nextX,
-						y: nextY,
-					},
+				layoutEntryByNodeId.set(targetNodeId, {
+					x: nextX,
+					y: nextY,
 				});
 			}
+			if (layoutEntryByNodeId.size > 0) {
+				workingNodes = workingNodes.map((node) => {
+					const patch = layoutEntryByNodeId.get(node.id);
+					if (!patch) return node;
+					return {
+						...node,
+						...patch,
+					};
+				});
+			}
+			const pointerWorld = resolveWorldPoint(pointerX, pointerY);
+			for (const entry of resolvePointerBoardReparentEntries(
+				workingNodes,
+				targetNodeIds,
+				pointerWorld.x,
+				pointerWorld.y,
+			)) {
+				const patch = layoutEntryByNodeId.get(entry.nodeId) ?? {};
+				layoutEntryByNodeId.set(entry.nodeId, {
+					...patch,
+					...entry.patch,
+				});
+				if (Object.keys(entry.patch).length > 0) {
+					didMove = true;
+				}
+			}
+			const nextLayoutEntries = [...layoutEntryByNodeId.entries()].map(
+				([nodeId, patch]) => ({
+					nodeId,
+					patch,
+				}),
+			);
 			if (nextLayoutEntries.length > 0) {
 				updateCanvasNodeLayoutBatch(nextLayoutEntries);
 			}
@@ -4602,6 +4644,8 @@ const CanvasWorkspace = () => {
 			resetCanvasDragSession,
 			resolveCanvasNodeTimelineDropTarget,
 			resolveCanvasGuideValues,
+			resolvePointerBoardReparentEntries,
+			resolveWorldPoint,
 			startCanvasTimelineDropPreview,
 			stopCanvasTimelineDropPreview,
 			setCanvasSnapGuides,
@@ -4638,28 +4682,12 @@ const CanvasWorkspace = () => {
 				dragSession.copyEntries.length > 0
 					? dragSession.copyEntries.map((entry) => entry.node.id)
 					: dragSession.dragNodeIds;
-			const reparentChanges = resolveBoardReparentChangesAfterDrag(
-				latestProject.canvas.nodes,
-				movedTargetNodeIds,
-			);
-			if (reparentChanges.length > 0) {
-				updateCanvasNodeLayoutBatch(
-					reparentChanges.map((change) => ({
-						nodeId: change.nodeId,
-						patch: {
-							parentId: change.afterParentId,
-							siblingOrder: change.afterSiblingOrder,
-						},
-					})),
-				);
-				latestProject = useProjectStore.getState().currentProject;
-				if (!latestProject) return;
-			}
 			if (dragSession.copyEntries.length > 0) {
+				const copyHistoryProject = latestProject;
 				const nextEntries = dragSession.copyEntries
 					.map((entry) => {
 						const latestNode =
-							latestProject.canvas.nodes.find(
+							copyHistoryProject.canvas.nodes.find(
 								(item) => item.id === entry.node.id,
 							) ?? null;
 						if (!latestNode) return null;
@@ -4667,7 +4695,8 @@ const CanvasWorkspace = () => {
 							node: latestNode,
 							scene:
 								latestNode.type === "scene"
-									? (latestProject.scenes[latestNode.sceneId] ?? entry.scene)
+									? (copyHistoryProject.scenes[latestNode.sceneId] ??
+										entry.scene)
 									: undefined,
 						};
 					})
@@ -4676,9 +4705,28 @@ const CanvasWorkspace = () => {
 				pushHistory({
 					kind: "canvas.node-create.batch",
 					entries: nextEntries,
-					focusNodeId: latestProject.ui.focusedNodeId,
+					focusNodeId: copyHistoryProject.ui.focusedNodeId,
 				});
 				return;
+			}
+			const projectBeforeBoardAutoFit = latestProject;
+			const boardAutoFitEntries = resolveBoardAutoFitEntriesAfterDrag(
+				projectBeforeBoardAutoFit.canvas.nodes,
+				movedTargetNodeIds,
+			);
+			const boardAutoFitBeforeByNodeId = new Map(
+				boardAutoFitEntries.map((entry) => {
+					const node =
+						projectBeforeBoardAutoFit.canvas.nodes.find(
+							(item) => item.id === entry.nodeId,
+						) ?? null;
+					return [entry.nodeId, node ? pickLayout(node) : null] as const;
+				}),
+			);
+			if (boardAutoFitEntries.length > 0) {
+				updateCanvasNodeLayoutBatch(boardAutoFitEntries);
+				latestProject = useProjectStore.getState().currentProject;
+				if (!latestProject) return;
 			}
 			const nextEntries = dragSession.dragNodeIds
 				.map((nodeId) => {
@@ -4703,10 +4751,32 @@ const CanvasWorkspace = () => {
 						before: CanvasNodeLayoutSnapshot;
 						after: CanvasNodeLayoutSnapshot;
 					} => Boolean(entry),
-				);
-			if (nextEntries.length === 0) return;
-			if (nextEntries.length === 1) {
-				const entry = nextEntries[0];
+					);
+			const historyEntryByNodeId = new Map(
+				nextEntries.map((entry) => [entry.nodeId, entry]),
+			);
+			for (const boardAutoFitEntry of boardAutoFitEntries) {
+				const latestNode =
+					latestProject.canvas.nodes.find(
+						(node) => node.id === boardAutoFitEntry.nodeId,
+					) ?? null;
+				if (!latestNode) continue;
+				const before =
+					dragSession.snapshots[boardAutoFitEntry.nodeId]?.before ??
+					boardAutoFitBeforeByNodeId.get(boardAutoFitEntry.nodeId);
+				if (!before) continue;
+				const after = pickLayout(latestNode);
+				if (isLayoutEqual(before, after)) continue;
+				historyEntryByNodeId.set(boardAutoFitEntry.nodeId, {
+					nodeId: boardAutoFitEntry.nodeId,
+					before,
+					after,
+				});
+			}
+			const historyEntries = [...historyEntryByNodeId.values()];
+			if (historyEntries.length === 0) return;
+			if (historyEntries.length === 1) {
+				const entry = historyEntries[0];
 				pushHistory({
 					kind: "canvas.node-layout",
 					nodeId: entry.nodeId,
@@ -4718,7 +4788,7 @@ const CanvasWorkspace = () => {
 			}
 			pushHistory({
 				kind: "canvas.node-layout.batch",
-				entries: nextEntries,
+				entries: historyEntries,
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
 		},
@@ -4727,7 +4797,7 @@ const CanvasWorkspace = () => {
 			commitCanvasTimelineDrop,
 			pushHistory,
 			removeCanvasGraphBatch,
-			resolveBoardReparentChangesAfterDrag,
+			resolveBoardAutoFitEntriesAfterDrag,
 			resetCanvasDragSession,
 			setPendingClickSuppression,
 			stopCanvasTimelineDropPreview,

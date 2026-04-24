@@ -8,7 +8,11 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import type { TimelineAsset } from "core/timeline-system/types";
-import type { CanvasNode, StudioProject } from "@/studio/project/types";
+import type {
+	BoardCanvasNode,
+	CanvasNode,
+	StudioProject,
+} from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCallback, useContext, useSyncExternalStore } from "react";
 import {
@@ -1361,6 +1365,89 @@ const setSceneCanvasSize = (
 			},
 		};
 	});
+};
+
+const createTestBoardNode = (
+	id: string,
+	patch: Partial<BoardCanvasNode> = {},
+): BoardCanvasNode => ({
+	id,
+	type: "board",
+	name: id,
+	x: 0,
+	y: 0,
+	width: 100,
+	height: 100,
+	siblingOrder: 0,
+	locked: false,
+	hidden: false,
+	createdAt: 10,
+	updatedAt: 10,
+	...patch,
+});
+
+const appendCanvasNodesForTest = (nodes: CanvasNode[]): void => {
+	useProjectStore.setState((state) => {
+		const project = state.currentProject;
+		if (!project) return state;
+		return {
+			...state,
+			currentProject: {
+				...project,
+				canvas: {
+					...project.canvas,
+					nodes: [...project.canvas.nodes, ...nodes],
+				},
+				ui: {
+					...project.ui,
+					canvasSnapEnabled: false,
+				},
+			},
+		};
+	});
+};
+
+const patchCanvasNodeForTest = (
+	nodeId: string,
+	patch: Partial<CanvasNode>,
+): void => {
+	useProjectStore.setState((state) => {
+		const project = state.currentProject;
+		if (!project) return state;
+		return {
+			...state,
+			currentProject: {
+				...project,
+				canvas: {
+					...project.canvas,
+					nodes: project.canvas.nodes.map((node) =>
+						node.id === nodeId
+							? ({
+									...node,
+									...patch,
+								} as CanvasNode)
+							: node,
+					),
+				},
+				ui: {
+					...project.ui,
+					canvasSnapEnabled: false,
+				},
+			},
+		};
+	});
+};
+
+const getCanvasNodeForTest = <T extends CanvasNode = CanvasNode>(
+	nodeId: string,
+): T => {
+	const node = useProjectStore
+		.getState()
+		.currentProject?.canvas.nodes.find((item) => item.id === nodeId);
+	if (!node) {
+		throw new Error(`node 不存在: ${nodeId}`);
+	}
+	return node as T;
 };
 
 const isPointInNode = (node: CanvasNode, x: number, y: number): boolean => {
@@ -4753,6 +4840,232 @@ describe("CanvasWorkspace", () => {
 		expect(node?.x).toBe(360);
 		expect(node?.y).toBe(220);
 		expect(project?.ui.activeNodeId).toBe("node-scene-1");
+	});
+
+	it("节点拖拽时按指针进入 board 即实时成为 child", () => {
+		appendCanvasNodesForTest([
+			createTestBoardNode("node-board-pointer", {
+				x: 500,
+				y: 100,
+				width: 180,
+				height: 120,
+				siblingOrder: 0,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(300, 160),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(520, 160),
+				buttons: 1,
+			});
+		});
+
+		const draggingNode = getCanvasNodeForTest("node-video-1");
+		expect(draggingNode.parentId).toBe("node-board-pointer");
+		expect(draggingNode.x).toBe(460);
+		expect(draggingNode.x + draggingNode.width).toBeGreaterThan(680);
+
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(520, 160),
+				buttons: 0,
+			});
+		});
+		expect(getCanvasNodeForTest("node-video-1").parentId).toBe(
+			"node-board-pointer",
+		);
+	});
+
+	it("节点拖拽时指针离开 board 会实时脱离 children", () => {
+		appendCanvasNodesForTest([
+			createTestBoardNode("node-board-leave", {
+				x: 200,
+				y: 100,
+				width: 400,
+				height: 300,
+				siblingOrder: 10,
+			}),
+		]);
+		patchCanvasNodeForTest("node-video-1", {
+			parentId: "node-board-leave",
+			siblingOrder: 0,
+		});
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(300, 160),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(700, 160),
+				buttons: 1,
+			});
+		});
+
+		expect(getCanvasNodeForTest("node-video-1").parentId ?? null).toBeNull();
+
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(700, 160),
+				buttons: 0,
+			});
+		});
+	});
+
+	it("节点拖拽在嵌套 board 中按指针位置切换内外层优先级", () => {
+		appendCanvasNodesForTest([
+			createTestBoardNode("node-board-outer", {
+				x: 400,
+				y: 80,
+				width: 500,
+				height: 400,
+				siblingOrder: 0,
+			}),
+			createTestBoardNode("node-board-inner", {
+				parentId: "node-board-outer",
+				x: 520,
+				y: 120,
+				width: 180,
+				height: 180,
+				siblingOrder: 0,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(300, 160),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(560, 160),
+				buttons: 1,
+			});
+		});
+		expect(getCanvasNodeForTest("node-video-1").parentId).toBe(
+			"node-board-inner",
+		);
+
+		act(() => {
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(460, 340),
+				buttons: 1,
+			});
+		});
+		expect(getCanvasNodeForTest("node-video-1").parentId).toBe(
+			"node-board-outer",
+		);
+
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(460, 340),
+				buttons: 0,
+			});
+		});
+	});
+
+	it("多选拖拽会按指针把 moving roots 一起实时 reparent 到 board", () => {
+		appendCanvasNodesForTest([
+			createTestBoardNode("node-board-multi", {
+				x: 900,
+				y: 300,
+				width: 220,
+				height: 220,
+				siblingOrder: 0,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(720, 360),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(920, 360),
+				buttons: 1,
+			});
+		});
+
+		expect(getCanvasNodeForTest("node-video-1").parentId).toBe(
+			"node-board-multi",
+		);
+		expect(getCanvasNodeForTest("node-image-1").parentId).toBe(
+			"node-board-multi",
+		);
+
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(920, 360),
+				buttons: 0,
+			});
+		});
+	});
+
+	it("拖拽结束会扩展最终目标 board 链 24px padding", () => {
+		appendCanvasNodesForTest([
+			createTestBoardNode("node-board-fit", {
+				x: 500,
+				y: 100,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 520, 160);
+
+		const expandedBoard = getCanvasNodeForTest<BoardCanvasNode>("node-board-fit");
+		expect(expandedBoard).toMatchObject({
+			x: 436,
+			y: 96,
+			width: 368,
+			height: 228,
+		});
+		expect(getCanvasNodeForTest("node-video-1").parentId).toBe(
+			"node-board-fit",
+		);
+		const past = useStudioHistoryStore.getState().past;
+		expect(past).toHaveLength(1);
+		expect(past[0]?.kind).toBe("canvas.node-layout.batch");
+	});
+
+	it("拖拽结束时目标 board 已足够大则不会收缩", () => {
+		appendCanvasNodesForTest([
+			createTestBoardNode("node-board-no-shrink", {
+				x: 100,
+				y: 80,
+				width: 900,
+				height: 500,
+				siblingOrder: -1,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		dragNodeAt(300, 160, 360, 160);
+
+		expect(getCanvasNodeForTest("node-video-1").parentId).toBe(
+			"node-board-no-shrink",
+		);
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-no-shrink"),
+		).toMatchObject({
+			x: 100,
+			y: 80,
+			width: 900,
+			height: 500,
+		});
 	});
 
 	it("节点拖拽吸附时会显示 guide，并在 dragEnd 后清空", () => {

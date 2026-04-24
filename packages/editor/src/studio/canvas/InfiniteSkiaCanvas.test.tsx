@@ -16,7 +16,7 @@ import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { TILE_MAX_TASKS_PER_TICK_DRAG } from "./tile/constants";
 import { StaticTileScheduler } from "./tile/scheduler";
-import type { TileFrameResult } from "./tile/types";
+import type { TileFrameResult, TileInput } from "./tile/types";
 
 const { rootRenderSpy } = vi.hoisted(() => ({
 	rootRenderSpy: vi.fn(),
@@ -179,6 +179,7 @@ vi.mock("react-skia-lite", async () => {
 			restore: vi.fn(),
 			translate: vi.fn(),
 			scale: vi.fn(),
+			clipRect: vi.fn(),
 			drawPicture: vi.fn(),
 			drawImageRect: vi.fn(),
 		};
@@ -244,6 +245,10 @@ vi.mock("react-skia-lite", async () => {
 
 	return {
 		Canvas,
+		ClipOp: {
+			Intersect: "intersect",
+			Difference: "difference",
+		},
 		Group: "group",
 		Image: "image",
 		Paragraph: "paragraph",
@@ -2114,6 +2119,70 @@ describe("InfiniteSkiaCanvas", () => {
 				top: 140,
 				right: 500,
 				bottom: 320,
+			});
+		} finally {
+			setInputsSpy.mockRestore();
+		}
+	});
+
+	it("board 子节点 tile 输入带有裁剪后的可见边界和祖先裁剪链", async () => {
+		tilePipelineMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		try {
+			const childNode = createImageNode("node-image-clipped", 1, {
+				parentId: "node-board",
+				x: 80,
+				y: 120,
+				width: 160,
+				height: 80,
+			});
+			render(
+				<InfiniteSkiaCanvas
+					width={256}
+					height={256}
+					camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+					nodes={[
+						createBoardNode("node-board", 0, {
+							x: 100,
+							y: 100,
+							width: 100,
+							height: 100,
+						}),
+						childNode,
+					]}
+					scenes={emptyScenes}
+					assets={[createImageAsset(childNode.assetId)]}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					focusedNodeId={null}
+				/>,
+			);
+
+			await waitFor(() => {
+				const matchingInput = setInputsSpy.mock.calls
+					.flatMap((call) => call[0] as TileInput[])
+					.find(
+						(input) =>
+							input.nodeId === "node-image-clipped" && input.visibleAabb,
+					);
+				expect(matchingInput?.visibleAabb).toMatchObject({
+					left: 100,
+					top: 120,
+					right: 200,
+					bottom: 200,
+					width: 100,
+					height: 80,
+				});
+				expect(matchingInput?.clipAabbs).toEqual([
+					expect.objectContaining({
+						left: 100,
+						top: 100,
+						right: 200,
+						bottom: 200,
+						width: 100,
+						height: 100,
+					}),
+				]);
 			});
 		} finally {
 			setInputsSpy.mockRestore();

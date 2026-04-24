@@ -297,6 +297,66 @@ const resolveNodeWorldAabb = (
 	);
 };
 
+const intersectTileAabb = (left: TileAabb, right: TileAabb): TileAabb | null => {
+	const nextLeft = Math.max(left.left, right.left);
+	const nextTop = Math.max(left.top, right.top);
+	const nextRight = Math.min(left.right, right.right);
+	const nextBottom = Math.min(left.bottom, right.bottom);
+	if (nextLeft >= nextRight || nextTop >= nextBottom) return null;
+	return createTileAabb(nextLeft, nextTop, nextRight, nextBottom);
+};
+
+const resolveNodeAncestorClipAabbs = (
+	node: CanvasNode,
+	nodeById: Map<string, CanvasNode>,
+): TileAabb[] => {
+	const clipAabbs: TileAabb[] = [];
+	const visitedNodeIds = new Set<string>();
+	let parentId = node.parentId ?? null;
+	while (parentId) {
+		if (visitedNodeIds.has(parentId)) break;
+		visitedNodeIds.add(parentId);
+		const parentNode = nodeById.get(parentId);
+		if (!parentNode) break;
+		if (parentNode.type === "board") {
+			clipAabbs.push(resolveNodeWorldAabb(parentNode));
+		}
+		parentId = parentNode.parentId ?? null;
+	}
+	return clipAabbs.reverse();
+};
+
+const resolveClippedTileInputAabb = (
+	aabb: TileAabb,
+	clipAabbs: TileAabb[],
+): TileAabb | null => {
+	let visibleAabb: TileAabb | null = aabb;
+	for (const clipAabb of clipAabbs) {
+		visibleAabb = intersectTileAabb(visibleAabb, clipAabb);
+		if (!visibleAabb) return null;
+	}
+	return visibleAabb;
+};
+
+const resolveTileClipSignature = (
+	clipAabbs: TileAabb[],
+	visibleAabb: TileAabb | null,
+): string => {
+	if (clipAabbs.length === 0) return "none";
+	const aabbToSignature = (aabb: TileAabb): string => {
+		return [
+			Math.round(aabb.left * 1000),
+			Math.round(aabb.top * 1000),
+			Math.round(aabb.right * 1000),
+			Math.round(aabb.bottom * 1000),
+		].join(",");
+	};
+	return [
+		visibleAabb ? aabbToSignature(visibleAabb) : "empty",
+		...clipAabbs.map(aabbToSignature),
+	].join("|");
+};
+
 const resolveTileRasterAsset = (
 	node: CanvasNode,
 	assetById: Map<string, TimelineAsset>,
@@ -1140,6 +1200,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		for (const node of tileNodes) {
 			nextTileNodeIdSet.add(node.id);
 			const nextAabb = resolveNodeWorldAabb(node);
+			const clipAabbs = resolveNodeAncestorClipAabbs(node, latestNodeById);
+			const visibleAabb = resolveClippedTileInputAabb(nextAabb, clipAabbs);
+			const clipSignature = resolveTileClipSignature(clipAabbs, visibleAabb);
 			const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 			if (node.id === activeLiveNodeId) {
 				if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
@@ -1152,12 +1215,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			}
 			const scene = resolveNodeScene(node, scenes);
 			const asset = resolveNodeAsset(node, assetById);
-			const sourceSignature = resolveTileNodeSourceSignature(
+			const sourceSignature = `${resolveTileNodeSourceSignature(
 				node,
 				scene,
 				asset,
 				hasThumbnailCapability(node),
-			);
+			)}:clip:${clipSignature}`;
 			if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
 				scheduler.markDirtyUnion(oldAabb, nextAabb);
 				tileNodeAabbRef.current.set(node.id, nextAabb);
@@ -1189,6 +1252,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		scenes,
 		scheduleTileTick,
 		supportsTilePipeline,
+		latestNodeById,
 		tileNodes,
 	]);
 
@@ -1221,6 +1285,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				continue;
 			}
 			visitedNodeIds.add(latestNode.id);
+			const aabb = resolveNodeWorldAabb(latestNode);
+			const clipAabbs = resolveNodeAncestorClipAabbs(
+				latestNode,
+				latestNodeById,
+			);
+			const visibleAabb = resolveClippedTileInputAabb(aabb, clipAabbs);
+			const clipSignature = resolveTileClipSignature(clipAabbs, visibleAabb);
 			const scene = resolveNodeScene(latestNode, scenes);
 			const asset = resolveNodeAsset(latestNode, assetById);
 			const thumbnailCapabilityEnabled = hasThumbnailCapability(latestNode);
@@ -1231,14 +1302,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				? (rasterCacheRef.current.get(uri) ?? null)
 				: null;
 			const image = rasterEntry?.image ?? null;
-			const sourceSignature =
-				tileNodeSourceSignatureRef.current.get(latestNode.id) ??
-				resolveTileNodeSourceSignature(
-					latestNode,
-					scene,
-					asset,
-					thumbnailCapabilityEnabled,
-				);
+			const sourceSignature = resolveTileNodeSourceSignature(
+				latestNode,
+				scene,
+				asset,
+				thumbnailCapabilityEnabled,
+			);
 			const cachedEntry = tileInputCacheRef.current.get(latestNode.id);
 			const sourceWidth =
 				rasterEntry?.width ??
@@ -1273,20 +1342,22 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						: `${sourceSignature}:fallback-picture:async:none`
 					: `${sourceSignature}:fallback-picture:sync`
 				: sourceSignature;
+			const inputSourceKey = `${sourceKey}:clip:${clipSignature}`;
 			const modeKey: TileInputCacheEntry["mode"] = fallbackToNodeRendererPicture
 				? "fallback-picture"
 				: "raster";
 			let epoch = cachedEntry?.epoch ?? 0;
-			const sourceChanged = cachedEntry?.sourceSignature !== sourceKey;
+			const sourceChanged = cachedEntry?.sourceSignature !== inputSourceKey;
 			const modeChanged = cachedEntry?.mode !== modeKey;
 			const imageChanged = cachedEntry?.rasterImage !== image;
 			if (!cachedEntry || sourceChanged || modeChanged || imageChanged) {
 				epoch += 1;
 			}
 			const inputId = resolveTileInputId(latestNode.id);
-			const aabb = resolveNodeWorldAabb(latestNode);
 			let input: TileInput | null = null;
-			if (image) {
+			if (!visibleAabb) {
+				disposeTileInput(cachedEntry?.input);
+			} else if (image) {
 				if (cachedEntry?.input?.kind === "picture") {
 					disposeTileInput(cachedEntry.input);
 				}
@@ -1296,6 +1367,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					nodeId: latestNode.id,
 					image,
 					aabb,
+					...(clipAabbs.length > 0 ? { visibleAabb, clipAabbs } : {}),
 					sourceWidth,
 					sourceHeight,
 					epoch,
@@ -1322,6 +1394,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							nodeId: latestNode.id,
 							picture: asyncPictureEntry.picture,
 							aabb,
+							...(clipAabbs.length > 0 ? { visibleAabb, clipAabbs } : {}),
 							sourceWidth: Math.max(1, asyncPictureEntry.sourceWidth),
 							sourceHeight: Math.max(1, asyncPictureEntry.sourceHeight),
 							epoch,
@@ -1345,6 +1418,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							nodeId: latestNode.id,
 							picture: pictureInput.picture,
 							aabb,
+							...(clipAabbs.length > 0 ? { visibleAabb, clipAabbs } : {}),
 							sourceWidth,
 							sourceHeight,
 							epoch,
@@ -1357,7 +1431,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			}
 			tileInputCacheRef.current.set(latestNode.id, {
 				epoch,
-				sourceSignature: sourceKey,
+				sourceSignature: inputSourceKey,
 				mode: modeKey,
 				rasterImage: image,
 				input,
@@ -1387,6 +1461,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, [
 		activeLiveNodeId,
 		assetById,
+		latestNodeById,
 		rasterCacheVersion,
 		resolveNodeRasterUri,
 		resolveTileInputId,

@@ -16,29 +16,27 @@ export type TilePriority = "HIGH" | "MID" | "LOW";
 
 export type TileCoverMode = "NONE" | "SELF" | "PARENT" | "CHILD" | "LIVE";
 
+interface TileInputBase {
+	id: number;
+	nodeId: string;
+	aabb: TileAabb;
+	visibleAabb?: TileAabb;
+	clipAabbs?: TileAabb[];
+	sourceWidth: number;
+	sourceHeight: number;
+	epoch: number;
+	dispose?: (() => void) | null;
+}
+
 export type TileInput =
-	| {
+	| (TileInputBase & {
 			kind: "picture";
-			id: number;
-			nodeId: string;
 			picture: SkPicture;
-			aabb: TileAabb;
-			sourceWidth: number;
-			sourceHeight: number;
-			epoch: number;
-			dispose?: (() => void) | null;
-	  }
-	| {
+	  })
+	| (TileInputBase & {
 			kind: "raster";
-			id: number;
-			nodeId: string;
 			image: SkImage;
-			aabb: TileAabb;
-			sourceWidth: number;
-			sourceHeight: number;
-			epoch: number;
-			dispose?: (() => void) | null;
-	  };
+	  });
 
 export interface TileKey {
 	lod: number;

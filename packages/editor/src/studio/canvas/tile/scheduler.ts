@@ -1,4 +1,9 @@
-import { scheduleSkiaDispose, Skia, type SkSurface } from "react-skia-lite";
+import {
+	ClipOp,
+	scheduleSkiaDispose,
+	Skia,
+	type SkSurface,
+} from "react-skia-lite";
 import RBush from "rbush";
 import {
 	TILE_CAMERA_EPSILON,
@@ -116,6 +121,22 @@ const quantizeSignatureValue = (value: number): number => {
 	return Math.round(value * TILE_INPUT_SIGNATURE_SCALE);
 };
 
+const resolveTileInputVisibleAabb = (input: TileInput): TileAabb => {
+	return input.visibleAabb ?? input.aabb;
+};
+
+const appendTileAabbSignatureParts = (
+	parts: Array<string | number>,
+	aabb: TileAabb,
+) => {
+	parts.push(
+		quantizeSignatureValue(aabb.left),
+		quantizeSignatureValue(aabb.top),
+		quantizeSignatureValue(aabb.right),
+		quantizeSignatureValue(aabb.bottom),
+	);
+};
+
 export class StaticTileScheduler {
 	private readonly frameBudgetMs: number;
 
@@ -195,11 +216,12 @@ export class StaticTileScheduler {
 		const items: TileInputSpatialItem[] = new Array(this.inputs.length);
 		for (let order = 0; order < this.inputs.length; order += 1) {
 			const input = this.inputs[order];
+			const visibleAabb = resolveTileInputVisibleAabb(input);
 			items[order] = {
-				minX: input.aabb.left,
-				minY: input.aabb.top,
-				maxX: input.aabb.right,
-				maxY: input.aabb.bottom,
+				minX: visibleAabb.left,
+				minY: visibleAabb.top,
+				maxX: visibleAabb.right,
+				maxY: visibleAabb.bottom,
 				order,
 			};
 		}
@@ -467,18 +489,25 @@ export class StaticTileScheduler {
 		if (candidateInputs.length <= 0) return "";
 		const segments: string[] = [];
 		for (const input of candidateInputs) {
-			if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
-			segments.push(
-				[
-					input.id,
-					input.nodeId,
-					input.epoch,
-					quantizeSignatureValue(input.aabb.left),
-					quantizeSignatureValue(input.aabb.top),
-					quantizeSignatureValue(input.aabb.right),
-					quantizeSignatureValue(input.aabb.bottom),
-				].join(":"),
-			);
+			const visibleAabb = resolveTileInputVisibleAabb(input);
+			if (!isTileAabbIntersected(tileRect, visibleAabb)) continue;
+			const parts: Array<string | number> = [
+				input.id,
+				input.nodeId,
+				input.epoch,
+			];
+			appendTileAabbSignatureParts(parts, input.aabb);
+			if (input.visibleAabb) {
+				parts.push("visible");
+				appendTileAabbSignatureParts(parts, input.visibleAabb);
+			}
+			if (input.clipAabbs?.length) {
+				parts.push("clips", input.clipAabbs.length);
+				for (const clipAabb of input.clipAabbs) {
+					appendTileAabbSignatureParts(parts, clipAabb);
+				}
+			}
+			segments.push(parts.join(":"));
 		}
 		return segments.join("|");
 	}
@@ -523,7 +552,11 @@ export class StaticTileScheduler {
 			const inputs = this.queryInputsByRect(tileRect);
 			if (inputs.length <= 0) continue;
 			for (const input of inputs) {
-				if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
+				if (
+					!isTileAabbIntersected(tileRect, resolveTileInputVisibleAabb(input))
+				) {
+					continue;
+				}
 				this.visibleCoveredKeySet.add(key);
 				break;
 			}
@@ -680,9 +713,25 @@ export class StaticTileScheduler {
 				candidateInputs,
 			);
 			for (const input of candidateInputs) {
-				if (!isTileAabbIntersected(tileRect, input.aabb)) continue;
+				if (
+					!isTileAabbIntersected(tileRect, resolveTileInputVisibleAabb(input))
+				) {
+					continue;
+				}
+				canvas.save();
+				for (const clipAabb of input.clipAabbs ?? []) {
+					canvas.clipRect(
+						{
+							x: clipAabb.left,
+							y: clipAabb.top,
+							width: clipAabb.width,
+							height: clipAabb.height,
+						},
+						ClipOp.Intersect,
+						true,
+					);
+				}
 				if (input.kind === "picture") {
-					canvas.save();
 					canvas.translate(input.aabb.left, input.aabb.top);
 					canvas.scale(
 						input.aabb.width / Math.max(1, input.sourceWidth),
@@ -709,6 +758,7 @@ export class StaticTileScheduler {
 					this.imagePaint,
 					true,
 				);
+				canvas.restore();
 			}
 			canvas.restore();
 			surface.flush();

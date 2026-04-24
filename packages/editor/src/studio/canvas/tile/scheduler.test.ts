@@ -14,6 +14,7 @@ const { makeOffscreenSpy, createdCanvases } = vi.hoisted(() => {
 			restore: ReturnType<typeof vi.fn>;
 			translate: ReturnType<typeof vi.fn>;
 			scale: ReturnType<typeof vi.fn>;
+			clipRect: ReturnType<typeof vi.fn>;
 			drawPicture: ReturnType<typeof vi.fn>;
 			drawImageRect: ReturnType<typeof vi.fn>;
 		}>,
@@ -35,6 +36,7 @@ vi.mock("react-skia-lite", () => {
 			restore: vi.fn(),
 			translate: vi.fn(),
 			scale: vi.fn(),
+			clipRect: vi.fn(),
 			drawPicture: vi.fn(),
 			drawImageRect: vi.fn(),
 		};
@@ -51,6 +53,10 @@ vi.mock("react-skia-lite", () => {
 		return createSurface();
 	});
 	return {
+		ClipOp: {
+			Intersect: "intersect",
+			Difference: "difference",
+		},
 		Skia: {
 			Paint: () => ({
 				dispose: vi.fn(),
@@ -558,7 +564,7 @@ describe("tile scheduler", () => {
 		);
 		const firstCanvas = createdCanvases[0];
 		expect(firstCanvas).toBeTruthy();
-		expect(firstCanvas.scale).toHaveBeenCalledWith(0.5, 0.5);
+		expect(firstCanvas.scale).toHaveBeenCalledWith(0.375, 0.375);
 		scheduler.dispose();
 	});
 
@@ -604,6 +610,69 @@ describe("tile scheduler", () => {
 		expect(firstCanvas.drawImageRect).toHaveBeenCalledTimes(2);
 		expect(firstCanvas.drawImageRect.mock.calls[0]?.[0]).toBe(firstImage);
 		expect(firstCanvas.drawImageRect.mock.calls[1]?.[0]).toBe(secondImage);
+		scheduler.dispose();
+	});
+
+	it("裁剪输入会先应用 clipRect，并保持原始绘制顺序", () => {
+		const firstImage = {
+			dispose: vi.fn(),
+		} as unknown as SkImage;
+		const secondImage = {
+			dispose: vi.fn(),
+		} as unknown as SkImage;
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 1,
+		});
+		scheduler.setInputs([
+			{
+				...createRasterInput({
+					id: 1,
+					nodeId: "node-clipped",
+					left: 0,
+					top: 0,
+					right: 512,
+					bottom: 512,
+					image: firstImage,
+				}),
+				visibleAabb: createTileAabb(32, 32, 128, 128),
+				clipAabbs: [createTileAabb(32, 32, 128, 128)],
+			},
+			createRasterInput({
+				id: 2,
+				nodeId: "node-plain",
+				left: 0,
+				top: 0,
+				right: 512,
+				bottom: 512,
+				image: secondImage,
+			}),
+		]);
+		scheduler.beginFrame(
+			createFrameInput({
+				stageWidth: 512,
+				stageHeight: 512,
+				zoom: 1,
+			}),
+		);
+
+		const firstCanvas = createdCanvases[0];
+		expect(firstCanvas).toBeTruthy();
+		expect(firstCanvas.clipRect).toHaveBeenCalledWith(
+			{
+				x: 32,
+				y: 32,
+				width: 96,
+				height: 96,
+			},
+			"intersect",
+			true,
+		);
+		expect(firstCanvas.drawImageRect).toHaveBeenCalledTimes(2);
+		expect(firstCanvas.drawImageRect.mock.calls[0]?.[0]).toBe(firstImage);
+		expect(firstCanvas.drawImageRect.mock.calls[1]?.[0]).toBe(secondImage);
+		expect(firstCanvas.clipRect.mock.invocationCallOrder[0]).toBeLessThan(
+			firstCanvas.drawImageRect.mock.invocationCallOrder[0],
+		);
 		scheduler.dispose();
 	});
 
