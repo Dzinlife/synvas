@@ -66,6 +66,7 @@ import type {
 } from "@/node-system/types";
 import {
 	createTileAabb,
+	isTileAabbIntersected,
 	StaticTileScheduler,
 	TILE_CAMERA_EPSILON,
 	TILE_LOD_MAX,
@@ -334,6 +335,186 @@ const resolveFrozenNodeSnapshotSize = (
 		width: Math.max(1, Math.round(rawWidth * pixelScale)),
 		height: Math.max(1, Math.round(rawHeight * pixelScale)),
 	};
+};
+
+const subtractTileAabb = (source: TileAabb, clip: TileAabb): TileAabb[] => {
+	const intersection = intersectTileAabb(source, clip);
+	if (!intersection) return [source];
+	const pieces: TileAabb[] = [];
+	if (source.top < intersection.top) {
+		pieces.push(
+			createTileAabb(source.left, source.top, source.right, intersection.top),
+		);
+	}
+	if (intersection.bottom < source.bottom) {
+		pieces.push(
+			createTileAabb(
+				source.left,
+				intersection.bottom,
+				source.right,
+				source.bottom,
+			),
+		);
+	}
+	if (source.left < intersection.left) {
+		pieces.push(
+			createTileAabb(
+				source.left,
+				intersection.top,
+				intersection.left,
+				intersection.bottom,
+			),
+		);
+	}
+	if (intersection.right < source.right) {
+		pieces.push(
+			createTileAabb(
+				intersection.right,
+				intersection.top,
+				source.right,
+				intersection.bottom,
+			),
+		);
+	}
+	return pieces.filter((piece) => {
+		return piece.width > TILE_AABB_EPSILON && piece.height > TILE_AABB_EPSILON;
+	});
+};
+
+const resolveTileDrawBleed = (tile: TileDrawItem): number => {
+	return (tile.size / TILE_PIXEL_SIZE) * TILE_DRAW_BLEED_TEXEL;
+};
+
+const resolveTileDrawWorldAabb = (tile: TileDrawItem): TileAabb => {
+	const bleed = resolveTileDrawBleed(tile);
+	return createTileAabb(
+		tile.left - bleed,
+		tile.top - bleed,
+		tile.left + tile.size + bleed,
+		tile.top + tile.size + bleed,
+	);
+};
+
+const resolveTileImageSize = (
+	tile: TileDrawItem,
+): { width: number; height: number } => {
+	return resolveSkImageSize(tile.image, TILE_PIXEL_SIZE, TILE_PIXEL_SIZE);
+};
+
+const resolveTileImagePixelRatio = (tile: TileDrawItem): number => {
+	const imageSize = resolveTileImageSize(tile);
+	const pixelRatio = Math.min(
+		imageSize.width / TILE_PIXEL_SIZE,
+		imageSize.height / TILE_PIXEL_SIZE,
+	);
+	return Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
+};
+
+const isTileAabbCoveredByDrawItems = (
+	aabb: TileAabb,
+	drawItems: TileDrawItem[],
+): boolean => {
+	let uncovered = [aabb];
+	for (const tile of drawItems) {
+		const tileAabb = resolveTileDrawWorldAabb(tile);
+		if (!isTileAabbIntersected(aabb, tileAabb)) continue;
+		uncovered = uncovered.flatMap((piece) => subtractTileAabb(piece, tileAabb));
+		if (uncovered.length === 0) return true;
+	}
+	return uncovered.length === 0;
+};
+
+const createFrozenNodeRasterSnapshotFromTiles = (
+	input: TileInput,
+	drawItems: TileDrawItem[],
+): FrozenNodeRasterSnapshot | null => {
+	const intersectedTiles = drawItems.filter((tile) => {
+		const tileAabb = resolveTileDrawWorldAabb(tile);
+		return isTileAabbIntersected(input.aabb, tileAabb);
+	});
+	if (intersectedTiles.length === 0) return null;
+	if (!isTileAabbCoveredByDrawItems(input.aabb, intersectedTiles)) return null;
+	const baseTile = intersectedTiles[0];
+	if (!baseTile) return null;
+	const baseTileAabb = resolveTileDrawWorldAabb(baseTile);
+	const pixelPerWorld = TILE_PIXEL_SIZE / Math.max(1, baseTileAabb.width);
+	const rawWidth = Math.max(1, Math.ceil(input.aabb.width * pixelPerWorld));
+	const rawHeight = Math.max(1, Math.ceil(input.aabb.height * pixelPerWorld));
+	const pixelScale = Math.min(
+		1,
+		FROZEN_NODE_SNAPSHOT_MAX_EDGE_PX / rawWidth,
+		FROZEN_NODE_SNAPSHOT_MAX_EDGE_PX / rawHeight,
+		Math.sqrt(FROZEN_NODE_SNAPSHOT_MAX_PIXELS / (rawWidth * rawHeight)),
+	);
+	const width = Math.max(1, Math.round(rawWidth * pixelScale));
+	const height = Math.max(1, Math.round(rawHeight * pixelScale));
+	const worldToSnapshotX = width / Math.max(1, input.aabb.width);
+	const worldToSnapshotY = height / Math.max(1, input.aabb.height);
+	const surface = Skia.Surface.MakeOffscreen(
+		width,
+		height,
+		resolveTileImagePixelRatio(baseTile),
+	);
+	if (!surface) return null;
+	let image: SkImage | null = null;
+	const imagePaint = Skia.Paint();
+	try {
+		const canvas = surface.getCanvas();
+		canvas.clear(Float32Array.of(0, 0, 0, 0));
+		for (const tile of intersectedTiles) {
+			const tileAabb = resolveTileDrawWorldAabb(tile);
+			const intersection = intersectTileAabb(input.aabb, tileAabb);
+			if (!intersection) continue;
+			const tileImageSize = resolveTileImageSize(tile);
+			canvas.drawImageRect(
+				tile.image,
+				{
+					x:
+						((intersection.left - tileAabb.left) / tileAabb.width) *
+						tileImageSize.width,
+					y:
+						((intersection.top - tileAabb.top) / tileAabb.height) *
+						tileImageSize.height,
+					width: (intersection.width / tileAabb.width) * tileImageSize.width,
+					height:
+						(intersection.height / tileAabb.height) * tileImageSize.height,
+				},
+				{
+					x: (intersection.left - input.aabb.left) * worldToSnapshotX,
+					y: (intersection.top - input.aabb.top) * worldToSnapshotY,
+					width: intersection.width * worldToSnapshotX,
+					height: intersection.height * worldToSnapshotY,
+				},
+				imagePaint,
+				true,
+			);
+		}
+		surface.flush();
+		image = surface.asImageCopy?.() ?? surface.makeImageSnapshot();
+		if (!image) return null;
+		return {
+			image,
+			sourceWidth: width,
+			sourceHeight: height,
+			dispose: () => {
+				try {
+					image?.dispose?.();
+				} catch {}
+			},
+		};
+	} catch {
+		try {
+			image?.dispose?.();
+		} catch {}
+		return null;
+	} finally {
+		try {
+			imagePaint.dispose?.();
+		} catch {}
+		try {
+			surface.dispose?.();
+		} catch {}
+	}
 };
 
 const createFrozenNodeRasterSnapshot = (
@@ -749,7 +930,7 @@ const StaticTileLayerComponent = ({
 		<Group pointerEvents="none">
 			{drawItems.map((tile) => {
 				// 按纹理 texel 轻微外扩，避免缩放/采样导致 tile 边界出现黑缝
-				const bleed = (tile.size / TILE_PIXEL_SIZE) * TILE_DRAW_BLEED_TEXEL;
+				const bleed = resolveTileDrawBleed(tile);
 				const drawX = tile.left - bleed;
 				const drawY = tile.top - bleed;
 				const drawSize = tile.size + bleed * 2;
@@ -1538,15 +1719,16 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				const cachedInput =
 					tileInputCacheRef.current.get(latestNode.id)?.input ?? null;
 				if (cachedInput && !frozenNodeSnapshotRef.current.has(latestNode.id)) {
-					const snapshot = createFrozenNodeRasterSnapshot(
-						cachedInput,
-						camera.value.zoom,
-					);
+					const snapshot =
+						createFrozenNodeRasterSnapshotFromTiles(
+							cachedInput,
+							latestTileFrameResultRef.current?.drawItems ?? [],
+						) ?? createFrozenNodeRasterSnapshot(cachedInput, camera.value.zoom);
 					if (snapshot) {
 						frozenNodeSnapshotRef.current.set(latestNode.id, snapshot);
 					}
 				}
-				// frozen 节点使用当前帧 raster snapshot，缓存保留到动画结束后再更新静态 tile。
+				// frozen 节点优先复用上一帧 static tile 纹理，保证 drag start 不换采样质量。
 				visitedNodeIds.add(latestNode.id);
 				continue;
 			}

@@ -1874,9 +1874,11 @@ const CanvasWorkspace = () => {
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 	const [tileDebugEnabled, setTileDebugEnabled] = useState(false);
 	const [isTileTaskBoostActive, setIsTileTaskBoostActive] = useState(false);
-	const tileMaxTasksPerTick = isTileTaskBoostActive
-		? TILE_MAX_TASKS_PER_TICK_DRAG
-		: TILE_MAX_TASKS_PER_TICK;
+	const isAutoLayoutAnimationActive = autoLayoutAnimatedNodeIds.length > 0;
+	const tileMaxTasksPerTick =
+		isTileTaskBoostActive || isAutoLayoutAnimationActive
+			? TILE_MAX_TASKS_PER_TICK_DRAG
+			: TILE_MAX_TASKS_PER_TICK;
 
 	const drawerIdentity = resolvedDrawerTarget
 		? `${resolvedDrawerTarget.node.id}:${resolvedDrawerTarget.trigger}`

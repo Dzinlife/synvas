@@ -6034,6 +6034,87 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("auto layout 过渡动画期间会提升 tile 任务上限，动画结束后恢复默认值", async () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-moving", {
+				parentId: "node-board-auto",
+				x: 392,
+				y: 64,
+				width: 80,
+				height: 40,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK,
+		);
+
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(430, 80),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(190, 80),
+				buttons: 1,
+			});
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK_DRAG,
+		);
+
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(190, 80),
+				buttons: 0,
+			});
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().animatedLayoutNodeIds).toEqual(
+			expect.arrayContaining(["node-auto-moving", "node-auto-b"]),
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK_DRAG,
+		);
+
+		await act(async () => {
+			await new Promise((resolve) => {
+				setTimeout(resolve, 320);
+			});
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().animatedLayoutNodeIds).toEqual(
+			[],
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().tileMaxTasksPerTick).toBe(
+			TILE_MAX_TASKS_PER_TICK,
+		);
+	});
+
 	it("多选 bbox Alt 拖拽会复制整组并保持当前 active", () => {
 		render(<CanvasWorkspace />);
 		clickNodeAt(300, 160);

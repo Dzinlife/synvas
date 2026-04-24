@@ -16,7 +16,22 @@ import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { TILE_MAX_TASKS_PER_TICK_DRAG } from "./tile/constants";
 import { StaticTileScheduler } from "./tile/scheduler";
-import type { TileFrameResult, TileInput } from "./tile/types";
+import type { TileDrawItem, TileFrameResult, TileInput } from "./tile/types";
+
+interface SkiaSurfaceMockRecord {
+	width: number;
+	height: number;
+	pixelRatio?: number;
+	resolvedPixelRatio: number;
+	canvas: {
+		drawImageRect: ReturnType<typeof vi.fn>;
+	};
+	image: {
+		width: ReturnType<typeof vi.fn>;
+		height: ReturnType<typeof vi.fn>;
+		dispose: ReturnType<typeof vi.fn>;
+	};
+}
 
 const { rootRenderSpy } = vi.hoisted(() => ({
 	rootRenderSpy: vi.fn(),
@@ -24,6 +39,12 @@ const { rootRenderSpy } = vi.hoisted(() => ({
 const { tilePipelineMockState } = vi.hoisted(() => ({
 	tilePipelineMockState: {
 		enabled: false,
+	},
+}));
+const { skiaSurfaceMockState } = vi.hoisted(() => ({
+	skiaSurfaceMockState: {
+		defaultPixelRatio: 1,
+		surfaces: [] as SkiaSurfaceMockRecord[],
 	},
 }));
 const { runtimeManagerMock } = vi.hoisted(() => ({
@@ -172,7 +193,11 @@ vi.mock("react-skia-lite", async () => {
 			},
 		};
 	};
-	const createSurface = () => {
+	const createSurface = (width = 1, height = 1, pixelRatio?: number) => {
+		const safeWidth = Math.max(1, Math.ceil(width));
+		const safeHeight = Math.max(1, Math.ceil(height));
+		const resolvedPixelRatio =
+			pixelRatio ?? skiaSurfaceMockState.defaultPixelRatio;
 		const canvas = {
 			clear: vi.fn(),
 			save: vi.fn(),
@@ -183,15 +208,28 @@ vi.mock("react-skia-lite", async () => {
 			drawPicture: vi.fn(),
 			drawImageRect: vi.fn(),
 		};
+		const image = {
+			width: vi.fn(() =>
+				Math.max(1, Math.ceil(safeWidth * resolvedPixelRatio)),
+			),
+			height: vi.fn(() =>
+				Math.max(1, Math.ceil(safeHeight * resolvedPixelRatio)),
+			),
+			dispose: vi.fn(),
+		};
+		skiaSurfaceMockState.surfaces.push({
+			width: safeWidth,
+			height: safeHeight,
+			pixelRatio,
+			resolvedPixelRatio,
+			canvas,
+			image,
+		});
 		return {
 			getCanvas: () => canvas,
 			flush: vi.fn(),
-			asImageCopy: () => ({
-				dispose: vi.fn(),
-			}),
-			makeImageSnapshot: () => ({
-				dispose: vi.fn(),
-			}),
+			asImageCopy: () => image,
+			makeImageSnapshot: () => image,
 			dispose: vi.fn(),
 		};
 	};
@@ -238,7 +276,8 @@ vi.mock("react-skia-lite", async () => {
 		Surface: {
 			get MakeOffscreen() {
 				if (!tilePipelineMockState.enabled) return undefined;
-				return () => createSurface();
+				return (width: number, height: number, pixelRatio?: number) =>
+					createSurface(width, height, pixelRatio);
 			},
 		},
 	};
@@ -750,6 +789,8 @@ describe("InfiniteSkiaCanvas", () => {
 	beforeEach(() => {
 		rootRenderSpy.mockReset();
 		tilePipelineMockState.enabled = false;
+		skiaSurfaceMockState.defaultPixelRatio = 1;
+		skiaSurfaceMockState.surfaces.length = 0;
 		acquireImageAssetMock.mockReset();
 		renderNodeToPictureMock.mockReset();
 		textTilePictureSourceSignatureMock.mockReset();
@@ -2414,6 +2455,104 @@ describe("InfiniteSkiaCanvas", () => {
 			expect(releaseMock).not.toHaveBeenCalled();
 		} finally {
 			setInputsSpy.mockRestore();
+		}
+	});
+
+	it("auto layout frozen snapshot 从 tile 裁剪时会使用真实纹理像素尺寸", async () => {
+		tilePipelineMockState.enabled = true;
+		skiaSurfaceMockState.defaultPixelRatio = 2;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const tileImage = {
+			width: vi.fn(() => 768),
+			height: vi.fn(() => 768),
+			dispose: vi.fn(),
+		};
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockReturnValue({
+				...createEmptyTileFrameResult(),
+				drawItems: [
+					{
+						key: 1,
+						lod: 0,
+						sourceLod: 0,
+						tx: 0,
+						ty: 0,
+						left: 0,
+						top: 0,
+						size: 512,
+						image: tileImage as unknown as TileDrawItem["image"],
+					},
+				],
+			});
+		try {
+			const animatedNode = createImageNode("node-image-dpr-layout", 0, {
+				x: 128,
+				y: 64,
+				width: 160,
+				height: 80,
+			});
+			const baseProps = {
+				width: 512,
+				height: 512,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [animatedNode],
+				scenes: emptyScenes,
+				assets: [createImageAsset(animatedNode.assetId)],
+				activeNodeId: null,
+				selectedNodeIds: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === animatedNode.id),
+				).toBe(true);
+			});
+
+			skiaSurfaceMockState.surfaces.length = 0;
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					animatedLayoutNodeIds={[animatedNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).toContain(
+					animatedNode.id,
+				);
+			});
+			const snapshotSurface = skiaSurfaceMockState.surfaces.find(
+				(surface) => surface.pixelRatio === 2,
+			);
+			expect(snapshotSurface).toBeTruthy();
+			const drawCall = snapshotSurface?.canvas.drawImageRect.mock.calls[0];
+			expect(drawCall).toBeTruthy();
+			const sourceRect = drawCall?.[1] as
+				| { x: number; y: number; width: number; height: number }
+				| undefined;
+			const bleed = (512 / 384) * 0.5;
+			const drawSize = 512 + bleed * 2;
+			expect(sourceRect?.x).toBeCloseTo(
+				((animatedNode.x + bleed) / drawSize) * 768,
+			);
+			expect(sourceRect?.y).toBeCloseTo(
+				((animatedNode.y + bleed) / drawSize) * 768,
+			);
+			expect(sourceRect?.width).toBeCloseTo(
+				(animatedNode.width / drawSize) * 768,
+			);
+			expect(sourceRect?.height).toBeCloseTo(
+				(animatedNode.height / drawSize) * 768,
+			);
+		} finally {
+			setInputsSpy.mockRestore();
+			beginFrameSpy.mockRestore();
 		}
 	});
 
