@@ -5341,6 +5341,57 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("auto board child resize 超过当前行高时不会合并相邻行", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 400,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 208,
+				width: 120,
+				height: 80,
+				siblingOrder: 1,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+
+		resizeNodeByIdAt("node-auto-a", 164, 144, 164, 284, "bottom-right");
+
+		expect(getCanvasNodeForTest("node-auto-a")).toMatchObject({
+			x: 64,
+			y: 64,
+			width: 100,
+			height: 220,
+			siblingOrder: 0,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			x: 64,
+			y: 348,
+			siblingOrder: 1,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 248,
+			height: 492,
+		});
+	});
+
 	it("auto board child 删除后会收缩 board", () => {
 		setCanvasNodesForTest([
 			createTestBoardNode("node-board-auto", {

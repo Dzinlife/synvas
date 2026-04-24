@@ -306,6 +306,7 @@ interface NodeResizeSession {
 	moved: boolean;
 	constraints: ResolvedCanvasNodeResizeConstraints;
 	guideValues: CanvasSnapGuideValues | null;
+	autoLayoutRowsByBoardId: Map<string, string[][]>;
 }
 
 interface SelectionResizeSnapshot {
@@ -329,6 +330,7 @@ interface SelectionResizeSession {
 	snapshots: Record<string, SelectionResizeSnapshot>;
 	moved: boolean;
 	guideValues: CanvasSnapGuideValues | null;
+	autoLayoutRowsByBoardId: Map<string, string[][]>;
 }
 
 interface PendingCanvasClickSuppression {
@@ -447,6 +449,17 @@ const resolveCanvasAutoLayoutFrozenNodeIdsForResize = (
 	return resolveCanvasAutoLayoutFrozenNodeIds(nodes, boardIds).filter(
 		(nodeId) => !resizedNodeIdSet.has(nodeId),
 	);
+};
+
+const resolveCanvasAutoLayoutRowsByBoardId = (
+	nodes: CanvasNode[],
+	boardIds: string[],
+): Map<string, string[][]> => {
+	const rowsByBoardId = new Map<string, string[][]>();
+	for (const boardId of [...new Set(boardIds)]) {
+		rowsByBoardId.set(boardId, deriveCanvasBoardAutoLayoutRows(nodes, boardId));
+	}
+	return rowsByBoardId;
 };
 
 const resolveCameraCenterWorld = (
@@ -4317,6 +4330,12 @@ const CanvasWorkspace = () => {
 			nodeDragSessionRef.current = null;
 			clearPendingClickSuppression();
 			commitSelectedNodeIds([node.id]);
+			const latestNodes =
+				useProjectStore.getState().currentProject?.canvas.nodes ?? [];
+			const autoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
+				latestNodes,
+				[node.id],
+			);
 			nodeResizeSessionRef.current = {
 				nodeId: node.id,
 				anchor,
@@ -4336,6 +4355,10 @@ const CanvasWorkspace = () => {
 				moved: false,
 				constraints: resolveNodeResizeConstraints(node),
 				guideValues: null,
+				autoLayoutRowsByBoardId: resolveCanvasAutoLayoutRowsByBoardId(
+					latestNodes,
+					autoLayoutBoardIds,
+				),
 			};
 		},
 		[
@@ -4501,13 +4524,15 @@ const CanvasWorkspace = () => {
 			if (!resizeSession.moved) return;
 			let latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
-			const autoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
-				latestProject.canvas.nodes,
-				[resizeSession.nodeId],
-			);
+			const autoLayoutBoardIds = [
+				...resizeSession.autoLayoutRowsByBoardId.keys(),
+			];
 			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
 				latestProject.canvas.nodes,
 				[resizeSession.nodeId],
+				{
+					rowsByBoardId: resizeSession.autoLayoutRowsByBoardId,
+				},
 			);
 			if (autoLayoutEntries.length > 0) {
 				commitCanvasAutoLayoutEntries(autoLayoutEntries, {
@@ -5127,6 +5152,13 @@ const CanvasWorkspace = () => {
 				suppressNode: false,
 				suppressCanvas: true,
 			});
+			const latestNodes =
+				useProjectStore.getState().currentProject?.canvas.nodes ?? [];
+			const resizeNodeIds = resizeNodes.map((node) => node.id);
+			const autoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
+				latestNodes,
+				resizeNodeIds,
+			);
 			selectionResizeSessionRef.current = {
 				anchor,
 				startBoundsLeft: selectedBounds.left,
@@ -5157,6 +5189,10 @@ const CanvasWorkspace = () => {
 				),
 				moved: false,
 				guideValues: null,
+				autoLayoutRowsByBoardId: resolveCanvasAutoLayoutRowsByBoardId(
+					latestNodes,
+					autoLayoutBoardIds,
+				),
 			};
 		},
 		[
@@ -5384,13 +5420,15 @@ const CanvasWorkspace = () => {
 			let latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			const resizedNodeIds = Object.keys(resizeSession.snapshots);
-			const autoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
-				latestProject.canvas.nodes,
-				resizedNodeIds,
-			);
+			const autoLayoutBoardIds = [
+				...resizeSession.autoLayoutRowsByBoardId.keys(),
+			];
 			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
 				latestProject.canvas.nodes,
 				resizedNodeIds,
+				{
+					rowsByBoardId: resizeSession.autoLayoutRowsByBoardId,
+				},
 			);
 			if (autoLayoutEntries.length > 0) {
 				commitCanvasAutoLayoutEntries(autoLayoutEntries, {
