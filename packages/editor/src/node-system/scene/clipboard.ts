@@ -5,6 +5,7 @@ import { createTransformMeta } from "@/element-system/transform";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { wouldCreateSceneCompositionCycle } from "@/studio/scene/sceneComposition";
 import { secondsToFrames } from "@/utils/timecode";
+import { resolveSceneTimelineInsertionSize } from "../timelineInsertionSize";
 import type { CanvasNodeToTimelineElementContext } from "../types";
 
 export const convertSceneNodeToTimelineElement = ({
@@ -33,14 +34,12 @@ export const convertSceneNodeToTimelineElement = ({
 	);
 	const fallbackDuration = Math.max(1, secondsToFrames(5, fps));
 	const duration = sourceDuration > 0 ? durationBySource : fallbackDuration;
-	const width = Math.max(
-		1,
-		Math.round(sourceScene.timeline.canvas.width || Math.abs(node.width) || 1),
-	);
-	const height = Math.max(
-		1,
-		Math.round(sourceScene.timeline.canvas.height || Math.abs(node.height) || 1),
-	);
+	const targetScene = targetSceneId ? project.scenes[targetSceneId] : null;
+	const { width, height } = resolveSceneTimelineInsertionSize({
+		sourceSize: sourceScene.timeline.canvas,
+		fallbackSize: node,
+		targetSize: targetScene?.timeline.canvas,
+	});
 	return {
 		id: createElementId(),
 		type: "Composition",

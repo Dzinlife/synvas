@@ -7,6 +7,7 @@ import {
 	readVideoMetadata,
 } from "@/scene-editor/utils/externalVideo";
 import { registerCanvasNodeDefinition } from "../registryCore";
+import { resolveSceneTimelineInsertionSize } from "../timelineInsertionSize";
 import type { CanvasNodeDefinition } from "../types";
 import { VideoNodeDrawer } from "./drawer";
 import { VideoNodeSkiaRenderer } from "./renderer";
@@ -72,6 +73,9 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 	},
 	toTimelineClipboardElement: ({
 		node,
+		project,
+		targetSceneId,
+		asset,
 		fps,
 		startFrame,
 		trackIndex,
@@ -79,8 +83,12 @@ const videoDefinition: CanvasNodeDefinition<VideoCanvasNode> = {
 	}) => {
 		if (!node.assetId) return null;
 		const durationFrames = Math.max(1, Math.round(node.duration ?? 1));
-		const width = Math.max(1, Math.round(Math.abs(node.width)));
-		const height = Math.max(1, Math.round(Math.abs(node.height)));
+		const targetScene = targetSceneId ? project.scenes[targetSceneId] : null;
+		const { width, height } = resolveSceneTimelineInsertionSize({
+			sourceSize: asset?.meta?.sourceSize,
+			fallbackSize: node,
+			targetSize: targetScene?.timeline.canvas,
+		});
 		return {
 			id: createElementId(),
 			type: "VideoClip",

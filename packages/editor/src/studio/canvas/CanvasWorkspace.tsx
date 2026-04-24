@@ -64,6 +64,7 @@ import {
 	canvasNodeDefinitionList,
 	getCanvasNodeDefinition,
 } from "@/node-system/registry";
+import { resolveSceneTimelineInsertionSize } from "@/node-system/timelineInsertionSize";
 import type {
 	CanvasNodeDrawerProps,
 	CanvasNodeDrawerTrigger,
@@ -1557,10 +1558,19 @@ const CanvasWorkspace = () => {
 				fps: number,
 				rippleEditingEnabled: boolean,
 				autoAttach: boolean,
+				targetCanvasSize: { width: number; height: number },
 			): TimelineElement[] => {
 				if (node.type !== "image" || !node.assetId) return elements;
 				const start = resolveTimelineEndFrame(elements);
 				const duration = Math.max(1, secondsToFrames(5, fps));
+				const sourceAsset =
+					latestProject.assets.find((asset) => asset.id === node.assetId) ??
+					null;
+				const { width, height } = resolveSceneTimelineInsertionSize({
+					sourceSize: sourceAsset?.meta?.sourceSize,
+					fallbackSize: node,
+					targetSize: targetCanvasSize,
+				});
 				const nextElement: TimelineElement = {
 					id: `element-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 					type: "Image",
@@ -1569,8 +1579,8 @@ const CanvasWorkspace = () => {
 					assetId: node.assetId,
 					props: {},
 					transform: createTransformMeta({
-						width: Math.max(1, Math.abs(node.width)),
-						height: Math.max(1, Math.abs(node.height)),
+						width,
+						height,
 						positionX: 0,
 						positionY: 0,
 					}),
@@ -1602,6 +1612,7 @@ const CanvasWorkspace = () => {
 				fps: number,
 				rippleEditingEnabled: boolean,
 				autoAttach: boolean,
+				targetCanvasSize: { width: number; height: number },
 			): TimelineElement[] => {
 				if (node.type !== "scene") return elements;
 				const sourceScene = latestProject.scenes[node.sceneId];
@@ -1638,14 +1649,11 @@ const CanvasWorkspace = () => {
 				const duration =
 					sourceDuration > 0 ? durationBySource : fallbackDuration;
 				const start = resolveTimelineEndFrame(elements);
-				const width = Math.max(
-					1,
-					Math.round(sourceCanvasSize.width || Math.abs(node.width) || 1),
-				);
-				const height = Math.max(
-					1,
-					Math.round(sourceCanvasSize.height || Math.abs(node.height) || 1),
-				);
+				const { width, height } = resolveSceneTimelineInsertionSize({
+					sourceSize: sourceCanvasSize,
+					fallbackSize: node,
+					targetSize: targetCanvasSize,
+				});
 				const nextElement: TimelineElement = {
 					id: `element-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 					type: "Composition",
@@ -1688,6 +1696,7 @@ const CanvasWorkspace = () => {
 				fps: number,
 				rippleEditingEnabled: boolean,
 				autoAttach: boolean,
+				targetCanvasSize: { width: number; height: number },
 			): TimelineElement[] => {
 				if (node.type === "image") {
 					return appendImageElement(
@@ -1695,6 +1704,7 @@ const CanvasWorkspace = () => {
 						fps,
 						rippleEditingEnabled,
 						autoAttach,
+						targetCanvasSize,
 					);
 				}
 				if (node.type === "scene") {
@@ -1703,6 +1713,7 @@ const CanvasWorkspace = () => {
 						fps,
 						rippleEditingEnabled,
 						autoAttach,
+						targetCanvasSize,
 					);
 				}
 				return elements;
@@ -1720,6 +1731,7 @@ const CanvasWorkspace = () => {
 							timelineState.fps,
 							timelineState.rippleEditingEnabled,
 							timelineState.autoAttach,
+							timelineState.canvasSize,
 						);
 					});
 					return;
@@ -1731,6 +1743,7 @@ const CanvasWorkspace = () => {
 				targetScene.timeline.fps,
 				targetScene.timeline.settings.rippleEditingEnabled,
 				targetScene.timeline.settings.autoAttach,
+				targetScene.timeline.canvas,
 			);
 			if (nextElements === targetScene.timeline.elements) return;
 			updateSceneTimeline(sceneId, {
@@ -3464,6 +3477,7 @@ const CanvasWorkspace = () => {
 			targetSceneId: string | null,
 			timelineElements: TimelineElement[],
 			fps: number,
+			targetCanvasSize: { width: number; height: number } | null,
 		) => {
 			const latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return null;
@@ -3478,6 +3492,7 @@ const CanvasWorkspace = () => {
 									timeline: {
 										...latestProject.scenes[targetSceneId].timeline,
 										elements: timelineElements,
+										...(targetCanvasSize ? { canvas: targetCanvasSize } : {}),
 									},
 								},
 							},
@@ -3556,6 +3571,7 @@ const CanvasWorkspace = () => {
 				timelineRuntime.ref.sceneId,
 				timelineState.elements,
 				timelineState.fps,
+				timelineState.canvasSize,
 			);
 			if (!payload) return false;
 			const postProcessOptions = {

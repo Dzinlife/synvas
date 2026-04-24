@@ -29,6 +29,7 @@ import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvid
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
 import { getCanvasNodeDefinition } from "@/node-system/registry";
+import { resolveSceneTimelineInsertionSize } from "@/node-system/timelineInsertionSize";
 import { useStudioClipboardStore } from "@/studio/clipboard/studioClipboardStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 import CanvasWorkspace from "./CanvasWorkspace";
@@ -447,45 +448,60 @@ vi.mock("@/node-system/registry", () => {
 			},
 			toTimelineClipboardElement: ({
 				node,
+				project,
+				targetSceneId,
 				fps,
 				startFrame,
 				trackIndex,
 				createElementId,
 			}: {
 				node: { name: string; sceneId: string; width: number; height: number };
+				project: StudioProject;
+				targetSceneId?: string | null;
 				fps: number;
 				startFrame: number;
 				trackIndex: number;
 				createElementId: () => string;
-			}) => ({
-				id: createElementId(),
-				type: "Composition",
-				component: "composition",
-				name: node.name,
-				props: {
-					sceneId: node.sceneId,
-				},
-				transform: createTransformMeta({
-					width: Math.max(1, Math.round(Math.abs(node.width))),
-					height: Math.max(1, Math.round(Math.abs(node.height))),
-					positionX: 0,
-					positionY: 0,
-				}),
-				timeline: buildTimelineMeta(
-					{
-						start: startFrame,
-						end: startFrame + 150,
-						trackIndex: trackIndex >= 0 ? trackIndex : 0,
-						role: "clip",
+			}) => {
+				const sourceScene = project.scenes[node.sceneId] ?? null;
+				const targetScene = targetSceneId
+					? project.scenes[targetSceneId]
+					: null;
+				const { width, height } = resolveSceneTimelineInsertionSize({
+					sourceSize: sourceScene?.timeline.canvas,
+					fallbackSize: node,
+					targetSize: targetScene?.timeline.canvas,
+				});
+				return {
+					id: createElementId(),
+					type: "Composition",
+					component: "composition",
+					name: node.name,
+					props: {
+						sceneId: node.sceneId,
 					},
-					fps,
-				),
-				render: {
-					zIndex: 0,
-					visible: true,
-					opacity: 1,
-				},
-			}),
+					transform: createTransformMeta({
+						width,
+						height,
+						positionX: 0,
+						positionY: 0,
+					}),
+					timeline: buildTimelineMeta(
+						{
+							start: startFrame,
+							end: startFrame + 150,
+							trackIndex: trackIndex >= 0 ? trackIndex : 0,
+							role: "clip",
+						},
+						fps,
+					),
+					render: {
+						zIndex: 0,
+						visible: true,
+						opacity: 1,
+					},
+				};
+			},
 		},
 		video: {
 			type: "video",
@@ -556,6 +572,9 @@ vi.mock("@/node-system/registry", () => {
 			},
 			toTimelineClipboardElement: ({
 				node,
+				project,
+				targetSceneId,
+				asset,
 				fps,
 				startFrame,
 				trackIndex,
@@ -568,6 +587,9 @@ vi.mock("@/node-system/registry", () => {
 					height: number;
 					duration?: number;
 				};
+				project: StudioProject;
+				targetSceneId?: string | null;
+				asset: TimelineAsset | null;
 				fps: number;
 				startFrame: number;
 				trackIndex: number;
@@ -575,6 +597,14 @@ vi.mock("@/node-system/registry", () => {
 			}) => {
 				if (!node.assetId) return null;
 				const durationFrames = Math.max(1, Math.round(node.duration ?? 150));
+				const targetScene = targetSceneId
+					? project.scenes[targetSceneId]
+					: null;
+				const { width, height } = resolveSceneTimelineInsertionSize({
+					sourceSize: asset?.meta?.sourceSize,
+					fallbackSize: node,
+					targetSize: targetScene?.timeline.canvas,
+				});
 				return {
 					id: createElementId(),
 					type: "VideoClip",
@@ -583,8 +613,8 @@ vi.mock("@/node-system/registry", () => {
 					assetId: node.assetId,
 					props: {},
 					transform: createTransformMeta({
-						width: Math.max(1, Math.round(Math.abs(node.width))),
-						height: Math.max(1, Math.round(Math.abs(node.height))),
+						width,
+						height,
 						positionX: 0,
 						positionY: 0,
 					}),
@@ -792,18 +822,32 @@ vi.mock("@/node-system/registry", () => {
 			},
 			toTimelineClipboardElement: ({
 				node,
+				project,
+				targetSceneId,
+				asset,
 				fps,
 				startFrame,
 				trackIndex,
 				createElementId,
 			}: {
 				node: { name: string; assetId?: string; width: number; height: number };
+				project: StudioProject;
+				targetSceneId?: string | null;
+				asset: TimelineAsset | null;
 				fps: number;
 				startFrame: number;
 				trackIndex: number;
 				createElementId: () => string;
 			}) => {
 				if (!node.assetId) return null;
+				const targetScene = targetSceneId
+					? project.scenes[targetSceneId]
+					: null;
+				const { width, height } = resolveSceneTimelineInsertionSize({
+					sourceSize: asset?.meta?.sourceSize,
+					fallbackSize: node,
+					targetSize: targetScene?.timeline.canvas,
+				});
 				return {
 					id: createElementId(),
 					type: "Image",
@@ -812,8 +856,8 @@ vi.mock("@/node-system/registry", () => {
 					assetId: node.assetId,
 					props: {},
 					transform: createTransformMeta({
-						width: Math.max(1, Math.round(Math.abs(node.width))),
-						height: Math.max(1, Math.round(Math.abs(node.height))),
+						width,
+						height,
 						positionX: 0,
 						positionY: 0,
 					}),
@@ -1290,6 +1334,34 @@ const setAssetSceneSourceSize = (width: number, height: number): void => {
 						},
 					};
 				}),
+			},
+		};
+	});
+};
+
+const setSceneCanvasSize = (
+	sceneId: string,
+	width: number,
+	height: number,
+): void => {
+	useProjectStore.setState((state) => {
+		const project = state.currentProject;
+		const scene = project?.scenes[sceneId];
+		if (!project || !scene) return state;
+		return {
+			...state,
+			currentProject: {
+				...project,
+				scenes: {
+					...project.scenes,
+					[sceneId]: {
+						...scene,
+						timeline: {
+							...scene.timeline,
+							canvas: { width, height },
+						},
+					},
+				},
 			},
 		};
 	});
@@ -2430,14 +2502,14 @@ describe("CanvasWorkspace", () => {
 			const past = useStudioHistoryStore.getState().past;
 			expect(past.at(-1)?.kind).toBe("canvas.node-create.batch");
 		} finally {
-				if (typeof originalElementFromPoint === "function") {
-					Object.defineProperty(document, "elementFromPoint", {
-						configurable: true,
-						value: originalElementFromPoint,
-					});
-				} else {
-					Reflect.deleteProperty(document, "elementFromPoint");
-				}
+			if (typeof originalElementFromPoint === "function") {
+				Object.defineProperty(document, "elementFromPoint", {
+					configurable: true,
+					value: originalElementFromPoint,
+				});
+			} else {
+				Reflect.deleteProperty(document, "elementFromPoint");
+			}
 		}
 	});
 
@@ -2521,14 +2593,14 @@ describe("CanvasWorkspace", () => {
 			expect(afterNodeCount).toBe(beforeNodeCount);
 			timelineZone.remove();
 		} finally {
-				if (typeof originalElementFromPoint === "function") {
-					Object.defineProperty(document, "elementFromPoint", {
-						configurable: true,
-						value: originalElementFromPoint,
-					});
-				} else {
-					Reflect.deleteProperty(document, "elementFromPoint");
-				}
+			if (typeof originalElementFromPoint === "function") {
+				Object.defineProperty(document, "elementFromPoint", {
+					configurable: true,
+					value: originalElementFromPoint,
+				});
+			} else {
+				Reflect.deleteProperty(document, "elementFromPoint");
+			}
 		}
 	});
 
@@ -2613,14 +2685,14 @@ describe("CanvasWorkspace", () => {
 			expect(afterNodeCount).toBe(beforeNodeCount);
 			timelineEditor.remove();
 		} finally {
-				if (typeof originalElementFromPoint === "function") {
-					Object.defineProperty(document, "elementFromPoint", {
-						configurable: true,
-						value: originalElementFromPoint,
-					});
-				} else {
-					Reflect.deleteProperty(document, "elementFromPoint");
-				}
+			if (typeof originalElementFromPoint === "function") {
+				Object.defineProperty(document, "elementFromPoint", {
+					configurable: true,
+					value: originalElementFromPoint,
+				});
+			} else {
+				Reflect.deleteProperty(document, "elementFromPoint");
+			}
 		}
 	});
 
@@ -3823,6 +3895,7 @@ describe("CanvasWorkspace", () => {
 	});
 
 	it("右键 image 节点可通过二级菜单插入到目标 scene timeline", async () => {
+		setAssetSceneSourceSize(400, 300);
 		render(<CanvasWorkspace />);
 		rightClickNodeAt(720, 360);
 		fireEvent.mouseEnter(
@@ -3842,6 +3915,8 @@ describe("CanvasWorkspace", () => {
 		expect(inserted.timeline.end).toBe(150);
 		expect(inserted.timeline.trackIndex).toBe(0);
 		expect(inserted.timeline.role).toBe("clip");
+		expect(inserted.transform?.baseSize.width).toBe(400);
+		expect(inserted.transform?.baseSize.height).toBe(300);
 		expect(inserted.transform?.position.x).toBe(0);
 		expect(inserted.transform?.position.y).toBe(0);
 		expect(project?.ui.activeNodeId).toBe("node-image-1");
@@ -3851,6 +3926,7 @@ describe("CanvasWorkspace", () => {
 	});
 
 	it("右键 scene 节点可插入 Composition 到目标 scene timeline", async () => {
+		setSceneCanvasSize("scene-1", 3840, 1080);
 		render(<CanvasWorkspace />);
 		const beforeUi = useProjectStore.getState().currentProject?.ui;
 
@@ -3874,7 +3950,7 @@ describe("CanvasWorkspace", () => {
 		expect(inserted.timeline.trackIndex).toBe(0);
 		expect(inserted.timeline.role).toBe("clip");
 		expect(inserted.transform?.baseSize.width).toBe(1920);
-		expect(inserted.transform?.baseSize.height).toBe(1080);
+		expect(inserted.transform?.baseSize.height).toBe(540);
 
 		const afterUi = project?.ui;
 		expect(afterUi).toEqual(beforeUi);
@@ -4778,6 +4854,85 @@ describe("CanvasWorkspace", () => {
 		}
 	});
 
+	it("从画布拖入 scene timeline 的 image 使用原始素材尺寸", () => {
+		setAssetSceneSourceSize(400, 300);
+		const runtime = createCanvasWorkspaceRuntime();
+		const removeDropZone = mountMainTimelineDropZone();
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			dragNodeAt(720, 360, 120, 80);
+			const timelineElements =
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState()
+					.elements ?? [];
+			const inserted = timelineElements[0];
+			expect(inserted?.type).toBe("Image");
+			expect(inserted?.transform?.baseSize.width).toBe(400);
+			expect(inserted?.transform?.baseSize.height).toBe(300);
+		} finally {
+			removeDropZone();
+		}
+	});
+
+	it("从画布拖入 scene timeline 的 video 超出 scene 时按 contain 缩小", () => {
+		setAssetSceneSourceSize(4000, 1000);
+		const runtime = createCanvasWorkspaceRuntime();
+		const removeDropZone = mountMainTimelineDropZone();
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			dragNodeAt(300, 160, 120, 80);
+			const timelineElements =
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState()
+					.elements ?? [];
+			const inserted = timelineElements[0];
+			expect(inserted?.type).toBe("VideoClip");
+			expect(inserted?.transform?.baseSize.width).toBe(1920);
+			expect(inserted?.transform?.baseSize.height).toBe(480);
+		} finally {
+			removeDropZone();
+		}
+	});
+
+	it("从画布拖入 scene timeline 的 scene 引用按源 scene canvas contain", () => {
+		setSceneCanvasSize("scene-2", 3840, 1080);
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: project.canvas.nodes.map((node) =>
+							node.id === "node-scene-2" ? { ...node, x: 40, y: 620 } : node,
+						),
+					},
+				},
+			};
+		});
+		const runtime = createCanvasWorkspaceRuntime();
+		const removeDropZone = mountMainTimelineDropZone();
+		try {
+			render(<CanvasWorkspace />, {
+				wrapper: createRuntimeProviderWrapper(runtime),
+			});
+			dragNodeAt(80, 660, 120, 80);
+			const timelineElements =
+				runtime.getActiveEditTimelineRuntime()?.timelineStore.getState()
+					.elements ?? [];
+			const inserted = timelineElements[0];
+			expect(inserted?.type).toBe("Composition");
+			expect(inserted?.transform?.baseSize.width).toBe(1920);
+			expect(inserted?.transform?.baseSize.height).toBe(540);
+		} finally {
+			removeDropZone();
+		}
+	});
+
 	it("主轨波纹开启时从画布拖入主轨会执行插入而不是落到新轨道", () => {
 		const runtime = createCanvasWorkspaceRuntime();
 		const removeDropZone = mountMainTimelineDropZone();
@@ -4889,14 +5044,14 @@ describe("CanvasWorkspace", () => {
 			expect(past).toHaveLength(1);
 			expect(past[0]?.kind).toBe("canvas.node-layout");
 		} finally {
-				if (typeof originalElementFromPoint === "function") {
-					Object.defineProperty(document, "elementFromPoint", {
-						configurable: true,
-						value: originalElementFromPoint,
-					});
-				} else {
-					Reflect.deleteProperty(document, "elementFromPoint");
-				}
+			if (typeof originalElementFromPoint === "function") {
+				Object.defineProperty(document, "elementFromPoint", {
+					configurable: true,
+					value: originalElementFromPoint,
+				});
+			} else {
+				Reflect.deleteProperty(document, "elementFromPoint");
+			}
 			removeDropZone();
 		}
 	});

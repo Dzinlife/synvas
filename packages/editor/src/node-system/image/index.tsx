@@ -3,6 +3,7 @@ import { createTransformMeta } from "@/element-system/transform";
 import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
+import { resolveSceneTimelineInsertionSize } from "../timelineInsertionSize";
 import { secondsToFrames } from "@/utils/timecode";
 import { ImageNodeSkiaRenderer } from "./renderer";
 import { ImageNodeToolbar } from "./toolbar";
@@ -131,6 +132,9 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 	},
 	toTimelineClipboardElement: ({
 		node,
+		project,
+		targetSceneId,
+		asset,
 		fps,
 		startFrame,
 		trackIndex,
@@ -138,8 +142,12 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 	}) => {
 		if (!node.assetId) return null;
 		const durationFrames = Math.max(1, secondsToFrames(5, fps));
-		const width = Math.max(1, Math.round(Math.abs(node.width)));
-		const height = Math.max(1, Math.round(Math.abs(node.height)));
+		const targetScene = targetSceneId ? project.scenes[targetSceneId] : null;
+		const { width, height } = resolveSceneTimelineInsertionSize({
+			sourceSize: asset?.meta?.sourceSize,
+			fallbackSize: node,
+			targetSize: targetScene?.timeline.canvas,
+		});
 		return {
 			id: createElementId(),
 			type: "Image",
