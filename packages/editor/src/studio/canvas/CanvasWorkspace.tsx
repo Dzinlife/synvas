@@ -422,9 +422,13 @@ const isTileLodTransitionEqual = (
 const resolveCanvasAutoLayoutFrozenNodeIds = (
 	nodes: CanvasNode[],
 	boardIds: string[],
+	options?: {
+		excludeNodeIds?: Set<string>;
+	},
 ): string[] => {
 	if (boardIds.length === 0) return [];
 	const boardIdSet = new Set(boardIds);
+	const excludeNodeIds = options?.excludeNodeIds ?? new Set<string>();
 	const visibleNodeIdSet = new Set(
 		nodes.filter((node) => !node.hidden).map((node) => node.id),
 	);
@@ -436,7 +440,10 @@ const resolveCanvasAutoLayoutFrozenNodeIds = (
 		})
 		.map((node) => node.id);
 	return expandCanvasNodeIdsWithDescendants(nodes, directChildNodeIds).filter(
-		(nodeId) => visibleNodeIdSet.has(nodeId) && !boardIdSet.has(nodeId),
+		(nodeId) =>
+			visibleNodeIdSet.has(nodeId) &&
+			!boardIdSet.has(nodeId) &&
+			!excludeNodeIds.has(nodeId),
 	);
 };
 
@@ -5006,6 +5013,11 @@ const CanvasWorkspace = () => {
 					? resolveCanvasAutoLayoutFrozenNodeIds(
 							workingNodes,
 							targetAutoBoardIds,
+							{
+								excludeNodeIds: activeNodeId
+									? new Set([activeNodeId])
+									: undefined,
+							},
 						)
 					: [];
 			setAutoLayoutFrozenNodeIds((prev) => {
@@ -5042,6 +5054,7 @@ const CanvasWorkspace = () => {
 			resolvePointerBoardReparentEntries,
 			resolveRootNodeIdsFromMovedSet,
 			resolveWorldPoint,
+			activeNodeId,
 			startCanvasTimelineDropPreview,
 			stopCanvasTimelineDropPreview,
 			setCanvasSnapGuides,
@@ -5154,6 +5167,12 @@ const CanvasWorkspace = () => {
 					frozenNodeIds: resolveCanvasAutoLayoutFrozenNodeIds(
 						projectBeforeBoardLayout.canvas.nodes,
 						autoLayoutExtraBoardIds,
+						{
+							excludeNodeIds:
+								activeNodeId && !movedTargetNodeIds.includes(activeNodeId)
+									? new Set([activeNodeId])
+									: undefined,
+						},
 					),
 				});
 				latestProject = useProjectStore.getState().currentProject;
@@ -5215,6 +5234,7 @@ const CanvasWorkspace = () => {
 			clearBoardAutoLayoutIndicator,
 			clearCanvasSnapGuides,
 			commitCanvasTimelineDrop,
+			activeNodeId,
 			pushHistory,
 			removeCanvasGraphBatch,
 			resolveAutoLayoutEntriesForChangedNodes,
@@ -7219,6 +7239,12 @@ const CanvasWorkspace = () => {
 						...selectionResizeFrozenNodeIds,
 					]),
 				];
+	const forceLiveCanvasNodeIds =
+		activeNodeId &&
+		(autoLayoutFrozenNodeIds.includes(activeNodeId) ||
+			autoLayoutAnimatedNodeIds.includes(activeNodeId))
+			? [activeNodeId]
+			: EMPTY_STRING_ARRAY;
 
 	return (
 		<div
@@ -7259,6 +7285,7 @@ const CanvasWorkspace = () => {
 				boardAutoLayoutIndicator={boardAutoLayoutIndicator}
 				animatedLayoutNodeIds={autoLayoutAnimatedNodeIds}
 				frozenNodeIds={frozenCanvasNodeIds}
+				forceLiveNodeIds={forceLiveCanvasNodeIds}
 				suspendHover={isCameraAnimating}
 				tileDebugEnabled={tileDebugEnabled}
 				tileMaxTasksPerTick={tileMaxTasksPerTick}

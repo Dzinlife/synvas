@@ -2494,6 +2494,33 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(renderNodeToPictureMock).toHaveBeenCalled();
 	});
 
+	it("forceLiveNodeIds 会让 animated active node 保持 live render", async () => {
+		tilePipelineMockState.enabled = true;
+		const activeNode = createTextNode("node-text-active-live-layout", 0);
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[activeNode]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId={activeNode.id}
+				selectedNodeIds={[activeNode.id]}
+				focusedNodeId={null}
+				animatedLayoutNodeIds={[activeNode.id]}
+				frozenNodeIds={[activeNode.id]}
+				forceLiveNodeIds={[activeNode.id]}
+			/>,
+		);
+
+		await waitFor(() => {
+			const tree = getLatestRenderTree();
+			expect(getLiveRenderedNodeIds(tree)).toContain(activeNode.id);
+			expect(getFrozenRenderedNodeIds(tree)).not.toContain(activeNode.id);
+		});
+	});
+
 	it("auto layout frozen snapshot 从 tile 裁剪时会使用真实纹理像素尺寸", async () => {
 		tilePipelineMockState.enabled = true;
 		skiaSurfaceMockState.defaultPixelRatio = 2;

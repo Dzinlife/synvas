@@ -127,6 +127,7 @@ interface MockInfiniteSkiaCanvasProps {
 	} | null;
 	animatedLayoutNodeIds?: string[];
 	frozenNodeIds?: string[];
+	forceLiveNodeIds?: string[];
 	suspendHover?: boolean;
 	onNodeResize?: (event: {
 		phase: "start" | "move" | "end";
@@ -5284,6 +5285,136 @@ describe("CanvasWorkspace", () => {
 				"node-auto-moving",
 			]),
 		);
+	});
+
+	it("auto board 拖拽另一个 child 时不会冻结原 active child", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-active", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-moving", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-sibling", {
+				parentId: "node-board-auto",
+				x: 392,
+				y: 64,
+				width: 80,
+				height: 40,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		clickNodeAt(100, 80);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(260, 80),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(320, 80),
+				buttons: 1,
+			});
+		});
+
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-auto-active",
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining(["node-auto-moving", "node-auto-sibling"]),
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).not.toContain(
+			"node-auto-active",
+		);
+	});
+
+	it("auto board 拖拽 active child 自身时不会冻结 active child", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-active", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-c", {
+				parentId: "node-board-auto",
+				x: 392,
+				y: 64,
+				width: 80,
+				height: 40,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		clickNodeAt(100, 80);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(100, 80),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(180, 80),
+				buttons: 1,
+			});
+		});
+
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining(["node-auto-b", "node-auto-c"]),
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).not.toContain(
+			"node-auto-active",
+		);
+
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(180, 80),
+				buttons: 0,
+			});
+		});
+
+		expect(getLatestInfiniteSkiaCanvasProps().forceLiveNodeIds).toEqual([
+			"node-auto-active",
+		]);
 	});
 
 	it("auto board child resize 结束后会重新适配 board size", () => {
