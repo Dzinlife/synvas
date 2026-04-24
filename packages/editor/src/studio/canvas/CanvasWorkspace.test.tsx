@@ -5339,6 +5339,51 @@ describe("CanvasWorkspace", () => {
 		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).not.toContain(
 			"node-auto-a",
 		);
+		expect(useStudioHistoryStore.getState().past[0]?.kind).toBe(
+			"canvas.node-layout.batch",
+		);
+
+		act(() => {
+			useStudioHistoryStore.getState().undo();
+		});
+
+		expect(getCanvasNodeForTest("node-auto-a")).toMatchObject({
+			x: 64,
+			y: 64,
+			width: 100,
+			height: 80,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			x: 228,
+			y: 64,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 500,
+			height: 300,
+		});
+
+		act(() => {
+			useStudioHistoryStore.getState().redo();
+		});
+
+		expect(getCanvasNodeForTest("node-auto-a")).toMatchObject({
+			x: 64,
+			y: 64,
+			width: 160,
+			height: 120,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			x: 288,
+			y: 64,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 452,
+			height: 248,
+		});
 	});
 
 	it("auto board 多选 children resize 结束后会继续冻结 resized children", () => {
@@ -5414,6 +5459,29 @@ describe("CanvasWorkspace", () => {
 		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
 			expect.arrayContaining(["node-auto-a", "node-auto-b"]),
 		);
+
+		act(() => {
+			useStudioHistoryStore.getState().undo();
+		});
+
+		expect(getCanvasNodeForTest("node-auto-a")).toMatchObject({
+			x: 64,
+			y: 64,
+			width: 100,
+			height: 80,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			x: 228,
+			y: 64,
+			width: 100,
+			height: 80,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 500,
+			height: 300,
+		});
 	});
 
 	it("auto board child resize 超过当前行高时不会合并相邻行", () => {

@@ -464,6 +464,38 @@ const resolveCanvasSelectionResizeFrozenNodeIds = (
 	);
 };
 
+const resolveCanvasLayoutHistoryEntries = (
+	beforeByNodeId: Map<string, CanvasNodeLayoutSnapshot>,
+	afterNodes: CanvasNode[],
+): Array<{
+	nodeId: string;
+	before: CanvasNodeLayoutSnapshot;
+	after: CanvasNodeLayoutSnapshot;
+}> => {
+	const afterNodeById = new Map(afterNodes.map((node) => [node.id, node]));
+	return [...beforeByNodeId.entries()]
+		.map(([nodeId, before]) => {
+			const afterNode = afterNodeById.get(nodeId) ?? null;
+			if (!afterNode) return null;
+			const after = pickLayout(afterNode);
+			if (isLayoutEqual(before, after)) return null;
+			return {
+				nodeId,
+				before,
+				after,
+			};
+		})
+		.filter(
+			(
+				entry,
+			): entry is {
+				nodeId: string;
+				before: CanvasNodeLayoutSnapshot;
+				after: CanvasNodeLayoutSnapshot;
+			} => Boolean(entry),
+		);
+};
+
 const resolveCanvasAutoLayoutRowsByBoardId = (
 	nodes: CanvasNode[],
 	boardIds: string[],
@@ -4561,6 +4593,7 @@ const CanvasWorkspace = () => {
 			if (!resizeSession.moved) return;
 			let latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
+			const projectBeforeAutoLayout = latestProject;
 			const autoLayoutBoardIds = [
 				...resizeSession.autoLayoutRowsByBoardId.keys(),
 			];
@@ -4582,17 +4615,37 @@ const CanvasWorkspace = () => {
 				latestProject = useProjectStore.getState().currentProject;
 				if (!latestProject) return;
 			}
-			const latestNode = latestProject.canvas.nodes.find(
-				(item) => item.id === resizeSession.nodeId,
+			const beforeByNodeId = new Map<string, CanvasNodeLayoutSnapshot>([
+				[resizeSession.nodeId, resizeSession.before],
+			]);
+			const beforeNodeById = new Map(
+				projectBeforeAutoLayout.canvas.nodes.map((item) => [item.id, item]),
 			);
-			if (!latestNode) return;
-			const after = pickLayout(latestNode);
-			if (isLayoutEqual(resizeSession.before, after)) return;
+			for (const entry of autoLayoutEntries) {
+				if (beforeByNodeId.has(entry.nodeId)) continue;
+				const beforeNode = beforeNodeById.get(entry.nodeId);
+				if (!beforeNode) continue;
+				beforeByNodeId.set(entry.nodeId, pickLayout(beforeNode));
+			}
+			const historyEntries = resolveCanvasLayoutHistoryEntries(
+				beforeByNodeId,
+				latestProject.canvas.nodes,
+			);
+			if (historyEntries.length === 0) return;
+			if (historyEntries.length === 1) {
+				const entry = historyEntries[0];
+				pushHistory({
+					kind: "canvas.node-layout",
+					nodeId: entry.nodeId,
+					before: entry.before,
+					after: entry.after,
+					focusNodeId: latestProject.ui.focusedNodeId,
+				});
+				return;
+			}
 			pushHistory({
-				kind: "canvas.node-layout",
-				nodeId: latestNode.id,
-				before: resizeSession.before,
-				after,
+				kind: "canvas.node-layout.batch",
+				entries: historyEntries,
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
 		},
@@ -5470,6 +5523,7 @@ const CanvasWorkspace = () => {
 				clearSelectionResizeFrozenNodeIds();
 				return;
 			}
+			const projectBeforeAutoLayout = latestProject;
 			const resizedNodeIds = Object.keys(resizeSession.snapshots);
 			const autoLayoutBoardIds = [
 				...resizeSession.autoLayoutRowsByBoardId.keys(),
@@ -5504,30 +5558,25 @@ const CanvasWorkspace = () => {
 					return;
 				}
 			}
-			const nextEntries = Object.keys(resizeSession.snapshots)
-				.map((nodeId) => {
-					const snapshot = resizeSession.snapshots[nodeId];
-					const latestNode =
-						latestProject.canvas.nodes.find((item) => item.id === nodeId) ??
-						null;
-					if (!snapshot || !latestNode) return null;
-					const after = pickLayout(latestNode);
-					if (isLayoutEqual(snapshot.before, after)) return null;
-					return {
-						nodeId,
-						before: snapshot.before,
-						after,
-					};
-				})
-				.filter(
-					(
-						entry,
-					): entry is {
-						nodeId: string;
-						before: CanvasNodeLayoutSnapshot;
-						after: CanvasNodeLayoutSnapshot;
-					} => Boolean(entry),
-				);
+			const beforeByNodeId = new Map<string, CanvasNodeLayoutSnapshot>(
+				Object.values(resizeSession.snapshots).map((snapshot) => [
+					snapshot.nodeId,
+					snapshot.before,
+				]),
+			);
+			const beforeNodeById = new Map(
+				projectBeforeAutoLayout.canvas.nodes.map((node) => [node.id, node]),
+			);
+			for (const entry of autoLayoutEntries) {
+				if (beforeByNodeId.has(entry.nodeId)) continue;
+				const beforeNode = beforeNodeById.get(entry.nodeId);
+				if (!beforeNode) continue;
+				beforeByNodeId.set(entry.nodeId, pickLayout(beforeNode));
+			}
+			const nextEntries = resolveCanvasLayoutHistoryEntries(
+				beforeByNodeId,
+				latestProject.canvas.nodes,
+			);
 			if (nextEntries.length === 0) {
 				deferClearSelectionResizeFrozenNodeIds();
 				return;
