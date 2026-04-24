@@ -70,6 +70,7 @@ export interface ImageCanvasNode extends CanvasNodeBase {
 
 export interface BoardCanvasNode extends CanvasNodeBase {
 	type: "board";
+	layoutMode?: "free" | "auto";
 }
 
 export type CanvasNode =

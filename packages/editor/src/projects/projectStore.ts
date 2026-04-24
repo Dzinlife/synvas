@@ -852,6 +852,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						id: nodeId,
 						type: "board",
 						name: input.name?.trim() ? input.name.trim() : "Board",
+						layoutMode: "free",
 						parentId: input.parentId ?? null,
 						x: input.x ?? -width / 2,
 						y: input.y ?? -height / 2,

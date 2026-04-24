@@ -64,6 +64,7 @@ const textNodeSchema = canvasNodeBaseSchema.extend({
 
 const boardNodeSchema = canvasNodeBaseSchema.extend({
 	type: z.literal("board"),
+	layoutMode: z.enum(["free", "auto"]).default("free"),
 });
 
 const canvasDocumentSchema = z.object({

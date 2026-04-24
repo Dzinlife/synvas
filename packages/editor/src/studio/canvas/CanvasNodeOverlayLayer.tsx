@@ -24,6 +24,7 @@ import {
 	resolveCanvasNodeLayoutWorldRect,
 	resolveCanvasWorldRectScreenFrame,
 } from "./canvasNodeLabelUtils";
+import type { CanvasBoardAutoLayoutIndicator } from "./canvasBoardAutoLayout";
 import type { CanvasNodeResizeAnchor } from "./canvasResizeAnchor";
 import {
 	CANVAS_RESIZE_ANCHOR_HIT_SIZE_PX,
@@ -268,6 +269,7 @@ interface CanvasNodeOverlayLayerProps {
 		y2: number;
 	} | null;
 	snapGuidesScreen: CanvasSnapGuidesScreen;
+	boardAutoLayoutIndicator?: CanvasBoardAutoLayoutIndicator | null;
 	camera: SharedValue<CanvasCameraState>;
 	onNodeResize?: (event: {
 		phase: "start" | "move" | "end";
@@ -291,6 +293,7 @@ export const CanvasNodeOverlayLayer = ({
 	hoverNode,
 	marqueeRectScreen = null,
 	snapGuidesScreen,
+	boardAutoLayoutIndicator = null,
 	camera,
 	onNodeResize,
 	onSelectionResize,
@@ -702,10 +705,12 @@ export const CanvasNodeOverlayLayer = ({
 	const hasSnapGuides =
 		snapGuidesScreen.vertical.length > 0 ||
 		snapGuidesScreen.horizontal.length > 0;
+	const hasBoardAutoLayoutIndicator = Boolean(boardAutoLayoutIndicator);
 	const hasVisibleMarquee = Boolean(marqueeRectScreen?.visible);
 
 	if (
 		!hasSnapGuides &&
+		!hasBoardAutoLayoutIndicator &&
 		!hasVisibleMarquee &&
 		!activeNode &&
 		!hoverBorderNode &&
@@ -798,6 +803,22 @@ export const CanvasNodeOverlayLayer = ({
 							style="stroke"
 							strokeWidth={groupBorderStrokeWidth}
 							color={groupBorderStyle.color}
+							pointerEvents="none"
+						/>
+					)}
+					{boardAutoLayoutIndicator && (
+						<Line
+							p1={{
+								x: boardAutoLayoutIndicator.x1,
+								y: boardAutoLayoutIndicator.y1,
+							}}
+							p2={{
+								x: boardAutoLayoutIndicator.x2,
+								y: boardAutoLayoutIndicator.y2,
+							}}
+							style="stroke"
+							strokeWidth={groupBorderStrokeWidth}
+							color="rgba(251,146,60,0.95)"
 							pointerEvents="none"
 						/>
 					)}

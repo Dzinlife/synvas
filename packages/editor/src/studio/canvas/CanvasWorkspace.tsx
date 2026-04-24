@@ -1,6 +1,7 @@
 import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
 import type { TimelineElement, TrackRole } from "core/timeline-system/types";
 import type {
+	BoardCanvasNode,
 	CanvasNode,
 	SceneDocument,
 	SceneNode,
@@ -114,6 +115,17 @@ import {
 	resolveInnermostContainingBoardId,
 	resolvePointerContainingBoardId,
 } from "./canvasBoardUtils";
+import {
+	CANVAS_BOARD_AUTO_LAYOUT_GAP,
+	type CanvasBoardAutoLayoutIndicator,
+	type CanvasBoardAutoLayoutInsertion,
+	type CanvasBoardAutoLayoutPatch,
+	collectCanvasAutoLayoutAncestorBoardIds,
+	deriveCanvasBoardAutoLayoutRows,
+	isCanvasBoardAutoLayoutNode,
+	resolveCanvasBoardAutoLayoutCascadePatches,
+	resolveCanvasBoardAutoLayoutInsertion,
+} from "./canvasBoardAutoLayout";
 import {
 	CANVAS_OVERLAY_GAP_PX,
 	CANVAS_OVERLAY_OUTER_PADDING_PX,
@@ -236,6 +248,7 @@ interface NodeDragSession {
 	copyMode: boolean;
 	timelineDropMode: boolean;
 	timelineDropTarget: DropTargetInfo | null;
+	autoLayoutInsertion: CanvasBoardAutoLayoutInsertion | null;
 	globalDragStarted: boolean;
 	guideValuesCache: {
 		key: string;
@@ -386,7 +399,8 @@ const TAP_MOVE_THRESHOLD_PX = 3;
 const FOCUS_EXIT_MIN_ZOOM_RATIO = 0.5;
 const FOCUS_TILE_LOD_TRANSITION: TileLodTransition = { mode: "freeze" };
 const BOARD_CREATE_MIN_SIZE_PX = 6;
-const BOARD_AUTO_FIT_PADDING_WORLD = 24;
+const BOARD_AUTO_FIT_PADDING_WORLD = CANVAS_BOARD_AUTO_LAYOUT_GAP;
+const BOARD_AUTO_LAYOUT_ANIMATION_RESET_MS = 280;
 const SKIA_RESOURCE_TRACKER_LOG_TAG = "[skia-resource-tracker]";
 const ENABLE_CANVAS_SPATIAL_INDEX_VALIDATION =
 	import.meta.env.DEV &&
@@ -876,6 +890,7 @@ const CanvasWorkspace = () => {
 	);
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
 	const createCanvasNode = useProjectStore((state) => state.createCanvasNode);
+	const updateCanvasNode = useProjectStore((state) => state.updateCanvasNode);
 	const updateCanvasNodeLayout = useProjectStore(
 		(state) => state.updateCanvasNodeLayout,
 	);
@@ -975,6 +990,11 @@ const CanvasWorkspace = () => {
 	});
 	const [snapGuidesScreen, setSnapGuidesScreen] =
 		useState<CanvasSnapGuidesScreen>(EMPTY_CANVAS_SNAP_GUIDES_SCREEN);
+	const [boardAutoLayoutIndicator, setBoardAutoLayoutIndicator] =
+		useState<CanvasBoardAutoLayoutIndicator | null>(null);
+	const [autoLayoutAnimatedNodeIds, setAutoLayoutAnimatedNodeIds] = useState<
+		string[]
+	>([]);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const marqueeRectRef = useRef<CanvasMarqueeRect>({
 		visible: false,
@@ -989,6 +1009,7 @@ const CanvasWorkspace = () => {
 	const activeDrawerAutoPanNodeKeyRef = useRef<string | null>(null);
 	const activeDrawerAutoPanSignatureRef = useRef<string | null>(null);
 	const previousProjectIdRef = useRef<string | null>(currentProjectId);
+	const autoLayoutAnimationResetTimerRef = useRef<number | null>(null);
 	const previousSkiaResourceSnapshotRef =
 		useRef<TrackedSkiaHostObjectSnapshot | null>(null);
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
@@ -1354,6 +1375,13 @@ const CanvasWorkspace = () => {
 		});
 		return () => {
 			window.removeEventListener("mousemove", handleWindowMouseMove);
+		};
+	}, []);
+	useEffect(() => {
+		return () => {
+			if (autoLayoutAnimationResetTimerRef.current === null) return;
+			window.clearTimeout(autoLayoutAnimationResetTimerRef.current);
+			autoLayoutAnimationResetTimerRef.current = null;
 		};
 	}, []);
 
@@ -1911,6 +1939,30 @@ const CanvasWorkspace = () => {
 	const clearCanvasSnapGuides = useCallback(() => {
 		setSnapGuidesScreen(EMPTY_CANVAS_SNAP_GUIDES_SCREEN);
 	}, []);
+	const clearBoardAutoLayoutIndicator = useCallback(() => {
+		setBoardAutoLayoutIndicator(null);
+	}, []);
+	const commitCanvasAutoLayoutEntries = useCallback(
+		(entries: CanvasBoardAutoLayoutPatch[]) => {
+			if (entries.length === 0) return;
+			const animatedNodeIds = entries.map((entry) => entry.nodeId);
+			setAutoLayoutAnimatedNodeIds(animatedNodeIds);
+			updateCanvasNodeLayoutBatch(
+				entries.map((entry) => ({
+					nodeId: entry.nodeId,
+					patch: entry.patch,
+				})),
+			);
+			if (autoLayoutAnimationResetTimerRef.current !== null) {
+				window.clearTimeout(autoLayoutAnimationResetTimerRef.current);
+			}
+			autoLayoutAnimationResetTimerRef.current = window.setTimeout(() => {
+				autoLayoutAnimationResetTimerRef.current = null;
+				setAutoLayoutAnimatedNodeIds([]);
+			}, BOARD_AUTO_LAYOUT_ANIMATION_RESET_MS);
+		},
+		[updateCanvasNodeLayoutBatch],
+	);
 	const setCanvasSnapGuides = useCallback(
 		(guidesWorld: CanvasSnapGuidesWorld) => {
 			if (
@@ -3064,7 +3116,10 @@ const CanvasWorkspace = () => {
 	);
 
 	const resolveBoardAutoFitEntriesAfterDrag = useCallback(
-		(nodes: CanvasNode[], movedNodeIds: string[]): CanvasNodeLayoutBatchEntry[] => {
+		(
+			nodes: CanvasNode[],
+			movedNodeIds: string[],
+		): CanvasNodeLayoutBatchEntry[] => {
 			const rootNodeIds = resolveRootNodeIdsFromMovedSet(nodes, movedNodeIds);
 			if (rootNodeIds.length === 0) return [];
 			const boardIds = rootNodeIds.flatMap((nodeId) => {
@@ -3080,6 +3135,90 @@ const CanvasWorkspace = () => {
 			);
 		},
 		[resolveRootNodeIdsFromMovedSet],
+	);
+	const resolveAutoLayoutEntriesForChangedNodes = useCallback(
+		(
+			nodes: CanvasNode[],
+			changedNodeIds: string[],
+			options?: {
+				rowsByBoardId?: Map<string, string[][]>;
+				extraBoardIds?: string[];
+			},
+		): CanvasBoardAutoLayoutPatch[] => {
+			const boardIds = [
+				...(options?.extraBoardIds ?? []),
+				...collectCanvasAutoLayoutAncestorBoardIds(nodes, changedNodeIds),
+			];
+			if (boardIds.length === 0) return [];
+			return resolveCanvasBoardAutoLayoutCascadePatches(nodes, boardIds, {
+				rowsByBoardId: options?.rowsByBoardId,
+			});
+		},
+		[],
+	);
+	const commitAutoLayoutForBoardIds = useCallback(
+		(boardIds: string[], beforeNodes?: CanvasNode[]) => {
+			if (boardIds.length === 0) return;
+			const projectBeforeLayout = useProjectStore.getState().currentProject;
+			if (!projectBeforeLayout) return;
+			const autoLayoutEntries = resolveCanvasBoardAutoLayoutCascadePatches(
+				projectBeforeLayout.canvas.nodes,
+				boardIds,
+			);
+			if (autoLayoutEntries.length === 0) return;
+			const beforeNodeById = new Map(
+				(beforeNodes ?? projectBeforeLayout.canvas.nodes).map((node) => [
+					node.id,
+					node,
+				]),
+			);
+			const beforeByNodeId = new Map(
+				autoLayoutEntries.map((entry) => {
+					const node =
+						beforeNodeById.get(entry.nodeId) ??
+						projectBeforeLayout.canvas.nodes.find(
+							(candidate) => candidate.id === entry.nodeId,
+						) ??
+						null;
+					return [entry.nodeId, node ? pickLayout(node) : null] as const;
+				}),
+			);
+			commitCanvasAutoLayoutEntries(autoLayoutEntries);
+			const projectAfterLayout = useProjectStore.getState().currentProject;
+			if (!projectAfterLayout) return;
+			const historyEntries = autoLayoutEntries
+				.map((entry) => {
+					const before = beforeByNodeId.get(entry.nodeId);
+					const afterNode =
+						projectAfterLayout.canvas.nodes.find(
+							(candidate) => candidate.id === entry.nodeId,
+						) ?? null;
+					if (!before || !afterNode) return null;
+					const after = pickLayout(afterNode);
+					if (isLayoutEqual(before, after)) return null;
+					return {
+						nodeId: entry.nodeId,
+						before,
+						after,
+					};
+				})
+				.filter(
+					(
+						entry,
+					): entry is {
+						nodeId: string;
+						before: CanvasNodeLayoutSnapshot;
+						after: CanvasNodeLayoutSnapshot;
+					} => Boolean(entry),
+				);
+			if (historyEntries.length === 0) return;
+			pushHistory({
+				kind: "canvas.node-layout.batch",
+				entries: historyEntries,
+				focusNodeId: projectAfterLayout.ui.focusedNodeId,
+			});
+		},
+		[commitCanvasAutoLayoutEntries, pushHistory],
 	);
 
 	const resolveNodeResizeConstraints = useCallback(
@@ -3474,10 +3613,13 @@ const CanvasWorkspace = () => {
 			dragSession.activated = false;
 			dragSession.moved = false;
 			dragSession.axisLock = null;
+			dragSession.autoLayoutInsertion = null;
 			dragSession.guideValuesCache = null;
 			clearCanvasSnapGuides();
+			clearBoardAutoLayoutIndicator();
 		},
 		[
+			clearBoardAutoLayoutIndicator,
 			clearCanvasSnapGuides,
 			removeCanvasGraphBatch,
 			updateCanvasNodeLayoutBatch,
@@ -3831,10 +3973,19 @@ const CanvasWorkspace = () => {
 				entries,
 				focusNodeId: latestProject?.ui.focusedNodeId ?? null,
 			});
+			if (latestProject) {
+				commitAutoLayoutForBoardIds(
+					collectCanvasAutoLayoutAncestorBoardIds(
+						latestProject.canvas.nodes,
+						entries.map((entry) => entry.node.id),
+					),
+					latestProject.canvas.nodes,
+				);
+			}
 			setContextMenuState({ open: false });
 			return true;
 		},
-		[commitSelectedNodeIds, pushHistory],
+		[commitAutoLayoutForBoardIds, commitSelectedNodeIds, pushHistory],
 	);
 
 	const resolveTimelineClipboardConvertedInputs = useCallback(
@@ -4089,6 +4240,7 @@ const CanvasWorkspace = () => {
 		},
 		[
 			appendCanvasGraphBatch,
+			commitCreatedCanvasEntries,
 			createTimelineClipboardConvertedNodesAt,
 			resolveTimelineClipboardConvertedInputs,
 		],
@@ -4303,8 +4455,17 @@ const CanvasWorkspace = () => {
 			if (resizeSession.nodeId !== node.id) return;
 			if (resizeSession.anchor !== anchor) return;
 			if (!resizeSession.moved) return;
-			const latestProject = useProjectStore.getState().currentProject;
+			let latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
+			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
+				latestProject.canvas.nodes,
+				[resizeSession.nodeId],
+			);
+			if (autoLayoutEntries.length > 0) {
+				commitCanvasAutoLayoutEntries(autoLayoutEntries);
+				latestProject = useProjectStore.getState().currentProject;
+				if (!latestProject) return;
+			}
 			const latestNode = latestProject.canvas.nodes.find(
 				(item) => item.id === resizeSession.nodeId,
 			);
@@ -4321,8 +4482,10 @@ const CanvasWorkspace = () => {
 		},
 		[
 			clearCanvasSnapGuides,
+			commitCanvasAutoLayoutEntries,
 			commitCanvasResizeCursorByAnchor,
 			pushHistory,
+			resolveAutoLayoutEntriesForChangedNodes,
 			resolveResizeAnchorAtWorldPoint,
 		],
 	);
@@ -4420,6 +4583,7 @@ const CanvasWorkspace = () => {
 				copyMode: input.copyMode,
 				timelineDropMode: false,
 				timelineDropTarget: null,
+				autoLayoutInsertion: null,
 				globalDragStarted: false,
 				guideValuesCache: null,
 			};
@@ -4629,6 +4793,46 @@ const CanvasWorkspace = () => {
 					didMove = true;
 				}
 			}
+			if (layoutEntryByNodeId.size > 0) {
+				workingNodes = workingNodes.map((node) => {
+					const patch = layoutEntryByNodeId.get(node.id);
+					if (!patch) return node;
+					return {
+						...node,
+						...patch,
+					};
+				});
+			}
+			const rootTargetNodeIds = resolveRootNodeIdsFromMovedSet(
+				workingNodes,
+				targetNodeIds,
+			);
+			const targetAutoBoardIds = [
+				...new Set(
+					rootTargetNodeIds
+						.map((nodeId) => {
+							const node =
+								workingNodes.find((item) => item.id === nodeId) ?? null;
+							const parent = node?.parentId
+								? (workingNodes.find((item) => item.id === node.parentId) ??
+									null)
+								: null;
+							return isCanvasBoardAutoLayoutNode(parent) ? parent.id : null;
+						})
+						.filter((boardId): boardId is string => Boolean(boardId)),
+				),
+			];
+			const autoLayoutInsertion =
+				targetAutoBoardIds.length === 1
+					? resolveCanvasBoardAutoLayoutInsertion(
+							workingNodes,
+							targetAutoBoardIds[0] ?? "",
+							rootTargetNodeIds,
+							pointerWorld,
+						)
+					: null;
+			dragSession.autoLayoutInsertion = autoLayoutInsertion;
+			setBoardAutoLayoutIndicator(autoLayoutInsertion?.indicator ?? null);
 			const nextLayoutEntries = [...layoutEntryByNodeId.entries()].map(
 				([nodeId, patch]) => ({
 					nodeId,
@@ -4651,6 +4855,7 @@ const CanvasWorkspace = () => {
 			resolveCanvasNodeTimelineDropTarget,
 			resolveCanvasGuideValues,
 			resolvePointerBoardReparentEntries,
+			resolveRootNodeIdsFromMovedSet,
 			resolveWorldPoint,
 			startCanvasTimelineDropPreview,
 			stopCanvasTimelineDropPreview,
@@ -4665,6 +4870,7 @@ const CanvasWorkspace = () => {
 			const dragSession = nodeDragSessionRef.current;
 			nodeDragSessionRef.current = null;
 			clearCanvasSnapGuides();
+			clearBoardAutoLayoutIndicator();
 			if (!dragSession) return;
 			if (dragSession.timelineDropMode) {
 				stopCanvasTimelineDropPreview(dragSession);
@@ -4713,17 +4919,63 @@ const CanvasWorkspace = () => {
 					entries: nextEntries,
 					focusNodeId: copyHistoryProject.ui.focusedNodeId,
 				});
+				commitAutoLayoutForBoardIds(
+					collectCanvasAutoLayoutAncestorBoardIds(
+						copyHistoryProject.canvas.nodes,
+						nextEntries.map((entry) => entry.node.id),
+					),
+					copyHistoryProject.canvas.nodes,
+				);
 				return;
 			}
-			const projectBeforeBoardAutoFit = latestProject;
-			const boardAutoFitEntries = resolveBoardAutoFitEntriesAfterDrag(
-				projectBeforeBoardAutoFit.canvas.nodes,
+			const projectBeforeBoardLayout = latestProject;
+			const autoLayoutRowsByBoardId = dragSession.autoLayoutInsertion
+				? new Map([
+						[
+							dragSession.autoLayoutInsertion.boardId,
+							dragSession.autoLayoutInsertion.rows,
+						],
+					])
+				: undefined;
+			const sourceAutoBoardIds = movedTargetNodeIds
+				.map((nodeId) => {
+					const beforeParentId =
+						dragSession.layoutBeforeByNodeId[nodeId]?.parentId ?? null;
+					const beforeParent = beforeParentId
+						? (projectBeforeBoardLayout.canvas.nodes.find(
+								(node) => node.id === beforeParentId,
+							) ?? null)
+						: null;
+					return isCanvasBoardAutoLayoutNode(beforeParent)
+						? beforeParent.id
+						: null;
+				})
+				.filter((boardId): boardId is string => Boolean(boardId));
+			const autoLayoutExtraBoardIds = dragSession.autoLayoutInsertion
+				? [dragSession.autoLayoutInsertion.boardId, ...sourceAutoBoardIds]
+				: sourceAutoBoardIds;
+			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
+				projectBeforeBoardLayout.canvas.nodes,
 				movedTargetNodeIds,
+				{
+					rowsByBoardId: autoLayoutRowsByBoardId,
+					extraBoardIds: autoLayoutExtraBoardIds,
+				},
 			);
-			if (boardAutoFitEntries.length > 0) {
-				updateCanvasNodeLayoutBatch(boardAutoFitEntries);
+			if (autoLayoutEntries.length > 0) {
+				commitCanvasAutoLayoutEntries(autoLayoutEntries);
 				latestProject = useProjectStore.getState().currentProject;
 				if (!latestProject) return;
+			} else {
+				const boardAutoFitEntries = resolveBoardAutoFitEntriesAfterDrag(
+					projectBeforeBoardLayout.canvas.nodes,
+					movedTargetNodeIds,
+				);
+				if (boardAutoFitEntries.length > 0) {
+					updateCanvasNodeLayoutBatch(boardAutoFitEntries);
+					latestProject = useProjectStore.getState().currentProject;
+					if (!latestProject) return;
+				}
 			}
 			const historyEntries = latestProject.canvas.nodes
 				.map((node) => {
@@ -4765,10 +5017,14 @@ const CanvasWorkspace = () => {
 			});
 		},
 		[
+			commitCanvasAutoLayoutEntries,
+			commitAutoLayoutForBoardIds,
+			clearBoardAutoLayoutIndicator,
 			clearCanvasSnapGuides,
 			commitCanvasTimelineDrop,
 			pushHistory,
 			removeCanvasGraphBatch,
+			resolveAutoLayoutEntriesForChangedNodes,
 			resolveBoardAutoFitEntriesAfterDrag,
 			resetCanvasDragSession,
 			setPendingClickSuppression,
@@ -5047,8 +5303,18 @@ const CanvasWorkspace = () => {
 			);
 			if (!resizeSession) return;
 			if (!resizeSession.moved) return;
-			const latestProject = useProjectStore.getState().currentProject;
+			let latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
+			const resizedNodeIds = Object.keys(resizeSession.snapshots);
+			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
+				latestProject.canvas.nodes,
+				resizedNodeIds,
+			);
+			if (autoLayoutEntries.length > 0) {
+				commitCanvasAutoLayoutEntries(autoLayoutEntries);
+				latestProject = useProjectStore.getState().currentProject;
+				if (!latestProject) return;
+			}
 			const nextEntries = Object.keys(resizeSession.snapshots)
 				.map((nodeId) => {
 					const snapshot = resizeSession.snapshots[nodeId];
@@ -5093,8 +5359,10 @@ const CanvasWorkspace = () => {
 		},
 		[
 			clearCanvasSnapGuides,
+			commitCanvasAutoLayoutEntries,
 			commitCanvasResizeCursorByAnchor,
 			pushHistory,
+			resolveAutoLayoutEntriesForChangedNodes,
 			resolveResizeAnchorAtWorldPoint,
 		],
 	);
@@ -5435,6 +5703,15 @@ const CanvasWorkspace = () => {
 				})
 				.filter((entry): entry is CanvasGraphHistoryEntry => entry !== null);
 			if (entries.length === 0) return;
+			const beforeDeleteNodes = latestProject.canvas.nodes;
+			const autoLayoutBoardIdsAfterDelete =
+				collectCanvasAutoLayoutAncestorBoardIds(beforeDeleteNodes, targetIds);
+			const commitAutoLayoutAfterDelete = () => {
+				commitAutoLayoutForBoardIds(
+					autoLayoutBoardIdsAfterDelete,
+					beforeDeleteNodes,
+				);
+			};
 			if (entries.length === 1) {
 				const entry = entries[0];
 				pushHistory({
@@ -5446,12 +5723,15 @@ const CanvasWorkspace = () => {
 				if (entry.node.type === "scene") {
 					if (entry.scene) {
 						removeSceneGraphForHistory(entry.scene.id, entry.node.id);
+						commitAutoLayoutAfterDelete();
 						return;
 					}
 					removeSceneNodeForHistory(entry.node.sceneId, entry.node.id);
+					commitAutoLayoutAfterDelete();
 					return;
 				}
 				removeCanvasNodeForHistory(entry.node.id);
+				commitAutoLayoutAfterDelete();
 				return;
 			}
 			pushHistory({
@@ -5460,8 +5740,10 @@ const CanvasWorkspace = () => {
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
 			removeCanvasGraphBatch(entries);
+			commitAutoLayoutAfterDelete();
 		},
 		[
+			commitAutoLayoutForBoardIds,
 			pushHistory,
 			removeCanvasGraphBatch,
 			removeCanvasNodeForHistory,
@@ -6513,6 +6795,97 @@ const CanvasWorkspace = () => {
 			setActiveNode(null);
 		}
 	}, [activeNodeId, focusedNodeId, setActiveNode, setFocusedNode]);
+	const handleBoardLayoutModeChange = useCallback(
+		(nodeId: string, mode: "free" | "auto") => {
+			const latestProject = useProjectStore.getState().currentProject;
+			const board =
+				latestProject?.canvas.nodes.find(
+					(node): node is BoardCanvasNode =>
+						node.id === nodeId && node.type === "board",
+				) ?? null;
+			if (!latestProject || !board) return;
+			const currentMode = board.layoutMode === "auto" ? "auto" : "free";
+			if (currentMode === mode) return;
+			const beforeBoard = board;
+			const afterBoard = {
+				...board,
+				layoutMode: mode,
+			};
+			updateCanvasNode(nodeId, { layoutMode: mode } as never);
+			pushHistory({
+				kind: "canvas.node-update",
+				nodeId,
+				before: beforeBoard,
+				after: afterBoard,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+			if (mode !== "auto") return;
+			const projectBeforeLayout = useProjectStore.getState().currentProject;
+			if (!projectBeforeLayout) return;
+			const rows = deriveCanvasBoardAutoLayoutRows(
+				projectBeforeLayout.canvas.nodes,
+				nodeId,
+			);
+			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
+				projectBeforeLayout.canvas.nodes,
+				[],
+				{
+					rowsByBoardId: new Map([[nodeId, rows]]),
+					extraBoardIds: [nodeId],
+				},
+			);
+			if (autoLayoutEntries.length === 0) return;
+			const beforeByNodeId = new Map(
+				autoLayoutEntries.map((entry) => {
+					const node =
+						projectBeforeLayout.canvas.nodes.find(
+							(candidate) => candidate.id === entry.nodeId,
+						) ?? null;
+					return [entry.nodeId, node ? pickLayout(node) : null] as const;
+				}),
+			);
+			commitCanvasAutoLayoutEntries(autoLayoutEntries);
+			const projectAfterLayout = useProjectStore.getState().currentProject;
+			if (!projectAfterLayout) return;
+			const historyEntries = autoLayoutEntries
+				.map((entry) => {
+					const before = beforeByNodeId.get(entry.nodeId);
+					const afterNode =
+						projectAfterLayout.canvas.nodes.find(
+							(candidate) => candidate.id === entry.nodeId,
+						) ?? null;
+					if (!before || !afterNode) return null;
+					const after = pickLayout(afterNode);
+					if (isLayoutEqual(before, after)) return null;
+					return {
+						nodeId: entry.nodeId,
+						before,
+						after,
+					};
+				})
+				.filter(
+					(
+						entry,
+					): entry is {
+						nodeId: string;
+						before: CanvasNodeLayoutSnapshot;
+						after: CanvasNodeLayoutSnapshot;
+					} => Boolean(entry),
+				);
+			if (historyEntries.length === 0) return;
+			pushHistory({
+				kind: "canvas.node-layout.batch",
+				entries: historyEntries,
+				focusNodeId: projectAfterLayout.ui.focusedNodeId,
+			});
+		},
+		[
+			commitCanvasAutoLayoutEntries,
+			pushHistory,
+			resolveAutoLayoutEntriesForChangedNodes,
+			updateCanvasNode,
+		],
+	);
 	const handleEditorMouseOverCapture = useCallback(
 		(event: React.MouseEvent<HTMLDivElement>) => {
 			event.stopPropagation();
@@ -6626,6 +6999,8 @@ const CanvasWorkspace = () => {
 				hoveredNodeId={hoveredNodeId}
 				marqueeRectScreen={marqueeRect}
 				snapGuidesScreen={snapGuidesScreen}
+				boardAutoLayoutIndicator={boardAutoLayoutIndicator}
+				animatedLayoutNodeIds={autoLayoutAnimatedNodeIds}
 				suspendHover={isCameraAnimating}
 				tileDebugEnabled={tileDebugEnabled}
 				tileMaxTasksPerTick={tileMaxTasksPerTick}
@@ -6668,6 +7043,7 @@ const CanvasWorkspace = () => {
 				onCloseDrawer={handleCloseDrawer}
 				onDropTimelineElementsToCanvas={handleDropTimelineElementsToCanvas}
 				onRestoreSceneReferenceToCanvas={handleRestoreSceneReferenceToCanvas}
+				onBoardLayoutModeChange={handleBoardLayoutModeChange}
 				contextMenuOpen={contextMenuState.open}
 				contextMenuX={contextMenuState.open ? contextMenuState.x : 0}
 				contextMenuY={contextMenuState.open ? contextMenuState.y : 0}

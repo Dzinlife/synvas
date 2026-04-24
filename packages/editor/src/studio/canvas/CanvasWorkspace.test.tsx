@@ -12,6 +12,7 @@ import type {
 	BoardCanvasNode,
 	CanvasNode,
 	StudioProject,
+	TextCanvasNode,
 } from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCallback, useContext, useSyncExternalStore } from "react";
@@ -116,6 +117,15 @@ interface MockInfiniteSkiaCanvasProps {
 		vertical: number[];
 		horizontal: number[];
 	};
+	boardAutoLayoutIndicator?: {
+		boardId: string;
+		orientation: "vertical" | "horizontal";
+		x1: number;
+		y1: number;
+		x2: number;
+		y2: number;
+	} | null;
+	animatedLayoutNodeIds?: string[];
 	suspendHover?: boolean;
 	onNodeResize?: (event: {
 		phase: "start" | "move" | "end";
@@ -1385,6 +1395,50 @@ const createTestBoardNode = (
 	updatedAt: 10,
 	...patch,
 });
+
+const createTestTextNode = (
+	id: string,
+	patch: Partial<TextCanvasNode> = {},
+): TextCanvasNode => ({
+	id,
+	type: "text",
+	name: id,
+	text: id,
+	fontSize: 24,
+	x: 0,
+	y: 0,
+	width: 100,
+	height: 40,
+	siblingOrder: 0,
+	locked: false,
+	hidden: false,
+	createdAt: 10,
+	updatedAt: 10,
+	...patch,
+});
+
+const setCanvasNodesForTest = (nodes: CanvasNode[]): void => {
+	useProjectStore.setState((state) => {
+		const project = state.currentProject;
+		if (!project) return state;
+		return {
+			...state,
+			currentProject: {
+				...project,
+				canvas: {
+					...project.canvas,
+					nodes,
+				},
+				ui: {
+					...project.ui,
+					activeNodeId: null,
+					focusedNodeId: null,
+					canvasSnapEnabled: false,
+				},
+			},
+		};
+	});
+};
 
 const appendCanvasNodesForTest = (nodes: CanvasNode[]): void => {
 	useProjectStore.setState((state) => {
@@ -5014,7 +5068,7 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
-	it("拖拽结束会扩展最终目标 board 链 24px padding", () => {
+	it("拖拽结束会扩展最终目标 board 链 64px padding", () => {
 		appendCanvasNodesForTest([
 			createTestBoardNode("node-board-fit", {
 				x: 500,
@@ -5027,12 +5081,13 @@ describe("CanvasWorkspace", () => {
 		render(<CanvasWorkspace />);
 		dragNodeAt(300, 160, 520, 160);
 
-		const expandedBoard = getCanvasNodeForTest<BoardCanvasNode>("node-board-fit");
+		const expandedBoard =
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-fit");
 		expect(expandedBoard).toMatchObject({
-			x: 436,
-			y: 96,
-			width: 368,
-			height: 228,
+			x: 396,
+			y: 56,
+			width: 448,
+			height: 308,
 		});
 		expect(getCanvasNodeForTest("node-video-1").parentId).toBe(
 			"node-board-fit",
@@ -5046,9 +5101,9 @@ describe("CanvasWorkspace", () => {
 		appendCanvasNodesForTest([
 			createTestBoardNode("node-board-no-shrink", {
 				x: 100,
-				y: 80,
+				y: 40,
 				width: 900,
-				height: 500,
+				height: 600,
 				siblingOrder: -1,
 			}),
 		]);
@@ -5062,9 +5117,226 @@ describe("CanvasWorkspace", () => {
 			getCanvasNodeForTest<BoardCanvasNode>("node-board-no-shrink"),
 		).toMatchObject({
 			x: 100,
-			y: 80,
+			y: 40,
 			width: 900,
-			height: 500,
+			height: 600,
+		});
+	});
+
+	it("auto board 拖拽时显示插入 indicator，drop 后按插入顺序重排", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-moving", {
+				parentId: "node-board-auto",
+				x: 392,
+				y: 64,
+				width: 80,
+				height: 40,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(430, 80),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(190, 80),
+				buttons: 1,
+			});
+		});
+
+		expect(getLatestInfiniteSkiaCanvasProps().boardAutoLayoutIndicator).toEqual(
+			{
+				boardId: "node-board-auto",
+				orientation: "vertical",
+				x1: 196,
+				y1: 64,
+				x2: 196,
+				y2: 144,
+			},
+		);
+
+		act(() => {
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(190, 80),
+				buttons: 0,
+			});
+		});
+
+		expect(getCanvasNodeForTest("node-auto-moving")).toMatchObject({
+			x: 228,
+			y: 64,
+			siblingOrder: 1,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			x: 372,
+			y: 64,
+			siblingOrder: 2,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 536,
+			height: 208,
+		});
+		expect(getLatestInfiniteSkiaCanvasProps().animatedLayoutNodeIds).toEqual(
+			expect.arrayContaining([
+				"node-auto-moving",
+				"node-auto-b",
+				"node-board-auto",
+			]),
+		);
+	});
+
+	it("auto board child resize 结束后会重新适配 board size", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+
+		resizeNodeByIdAt("node-auto-a", 164, 144, 224, 184, "bottom-right");
+
+		expect(getCanvasNodeForTest("node-auto-a")).toMatchObject({
+			x: 64,
+			y: 64,
+			width: 160,
+			height: 120,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 288,
+			height: 248,
+		});
+	});
+
+	it("auto board child 删除后会收缩 board", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 392,
+				height: 208,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		clickNodeAt(250, 80);
+
+		fireEvent.keyDown(window, { key: "Delete" });
+
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some((node) => node.id === "node-auto-b"),
+		).toBe(false);
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 228,
+			height: 208,
+		});
+	});
+
+	it("拖入 auto board 时会 reparent 并触发自动排版", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-outside", {
+				x: 420,
+				y: 64,
+				width: 80,
+				height: 40,
+				siblingOrder: 1,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+
+		dragNodeAt(440, 80, 260, 80);
+
+		expect(getCanvasNodeForTest("node-auto-outside")).toMatchObject({
+			parentId: "node-board-auto",
+			x: 228,
+			y: 64,
+			siblingOrder: 1,
+		});
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
+		).toMatchObject({
+			width: 372,
+			height: 208,
 		});
 	});
 

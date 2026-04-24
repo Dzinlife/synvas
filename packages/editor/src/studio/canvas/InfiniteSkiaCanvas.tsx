@@ -14,6 +14,7 @@ import {
 import {
 	Canvas,
 	type CanvasRef,
+	Easing,
 	flushSkiaDisposals,
 	Group,
 	Image,
@@ -41,6 +42,7 @@ import {
 	CanvasNodeLabelLayer,
 } from "./CanvasNodeLabelLayer";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
+import type { CanvasBoardAutoLayoutIndicator } from "./canvasBoardAutoLayout";
 import {
 	CanvasTriDotGridBackground,
 	resolveDotGridUniforms,
@@ -116,6 +118,8 @@ interface InfiniteSkiaCanvasProps {
 	hoveredNodeId?: string | null;
 	marqueeRectScreen?: CanvasMarqueeRectScreen | null;
 	snapGuidesScreen?: CanvasSnapGuidesScreen;
+	boardAutoLayoutIndicator?: CanvasBoardAutoLayoutIndicator | null;
+	animatedLayoutNodeIds?: string[];
 	suspendHover?: boolean;
 	tileDebugEnabled?: boolean;
 	tileMaxTasksPerTick?: number;
@@ -128,6 +132,7 @@ const EMPTY_SNAP_GUIDES_SCREEN: CanvasSnapGuidesScreen = {
 	vertical: [],
 	horizontal: [],
 };
+const EMPTY_ANIMATED_LAYOUT_NODE_IDS: string[] = [];
 
 const LAYOUT_EPSILON = 1e-6;
 const TILE_AABB_EPSILON = 1e-4;
@@ -141,6 +146,10 @@ const TILE_DEBUG_LABEL_OFFSET_Y = 4;
 const TILE_DRAW_BLEED_TEXEL = 0.5;
 const NODE_HUD_FADE_IN_DURATION_MS = 180;
 const STATIC_TILE_FOCUS_FADE_DURATION_MS = 220;
+const AUTO_LAYOUT_TIMING = {
+	duration: 220,
+	easing: Easing.out(Easing.cubic),
+} as const;
 
 interface RasterImageCacheEntry {
 	uri: string;
@@ -297,7 +306,10 @@ const resolveNodeWorldAabb = (
 	);
 };
 
-const intersectTileAabb = (left: TileAabb, right: TileAabb): TileAabb | null => {
+const intersectTileAabb = (
+	left: TileAabb,
+	right: TileAabb,
+): TileAabb | null => {
 	const nextLeft = Math.max(left.left, right.left);
 	const nextTop = Math.max(left.top, right.top);
 	const nextRight = Math.min(left.right, right.right);
@@ -754,6 +766,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	hoveredNodeId,
 	marqueeRectScreen = null,
 	snapGuidesScreen = EMPTY_SNAP_GUIDES_SCREEN,
+	boardAutoLayoutIndicator = null,
+	animatedLayoutNodeIds = EMPTY_ANIMATED_LAYOUT_NODE_IDS,
 	suspendHover = false,
 	tileDebugEnabled = false,
 	tileMaxTasksPerTick,
@@ -765,6 +779,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const runtimeManager = useStudioRuntimeManager();
 	const canvasRef = useRef<CanvasRef>(null);
 	const tileNodes = tileSourceNodes ?? nodes;
+	const animatedLayoutNodeIdSet = useMemo(() => {
+		return new Set(animatedLayoutNodeIds);
+	}, [animatedLayoutNodeIds]);
 	const isFocusMode = Boolean(focusedNodeId);
 	const latestNodeById = useMemo(() => {
 		return new Map(tileNodes.map((node) => [node.id, node]));
@@ -925,13 +942,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		return activeNode.id;
 	}, [activeNode]);
 	const liveRenderNodes = useMemo(() => {
-		if (!activeLiveNodeId) return [];
-		const activeNodeInRenderTree = renderNodes.find(
-			(node) => node.id === activeLiveNodeId,
-		);
-		if (!activeNodeInRenderTree) return [];
-		return [activeNodeInRenderTree];
-	}, [activeLiveNodeId, renderNodes]);
+		const liveNodeIds = new Set(animatedLayoutNodeIds);
+		if (activeLiveNodeId) {
+			liveNodeIds.add(activeLiveNodeId);
+		}
+		if (liveNodeIds.size === 0) return [];
+		return renderNodes.filter((node) => liveNodeIds.has(node.id));
+	}, [activeLiveNodeId, animatedLayoutNodeIds, renderNodes]);
 	const focusedNodeDefinition = useMemo(() => {
 		if (!focusedNode) return null;
 		return getCanvasNodeDefinition(focusedNode.type);
@@ -1183,13 +1200,15 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			if (isNodeLayoutStateEqual(currentLayout.value, nextLayout)) {
 				continue;
 			}
-			currentLayout.value = nextLayout;
+			currentLayout.value = animatedLayoutNodeIdSet.has(node.id)
+				? withTiming(nextLayout, AUTO_LAYOUT_TIMING)
+				: nextLayout;
 		}
 		for (const nodeId of nodeLayoutValuesRef.current.keys()) {
 			if (nextNodeIds.has(nodeId)) continue;
 			nodeLayoutValuesRef.current.delete(nodeId);
 		}
-	}, [tileNodes]);
+	}, [animatedLayoutNodeIdSet, tileNodes]);
 
 	useLayoutEffect(() => {
 		if (!supportsTilePipeline) return;
@@ -1705,6 +1724,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 								hoverNode={hoverNode}
 								marqueeRectScreen={marqueeRectScreen}
 								snapGuidesScreen={snapGuidesScreen}
+								boardAutoLayoutIndicator={boardAutoLayoutIndicator}
 								camera={animatedCamera}
 								onNodeResize={handleOverlayNodeResize}
 								onSelectionResize={onSelectionResize}
@@ -1723,6 +1743,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		activeNode,
 		activeNodeId,
 		assetById,
+		boardAutoLayoutIndicator,
 		getNodeLayoutValue,
 		focusedNodeId,
 		focusEditorLayerState.layerProps,

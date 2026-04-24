@@ -191,6 +191,30 @@ describe("studio schema", () => {
 		}
 	});
 
+	it("board 缺失 layoutMode 时应回填 free", () => {
+		const legacy = createValidProject();
+		appendCanvasNode(legacy, {
+			id: "node-board",
+			type: "board",
+			name: "Board",
+			x: 0,
+			y: 0,
+			width: 400,
+			height: 300,
+			siblingOrder: 5,
+			locked: false,
+			hidden: false,
+			createdAt: 2,
+			updatedAt: 2,
+		});
+
+		const parsed = parseStudioProject(legacy);
+		const board = parsed.canvas.nodes.find((node) => node.id === "node-board");
+		expect(board?.type).toBe("board");
+		if (board?.type !== "board") return;
+		expect(board.layoutMode).toBe("free");
+	});
+
 	it("siblingOrder 支持小数并拒绝 NaN/Infinity", () => {
 		const withFloatZIndex = createValidProject();
 		withFloatZIndex.canvas.nodes[1] = {

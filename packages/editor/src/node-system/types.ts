@@ -1,4 +1,7 @@
-import type { TimelineAsset, TimelineElement } from "core/timeline-system/types";
+import type {
+	TimelineAsset,
+	TimelineElement,
+} from "core/timeline-system/types";
 import type {
 	CanvasNode,
 	SceneDocument,
@@ -32,6 +35,7 @@ export interface CanvasNodeToolbarProps<TNode extends CanvasNode = CanvasNode> {
 	updateNode: (patch: Record<string, unknown>) => void;
 	setFocusedNode: (nodeId: string | null) => void;
 	setActiveScene: (sceneId: string | null) => void;
+	onBoardLayoutModeChange?: (nodeId: string, mode: "free" | "auto") => void;
 }
 
 export interface CanvasNodeInspectorProps<

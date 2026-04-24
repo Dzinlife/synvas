@@ -119,6 +119,7 @@ interface CanvasWorkspaceOverlayProps {
 		request: StudioTimelineCanvasDropRequest,
 	) => boolean;
 	onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
+	onBoardLayoutModeChange?: (nodeId: string, mode: "free" | "auto") => void;
 	contextMenuOpen: boolean;
 	contextMenuX: number;
 	contextMenuY: number;
@@ -343,6 +344,7 @@ const CanvasWorkspaceOverlay = ({
 	onCloseDrawer,
 	onDropTimelineElementsToCanvas,
 	onRestoreSceneReferenceToCanvas,
+	onBoardLayoutModeChange,
 	contextMenuOpen,
 	contextMenuX,
 	contextMenuY,
@@ -511,6 +513,7 @@ const CanvasWorkspaceOverlay = ({
 							}}
 							setFocusedNode={setFocusedNode}
 							setActiveScene={setActiveScene}
+							onBoardLayoutModeChange={onBoardLayoutModeChange}
 						/>
 					</ActiveNodeToolbarOverlay>
 				)}
