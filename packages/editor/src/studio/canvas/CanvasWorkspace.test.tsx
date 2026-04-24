@@ -5978,6 +5978,82 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
+	it("拖拽 auto board 内嵌套的 child board 时保留 child board 自身尺寸", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 700,
+				height: 400,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestBoardNode("node-auto-child-board", {
+				layoutMode: "auto",
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 220,
+				height: 180,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-nested-child", {
+				parentId: "node-auto-child-board",
+				x: 292,
+				y: 128,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 512,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+
+		const childBoardLabelPoint = resolveNodeLabelPoint(
+			"node-auto-child-board",
+			24,
+		);
+		clickNodeAt(childBoardLabelPoint.x, childBoardLabelPoint.y);
+		dragNodeAt(260, 140, 620, 104);
+
+		expect(
+			getCanvasNodeForTest<BoardCanvasNode>("node-auto-child-board"),
+		).toMatchObject({
+			parentId: "node-board-auto",
+			x: 392,
+			y: 64,
+			width: 220,
+			height: 180,
+			siblingOrder: 2,
+		});
+		expect(getCanvasNodeForTest("node-auto-nested-child")).toMatchObject({
+			parentId: "node-auto-child-board",
+			x: 456,
+			y: 128,
+		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			parentId: "node-board-auto",
+			x: 228,
+			y: 64,
+			siblingOrder: 1,
+		});
+	});
+
 	it("拖拽到更高层级 board 后 undo 会恢复原始 siblingOrder", () => {
 		useProjectStore.setState((state) => {
 			const project = state.currentProject;

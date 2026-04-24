@@ -5169,6 +5169,12 @@ const CanvasWorkspace = () => {
 			}
 			const projectBeforeBoardLayout = latestProject;
 			const movedTargetNodeIdSet = new Set(movedTargetNodeIds);
+			const movedRootNodeIds = movedTargetNodeIds.filter((nodeId) => {
+				const beforeParentId =
+					dragSession.layoutBeforeByNodeId[nodeId]?.parentId ?? null;
+				return !beforeParentId || !movedTargetNodeIdSet.has(beforeParentId);
+			});
+			const movedRootNodeIdSet = new Set(movedRootNodeIds);
 			if (
 				dragSession.autoLayoutInsertion &&
 				!dragSession.autoLayoutInsertion.changesRows
@@ -5203,7 +5209,7 @@ const CanvasWorkspace = () => {
 			}
 			const sourceAutoBoardIds = [
 				...new Set(
-					movedTargetNodeIds
+					movedRootNodeIds
 						.map((nodeId) => {
 							const beforeParentId =
 								dragSession.layoutBeforeByNodeId[nodeId]?.parentId ?? null;
@@ -5232,7 +5238,7 @@ const CanvasWorkspace = () => {
 				if (!originalRows) continue;
 				autoLayoutRowsByBoardId.set(
 					boardId,
-					removeCanvasAutoLayoutRowNodeIds(originalRows, movedTargetNodeIdSet),
+					removeCanvasAutoLayoutRowNodeIds(originalRows, movedRootNodeIdSet),
 				);
 			}
 			const autoLayoutExtraBoardIds = [
@@ -5245,7 +5251,7 @@ const CanvasWorkspace = () => {
 			];
 			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
 				projectBeforeBoardLayout.canvas.nodes,
-				movedTargetNodeIds,
+				movedRootNodeIds,
 				{
 					rowsByBoardId:
 						autoLayoutRowsByBoardId.size > 0
