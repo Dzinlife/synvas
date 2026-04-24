@@ -1719,23 +1719,144 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const inputByNodeId = new Map<string, TileInput>();
 		const asyncPictureRequests: TileAsyncPictureRequest[] = [];
 		const visitedNodeIds = new Set<string>();
+		const createFrozenNodeSnapshotInput = (
+			latestNode: CanvasNode,
+		): TileInput | null => {
+			const aabb = resolveNodeWorldAabb(latestNode);
+			const clipAabbs = resolveNodeAncestorClipAabbs(
+				latestNode,
+				latestNodeById,
+			);
+			const visibleAabb = resolveClippedTileInputAabb(aabb, clipAabbs);
+			if (!visibleAabb) return null;
+			const scene = resolveNodeScene(latestNode, scenes);
+			const asset = resolveNodeAsset(latestNode, assetById);
+			const thumbnailCapabilityEnabled = hasThumbnailCapability(latestNode);
+			const uri =
+				nodeRasterUriRef.current.get(latestNode.id) ??
+				resolveNodeRasterUri(latestNode);
+			const rasterEntry = uri
+				? (rasterCacheRef.current.get(uri) ?? null)
+				: null;
+			const image = rasterEntry?.image ?? null;
+			const sourceWidth =
+				rasterEntry?.width ??
+				Math.max(1, Math.round(Math.abs(latestNode.width)));
+			const sourceHeight =
+				rasterEntry?.height ??
+				Math.max(1, Math.round(Math.abs(latestNode.height)));
+			const inputId = resolveTileInputId(latestNode.id);
+			if (image) {
+				return {
+					kind: "raster",
+					id: inputId,
+					nodeId: latestNode.id,
+					image,
+					aabb,
+					...(clipAabbs.length > 0 ? { visibleAabb, clipAabbs } : {}),
+					sourceWidth,
+					sourceHeight,
+					epoch: 0,
+				};
+			}
+			const pictureInput = createTilePictureFromNodeRenderer({
+				node: latestNode,
+				scene,
+				asset,
+				runtimeManager,
+			});
+			if (pictureInput) {
+				return {
+					kind: "picture",
+					id: inputId,
+					nodeId: latestNode.id,
+					picture: pictureInput.picture,
+					aabb,
+					...(clipAabbs.length > 0 ? { visibleAabb, clipAabbs } : {}),
+					sourceWidth,
+					sourceHeight,
+					epoch: 0,
+					dispose: pictureInput.dispose,
+				};
+			}
+			if (thumbnailCapabilityEnabled) return null;
+			const tilePictureCapability = resolveTilePictureCapability(latestNode);
+			if (!tilePictureCapability) return null;
+			const tilePictureContext: CanvasNodeTilePictureCapabilityContext<CanvasNode> =
+				{
+					node: latestNode,
+					scene,
+					asset,
+					runtimeManager,
+				};
+			const tilePictureCapabilitySourceSignature =
+				tilePictureCapability.getSourceSignature?.(tilePictureContext) ?? null;
+			const tilePictureSourceSignature =
+				typeof tilePictureCapabilitySourceSignature === "string"
+					? tilePictureCapabilitySourceSignature
+					: null;
+			const sourceSignature = resolveTileNodeSourceSignature(
+				latestNode,
+				scene,
+				asset,
+				thumbnailCapabilityEnabled,
+			);
+			const sourceKey =
+				tilePictureSourceSignature !== null
+					? `fallback-picture:async:${tilePictureSourceSignature}`
+					: `${sourceSignature}:fallback-picture:async:none`;
+			const asyncPictureEntry =
+				tileAsyncPictureCacheRef.current.get(latestNode.id) ?? null;
+			if (asyncPictureEntry?.sourceSignature !== sourceKey) {
+				asyncPictureRequests.push({
+					nodeId: latestNode.id,
+					sourceSignature: sourceKey,
+					capability: tilePictureCapability,
+					context: tilePictureContext,
+				});
+			}
+			if (!asyncPictureEntry?.picture) return null;
+			return {
+				kind: "picture",
+				id: inputId,
+				nodeId: latestNode.id,
+				picture: asyncPictureEntry.picture,
+				aabb,
+				...(clipAabbs.length > 0 ? { visibleAabb, clipAabbs } : {}),
+				sourceWidth: Math.max(1, asyncPictureEntry.sourceWidth),
+				sourceHeight: Math.max(1, asyncPictureEntry.sourceHeight),
+				epoch: 0,
+				dispose: null,
+			};
+		};
 		for (const node of tileNodes) {
 			// 这里直接使用当帧 tileNodes，避免 undo/redo 与拖拽时 tile 输入落后一帧。
 			const latestNode = node;
 			if (frozenNodeIdSet.has(latestNode.id)) {
 				const cachedInput =
 					tileInputCacheRef.current.get(latestNode.id)?.input ?? null;
-				if (cachedInput && !frozenNodeSnapshotRef.current.has(latestNode.id)) {
+				if (!frozenNodeSnapshotRef.current.has(latestNode.id)) {
+					let transientInput: TileInput | null = null;
+					if (!cachedInput) {
+						transientInput = createFrozenNodeSnapshotInput(latestNode);
+					}
+					const snapshotInput = cachedInput ?? transientInput;
 					const snapshot =
-						(canCreateFrozenSnapshotFromCompositedTiles(latestNode)
+						(cachedInput &&
+						canCreateFrozenSnapshotFromCompositedTiles(latestNode)
 							? createFrozenNodeRasterSnapshotFromTiles(
 									cachedInput,
 									latestTileFrameResultRef.current?.drawItems ?? [],
 								)
 							: null) ??
-						createFrozenNodeRasterSnapshot(cachedInput, camera.value.zoom);
+						(snapshotInput
+							? createFrozenNodeRasterSnapshot(snapshotInput, camera.value.zoom)
+							: null);
 					if (snapshot) {
 						frozenNodeSnapshotRef.current.set(latestNode.id, snapshot);
+					}
+					if (transientInput) {
+						disposeTileInput(transientInput);
 					}
 				}
 				// frozen 节点优先复用上一帧 static tile 纹理，保证 drag start 不换采样质量。

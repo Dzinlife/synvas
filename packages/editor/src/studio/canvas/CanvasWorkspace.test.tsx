@@ -5341,6 +5341,81 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("auto board 多选 children resize 结束后会继续冻结 resized children", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 500,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		clickNodeAt(100, 80);
+		clickNodeAt(260, 80, { shiftKey: true });
+
+		act(() => {
+			getLatestInfiniteSkiaCanvasProps().onSelectionResize?.({
+				phase: "start",
+				anchor: "bottom-right",
+				event: {
+					...createPointerMeta(328, 144),
+					movementX: 0,
+					movementY: 0,
+					first: true,
+					last: false,
+					tap: false,
+				},
+			});
+			getLatestInfiniteSkiaCanvasProps().onSelectionResize?.({
+				phase: "move",
+				anchor: "bottom-right",
+				event: {
+					...createPointerMeta(388, 184),
+					movementX: 60,
+					movementY: 40,
+					first: false,
+					last: false,
+					tap: false,
+				},
+			});
+			getLatestInfiniteSkiaCanvasProps().onSelectionResize?.({
+				phase: "end",
+				anchor: "bottom-right",
+				event: {
+					...createPointerMeta(388, 184, { buttons: 0 }),
+					movementX: 60,
+					movementY: 40,
+					first: false,
+					last: true,
+					tap: false,
+				},
+			});
+		});
+
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining(["node-auto-a", "node-auto-b"]),
+		);
+	});
+
 	it("auto board child resize 超过当前行高时不会合并相邻行", () => {
 		setCanvasNodesForTest([
 			createTestBoardNode("node-board-auto", {
@@ -5885,6 +5960,50 @@ describe("CanvasWorkspace", () => {
 		const afterRevision =
 			useProjectStore.getState().currentProject?.revision ?? 0;
 		expect(afterRevision).toBe(beforeRevision + 1);
+	});
+
+	it("多选 resize 过程中会冻结被 resize 的 selected nodes", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+		clickNodeAt(720, 360, { shiftKey: true });
+
+		act(() => {
+			getLatestInfiniteSkiaCanvasProps().onSelectionResize?.({
+				phase: "start",
+				anchor: "bottom-right",
+				event: {
+					...createPointerMeta(940, 480),
+					movementX: 0,
+					movementY: 0,
+					first: true,
+					last: false,
+					tap: false,
+				},
+			});
+		});
+
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining(["node-video-1", "node-image-1"]),
+		);
+
+		act(() => {
+			getLatestInfiniteSkiaCanvasProps().onSelectionResize?.({
+				phase: "move",
+				anchor: "bottom-right",
+				event: {
+					...createPointerMeta(1080, 480),
+					movementX: 140,
+					movementY: 0,
+					first: false,
+					last: false,
+					tap: false,
+				},
+			});
+		});
+
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining(["node-video-1", "node-image-1"]),
+		);
 	});
 
 	it("多选组拖拽会按 bbox 吸附到其他节点边线", () => {

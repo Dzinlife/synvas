@@ -451,6 +451,19 @@ const resolveCanvasAutoLayoutFrozenNodeIdsForResize = (
 	);
 };
 
+const resolveCanvasSelectionResizeFrozenNodeIds = (
+	nodes: CanvasNode[],
+	resizedNodeIds: string[],
+): string[] => {
+	if (resizedNodeIds.length === 0) return [];
+	const visibleNodeIdSet = new Set(
+		nodes.filter((node) => !node.hidden).map((node) => node.id),
+	);
+	return expandCanvasNodeIdsWithDescendants(nodes, resizedNodeIds).filter(
+		(nodeId) => visibleNodeIdSet.has(nodeId),
+	);
+};
+
 const resolveCanvasAutoLayoutRowsByBoardId = (
 	nodes: CanvasNode[],
 	boardIds: string[],
@@ -1044,6 +1057,8 @@ const CanvasWorkspace = () => {
 	const [autoLayoutFrozenNodeIds, setAutoLayoutFrozenNodeIds] = useState<
 		string[]
 	>([]);
+	const [selectionResizeFrozenNodeIds, setSelectionResizeFrozenNodeIds] =
+		useState<string[]>([]);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const marqueeRectRef = useRef<CanvasMarqueeRect>({
 		visible: false,
@@ -1059,6 +1074,7 @@ const CanvasWorkspace = () => {
 	const activeDrawerAutoPanSignatureRef = useRef<string | null>(null);
 	const previousProjectIdRef = useRef<string | null>(currentProjectId);
 	const autoLayoutAnimationResetTimerRef = useRef<number | null>(null);
+	const selectionResizeFrozenResetTimerRef = useRef<number | null>(null);
 	const previousSkiaResourceSnapshotRef =
 		useRef<TrackedSkiaHostObjectSnapshot | null>(null);
 	const prevFocusedNodeIdRef = useRef<string | null>(focusedNodeId);
@@ -1428,9 +1444,14 @@ const CanvasWorkspace = () => {
 	}, []);
 	useEffect(() => {
 		return () => {
-			if (autoLayoutAnimationResetTimerRef.current === null) return;
-			window.clearTimeout(autoLayoutAnimationResetTimerRef.current);
-			autoLayoutAnimationResetTimerRef.current = null;
+			if (autoLayoutAnimationResetTimerRef.current !== null) {
+				window.clearTimeout(autoLayoutAnimationResetTimerRef.current);
+				autoLayoutAnimationResetTimerRef.current = null;
+			}
+			if (selectionResizeFrozenResetTimerRef.current !== null) {
+				window.clearTimeout(selectionResizeFrozenResetTimerRef.current);
+				selectionResizeFrozenResetTimerRef.current = null;
+			}
 		};
 	}, []);
 
@@ -1993,6 +2014,22 @@ const CanvasWorkspace = () => {
 	const clearBoardAutoLayoutIndicator = useCallback(() => {
 		setBoardAutoLayoutIndicator(null);
 	}, []);
+	const clearSelectionResizeFrozenResetTimer = useCallback(() => {
+		if (selectionResizeFrozenResetTimerRef.current === null) return;
+		window.clearTimeout(selectionResizeFrozenResetTimerRef.current);
+		selectionResizeFrozenResetTimerRef.current = null;
+	}, []);
+	const clearSelectionResizeFrozenNodeIds = useCallback(() => {
+		clearSelectionResizeFrozenResetTimer();
+		setSelectionResizeFrozenNodeIds([]);
+	}, [clearSelectionResizeFrozenResetTimer]);
+	const deferClearSelectionResizeFrozenNodeIds = useCallback(() => {
+		clearSelectionResizeFrozenResetTimer();
+		selectionResizeFrozenResetTimerRef.current = window.setTimeout(() => {
+			selectionResizeFrozenResetTimerRef.current = null;
+			setSelectionResizeFrozenNodeIds([]);
+		}, BOARD_AUTO_LAYOUT_ANIMATION_RESET_MS);
+	}, [clearSelectionResizeFrozenResetTimer]);
 	const commitCanvasAutoLayoutEntries = useCallback(
 		(
 			entries: CanvasBoardAutoLayoutPatch[],
@@ -5155,6 +5192,10 @@ const CanvasWorkspace = () => {
 			const latestNodes =
 				useProjectStore.getState().currentProject?.canvas.nodes ?? [];
 			const resizeNodeIds = resizeNodes.map((node) => node.id);
+			clearSelectionResizeFrozenResetTimer();
+			setSelectionResizeFrozenNodeIds(
+				resolveCanvasSelectionResizeFrozenNodeIds(latestNodes, resizeNodeIds),
+			);
 			const autoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
 				latestNodes,
 				resizeNodeIds,
@@ -5200,6 +5241,7 @@ const CanvasWorkspace = () => {
 			clearCanvasMarquee,
 			clearCanvasSnapGuides,
 			clearHoveredNode,
+			clearSelectionResizeFrozenResetTimer,
 			isCanvasInteractionLocked,
 			resolveNodeResizeConstraints,
 			selectedBounds,
@@ -5415,14 +5457,27 @@ const CanvasWorkspace = () => {
 						)
 					: null,
 			);
-			if (!resizeSession) return;
-			if (!resizeSession.moved) return;
+			if (!resizeSession) {
+				clearSelectionResizeFrozenNodeIds();
+				return;
+			}
+			if (!resizeSession.moved) {
+				clearSelectionResizeFrozenNodeIds();
+				return;
+			}
 			let latestProject = useProjectStore.getState().currentProject;
-			if (!latestProject) return;
+			if (!latestProject) {
+				clearSelectionResizeFrozenNodeIds();
+				return;
+			}
 			const resizedNodeIds = Object.keys(resizeSession.snapshots);
 			const autoLayoutBoardIds = [
 				...resizeSession.autoLayoutRowsByBoardId.keys(),
 			];
+			const resizedFrozenNodeIds = resolveCanvasSelectionResizeFrozenNodeIds(
+				latestProject.canvas.nodes,
+				resizedNodeIds,
+			);
 			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
 				latestProject.canvas.nodes,
 				resizedNodeIds,
@@ -5432,14 +5487,22 @@ const CanvasWorkspace = () => {
 			);
 			if (autoLayoutEntries.length > 0) {
 				commitCanvasAutoLayoutEntries(autoLayoutEntries, {
-					frozenNodeIds: resolveCanvasAutoLayoutFrozenNodeIdsForResize(
-						latestProject.canvas.nodes,
-						autoLayoutBoardIds,
-						resizedNodeIds,
-					),
+					frozenNodeIds: [
+						...new Set([
+							...resolveCanvasAutoLayoutFrozenNodeIdsForResize(
+								latestProject.canvas.nodes,
+								autoLayoutBoardIds,
+								resizedNodeIds,
+							),
+							...resizedFrozenNodeIds,
+						]),
+					],
 				});
 				latestProject = useProjectStore.getState().currentProject;
-				if (!latestProject) return;
+				if (!latestProject) {
+					clearSelectionResizeFrozenNodeIds();
+					return;
+				}
 			}
 			const nextEntries = Object.keys(resizeSession.snapshots)
 				.map((nodeId) => {
@@ -5465,7 +5528,10 @@ const CanvasWorkspace = () => {
 						after: CanvasNodeLayoutSnapshot;
 					} => Boolean(entry),
 				);
-			if (nextEntries.length === 0) return;
+			if (nextEntries.length === 0) {
+				deferClearSelectionResizeFrozenNodeIds();
+				return;
+			}
 			if (nextEntries.length === 1) {
 				const entry = nextEntries[0];
 				pushHistory({
@@ -5475,6 +5541,7 @@ const CanvasWorkspace = () => {
 					after: entry.after,
 					focusNodeId: latestProject.ui.focusedNodeId,
 				});
+				deferClearSelectionResizeFrozenNodeIds();
 				return;
 			}
 			pushHistory({
@@ -5482,11 +5549,14 @@ const CanvasWorkspace = () => {
 				entries: nextEntries,
 				focusNodeId: latestProject.ui.focusedNodeId,
 			});
+			deferClearSelectionResizeFrozenNodeIds();
 		},
 		[
 			clearCanvasSnapGuides,
+			clearSelectionResizeFrozenNodeIds,
 			commitCanvasAutoLayoutEntries,
 			commitCanvasResizeCursorByAnchor,
+			deferClearSelectionResizeFrozenNodeIds,
 			pushHistory,
 			resolveAutoLayoutEntriesForChangedNodes,
 			resolveResizeAnchorAtWorldPoint,
@@ -7090,12 +7160,14 @@ const CanvasWorkspace = () => {
 		canvasToolMode === "board" ? "crosshair" : canvasResizeCursor;
 	const frozenCanvasNodeIds =
 		autoLayoutFrozenNodeIds.length === 0 &&
-		autoLayoutAnimatedNodeIds.length === 0
+		autoLayoutAnimatedNodeIds.length === 0 &&
+		selectionResizeFrozenNodeIds.length === 0
 			? EMPTY_STRING_ARRAY
 			: [
 					...new Set([
 						...autoLayoutFrozenNodeIds,
 						...autoLayoutAnimatedNodeIds,
+						...selectionResizeFrozenNodeIds,
 					]),
 				];
 

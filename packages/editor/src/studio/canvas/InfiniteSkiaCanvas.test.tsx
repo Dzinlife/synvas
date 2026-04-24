@@ -2459,6 +2459,41 @@ describe("InfiniteSkiaCanvas", () => {
 		}
 	});
 
+	it("frozen active node 没有 tile cache 时会同步创建 snapshot，避免黑屏", async () => {
+		tilePipelineMockState.enabled = true;
+		const activeNode = createTextNode("node-text-active-frozen", 0);
+		const baseProps = {
+			width: 128,
+			height: 128,
+			camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+			nodes: [activeNode],
+			scenes: emptyScenes,
+			assets: [],
+			activeNodeId: activeNode.id,
+			selectedNodeIds: [activeNode.id],
+			focusedNodeId: null,
+		};
+		const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+		await waitFor(() => {
+			expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+				activeNode.id,
+			);
+		});
+		renderNodeToPictureMock.mockClear();
+
+		rerender(
+			<InfiniteSkiaCanvas {...baseProps} frozenNodeIds={[activeNode.id]} />,
+		);
+
+		await waitFor(() => {
+			const tree = getLatestRenderTree();
+			expect(getFrozenRenderedNodeIds(tree)).toContain(activeNode.id);
+			expect(getLiveRenderedNodeIds(tree)).not.toContain(activeNode.id);
+		});
+		expect(renderNodeToPictureMock).toHaveBeenCalled();
+	});
+
 	it("auto layout frozen snapshot 从 tile 裁剪时会使用真实纹理像素尺寸", async () => {
 		tilePipelineMockState.enabled = true;
 		skiaSurfaceMockState.defaultPixelRatio = 2;
