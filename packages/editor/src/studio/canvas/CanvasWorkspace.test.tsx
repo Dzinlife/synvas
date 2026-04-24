@@ -5304,6 +5304,14 @@ describe("CanvasWorkspace", () => {
 				height: 80,
 				siblingOrder: 0,
 			}),
+			createTestTextNode("node-auto-b", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
 		]);
 		render(<CanvasWorkspace />);
 
@@ -5315,12 +5323,22 @@ describe("CanvasWorkspace", () => {
 			width: 160,
 			height: 120,
 		});
+		expect(getCanvasNodeForTest("node-auto-b")).toMatchObject({
+			x: 288,
+			y: 64,
+		});
 		expect(
 			getCanvasNodeForTest<BoardCanvasNode>("node-board-auto"),
 		).toMatchObject({
-			width: 288,
+			width: 452,
 			height: 248,
 		});
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).toEqual(
+			expect.arrayContaining(["node-auto-b", "node-board-auto"]),
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().frozenNodeIds).not.toContain(
+			"node-auto-a",
+		);
 	});
 
 	it("auto board child 删除后会收缩 board", () => {

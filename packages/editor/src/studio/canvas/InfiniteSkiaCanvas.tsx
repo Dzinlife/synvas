@@ -410,6 +410,13 @@ const resolveTileImagePixelRatio = (tile: TileDrawItem): number => {
 	return Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
 };
 
+const canCreateFrozenSnapshotFromCompositedTiles = (
+	node: CanvasNode,
+): boolean => {
+	// board 的全局 tile 区域会包含 children，不能拿来做 board 自身的过渡纹理。
+	return node.type !== "board";
+};
+
 const isTileAabbCoveredByDrawItems = (
 	aabb: TileAabb,
 	drawItems: TileDrawItem[],
@@ -1720,10 +1727,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					tileInputCacheRef.current.get(latestNode.id)?.input ?? null;
 				if (cachedInput && !frozenNodeSnapshotRef.current.has(latestNode.id)) {
 					const snapshot =
-						createFrozenNodeRasterSnapshotFromTiles(
-							cachedInput,
-							latestTileFrameResultRef.current?.drawItems ?? [],
-						) ?? createFrozenNodeRasterSnapshot(cachedInput, camera.value.zoom);
+						(canCreateFrozenSnapshotFromCompositedTiles(latestNode)
+							? createFrozenNodeRasterSnapshotFromTiles(
+									cachedInput,
+									latestTileFrameResultRef.current?.drawItems ?? [],
+								)
+							: null) ??
+						createFrozenNodeRasterSnapshot(cachedInput, camera.value.zoom);
 					if (snapshot) {
 						frozenNodeSnapshotRef.current.set(latestNode.id, snapshot);
 					}

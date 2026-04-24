@@ -438,6 +438,17 @@ const resolveCanvasAutoLayoutFrozenNodeIds = (
 	);
 };
 
+const resolveCanvasAutoLayoutFrozenNodeIdsForResize = (
+	nodes: CanvasNode[],
+	boardIds: string[],
+	resizedNodeIds: string[],
+): string[] => {
+	const resizedNodeIdSet = new Set(resizedNodeIds);
+	return resolveCanvasAutoLayoutFrozenNodeIds(nodes, boardIds).filter(
+		(nodeId) => !resizedNodeIdSet.has(nodeId),
+	);
+};
+
 const resolveCameraCenterWorld = (
 	camera: CameraState,
 	stageWidth: number,
@@ -4490,12 +4501,22 @@ const CanvasWorkspace = () => {
 			if (!resizeSession.moved) return;
 			let latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
+			const autoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
+				latestProject.canvas.nodes,
+				[resizeSession.nodeId],
+			);
 			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
 				latestProject.canvas.nodes,
 				[resizeSession.nodeId],
 			);
 			if (autoLayoutEntries.length > 0) {
-				commitCanvasAutoLayoutEntries(autoLayoutEntries);
+				commitCanvasAutoLayoutEntries(autoLayoutEntries, {
+					frozenNodeIds: resolveCanvasAutoLayoutFrozenNodeIdsForResize(
+						latestProject.canvas.nodes,
+						autoLayoutBoardIds,
+						[resizeSession.nodeId],
+					),
+				});
 				latestProject = useProjectStore.getState().currentProject;
 				if (!latestProject) return;
 			}
@@ -5363,12 +5384,22 @@ const CanvasWorkspace = () => {
 			let latestProject = useProjectStore.getState().currentProject;
 			if (!latestProject) return;
 			const resizedNodeIds = Object.keys(resizeSession.snapshots);
+			const autoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
+				latestProject.canvas.nodes,
+				resizedNodeIds,
+			);
 			const autoLayoutEntries = resolveAutoLayoutEntriesForChangedNodes(
 				latestProject.canvas.nodes,
 				resizedNodeIds,
 			);
 			if (autoLayoutEntries.length > 0) {
-				commitCanvasAutoLayoutEntries(autoLayoutEntries);
+				commitCanvasAutoLayoutEntries(autoLayoutEntries, {
+					frozenNodeIds: resolveCanvasAutoLayoutFrozenNodeIdsForResize(
+						latestProject.canvas.nodes,
+						autoLayoutBoardIds,
+						resizedNodeIds,
+					),
+				});
 				latestProject = useProjectStore.getState().currentProject;
 				if (!latestProject) return;
 			}

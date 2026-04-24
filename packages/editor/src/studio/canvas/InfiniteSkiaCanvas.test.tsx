@@ -24,6 +24,7 @@ interface SkiaSurfaceMockRecord {
 	pixelRatio?: number;
 	resolvedPixelRatio: number;
 	canvas: {
+		drawPicture: ReturnType<typeof vi.fn>;
 		drawImageRect: ReturnType<typeof vi.fn>;
 	};
 	image: {
@@ -2550,6 +2551,99 @@ describe("InfiniteSkiaCanvas", () => {
 			expect(sourceRect?.height).toBeCloseTo(
 				(animatedNode.height / drawSize) * 768,
 			);
+		} finally {
+			setInputsSpy.mockRestore();
+			beginFrameSpy.mockRestore();
+		}
+	});
+
+	it("auto layout frozen board snapshot 不会从合成 tile 裁出 children", async () => {
+		tilePipelineMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const tileImage = {
+			width: vi.fn(() => 384),
+			height: vi.fn(() => 384),
+			dispose: vi.fn(),
+		};
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockReturnValue({
+				...createEmptyTileFrameResult(),
+				drawItems: [
+					{
+						key: 1,
+						lod: 0,
+						sourceLod: 0,
+						tx: 0,
+						ty: 0,
+						left: 0,
+						top: 0,
+						size: 512,
+						image: tileImage as unknown as TileDrawItem["image"],
+					},
+				],
+			});
+		try {
+			const boardNode = createBoardNode("node-board-animated-layout", 0, {
+				x: 0,
+				y: 0,
+				width: 320,
+				height: 180,
+			});
+			const childNode = createTextNode("node-board-child", 1, {
+				parentId: boardNode.id,
+				x: 64,
+				y: 64,
+				width: 120,
+				height: 60,
+			});
+			const baseProps = {
+				width: 512,
+				height: 512,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [boardNode, childNode],
+				scenes: emptyScenes,
+				assets: [],
+				activeNodeId: null,
+				selectedNodeIds: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === boardNode.id),
+				).toBe(true);
+			});
+
+			skiaSurfaceMockState.surfaces.length = 0;
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					animatedLayoutNodeIds={[boardNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).toContain(
+					boardNode.id,
+				);
+			});
+			expect(
+				skiaSurfaceMockState.surfaces.some((surface) =>
+					surface.canvas.drawImageRect.mock.calls.some((call) => {
+						return call[0] === tileImage;
+					}),
+				),
+			).toBe(false);
+			expect(
+				skiaSurfaceMockState.surfaces.some((surface) => {
+					return surface.canvas.drawPicture.mock.calls.length > 0;
+				}),
+			).toBe(true);
 		} finally {
 			setInputsSpy.mockRestore();
 			beginFrameSpy.mockRestore();
