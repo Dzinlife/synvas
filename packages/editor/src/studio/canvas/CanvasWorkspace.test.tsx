@@ -5230,6 +5230,128 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("auto board child 拖拽时不会触发大画布吸附", () => {
+		const collectSpy = vi.spyOn(
+			canvasSnapUtils,
+			"collectCanvasSnapGuideValues",
+		);
+		try {
+			setCanvasNodesForTest([
+				createTestBoardNode("node-board-auto", {
+					layoutMode: "auto",
+					x: 0,
+					y: 0,
+					width: 500,
+					height: 300,
+					siblingOrder: -1,
+				}),
+				createTestTextNode("node-auto-moving", {
+					parentId: "node-board-auto",
+					x: 64,
+					y: 64,
+					width: 100,
+					height: 80,
+					siblingOrder: 0,
+				}),
+				createTestTextNode("node-auto-guide", {
+					parentId: "node-board-auto",
+					x: 220,
+					y: 64,
+					width: 100,
+					height: 80,
+					siblingOrder: 1,
+				}),
+			]);
+			render(<CanvasWorkspace />);
+			const beforeCalls = collectSpy.mock.calls.length;
+			const canvas = screen.getByTestId("infinite-skia-canvas");
+
+			act(() => {
+				fireEvent.pointerDown(canvas, {
+					...createPointerPatch(100, 80),
+					buttons: 1,
+				});
+				fireEvent.pointerMove(canvas, {
+					...createPointerPatch(320, 80),
+					buttons: 1,
+				});
+			});
+
+			expect(getCanvasNodeForTest("node-auto-moving")).toMatchObject({
+				x: 284,
+				y: 64,
+			});
+			expect(getLatestInfiniteSkiaCanvasProps().snapGuidesScreen).toEqual({
+				vertical: [],
+				horizontal: [],
+			});
+			expect(
+				getLatestInfiniteSkiaCanvasProps().boardAutoLayoutIndicator,
+			).toBeTruthy();
+			expect(collectSpy.mock.calls.length - beforeCalls).toBe(0);
+		} finally {
+			collectSpy.mockRestore();
+		}
+	});
+
+	it("auto board 中间 child 拖回原本行内位置时不显示插入 indicator", () => {
+		setCanvasNodesForTest([
+			createTestBoardNode("node-board-auto", {
+				layoutMode: "auto",
+				x: 0,
+				y: 0,
+				width: 700,
+				height: 300,
+				siblingOrder: -1,
+			}),
+			createTestTextNode("node-auto-a", {
+				parentId: "node-board-auto",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTestTextNode("node-auto-moving", {
+				parentId: "node-board-auto",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTestTextNode("node-auto-c", {
+				parentId: "node-board-auto",
+				x: 392,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 2,
+			}),
+		]);
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(278, 80),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(300, 80),
+				buttons: 1,
+			});
+		});
+
+		expect(getCanvasNodeForTest("node-auto-moving")).toMatchObject({
+			x: 250,
+			y: 64,
+		});
+		expect(
+			getLatestInfiniteSkiaCanvasProps().boardAutoLayoutIndicator,
+		).toBeNull();
+	});
+
 	it("auto board 跨行拖拽时冻结所有 direct children，避免行间混合分辨率闪烁", () => {
 		setCanvasNodesForTest([
 			createTestBoardNode("node-board-auto", {

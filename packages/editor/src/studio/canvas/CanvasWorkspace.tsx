@@ -249,6 +249,7 @@ interface NodeDragSession {
 	timelineDropMode: boolean;
 	timelineDropTarget: DropTargetInfo | null;
 	autoLayoutInsertion: CanvasBoardAutoLayoutInsertion | null;
+	autoLayoutRowsByBoardId: Map<string, string[][]>;
 	globalDragStarted: boolean;
 	guideValuesCache: {
 		key: string;
@@ -4727,6 +4728,10 @@ const CanvasWorkspace = () => {
 			if (dragNodes.length === 0) return false;
 			const initialBounds = resolveCanvasNodeBounds(dragNodes);
 			if (!initialBounds) return false;
+			const autoLayoutBoardIds = collectCanvasAutoLayoutAncestorBoardIds(
+				latestProject.canvas.nodes,
+				dragNodes.map((node) => node.id),
+			);
 			nodeDragSessionRef.current = {
 				origin: input.origin,
 				anchorNodeId: input.anchorNodeId,
@@ -4760,6 +4765,10 @@ const CanvasWorkspace = () => {
 				timelineDropMode: false,
 				timelineDropTarget: null,
 				autoLayoutInsertion: null,
+				autoLayoutRowsByBoardId: resolveCanvasAutoLayoutRowsByBoardId(
+					latestProject.canvas.nodes,
+					autoLayoutBoardIds,
+				),
 				globalDragStarted: false,
 				guideValuesCache: null,
 			};
@@ -4860,6 +4869,24 @@ const CanvasWorkspace = () => {
 					? dragSession.copyEntries.map((entry) => entry.node.id)
 					: dragSession.dragNodeIds;
 			if (targetNodeIds.length === 0) return;
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const latestNodeById = new Map(
+				latestProject.canvas.nodes.map((node) => [node.id, node]),
+			);
+			const initialRootTargetNodeIds = resolveRootNodeIdsFromMovedSet(
+				latestProject.canvas.nodes,
+				targetNodeIds,
+			);
+			const shouldDisableCanvasSnapForAutoLayoutDrag =
+				initialRootTargetNodeIds.length > 0 &&
+				initialRootTargetNodeIds.some((nodeId) => {
+					const node = latestNodeById.get(nodeId) ?? null;
+					const parent = node?.parentId
+						? (latestNodeById.get(node.parentId) ?? null)
+						: null;
+					return isCanvasBoardAutoLayoutNode(parent);
+				});
 			const currentZoom = getCamera().zoom;
 			const safeZoom = Math.max(currentZoom, CAMERA_ZOOM_EPSILON);
 			let deltaX = event.movementX / safeZoom;
@@ -4880,7 +4907,7 @@ const CanvasWorkspace = () => {
 			if (dragSession.axisLock === "y") {
 				deltaX = 0;
 			}
-			if (canvasSnapEnabled) {
+			if (canvasSnapEnabled && !shouldDisableCanvasSnapForAutoLayoutDrag) {
 				const guideCacheKey = [...targetNodeIds].sort().join(",");
 				if (
 					!dragSession.guideValuesCache ||
@@ -4926,8 +4953,6 @@ const CanvasWorkspace = () => {
 				clearCanvasSnapGuides();
 			}
 			let didMove = false;
-			const latestProject = useProjectStore.getState().currentProject;
-			if (!latestProject) return;
 			let workingNodes = latestProject.canvas.nodes;
 			const layoutEntryByNodeId = new Map<string, CanvasNodeLayoutPatch>();
 			for (const targetNodeId of targetNodeIds) {
@@ -5005,6 +5030,11 @@ const CanvasWorkspace = () => {
 							targetAutoBoardIds[0] ?? "",
 							rootTargetNodeIds,
 							pointerWorld,
+							{
+								originalRows: dragSession.autoLayoutRowsByBoardId.get(
+									targetAutoBoardIds[0] ?? "",
+								),
+							},
 						)
 					: null;
 			dragSession.autoLayoutInsertion = autoLayoutInsertion;

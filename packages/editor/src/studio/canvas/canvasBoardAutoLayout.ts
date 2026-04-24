@@ -474,6 +474,49 @@ const insertNodeIdsIntoRows = (
 	return nextRows.filter((item) => item.length > 0);
 };
 
+const areCanvasBoardAutoLayoutRowsEqual = (
+	leftRows: string[][],
+	rightRows: string[][],
+): boolean => {
+	if (leftRows.length !== rightRows.length) return false;
+	return leftRows.every((leftRow, rowIndex) => {
+		const rightRow = rightRows[rowIndex];
+		if (!rightRow || leftRow.length !== rightRow.length) return false;
+		return leftRow.every((nodeId, nodeIndex) => nodeId === rightRow[nodeIndex]);
+	});
+};
+
+const resolveCanvasBoardAutoLayoutInsertionResult = (
+	nodes: CanvasNode[],
+	boardId: string,
+	rows: string[][],
+	indicator: CanvasBoardAutoLayoutIndicator,
+	originalRows?: string[][],
+): CanvasBoardAutoLayoutInsertion | null => {
+	if (originalRows) {
+		const normalizedOriginalRows = normalizeCanvasBoardAutoLayoutRows(
+			nodes,
+			boardId,
+			originalRows,
+		);
+		const normalizedRows = normalizeCanvasBoardAutoLayoutRows(
+			nodes,
+			boardId,
+			rows,
+		);
+		if (
+			areCanvasBoardAutoLayoutRowsEqual(normalizedRows, normalizedOriginalRows)
+		) {
+			return null;
+		}
+	}
+	return {
+		boardId,
+		rows,
+		indicator,
+	};
+};
+
 export const resolveCanvasBoardAutoLayoutInsertion = (
 	nodes: CanvasNode[],
 	boardId: string,
@@ -481,6 +524,7 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 	pointer: { x: number; y: number },
 	options?: {
 		gap?: number;
+		originalRows?: string[][];
 	},
 ): CanvasBoardAutoLayoutInsertion | null => {
 	const gap = options?.gap ?? CANVAS_BOARD_AUTO_LAYOUT_GAP;
@@ -505,10 +549,11 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 	if (rowMetrics.length === 0) {
 		const lineX = board.x + gap / 2;
 		const lineTop = board.y + gap;
-		return {
+		return resolveCanvasBoardAutoLayoutInsertionResult(
+			nodes,
 			boardId,
-			rows: [[...movingRootNodeIds]],
-			indicator: {
+			[[...movingRootNodeIds]],
+			{
 				boardId,
 				orientation: "vertical",
 				x1: lineX,
@@ -516,15 +561,17 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 				x2: lineX,
 				y2: lineTop + gap,
 			},
-		};
+			options?.originalRows,
+		);
 	}
 
 	if (pointer.y < rowMetrics[0].top - gap / 2) {
 		const y = rowMetrics[0].top - gap / 2;
-		return {
+		return resolveCanvasBoardAutoLayoutInsertionResult(
+			nodes,
 			boardId,
-			rows: insertNodeIdsIntoRows(baseRows, 0, 0, movingRootNodeIds, "new-row"),
-			indicator: {
+			insertNodeIdsIntoRows(baseRows, 0, 0, movingRootNodeIds, "new-row"),
+			{
 				boardId,
 				orientation: "horizontal",
 				x1: board.x + gap,
@@ -532,7 +579,8 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 				x2: board.x + Math.max(gap, board.width - gap),
 				y2: y,
 			},
-		};
+			options?.originalRows,
+		);
 	}
 
 	for (let index = 0; index < rowMetrics.length - 1; index += 1) {
@@ -541,16 +589,17 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 		if (!current || !next) continue;
 		if (pointer.y >= current.bottom && pointer.y <= next.top) {
 			const y = (current.bottom + next.top) / 2;
-			return {
+			return resolveCanvasBoardAutoLayoutInsertionResult(
+				nodes,
 				boardId,
-				rows: insertNodeIdsIntoRows(
+				insertNodeIdsIntoRows(
 					baseRows,
 					index + 1,
 					0,
 					movingRootNodeIds,
 					"new-row",
 				),
-				indicator: {
+				{
 					boardId,
 					orientation: "horizontal",
 					x1: board.x + gap,
@@ -558,23 +607,25 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 					x2: board.x + Math.max(gap, board.width - gap),
 					y2: y,
 				},
-			};
+				options?.originalRows,
+			);
 		}
 	}
 
 	const lastRow = rowMetrics[rowMetrics.length - 1];
 	if (lastRow && pointer.y > lastRow.bottom + gap / 2) {
 		const y = lastRow.bottom + gap / 2;
-		return {
+		return resolveCanvasBoardAutoLayoutInsertionResult(
+			nodes,
 			boardId,
-			rows: insertNodeIdsIntoRows(
+			insertNodeIdsIntoRows(
 				baseRows,
 				baseRows.length,
 				0,
 				movingRootNodeIds,
 				"new-row",
 			),
-			indicator: {
+			{
 				boardId,
 				orientation: "horizontal",
 				x1: board.x + gap,
@@ -582,7 +633,8 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 				x2: board.x + Math.max(gap, board.width - gap),
 				y2: y,
 			},
-		};
+			options?.originalRows,
+		);
 	}
 
 	let targetRowIndex = rowMetrics.findIndex((row) => {
@@ -636,16 +688,17 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 			2
 		);
 	})();
-	return {
+	return resolveCanvasBoardAutoLayoutInsertionResult(
+		nodes,
 		boardId,
-		rows: insertNodeIdsIntoRows(
+		insertNodeIdsIntoRows(
 			baseRows,
 			targetRowIndex,
 			insertIndex,
 			movingRootNodeIds,
 			"same-row",
 		),
-		indicator: {
+		{
 			boardId,
 			orientation: "vertical",
 			x1: lineX,
@@ -653,5 +706,6 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 			x2: lineX,
 			y2: targetRow.top + targetRow.height,
 		},
-	};
+		options?.originalRows,
+	);
 };

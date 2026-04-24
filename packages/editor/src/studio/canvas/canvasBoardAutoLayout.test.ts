@@ -254,4 +254,55 @@ describe("canvasBoardAutoLayout", () => {
 			y2: 176,
 		});
 	});
+
+	it("拖拽到原本行内位置时不返回插入 indicator", () => {
+		const nodes: CanvasNode[] = [
+			createBoardNode("board", { x: 0, y: 0, width: 700, height: 300 }),
+			createTextNode("a", {
+				parentId: "board",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTextNode("moving", {
+				parentId: "board",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTextNode("c", {
+				parentId: "board",
+				x: 392,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 2,
+			}),
+		];
+		const originalRows = [["a", "moving", "c"]];
+
+		expect(
+			resolveCanvasBoardAutoLayoutInsertion(
+				nodes,
+				"board",
+				["moving"],
+				{ x: 300, y: 80 },
+				{ originalRows },
+			),
+		).toBeNull();
+
+		expect(
+			resolveCanvasBoardAutoLayoutInsertion(
+				nodes,
+				"board",
+				["moving"],
+				{ x: 560, y: 80 },
+				{ originalRows },
+			)?.rows,
+		).toEqual([["a", "c", "moving"]]);
+	});
 });
