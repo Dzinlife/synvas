@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	act,
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTransformMeta } from "@/element-system/transform";
 import { useProjectStore } from "@/projects/projectStore";
 import {
@@ -11,6 +17,10 @@ import { buildTimelineMeta } from "@/scene-editor/utils/timelineTime";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import type { SceneDocument, SceneNode } from "@/studio/project/types";
 import { SceneNodeInspector } from "./inspector";
+
+vi.mock("@/scene-editor/components/SceneElementLibrary", () => ({
+	default: () => <div data-testid="canvas-element-library" />,
+}));
 
 const createSceneNode = (sceneId = "scene-1"): SceneNode => ({
 	id: `node-${sceneId}`,
@@ -108,7 +118,7 @@ afterEach(() => {
 });
 
 describe("SceneNodeInspector", () => {
-	it("未选中 element 时展示 scene 元数据", () => {
+	it("默认展示属性 tab，未选中 element 时不显示选中元素 tab", () => {
 		const runtime = createTestEditorRuntime("scene-inspector-meta");
 		runtime.ensureTimelineRuntime(toSceneTimelineRef("scene-1"));
 
@@ -125,6 +135,14 @@ describe("SceneNodeInspector", () => {
 			{ wrapper: createRuntimeProviderWrapper(runtime) },
 		);
 
+		expect(
+			screen
+				.getByTestId("scene-inspector-tab-properties")
+				.getAttribute("aria-pressed"),
+		).toBe("true");
+		expect(
+			screen.queryByTestId("scene-inspector-tab-selected-element"),
+		).toBeNull();
 		const panel = screen.getByTestId("canvas-scene-node-meta-panel");
 		expect(panel.textContent).toContain("Scene 1");
 		expect(panel.textContent).toContain("scene-1");
@@ -133,7 +151,37 @@ describe("SceneNodeInspector", () => {
 		expect(panel.textContent).toContain("0f");
 	});
 
-	it("选中 element 时展示 scene runtime 作用域下的 element 面板", () => {
+	it("点击元素组件 tab 后展示 scene 元素组件库", () => {
+		const runtime = createTestEditorRuntime("scene-inspector-components");
+		runtime.ensureTimelineRuntime(toSceneTimelineRef("scene-1"));
+
+		render(
+			<SceneNodeInspector
+				node={createSceneNode()}
+				scene={createSceneDocument()}
+				asset={null}
+				isFocused={false}
+				updateNode={() => {}}
+				setFocusedNode={() => {}}
+				setActiveScene={() => {}}
+			/>,
+			{ wrapper: createRuntimeProviderWrapper(runtime) },
+		);
+
+		fireEvent.click(screen.getByTestId("scene-inspector-tab-components"));
+
+		expect(
+			screen.getByTestId("canvas-scene-element-library-panel"),
+		).toBeTruthy();
+		expect(screen.getByTestId("canvas-element-library")).toBeTruthy();
+		expect(
+			screen
+				.getByTestId("scene-inspector-tab-components")
+				.getAttribute("aria-pressed"),
+		).toBe("true");
+	});
+
+	it("选中 element 时自动展示 scene runtime 作用域下的 element 面板", () => {
 		const runtime = createTestEditorRuntime("scene-inspector-element");
 		const element = createTimelineElement();
 		const sceneRef = toSceneTimelineRef("scene-1");
@@ -158,12 +206,17 @@ describe("SceneNodeInspector", () => {
 			{ wrapper: createRuntimeProviderWrapper(runtime) },
 		);
 
+		expect(
+			screen
+				.getByTestId("scene-inspector-tab-selected-element")
+				.getAttribute("aria-pressed"),
+		).toBe("true");
 		const panel = screen.getByTestId("canvas-timeline-element-settings-panel");
-		expect(panel.textContent).toContain("Element");
+		expect(panel).toBeTruthy();
 		expect(screen.getByDisplayValue("Image Clip")).toBeTruthy();
 	});
 
-	it("scene 不可用时 fallback 到默认 debug meta panel", () => {
+	it("scene 不可用时 fallback 到默认 node inspector", () => {
 		const runtime = createTestEditorRuntime("scene-inspector-fallback");
 
 		render(
@@ -179,7 +232,7 @@ describe("SceneNodeInspector", () => {
 			{ wrapper: createRuntimeProviderWrapper(runtime) },
 		);
 
-		expect(screen.getByTestId("canvas-active-node-meta-panel")).toBeTruthy();
+		expect(screen.getByTestId("canvas-node-inspector")).toBeTruthy();
 	});
 
 	it("清空 element 选中后会回到 scene 元数据面板", () => {
@@ -211,6 +264,14 @@ describe("SceneNodeInspector", () => {
 			sceneRuntime.timelineStore.getState().setSelectedIds([], null);
 		});
 
+		expect(
+			screen.queryByTestId("scene-inspector-tab-selected-element"),
+		).toBeNull();
+		expect(
+			screen
+				.getByTestId("scene-inspector-tab-properties")
+				.getAttribute("aria-pressed"),
+		).toBe("true");
 		expect(screen.getByTestId("canvas-scene-node-meta-panel")).toBeTruthy();
 	});
 });

@@ -1,5 +1,5 @@
 /**
- * Focus Scene 的元素组件库
+ * Scene Editor 的元素组件库
  * 用于展示可拖拽的元素组件（图片、视频、滤镜、转场等）
  */
 
@@ -414,7 +414,7 @@ const resolveTransitionDrop = (
 // 素材库面板组件
 // ============================================================================
 
-const CanvasElementLibrary: React.FC = () => {
+const SceneElementLibrary: React.FC = () => {
 	const dndContext = useMaterialDndContext();
 	const setElements = useTimelineStore((state) => state.setElements);
 	const currentTime = useTimelineStore((state) => state.currentTime);
@@ -725,5 +725,5 @@ const CanvasElementLibrary: React.FC = () => {
 	);
 };
 
-export default CanvasElementLibrary;
+export default SceneElementLibrary;
 export type { MaterialItem };

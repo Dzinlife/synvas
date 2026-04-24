@@ -16,10 +16,8 @@ import {
 } from "@/studio/canvas/layerOrderCoordinator";
 import type { CanvasNode } from "@/studio/project/types";
 import { resolveCanvasNodeTypeIcon } from "../canvasNodeIconLabel";
-import CanvasElementLibrary from "./CanvasElementLibrary";
 
 export type CanvasSidebarMode = "canvas" | "focus";
-export type CanvasSidebarTab = "nodes" | "element";
 
 type DropPosition = "before" | "inside" | "after";
 
@@ -38,8 +36,6 @@ interface CanvasSidebarProps {
 	nodes: CanvasNode[];
 	activeNodeId: string | null;
 	selectedNodeIds: string[];
-	activeTab: CanvasSidebarTab;
-	onTabChange: (tab: CanvasSidebarTab) => void;
 	onNodeSelect: (
 		node: CanvasNode,
 		options?: CanvasSidebarNodeSelectOptions,
@@ -1018,20 +1014,12 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 	nodes,
 	activeNodeId,
 	selectedNodeIds,
-	activeTab,
-	onTabChange,
 	onNodeSelect,
 	onNodeReorder,
 	onCollapse,
 }) => {
 	const [isNodeListDragging, setIsNodeListDragging] = useState(false);
-	const showTabs = mode === "focus";
-	const nodeTabDisabled = mode === "focus" && activeTab === "nodes";
-	const visibleTab = showTabs ? activeTab : "nodes";
-	const title = useMemo(() => {
-		if (!showTabs) return "Node 导航";
-		return visibleTab === "element" ? "元素组件" : "Node 导航";
-	}, [showTabs, visibleTab]);
+	const nodeTabDisabled = mode === "focus";
 
 	return (
 		<div
@@ -1039,7 +1027,7 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 			className="flex h-full min-h-0 w-full flex-col overflow-hidden ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
 		>
 			<div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-				<div className="text-xs font-medium text-white/90">{title}</div>
+				<div className="text-xs font-medium text-white/90">Node 导航</div>
 				{onCollapse && (
 					<button
 						type="button"
@@ -1054,60 +1042,16 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 					</button>
 				)}
 			</div>
-			{showTabs && (
-				<div className="border-b border-white/10 px-3 py-2">
-					<div className="flex rounded-md bg-black/30 p-1">
-						<button
-							type="button"
-							data-testid="canvas-sidebar-tab-nodes"
-							onClick={() => onTabChange("nodes")}
-							className={cn(
-								"h-7 flex-1 rounded px-2 text-xs",
-								activeTab === "nodes"
-									? "bg-white/15 text-white"
-									: "text-neutral-300",
-								!isNodeListDragging &&
-									activeTab !== "nodes" &&
-									"hover:text-white",
-							)}
-						>
-							Node
-						</button>
-						<button
-							type="button"
-							data-testid="canvas-sidebar-tab-element"
-							onClick={() => onTabChange("element")}
-							className={cn(
-								"h-7 flex-1 rounded px-2 text-xs",
-								activeTab === "element"
-									? "bg-white/15 text-white"
-									: "text-neutral-300",
-								!isNodeListDragging &&
-									activeTab !== "element" &&
-									"hover:text-white",
-							)}
-						>
-							Element
-						</button>
-					</div>
-				</div>
-			)}
 			<div className="min-h-0 flex-1 p-3">
-				{visibleTab === "nodes" ? (
-					<NodeList
-						nodes={nodes}
-						activeNodeId={activeNodeId}
-						selectedNodeIds={selectedNodeIds}
-						disabled={nodeTabDisabled}
-						onDraggingChange={setIsNodeListDragging}
-						onNodeSelect={onNodeSelect}
-						onNodeReorder={onNodeReorder}
-					/>
-				) : (
-					<div className="min-h-0 h-full overflow-y-auto">
-						<CanvasElementLibrary />
-					</div>
-				)}
+				<NodeList
+					nodes={nodes}
+					activeNodeId={activeNodeId}
+					selectedNodeIds={selectedNodeIds}
+					disabled={nodeTabDisabled}
+					onDraggingChange={setIsNodeListDragging}
+					onNodeSelect={onNodeSelect}
+					onNodeReorder={onNodeReorder}
+				/>
 			</div>
 		</div>
 	);

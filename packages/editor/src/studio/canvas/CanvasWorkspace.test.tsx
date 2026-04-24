@@ -230,10 +230,6 @@ vi.mock("@/scene-editor/components/SceneTimelineDrawer", () => ({
 	),
 }));
 
-vi.mock("@/studio/canvas/sidebar/CanvasElementLibrary", () => ({
-	default: () => <div data-testid="canvas-element-library" />,
-}));
-
 vi.mock("@/node-system/registry", () => {
 	const GenericSkiaRenderer = () => null;
 	const createToolbar = (type: string) => () => (
@@ -2104,14 +2100,14 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
-	it("非 scene active node 会继续 fallback 到 debug meta panel", () => {
+	it("非 scene active node 会继续 fallback 到默认 node inspector", () => {
 		render(<CanvasWorkspace />);
 
 		act(() => {
 			useProjectStore.getState().setActiveNode("node-video-1");
 		});
 
-		const panel = screen.getByTestId("canvas-active-node-meta-panel");
+		const panel = screen.getByTestId("canvas-node-inspector");
 		expect(panel.textContent).toContain("Video 1");
 		expect(screen.queryByTestId("canvas-scene-node-meta-panel")).toBeNull();
 	});
@@ -2796,13 +2792,13 @@ describe("CanvasWorkspace", () => {
 		}
 	});
 
-	it("Focus 模式默认 元素 tab，Node tab 仅占位禁用", () => {
+	it("Focus 模式左侧栏只保留禁用的 Node 导航", () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(80, 80);
-		expect(screen.getByTestId("canvas-sidebar-tab-element")).toBeTruthy();
-		expect(screen.getByTestId("canvas-element-library")).toBeTruthy();
+		expect(screen.queryByTestId("canvas-sidebar-tab-element")).toBeNull();
+		expect(screen.queryByTestId("canvas-sidebar-tab-nodes")).toBeNull();
+		expect(screen.queryByTestId("canvas-element-library")).toBeNull();
 
-		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-nodes"));
 		expect(screen.getByText("拖拽 node asset 到时间线（待实现）")).toBeTruthy();
 		const beforeUi = useProjectStore.getState().currentProject?.ui;
 		const beforeCamera = useCanvasCameraStore.getState().camera;

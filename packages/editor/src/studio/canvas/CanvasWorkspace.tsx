@@ -73,7 +73,6 @@ import type {
 import type {
 	CanvasSidebarNodeReorderRequest,
 	CanvasSidebarNodeSelectOptions,
-	CanvasSidebarTab,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
 import {
 	buildCanvasClipboardEntries,
@@ -1810,17 +1809,12 @@ const CanvasWorkspace = () => {
 	}, [currentProject, resolvedDrawerTarget]);
 
 	const isSidebarFocusMode = focusedNode?.type === "scene";
-	const [sidebarTab, setSidebarTab] = useState<CanvasSidebarTab>("nodes");
 	const [sidebarExpanded, setSidebarExpanded] = useState(true);
 	const [tileDebugEnabled, setTileDebugEnabled] = useState(false);
 	const [isTileTaskBoostActive, setIsTileTaskBoostActive] = useState(false);
 	const tileMaxTasksPerTick = isTileTaskBoostActive
 		? TILE_MAX_TASKS_PER_TICK_DRAG
 		: TILE_MAX_TASKS_PER_TICK;
-
-	useEffect(() => {
-		setSidebarTab(focusedNodeId ? "element" : "nodes");
-	}, [focusedNodeId]);
 
 	const drawerIdentity = resolvedDrawerTarget
 		? `${resolvedDrawerTarget.node.id}:${resolvedDrawerTarget.trigger}`
@@ -6617,8 +6611,6 @@ const CanvasWorkspace = () => {
 				sidebarRect={overlayLayout.sidebarRect}
 				expandButtonOffsetX={expandButtonOffsetX}
 				expandButtonOffsetY={expandButtonOffsetY}
-				sidebarTab={sidebarTab}
-				onSidebarTabChange={setSidebarTab}
 				selectedNodeIds={normalizedSelectedNodeIds}
 				onSidebarNodeSelect={handleSidebarNodeSelect}
 				onSidebarNodeReorder={handleSidebarNodeReorder}

@@ -56,8 +56,8 @@ const CanvasActiveNodeMetaPanel: React.FC<CanvasActiveNodeMetaPanelProps> = ({
 
 	return (
 		<div
-			data-testid="canvas-active-node-meta-panel"
-			className="flex h-full min-h-0 w-full flex-col overflow-auto ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
+			data-testid="canvas-node-inspector"
+			className="flex h-full min-h-0 w-full flex-col ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
 		>
 			<div className="border-b border-white/10 px-3 py-2 text-xs font-medium text-white/90">
 				Active Node

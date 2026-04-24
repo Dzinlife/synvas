@@ -1,5 +1,9 @@
 import type { TimelineAsset } from "core/timeline-system/types";
-import type { CanvasNode, SceneDocument, SceneNode } from "@/studio/project/types";
+import type {
+	CanvasNode,
+	SceneDocument,
+	SceneNode,
+} from "@/studio/project/types";
 import { Bug, PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
 import { AnimatePresence, motion, usePresence } from "motion/react";
 import type React from "react";
@@ -36,7 +40,6 @@ import type { CanvasNodeDrawerProps } from "@/node-system/types";
 import CanvasSidebar, {
 	type CanvasSidebarNodeReorderRequest,
 	type CanvasSidebarNodeSelectOptions,
-	type CanvasSidebarTab,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
 import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
@@ -96,8 +99,6 @@ interface CanvasWorkspaceOverlayProps {
 	sidebarRect: OverlayRect;
 	expandButtonOffsetX: number;
 	expandButtonOffsetY: number;
-	sidebarTab: CanvasSidebarTab;
-	onSidebarTabChange: (tab: CanvasSidebarTab) => void;
 	selectedNodeIds: string[];
 	onSidebarNodeSelect: (
 		node: CanvasNode,
@@ -327,8 +328,6 @@ const CanvasWorkspaceOverlay = ({
 	sidebarRect,
 	expandButtonOffsetX,
 	expandButtonOffsetY,
-	sidebarTab,
-	onSidebarTabChange,
 	selectedNodeIds,
 	onSidebarNodeSelect,
 	onSidebarNodeReorder,
@@ -654,8 +653,6 @@ const CanvasWorkspaceOverlay = ({
 							nodes={sidebarNodes}
 							activeNodeId={activeNodeId}
 							selectedNodeIds={selectedNodeIds}
-							activeTab={sidebarTab}
-							onTabChange={onSidebarTabChange}
 							onNodeSelect={onSidebarNodeSelect}
 							onNodeReorder={onSidebarNodeReorder}
 							onCollapse={onCollapseSidebar}
