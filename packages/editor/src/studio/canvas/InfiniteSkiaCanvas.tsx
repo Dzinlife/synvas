@@ -1136,8 +1136,7 @@ const isStaticTileFrameFullyReady = (frameResult: TileFrameResult): boolean => {
 	const stats = frameResult.stats;
 	return (
 		!frameResult.hasPendingWork &&
-		stats.visibleCount === stats.readyVisibleCount &&
-		stats.coverFallbackCount === 0 &&
+		stats.visibleCount <= stats.readyVisibleCount + stats.coverFallbackCount &&
 		stats.queuedCount === 0 &&
 		stats.renderingCount === 0
 	);
@@ -1395,6 +1394,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		[],
 	);
 	const [frozenRetentionVersion, setFrozenRetentionVersion] = useState(0);
+	const retainedFrozenCameraZoomRef = useRef<number | null>(null);
 	const releasedFrozenNodeIdSet = useMemo(() => {
 		void frozenRetentionVersion;
 		if (!supportsTilePipeline) return EMPTY_NODE_ID_SET;
@@ -1728,12 +1728,19 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			previousEffectiveFrozenNodeIdSetRef.current = new Set(
 				effectiveFrozenNodeIdSet,
 			);
+			retainedFrozenCameraZoomRef.current = null;
 			setRetainedFrozenNodeIds((previous) =>
 				previous.length === 0 ? previous : [],
 			);
 			return;
 		}
 		if (releasedFrozenNodeIdSet.size > 0 || retainedFrozenNodeIds.length > 0) {
+			if (releasedFrozenNodeIdSet.size > 0) {
+				retainedFrozenCameraZoomRef.current = Math.max(
+					camera.value.zoom,
+					TILE_CAMERA_EPSILON,
+				);
+			}
 			setRetainedFrozenNodeIds((previous) => {
 				const nextNodeIds = new Set(previous);
 				for (const nodeId of releasedFrozenNodeIdSet) {
@@ -1761,6 +1768,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			effectiveFrozenNodeIdSet,
 		);
 	}, [
+		camera,
 		effectiveFrozenNodeIdSet,
 		latestNodeById,
 		releasedFrozenNodeIdSet,
@@ -2342,6 +2350,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		let staticTileDrawItems: TileDrawItem[] = [];
 		let tileDebugItems: TileDebugItem[] = [];
 		let shouldReleaseRetainedFrozenNodes = false;
+		const retainedFrozenCameraZoom = retainedFrozenCameraZoomRef.current;
+		const currentCameraZoom = Math.max(camera.value.zoom, TILE_CAMERA_EPSILON);
+		const shouldDropRetainedFrozenNodesForZoom =
+			retainedFrozenNodeIdSet.size > 0 &&
+			retainedFrozenCameraZoom !== null &&
+			Math.abs(currentCameraZoom - retainedFrozenCameraZoom) >
+				Math.max(TILE_CAMERA_EPSILON, retainedFrozenCameraZoom * 0.001);
 		const scheduler = supportsTilePipeline ? tileSchedulerRef.current : null;
 		if (scheduler) {
 			if (!isFocusMode) {
@@ -2393,7 +2408,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					)}
 					{frozenLayoutRenderNodes.map((node) => {
 						if (
-							shouldReleaseRetainedFrozenNodes &&
+							(shouldReleaseRetainedFrozenNodes ||
+								shouldDropRetainedFrozenNodesForZoom) &&
 							retainedFrozenNodeIdSet.has(node.id) &&
 							!effectiveFrozenNodeIdSet.has(node.id)
 						) {
@@ -2476,10 +2492,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					)}
 			</Group>,
 		);
-		if (shouldReleaseRetainedFrozenNodes) {
+		if (
+			shouldReleaseRetainedFrozenNodes ||
+			shouldDropRetainedFrozenNodesForZoom
+		) {
 			previousEffectiveFrozenNodeIdSetRef.current = new Set(
 				effectiveFrozenNodeIdSet,
 			);
+			retainedFrozenCameraZoomRef.current = null;
 			setFrozenRetentionVersion((previous) => previous + 1);
 			setRetainedFrozenNodeIds((previous) => {
 				const next = previous.filter((nodeId) => {

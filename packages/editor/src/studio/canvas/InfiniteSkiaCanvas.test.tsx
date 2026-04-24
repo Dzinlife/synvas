@@ -2767,7 +2767,7 @@ describe("InfiniteSkiaCanvas", () => {
 		}
 	});
 
-	it("auto layout 动画结束后 tile 未 ready 时继续保留 frozen snapshot", async () => {
+	it("auto layout 动画结束后 tile pending 时保留 snapshot，fallback 覆盖后释放", async () => {
 		tilePipelineMockState.enabled = true;
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
 		const tileImage = {
@@ -2801,7 +2801,8 @@ describe("InfiniteSkiaCanvas", () => {
 					stats: {
 						...baseFrame.stats,
 						visibleCount: 1,
-						readyVisibleCount: frameReady ? 1 : 0,
+						readyVisibleCount: 0,
+						coverFallbackCount: frameReady ? 1 : 0,
 						queuedCount: frameReady ? 0 : 1,
 					},
 				};
@@ -2868,6 +2869,97 @@ describe("InfiniteSkiaCanvas", () => {
 			});
 
 			frameReady = true;
+			rerender(<InfiniteSkiaCanvas {...baseProps} width={129} />);
+
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					animatedNode.id,
+				);
+			});
+		} finally {
+			setInputsSpy.mockRestore();
+			beginFrameSpy.mockRestore();
+		}
+	});
+
+	it("auto layout retained snapshot 遇到 zoom 变化会释放，避免低 LOD 纹理挡住高清 tile", async () => {
+		tilePipelineMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockImplementation(() => {
+				const baseFrame = createEmptyTileFrameResult();
+				return {
+					...baseFrame,
+					hasPendingWork: true,
+					stats: {
+						...baseFrame.stats,
+						visibleCount: 1,
+						readyVisibleCount: 0,
+						queuedCount: 1,
+					},
+				};
+			});
+		const image = {
+			id: "auto-layout-zoom-retain-image",
+			width: 256,
+			height: 144,
+			dispose: vi.fn(),
+		};
+		acquireImageAssetMock.mockResolvedValue({
+			asset: { image },
+			release: vi.fn(),
+		});
+		try {
+			const camera = createCameraShared({ x: 0, y: 0, zoom: 0.25 });
+			const animatedNode = createImageNode(
+				"node-image-zoom-retained-layout",
+				0,
+			);
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera,
+				nodes: [animatedNode],
+				scenes: emptyScenes,
+				assets: [createImageAsset(animatedNode.assetId)],
+				activeNodeId: null,
+				selectedNodeIds: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === animatedNode.id),
+				).toBe(true);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					animatedLayoutNodeIds={[animatedNode.id]}
+				/>,
+			);
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).toContain(
+					animatedNode.id,
+				);
+			});
+
+			rerender(<InfiniteSkiaCanvas {...baseProps} />);
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).toContain(
+					animatedNode.id,
+				);
+			});
+
+			act(() => {
+				camera.value = { x: 0, y: 0, zoom: 2 };
+			});
 			rerender(<InfiniteSkiaCanvas {...baseProps} width={129} />);
 
 			await waitFor(() => {
