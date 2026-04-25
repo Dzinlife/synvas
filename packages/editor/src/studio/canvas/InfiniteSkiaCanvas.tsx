@@ -411,7 +411,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const {
 		effectiveFrozenNodeIdSet,
 		renderFrozenNodeIdSet,
-		renderLiveNodeIdSet,
 		retainedFrozenNodeIdSet,
 		retainedLiveNodeIdSet,
 		staticTileExcludedNodeIdSet,
@@ -426,14 +425,25 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		forceLiveNodeIdSet,
 		cameraZoom: camera.value.zoom,
 	});
-	const liveRenderNodes = useMemo(() => {
-		const liveNodeIds = renderLiveNodeIdSet;
-		if (liveNodeIds.size === 0) return [];
+	const retainedLiveRenderNodes = useMemo(() => {
+		if (isFocusMode || retainedLiveNodeIdSet.size === 0) return [];
 		return renderNodes.filter((node) => {
 			if (effectiveFrozenNodeIdSet.has(node.id)) return false;
-			return liveNodeIds.has(node.id);
+			return retainedLiveNodeIdSet.has(node.id);
 		});
-	}, [effectiveFrozenNodeIdSet, renderLiveNodeIdSet, renderNodes]);
+	}, [
+		effectiveFrozenNodeIdSet,
+		isFocusMode,
+		renderNodes,
+		retainedLiveNodeIdSet,
+	]);
+	const liveRenderNodes = useMemo(() => {
+		if (liveNodeIdSet.size === 0) return [];
+		return renderNodes.filter((node) => {
+			if (effectiveFrozenNodeIdSet.has(node.id)) return false;
+			return liveNodeIdSet.has(node.id);
+		});
+	}, [effectiveFrozenNodeIdSet, liveNodeIdSet, renderNodes]);
 	const frozenLayoutRenderNodes = useMemo(() => {
 		if (renderFrozenNodeIdSet.size === 0) return [];
 		return renderNodes.filter((node) => renderFrozenNodeIdSet.has(node.id));
@@ -1316,6 +1326,32 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				}
 			}
 		}
+		const renderLiveNodeItem = (node: CanvasNode) => {
+			const layout = getNodeLayoutValue(node.id);
+			if (!layout) return null;
+			const latestNode = getLatestNodeById(node.id) ?? node;
+			const renderNode = latestNode;
+			const scene =
+				latestNode.type === "scene"
+					? (scenes[latestNode.sceneId] ?? null)
+					: null;
+			const asset =
+				"assetId" in latestNode
+					? (assetById.get(latestNode.assetId) ?? null)
+					: null;
+			return (
+				<CanvasNodeRenderItem
+					key={`canvas-node-render-${node.id}`}
+					node={renderNode}
+					layout={layout}
+					scene={scene}
+					asset={asset}
+					isActive={node.id === activeNodeId}
+					isFocused={node.id === focusedNodeId}
+					runtimeManager={runtimeManager}
+				/>
+			);
+		};
 		root.render(
 			<Group>
 				<CanvasTriDotGridBackground
@@ -1356,32 +1392,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							/>
 						);
 					})}
-					{liveRenderNodes.map((node) => {
-						const layout = getNodeLayoutValue(node.id);
-						if (!layout) return null;
-						const latestNode = getLatestNodeById(node.id) ?? node;
-						const renderNode = latestNode;
-						const scene =
-							latestNode.type === "scene"
-								? (scenes[latestNode.sceneId] ?? null)
-								: null;
-						const asset =
-							"assetId" in latestNode
-								? (assetById.get(latestNode.assetId) ?? null)
-								: null;
-						return (
-							<CanvasNodeRenderItem
-								key={`canvas-node-render-${node.id}`}
-								node={renderNode}
-								layout={layout}
-								scene={scene}
-								asset={asset}
-								isActive={node.id === activeNodeId}
-								isFocused={node.id === focusedNodeId}
-								runtimeManager={runtimeManager}
-							/>
-						);
-					})}
+					{retainedLiveRenderNodes.map(renderLiveNodeItem)}
+					{liveRenderNodes.map(renderLiveNodeItem)}
 				</Group>
 				{shouldRenderNodeLabels && (
 					<Group opacity={nodeHudOpacity}>
@@ -1443,6 +1455,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		marqueeRectScreen,
 		effectiveFrozenNodeIdSet,
 		retainedFrozenNodeIdSet,
+		retainedLiveRenderNodes,
 		retainedLiveNodeIdSet,
 		releaseRetainedNodesAfterRender,
 		scheduleTileTick,

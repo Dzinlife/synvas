@@ -2623,6 +2623,125 @@ describe("InfiniteSkiaCanvas", () => {
 		}
 	});
 
+	it("retained live node 会渲染在当前 active live node 下方", async () => {
+		tilePipelineMockState.enabled = true;
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockImplementation(() => {
+				return {
+					...createEmptyTileFrameResult(),
+					hasPendingWork: true,
+					stats: {
+						...createEmptyTileFrameResult().stats,
+						queuedCount: 1,
+					},
+				};
+			});
+		try {
+			const activeNode = createTextNode("node-text-active-live-top", 0);
+			const retainedNode = createTextNode("node-text-retained-live-below", 1);
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [activeNode, retainedNode],
+				scenes: emptyScenes,
+				assets: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={retainedNode.id}
+					selectedNodeIds={[retainedNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					retainedNode.id,
+				);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={activeNode.id}
+					selectedNodeIds={[activeNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				const liveNodeIds = getLiveRenderedNodeIds(getLatestRenderTree());
+				expect(liveNodeIds).toEqual(
+					expect.arrayContaining([retainedNode.id, activeNode.id]),
+				);
+				expect(liveNodeIds.at(-1)).toBe(activeNode.id);
+			});
+		} finally {
+			beginFrameSpy.mockRestore();
+		}
+	});
+
+	it("focus mode 会隐藏 retained live nodes", async () => {
+		tilePipelineMockState.enabled = true;
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockImplementation(() => {
+				return {
+					...createEmptyTileFrameResult(),
+					hasPendingWork: true,
+					stats: {
+						...createEmptyTileFrameResult().stats,
+						queuedCount: 1,
+					},
+				};
+			});
+		try {
+			const focusedNode = createSceneNode("node-scene-focused-live", 0);
+			const retainedNode = createTextNode("node-text-retained-focus-hidden", 1);
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [focusedNode, retainedNode],
+				scenes: emptyScenes,
+				assets: [],
+			};
+			const { rerender } = render(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={retainedNode.id}
+					selectedNodeIds={[retainedNode.id]}
+					focusedNodeId={null}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					retainedNode.id,
+				);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={focusedNode.id}
+					selectedNodeIds={[focusedNode.id]}
+					focusedNodeId={focusedNode.id}
+				/>,
+			);
+
+			await waitFor(() => {
+				const liveNodeIds = getLiveRenderedNodeIds(getLatestRenderTree());
+				expect(liveNodeIds).toContain(focusedNode.id);
+				expect(liveNodeIds).not.toContain(retainedNode.id);
+			});
+		} finally {
+			beginFrameSpy.mockRestore();
+		}
+	});
+
 	it("auto layout frozen snapshot 从 tile 裁剪时会使用真实纹理像素尺寸", async () => {
 		tilePipelineMockState.enabled = true;
 		skiaSurfaceMockState.defaultPixelRatio = 2;
