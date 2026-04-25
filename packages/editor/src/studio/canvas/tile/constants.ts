@@ -1,10 +1,10 @@
 export const TILE_LOD_BASE = 0 as const;
 export const TILE_LOD_MIN = -Infinity;
 export const TILE_LOD_MAX = 2;
-export const TILE_LOD_HYSTERESIS = 0.2;
-export const TILE_LOD_STEP_PER_FRAME = 1;
+export const TILE_LOD_HYSTERESIS = 0;
+export const TILE_LOD_STEP_PER_FRAME = 3;
 export const TILE_WORLD_SIZE_L0 = 512;
-export const TILE_PIXEL_SIZE = 384;
+export const TILE_PIXEL_SIZE = 512;
 export const TILE_OVERSCAN_TILES = 1;
 export const TILE_FRAME_BUDGET_MS = 3;
 export const TILE_MAX_TASKS_PER_TICK = 4;

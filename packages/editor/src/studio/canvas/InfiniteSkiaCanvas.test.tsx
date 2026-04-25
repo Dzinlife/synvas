@@ -14,7 +14,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
-import { TILE_MAX_TASKS_PER_TICK_DRAG } from "./tile/constants";
+import {
+	TILE_MAX_TASKS_PER_TICK_DRAG,
+	TILE_PIXEL_SIZE,
+} from "./tile/constants";
 import { StaticTileScheduler } from "./tile/scheduler";
 import type { TileDrawItem, TileFrameResult, TileInput } from "./tile/types";
 
@@ -2624,9 +2627,12 @@ describe("InfiniteSkiaCanvas", () => {
 		tilePipelineMockState.enabled = true;
 		skiaSurfaceMockState.defaultPixelRatio = 2;
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const tileDrawSize = 512;
+		const tilePixelRatio = 2;
+		const tileImageSize = TILE_PIXEL_SIZE * tilePixelRatio;
 		const tileImage = {
-			width: vi.fn(() => 768),
-			height: vi.fn(() => 768),
+			width: vi.fn(() => tileImageSize),
+			height: vi.fn(() => tileImageSize),
 			dispose: vi.fn(),
 		};
 		const beginFrameSpy = vi
@@ -2642,7 +2648,7 @@ describe("InfiniteSkiaCanvas", () => {
 						ty: 0,
 						left: 0,
 						top: 0,
-						size: 512,
+						size: tileDrawSize,
 						image: tileImage as unknown as TileDrawItem["image"],
 					},
 				],
@@ -2690,7 +2696,7 @@ describe("InfiniteSkiaCanvas", () => {
 				);
 			});
 			const snapshotSurface = skiaSurfaceMockState.surfaces.find(
-				(surface) => surface.pixelRatio === 2,
+				(surface) => surface.pixelRatio === tilePixelRatio,
 			);
 			expect(snapshotSurface).toBeTruthy();
 			const drawCall = snapshotSurface?.canvas.drawImageRect.mock.calls[0];
@@ -2698,19 +2704,19 @@ describe("InfiniteSkiaCanvas", () => {
 			const sourceRect = drawCall?.[1] as
 				| { x: number; y: number; width: number; height: number }
 				| undefined;
-			const bleed = (512 / 384) * 0.5;
-			const drawSize = 512 + bleed * 2;
+			const bleed = (tileDrawSize / TILE_PIXEL_SIZE) * 0.5;
+			const drawSize = tileDrawSize + bleed * 2;
 			expect(sourceRect?.x).toBeCloseTo(
-				((animatedNode.x + bleed) / drawSize) * 768,
+				((animatedNode.x + bleed) / drawSize) * tileImageSize,
 			);
 			expect(sourceRect?.y).toBeCloseTo(
-				((animatedNode.y + bleed) / drawSize) * 768,
+				((animatedNode.y + bleed) / drawSize) * tileImageSize,
 			);
 			expect(sourceRect?.width).toBeCloseTo(
-				(animatedNode.width / drawSize) * 768,
+				(animatedNode.width / drawSize) * tileImageSize,
 			);
 			expect(sourceRect?.height).toBeCloseTo(
-				(animatedNode.height / drawSize) * 768,
+				(animatedNode.height / drawSize) * tileImageSize,
 			);
 		} finally {
 			setInputsSpy.mockRestore();
