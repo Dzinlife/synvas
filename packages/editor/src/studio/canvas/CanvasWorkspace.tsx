@@ -5,6 +5,7 @@ import { useProjectStore } from "@/projects/projectStore";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
+import { resolveSkiaCanvasColorSpaceForScene } from "@/studio/project/colorManagement";
 import CanvasWorkspaceOverlay from "./CanvasWorkspaceOverlay";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { useCanvasInteractionStore } from "./canvasInteractionStore";
@@ -67,6 +68,13 @@ const CanvasWorkspace = () => {
 	});
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
+	const activeScene = activeSceneId
+		? (currentProject?.scenes[activeSceneId] ?? null)
+		: null;
+	const canvasColorSpace = useMemo(
+		() => resolveSkiaCanvasColorSpaceForScene(currentProject, activeScene),
+		[currentProject, activeScene],
+	);
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
 	const isCanvasInteractionLocked = Boolean(focusedNodeId);
@@ -222,6 +230,7 @@ const CanvasWorkspace = () => {
 				tileDebugEnabled={tileDebugEnabled}
 				tileMaxTasksPerTick={tileMaxTasksPerTick}
 				tileLodTransition={effectiveTileLodTransition}
+				colorSpace={canvasColorSpace}
 				onNodeResize={handleSkiaNodeResize}
 				onSelectionResize={handleSelectionResize}
 				onLabelHitTesterChange={handleLabelHitTesterChange}

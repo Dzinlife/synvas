@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import type { TextureSourceTargetColorSpace } from "react-skia-lite";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import {
 	type VideoNodePlaybackController,
@@ -20,16 +21,20 @@ const EMPTY_SNAPSHOT: VideoNodePlaybackSnapshot = {
 interface UseVideoNodePlaybackOptions {
 	nodeId: string;
 	assetUri: string | null;
+	assetId?: string | null;
 	fps: number;
 	runtimeManager: StudioRuntimeManager | null;
+	targetColorSpace?: TextureSourceTargetColorSpace;
 	active?: boolean;
 }
 
 export const useVideoNodePlayback = ({
 	nodeId,
 	assetUri,
+	assetId = null,
 	fps,
 	runtimeManager,
+	targetColorSpace,
 	active = true,
 }: UseVideoNodePlaybackOptions) => {
 	const [controller, setController] =
@@ -47,11 +52,13 @@ export const useVideoNodePlayback = ({
 		if (!controller) return;
 		controller.bind({
 			assetUri,
+			assetId,
 			fps,
 			runtimeManager,
+			targetColorSpace,
 			active,
 		});
-	}, [active, assetUri, controller, fps, runtimeManager]);
+	}, [active, assetId, assetUri, controller, fps, runtimeManager, targetColorSpace]);
 
 	const subscribe = useCallback(
 		(listener: () => void) => {

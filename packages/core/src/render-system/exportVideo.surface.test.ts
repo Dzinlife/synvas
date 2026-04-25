@@ -45,6 +45,8 @@ describe("exportVideo surface selection", () => {
 			expect(createSkiaCanvasSurfaceMock).toHaveBeenCalledWith(
 				(globalThis as { CanvasKit?: unknown }).CanvasKit,
 				canvas,
+				{ bundle, kind },
+				{ colorSpace: "srgb" },
 			);
 			expect(result).toEqual({
 				surface,

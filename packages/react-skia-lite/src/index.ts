@@ -13,7 +13,11 @@ export { useContextBridge } from "./renderer/ContextBridge";
 export * from "./skia";
 export { JsiSkImage } from "./skia/web/JsiSkImage";
 export { JsiSkSurface } from "./skia/web/JsiSkSurface";
-export { makeImageFromTextureSourceDirect } from "./skia/web/makeTextureSourceImage";
+export {
+	makeImageFromTextureSourceDirect,
+	type TextureSourceImageOptions,
+	type TextureSourceTargetColorSpace,
+} from "./skia/web/makeTextureSourceImage";
 export {
 	captureTrackedSkiaHostObjectsSnapshot,
 	diffTrackedSkiaHostObjectSnapshots,

@@ -1,5 +1,8 @@
 import type { TimelineJSON } from "core/timeline-system/loader";
-import type { TimelineAsset } from "core/timeline-system/types";
+import type {
+	ColorManagementSettings,
+	TimelineAsset,
+} from "core";
 import {
 	clearSceneTombstone,
 	ensureStudioProjectOt,
@@ -155,6 +158,12 @@ interface ProjectStoreState {
 		sceneId: string,
 		timeline: TimelineJSON,
 		options?: UpdateSceneTimelineOptions,
+	) => void;
+	updateSceneColor: (
+		sceneId: string,
+		updater: (
+			prev: Partial<ColorManagementSettings> | undefined,
+		) => Partial<ColorManagementSettings> | undefined,
 	) => void;
 	updateScenePosterFrame: (sceneId: string, posterFrame: number) => void;
 	updateActiveSceneTimeline: (
@@ -1239,6 +1248,29 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					...state.sceneTimelineMutationOpIds,
 					[sceneId]: options?.txnId ?? options?.historyOpId,
 				},
+			};
+		});
+	},
+	updateSceneColor: (sceneId, updater) => {
+		set((state) => {
+			if (!state.currentProject) return state;
+			const currentScene = state.currentProject.scenes[sceneId];
+			if (!currentScene) return state;
+			const nextColor = updater(currentScene.color);
+			if (nextColor === currentScene.color) return state;
+			const nextProject = withProjectRevision({
+				...state.currentProject,
+				scenes: {
+					...state.currentProject.scenes,
+					[sceneId]: {
+						...currentScene,
+						...(nextColor ? { color: nextColor } : { color: undefined }),
+						updatedAt: Date.now(),
+					},
+				},
+			});
+			return {
+				currentProject: nextProject,
 			};
 		});
 	},

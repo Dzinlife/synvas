@@ -16,6 +16,7 @@ import {
 	Group,
 	makeMutable,
 	markSkiaRuntimeActivity,
+	type SkiaWebCanvasColorSpace,
 	type SharedValue,
 	useDerivedValue,
 	useSharedValue,
@@ -150,6 +151,7 @@ interface InfiniteSkiaCanvasProps {
 	tileDebugEnabled?: boolean;
 	tileMaxTasksPerTick?: number;
 	tileLodTransition?: TileLodTransition | null;
+	colorSpace?: SkiaWebCanvasColorSpace;
 	onNodeResize?: (event: CanvasNodeResizeEvent) => void;
 	onSelectionResize?: (event: CanvasSelectionResizeEvent) => void;
 	onLabelHitTesterChange?: (tester: CanvasNodeLabelHitTester | null) => void;
@@ -193,6 +195,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	tileDebugEnabled = false,
 	tileMaxTasksPerTick,
 	tileLodTransition = null,
+	colorSpace,
 	onNodeResize,
 	onSelectionResize,
 	onLabelHitTesterChange,
@@ -1495,7 +1498,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				suspendHover ? "pointer-events-none" : "pointer-events-auto"
 			}`}
 		>
-			<Canvas ref={canvasRef} style={{ width, height }} />
+			<Canvas ref={canvasRef} style={{ width, height }} colorSpace={colorSpace} />
 			{!suspendHover && focusedNode && FocusEditorBridge && (
 				<FocusEditorBridge
 					width={width}

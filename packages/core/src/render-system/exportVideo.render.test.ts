@@ -68,6 +68,10 @@ vi.mock("react-skia-lite", () => ({
 }));
 
 import { exportTimelineAsVideoCore } from "./exportVideo";
+import {
+	COLOR_SPACE_PRESETS,
+	DEFAULT_COLOR_MANAGEMENT_SETTINGS,
+} from "../color-management";
 
 const createMockSurface = () => ({
 	getCanvas: () => ({
@@ -162,6 +166,44 @@ describe("exportTimelineAsVideoCore live render", () => {
 		expect(canvasSourceAddMock).toHaveBeenNthCalledWith(2, 1 / 30, 1 / 30);
 		expect(canvasSourceAddMock).toHaveBeenNthCalledWith(3, 2 / 30, 1 / 30);
 		expect(skiaRootUnmountMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("P3 SDR 导出会把 surface 目标切到 Display P3", async () => {
+		const buildSkiaFrameSnapshot = vi.fn(async () => ({
+			children: [],
+			orderedElements: [],
+			visibleElements: [],
+			transitionFrameState: {
+				activeTransitions: [],
+				hiddenElementIds: [],
+			},
+			picture: { id: "picture" } as never,
+			ready: Promise.resolve(),
+			dispose: vi.fn(),
+		}));
+		const buildSkiaRenderState = vi.fn(async () => createRenderState());
+
+		await exportTimelineAsVideoCore({
+			elements: [],
+			tracks: [],
+			fps: 30,
+			canvasSize: { width: WIDTH, height: HEIGHT },
+			startFrame: 0,
+			endFrame: 1,
+			buildSkiaFrameSnapshot,
+			buildSkiaRenderState,
+			colorSettings: {
+				...DEFAULT_COLOR_MANAGEMENT_SETTINGS,
+				export: COLOR_SPACE_PRESETS.displayP3Sdr,
+			},
+		});
+
+		expect(createSkiaCanvasSurfaceMock).toHaveBeenCalledWith(
+			(globalThis as { CanvasKit?: unknown }).CanvasKit,
+			expect.anything(),
+			expect.objectContaining({ kind: "webgpu" }),
+			{ colorSpace: "p3" },
+		);
 	});
 
 	it("WebGPU surface 创建失败时会直接报错，不再回退", async () => {

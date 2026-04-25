@@ -7,7 +7,9 @@ import {
 	getOwner,
 	requestOwner,
 } from "@/audio/owner";
+import { useProjectStore } from "@/projects/projectStore";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
+import type { StudioProject } from "@/studio/project/types";
 
 const mocks = vi.hoisted(() => {
 	const createFrameController = () => {
@@ -49,7 +51,7 @@ const mocks = vi.hoisted(() => {
 		getAudioContext: vi.fn(),
 		createFramePrecompileController: vi.fn(),
 		createFrameController,
-		videoSampleToSkImage: vi.fn(),
+		videoSampleToColorManagedSkImage: vi.fn(),
 		closeVideoSample: vi.fn(),
 	};
 });
@@ -82,7 +84,7 @@ vi.mock("core/render-system/framePrecompileController", () => ({
 }));
 
 vi.mock("@/lib/videoFrameUtils", () => ({
-	videoSampleToSkImage: mocks.videoSampleToSkImage,
+	videoSampleToColorManagedSkImage: mocks.videoSampleToColorManagedSkImage,
 	closeVideoSample: mocks.closeVideoSample,
 }));
 
@@ -180,6 +182,10 @@ const createFrameWithCloneSpy = (id: string) => {
 describe("video playbackController", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		useProjectStore.setState({
+			currentProject: null,
+			currentProjectId: null,
+		});
 		__resetAudioOwnerForTests();
 		__resetVideoNodePlaybackControllersForTests();
 		mocks.getAudioContext.mockReturnValue(null);
@@ -190,8 +196,17 @@ describe("video playbackController", () => {
 			stopPlayback: vi.fn(),
 			dispose: vi.fn(),
 		});
-		mocks.videoSampleToSkImage.mockReturnValue({
-			dispose: vi.fn(),
+		mocks.videoSampleToColorManagedSkImage.mockReturnValue({
+			image: {
+				dispose: vi.fn(),
+			},
+			sourceColorSpace: {
+				primaries: "srgb",
+				transfer: "bt709",
+				matrix: "bt709",
+				range: "limited",
+				label: "Rec.709 SDR",
+			},
 		});
 		mocks.createFramePrecompileController.mockImplementation(() => {
 			return mocks.createFrameController();
@@ -199,6 +214,10 @@ describe("video playbackController", () => {
 	});
 
 	afterEach(() => {
+		useProjectStore.setState({
+			currentProject: null,
+			currentProjectId: null,
+		});
 		__resetAudioOwnerForTests();
 		__resetVideoNodePlaybackControllersForTests();
 	});
@@ -512,6 +531,75 @@ describe("video playbackController", () => {
 		expect(video.samplesMock).toHaveBeenCalled();
 
 		releaseVideoNodePlaybackController("node-scrub-fallback");
+	});
+
+	it("解码首帧时会写入素材色彩 metadata 并透传预览目标", async () => {
+		const video = createVideoHandle(10);
+		const audio = createAudioHandle();
+		const sample = { timestamp: 0, close: vi.fn() };
+		const sourceColorSpace = {
+			primaries: "bt2020",
+			transfer: "pq",
+			matrix: "bt2020-ncl",
+			range: "limited",
+			label: "Rec.2100 PQ",
+		} as const;
+		mocks.acquireVideoAsset.mockResolvedValue(video.handle);
+		mocks.acquireAudioAsset.mockResolvedValue(audio);
+		mocks.stepVideoPlaybackSession.mockResolvedValue(sample);
+		mocks.videoSampleToColorManagedSkImage.mockReturnValue({
+			image: { id: "decoded", dispose: vi.fn() },
+			sourceColorSpace,
+		});
+		useProjectStore.setState({
+			currentProjectId: "project-1",
+			currentProject: {
+				id: "project-1",
+				revision: 0,
+				canvas: { nodes: [] },
+				scenes: {},
+				assets: [
+					{
+						id: "asset-video-1",
+						kind: "video",
+						name: "video.mp4",
+						locator: { type: "linked-file", filePath: "/video.mp4" },
+					},
+				],
+				ui: {
+					activeSceneId: null,
+					focusedNodeId: null,
+					activeNodeId: null,
+					canvasSnapEnabled: true,
+					camera: { x: 0, y: 0, zoom: 1 },
+				},
+				createdAt: 1,
+				updatedAt: 1,
+			} satisfies StudioProject,
+		});
+
+		const controller = retainVideoNodePlaybackController("node-color-meta");
+		controller.bind({
+			assetUri: "file:///color-meta.mp4",
+			assetId: "asset-video-1",
+			fps: 30,
+			runtimeManager: null,
+			targetColorSpace: "display-p3",
+		});
+
+		await waitFor(() => {
+			expect(controller.getSnapshot().currentFrame).not.toBeNull();
+		});
+
+		expect(mocks.videoSampleToColorManagedSkImage).toHaveBeenCalledWith(sample, {
+			targetColorSpace: "display-p3",
+		});
+		expect(
+			useProjectStore.getState().currentProject?.assets[0]?.meta?.color
+				?.detected,
+		).toEqual(sourceColorSpace);
+
+		releaseVideoNodePlaybackController("node-color-meta");
 	});
 
 	it("lookahead 会在跳跃 seek 与暂停时失效重建", async () => {

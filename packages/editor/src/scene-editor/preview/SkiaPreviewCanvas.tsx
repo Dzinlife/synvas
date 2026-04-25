@@ -15,6 +15,7 @@ import {
 	useContextBridge,
 } from "react-skia-lite";
 import { useTimelineStore } from "@/scene-editor/contexts/TimelineContext";
+import { useProjectStore } from "@/projects/projectStore";
 import {
 	EditorRuntimeContext,
 	useEditorRuntime,
@@ -22,6 +23,7 @@ import {
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
+import { resolveSkiaCanvasColorSpaceForScene } from "@/studio/project/colorManagement";
 import type { TimelineTrack } from "@/scene-editor/timeline/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { textTypographyFacade } from "@/typography/textTypographyFacade";
@@ -132,6 +134,12 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	);
 	const fps = useTimelineStore((state) => state.fps);
 	const isPlaying = useTimelineStore((state) => state.isPlaying);
+	const currentProject = useProjectStore((state) => state.currentProject);
+	const rootScene = rootSceneId ? (currentProject?.scenes[rootSceneId] ?? null) : null;
+	const canvasColorSpace = useMemo(
+		() => resolveSkiaCanvasColorSpaceForScene(currentProject, rootScene),
+		[currentProject, rootScene],
+	);
 
 	const preemptBuildQueue = useCallback(() => {
 		buildQueueEpochRef.current += 1;
@@ -505,10 +513,11 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 					height: canvasHeight,
 					overflow: "hidden",
 				}}
+				colorSpace={canvasColorSpace}
 				ref={targetCanvasRef}
 			/>
 		);
-	}, [canvasWidth, canvasHeight, targetCanvasRef]);
+	}, [canvasColorSpace, canvasWidth, canvasHeight, targetCanvasRef]);
 
 	return skiaCanvas;
 };

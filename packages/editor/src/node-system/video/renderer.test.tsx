@@ -20,9 +20,15 @@ vi.mock("../thumbnail/useCanvasNodeThumbnailImage", () => ({
 }));
 
 vi.mock("@/projects/projectStore", () => ({
-	useProjectStore: (selector: (state: { currentProjectId: string | null }) => unknown) =>
+	useProjectStore: (
+		selector: (state: {
+			currentProjectId: string | null;
+			currentProject: unknown;
+		}) => unknown,
+	) =>
 		selector({
 			currentProjectId: "project-1",
+			currentProject: null,
 		}),
 }));
 
@@ -82,11 +88,21 @@ const runtimeManager = {
 describe("VideoNodeSkiaRenderer", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		Object.defineProperty(window, "matchMedia", {
+			configurable: true,
+			value: vi.fn((query: string) => ({
+				matches: query === "(color-gamut: p3)",
+				media: query,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+			})),
+		});
 		mocks.useCanvasNodeThumbnailImage.mockReturnValue(null);
 	});
 
 	afterEach(() => {
 		cleanup();
+		vi.restoreAllMocks();
 	});
 
 	it("有帧时渲染 ImageShader", () => {
@@ -246,6 +262,8 @@ describe("VideoNodeSkiaRenderer", () => {
 			]?.[0] ?? null;
 		expect(lastCall).toMatchObject({
 			nodeId: "video-node-1",
+			assetId: "asset-video-1",
+			targetColorSpace: "display-p3",
 			active: false,
 		});
 	});

@@ -1,4 +1,5 @@
 export * from "./timeline-system/timecode";
+export * from "./color-management";
 export * from "./asr/types";
 export * from "./timeline-system/types";
 export * from "./timeline-system/position";

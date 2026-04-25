@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_COLOR_MANAGEMENT_SETTINGS } from "core";
 import { parseStudioProject } from "./schema";
 
 const createValidProject = () => ({
@@ -181,6 +182,33 @@ describe("studio schema", () => {
 		delete (legacy.ui as { canvasSnapEnabled?: unknown }).canvasSnapEnabled;
 		const parsed = parseStudioProject(legacy);
 		expect(parsed.ui.canvasSnapEnabled).toBe(true);
+	});
+
+	it("缺失色彩管理字段时应回填项目默认值", () => {
+		const legacy = createValidProject();
+		const parsed = parseStudioProject(legacy);
+		expect(parsed.color).toEqual(DEFAULT_COLOR_MANAGEMENT_SETTINGS);
+	});
+
+	it("会保留 scene 与 asset 的色彩 metadata", () => {
+		const project = createValidProject();
+		(project.scenes["scene-1"] as { color?: unknown }).color = {
+			preview: "srgb",
+		};
+		(project.assets[0].meta as { color?: unknown }).color = {
+			detected: {
+				primaries: "bt2020",
+				transfer: "pq",
+				matrix: "bt2020-ncl",
+				range: "limited",
+				label: "Rec.2100 PQ",
+			},
+		};
+
+		const parsed = parseStudioProject(project);
+
+		expect(parsed.scenes["scene-1"]?.color?.preview).toBe("srgb");
+		expect(parsed.assets[0]?.meta?.color?.detected?.transfer).toBe("pq");
 	});
 
 	it("缺失 parentId 时应回填 null", () => {

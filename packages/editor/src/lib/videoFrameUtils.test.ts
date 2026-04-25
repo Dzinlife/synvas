@@ -3,6 +3,8 @@ import type { VideoSample } from "mediabunny";
 import {
 	closeVideoFrame,
 	closeVideoSample,
+	normalizeVideoFrameColorSpace,
+	videoSampleToColorManagedSkImage,
 	videoSampleToSkImage,
 } from "./videoFrameUtils";
 
@@ -39,7 +41,9 @@ describe("videoFrameUtils", () => {
 		mocks.makeImageFromTextureSourceDirect.mockReturnValue(image);
 
 		expect(videoSampleToSkImage(sample)).toBe(image);
-		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(frame);
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(frame, {
+			colorConversion: "browser",
+		});
 		expect(frame.close).toHaveBeenCalledTimes(1);
 		expect(sample.close).toHaveBeenCalledTimes(1);
 	});
@@ -62,6 +66,51 @@ describe("videoFrameUtils", () => {
 		expect(videoSampleToSkImage(sample)).toBe(image);
 		expect(frame.close).not.toHaveBeenCalled();
 		expect(sample.close).toHaveBeenCalledTimes(1);
+	});
+
+	it("color-managed 版本会返回归一化视频色彩空间", () => {
+		const frame = {
+			colorSpace: {
+				toJSON: () => ({
+					primaries: "bt2020",
+					transfer: "pq",
+					matrix: "bt2020-ncl",
+					fullRange: false,
+				}),
+			},
+			close: vi.fn(),
+		} as unknown as VideoFrame;
+		const sample = {
+			toVideoFrame: vi.fn(() => frame),
+			close: vi.fn(),
+		} as unknown as VideoSample;
+		const image = { id: "image" };
+		mocks.getSkiaRenderBackend.mockReturnValue({
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: {} as never,
+		});
+		mocks.makeImageFromTextureSourceDirect.mockReturnValue(image);
+
+		expect(
+			videoSampleToColorManagedSkImage(sample, {
+				targetColorSpace: "display-p3",
+			}),
+		).toEqual({
+			image,
+			sourceColorSpace: {
+				primaries: "bt2020",
+				transfer: "pq",
+				matrix: "bt2020-ncl",
+				range: "limited",
+				label: "Rec.2100 PQ",
+			},
+		});
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(frame, {
+			colorConversion: "browser",
+			targetColorSpace: "display-p3",
+		});
 	});
 
 	it("失败时仍会关闭 VideoFrame 与 sample", () => {
@@ -101,5 +150,39 @@ describe("videoFrameUtils", () => {
 
 		expect(() => closeVideoFrame(frame)).not.toThrow();
 		expect(() => closeVideoSample(sample)).not.toThrow();
+	});
+
+	it("会归一化常见 VideoFrame.colorSpace 元数据", () => {
+		expect(
+			normalizeVideoFrameColorSpace({
+				colorSpace: {
+					primaries: "smpte432",
+					transfer: "iec61966-2-1",
+					matrix: "rgb",
+					fullRange: true,
+				} as never,
+			}),
+		).toEqual({
+			primaries: "display-p3",
+			transfer: "srgb",
+			matrix: "rgb",
+			range: "full",
+			label: "Display P3 SDR",
+		});
+		expect(
+			normalizeVideoFrameColorSpace({
+				colorSpace: {
+					primaries: null,
+					transfer: null,
+					matrix: null,
+					fullRange: null,
+				} as never,
+			}),
+		).toEqual({
+			primaries: "unknown",
+			transfer: "unknown",
+			matrix: "unknown",
+			range: "unknown",
+		});
 	});
 });

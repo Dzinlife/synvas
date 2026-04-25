@@ -15,8 +15,21 @@ type CanvasKitWithLazyTextureSourceImage = typeof CanvasKit & {
 type WebGPUExternalImageCopy = Parameters<
 	GPUQueue["copyExternalImageToTexture"]
 >[0];
+type WebGPUExternalTextureDestination = Parameters<
+	GPUQueue["copyExternalImageToTexture"]
+>[1] & {
+	colorSpace?: PredefinedColorSpace;
+};
+
+export type TextureSourceTargetColorSpace = "srgb" | "display-p3";
+
+export interface TextureSourceImageOptions {
+	targetColorSpace?: TextureSourceTargetColorSpace;
+	colorConversion?: "browser" | "none";
+}
 
 const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
+let didWarnWebGLColorManagedTextureSource = false;
 
 const getWebGPUTextureUsage = () => {
 	if (typeof GPUTextureUsage === "undefined") {
@@ -73,14 +86,50 @@ const toExternalTextureSource = (source: TextureSource | VideoFrame) =>
 		source: source as never,
 	}) as WebGPUExternalImageCopy;
 
+const resolveTargetColorSpace = (
+	options: TextureSourceImageOptions | undefined,
+): TextureSourceTargetColorSpace =>
+	options?.targetColorSpace === "display-p3" &&
+	CanvasKit.ColorSpace.DISPLAY_P3
+		? "display-p3"
+		: "srgb";
+
+const toCanvasKitTextureColorSpace = (
+	targetColorSpace: TextureSourceTargetColorSpace,
+) =>
+	targetColorSpace === "display-p3" && CanvasKit.ColorSpace.DISPLAY_P3
+		? CanvasKit.ColorSpace.DISPLAY_P3
+		: CanvasKit.ColorSpace.SRGB;
+
+const toExternalTextureDestination = (
+	texture: GPUTexture,
+	targetColorSpace: TextureSourceTargetColorSpace,
+	options: TextureSourceImageOptions | undefined,
+): WebGPUExternalTextureDestination => ({
+	texture,
+	...(options?.colorConversion === "none"
+		? {}
+		: { colorSpace: targetColorSpace }),
+});
+
 export const makeImageFromTextureSourceDirect = (
 	source: TextureSource | VideoFrame,
+	options?: TextureSourceImageOptions,
 ): JsiSkImage | null => {
 	const backend = getSkiaRenderBackend();
 	if (backend.kind === "webgl") {
+		if (
+			(options?.targetColorSpace === "display-p3" ||
+				options?.colorConversion === "browser") &&
+			!didWarnWebGLColorManagedTextureSource
+		) {
+			didWarnWebGLColorManagedTextureSource = true;
+			console.info(
+				"WebGL texture-source images are created through the sRGB compatibility path.",
+			);
+		}
 		try {
-			const canvasKit =
-				CanvasKit as CanvasKitWithLazyTextureSourceImage;
+			const canvasKit = CanvasKit as CanvasKitWithLazyTextureSourceImage;
 			const image =
 				canvasKit.MakeLazyImageFromTextureSource?.(
 					source as TextureSource,
@@ -96,6 +145,7 @@ export const makeImageFromTextureSourceDirect = (
 	}
 	const width = Math.max(1, Math.ceil(getTextureSourceWidth(source)));
 	const height = Math.max(1, Math.ceil(getTextureSourceHeight(source)));
+	const targetColorSpace = resolveTargetColorSpace(options);
 	const textureFormat = getPreferredWebGPUTextureFormat();
 	const texture = backend.device.createTexture({
 		size: {
@@ -108,7 +158,7 @@ export const makeImageFromTextureSourceDirect = (
 	try {
 		backend.device.queue.copyExternalImageToTexture(
 			toExternalTextureSource(source),
-			{ texture },
+			toExternalTextureDestination(texture, targetColorSpace, options),
 			{
 				width,
 				height,
@@ -119,7 +169,7 @@ export const makeImageFromTextureSourceDirect = (
 			texture,
 			CanvasKit.ColorType.RGBA_8888,
 			CanvasKit.AlphaType.Unpremul,
-			CanvasKit.ColorSpace.SRGB,
+			toCanvasKitTextureColorSpace(targetColorSpace),
 			undefined,
 			undefined,
 			() => {

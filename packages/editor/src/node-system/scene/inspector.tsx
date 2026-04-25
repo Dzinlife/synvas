@@ -1,5 +1,12 @@
 import { resolveTimelineEndFrame } from "core/timeline-system/utils/timelineEndFrame";
 import {
+	getColorSpacePresetKey,
+	formatColorSpaceDescriptor,
+	type ColorManagementSettings,
+	type ColorSpaceDescriptor,
+	type PreviewColorSpaceTarget,
+} from "core";
+import {
 	MousePointer2,
 	Shapes,
 	SlidersHorizontal,
@@ -13,6 +20,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useProjectStore } from "@/projects/projectStore";
 import { framesToTimecode } from "@/utils/timecode";
 import ElementSettingsPanel from "@/scene-editor/components/ElementSettingsPanel";
 import { useSelectedElement } from "@/scene-editor/contexts/TimelineContext";
@@ -27,6 +35,11 @@ import type {
 	StudioRuntimeManager,
 } from "@/scene-editor/runtime/types";
 import CanvasActiveNodeMetaPanel from "@/studio/canvas/CanvasActiveNodeMetaPanel";
+import {
+	SCENE_EXPORT_COLOR_OPTIONS,
+	SCENE_WORKING_COLOR_OPTIONS,
+	resolveSceneColorContext,
+} from "@/studio/project/colorManagement";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import type { CanvasNodeInspectorProps } from "../types";
 
@@ -70,15 +83,95 @@ const Item = ({ label, value }: { label: string; value: React.ReactNode }) => {
 	);
 };
 
+const getDescriptorSelectKey = (
+	descriptor: ColorSpaceDescriptor | undefined,
+	fallback = "inherit",
+) => {
+	if (!descriptor) return fallback;
+	return getColorSpacePresetKey(descriptor) ?? "custom";
+};
+
+const normalizeSceneColorPatch = (
+	color: Partial<ColorManagementSettings>,
+): Partial<ColorManagementSettings> | undefined =>
+	Object.keys(color).length > 0 ? color : undefined;
+
 const SceneNodeMetaPanel = ({ scene }: { scene: SceneDocument }) => {
+	const currentProject = useProjectStore((state) => state.currentProject);
+	const updateSceneColor = useProjectStore((state) => state.updateSceneColor);
+	const colorContext = useMemo(
+		() => resolveSceneColorContext(currentProject, scene),
+		[currentProject, scene],
+	);
 	const durationFrames = useMemo(() => {
 		return resolveTimelineEndFrame(scene.timeline.elements);
 	}, [scene.timeline.elements]);
+	const workingKey = getDescriptorSelectKey(scene.color?.working);
+	const previewKey = scene.color?.preview ?? "inherit";
+	const exportKey = getDescriptorSelectKey(scene.color?.export);
+
+	const updateWorking = (descriptor: ColorSpaceDescriptor | null) => {
+		updateSceneColor(scene.id, (prev) => {
+			const next = { ...(prev ?? {}) };
+			if (descriptor) {
+				next.working = { ...descriptor };
+			} else {
+				delete next.working;
+			}
+			return normalizeSceneColorPatch(next);
+		});
+	};
+	const updatePreview = (preview: PreviewColorSpaceTarget | null) => {
+		updateSceneColor(scene.id, (prev) => {
+			const next = { ...(prev ?? {}) };
+			if (preview) {
+				next.preview = preview;
+			} else {
+				delete next.preview;
+			}
+			return normalizeSceneColorPatch(next);
+		});
+	};
+	const updateExport = (descriptor: ColorSpaceDescriptor | null) => {
+		updateSceneColor(scene.id, (prev) => {
+			const next = { ...(prev ?? {}) };
+			if (descriptor) {
+				next.export = { ...descriptor };
+			} else {
+				delete next.export;
+			}
+			return normalizeSceneColorPatch(next);
+		});
+	};
 
 	return (
 		<div
 			data-testid="canvas-scene-node-meta-panel"
 			className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3"
+			onChange={(event) => {
+				const target = event.target as HTMLSelectElement | null;
+				const value = target?.value;
+				if (!target || typeof value !== "string") return;
+				if (target.dataset.colorField === "working") {
+					const option = SCENE_WORKING_COLOR_OPTIONS.find(
+						(item) => item.key === value,
+					);
+					if (option) updateWorking(option.descriptor);
+					return;
+				}
+				if (target.dataset.colorField === "preview") {
+					updatePreview(
+						value === "inherit" ? null : (value as PreviewColorSpaceTarget),
+					);
+					return;
+				}
+				if (target.dataset.colorField === "export") {
+					const option = SCENE_EXPORT_COLOR_OPTIONS.find(
+						(item) => item.key === value,
+					);
+					if (option) updateExport(option.descriptor);
+				}
+			}}
 		>
 			<Item label="Name" value={scene.name} />
 			<Item label="ID" value={scene.id} />
@@ -92,6 +185,55 @@ const SceneNodeMetaPanel = ({ scene }: { scene: SceneDocument }) => {
 				value={`${durationFrames}f (${framesToTimecode(durationFrames, scene.timeline.fps)})`}
 			/>
 			<Item label="Elements" value={scene.timeline.elements.length} />
+			<label className="grid grid-cols-[92px_1fr] gap-2 rounded-md border border-white/10 bg-black/20 px-2 py-1.5">
+				<span className="text-[11px] text-white/60">Working</span>
+				<select
+					data-color-field="working"
+					value={workingKey}
+					className="min-w-0 rounded border border-white/10 bg-neutral-950 px-1.5 py-0.5 text-[11px] text-white/90 outline-none"
+				>
+					{SCENE_WORKING_COLOR_OPTIONS.map((item) => (
+						<option key={item.key} value={item.key}>
+							{item.label}
+						</option>
+					))}
+					{workingKey === "custom" && <option value="custom">Custom</option>}
+				</select>
+			</label>
+			<label className="grid grid-cols-[92px_1fr] gap-2 rounded-md border border-white/10 bg-black/20 px-2 py-1.5">
+				<span className="text-[11px] text-white/60">Preview</span>
+				<select
+					data-color-field="preview"
+					value={previewKey}
+					className="min-w-0 rounded border border-white/10 bg-neutral-950 px-1.5 py-0.5 text-[11px] text-white/90 outline-none"
+				>
+					<option value="inherit">Inherit</option>
+					<option value="auto">Auto</option>
+					<option value="srgb">sRGB</option>
+					<option value="display-p3">Display P3</option>
+				</select>
+			</label>
+			<label className="grid grid-cols-[92px_1fr] gap-2 rounded-md border border-white/10 bg-black/20 px-2 py-1.5">
+				<span className="text-[11px] text-white/60">Export</span>
+				<select
+					data-color-field="export"
+					value={exportKey}
+					className="min-w-0 rounded border border-white/10 bg-neutral-950 px-1.5 py-0.5 text-[11px] text-white/90 outline-none"
+				>
+					{SCENE_EXPORT_COLOR_OPTIONS.map((item) => (
+						<option key={item.key} value={item.key}>
+							{item.label}
+						</option>
+					))}
+					{exportKey === "custom" && <option value="custom">Custom</option>}
+				</select>
+			</label>
+			<Item
+				label="Resolved"
+				value={`${formatColorSpaceDescriptor(
+					colorContext.settings.working,
+				)} / ${colorContext.previewTargetColorSpace}`}
+			/>
 		</div>
 	);
 };

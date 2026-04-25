@@ -1,7 +1,8 @@
 import { createFramePrecompileController } from "core/render-system/framePrecompileController";
 import { schedulePrecompileTask } from "core/render-system/framePrecompileScheduler";
+import type { ColorSpaceDescriptor } from "core";
 import type { AudioBufferSink, VideoSample, VideoSampleSink } from "mediabunny";
-import type { SkImage } from "react-skia-lite";
+import type { SkImage, TextureSourceTargetColorSpace } from "react-skia-lite";
 import type { AssetHandle } from "@/assets/AssetStore";
 import { type AudioAsset, acquireAudioAsset } from "@/assets/audioAsset";
 import { acquireVideoAsset, type VideoAsset } from "@/assets/videoAsset";
@@ -12,7 +13,11 @@ import {
 	requestOwner,
 	subscribeOwnerChange,
 } from "@/audio/owner";
-import { closeVideoSample, videoSampleToSkImage } from "@/lib/videoFrameUtils";
+import {
+	closeVideoSample,
+	videoSampleToColorManagedSkImage,
+} from "@/lib/videoFrameUtils";
+import { useProjectStore } from "@/projects/projectStore";
 import {
 	type AudioPlaybackController,
 	createAudioPlaybackController,
@@ -31,6 +36,7 @@ const LOOKAHEAD_FRAMES = 2;
 const PLAYBACK_BACK_JUMP_FRAMES = 3;
 const VIDEO_OWNER_PREFIX = "canvas-node:video:";
 const SCENE_OWNER_PREFIX = "scene:";
+const DEFAULT_TEXTURE_TARGET_COLOR_SPACE: TextureSourceTargetColorSpace = "srgb";
 
 type ClockMode = "audio" | "perf" | null;
 
@@ -88,8 +94,10 @@ export interface VideoNodePlaybackSnapshot {
 
 export interface VideoNodePlaybackBinding {
 	assetUri: string | null;
+	assetId?: string | null;
 	fps: number;
 	runtimeManager: StudioRuntimeManager | null;
+	targetColorSpace?: TextureSourceTargetColorSpace;
 	active?: boolean;
 }
 
@@ -139,8 +147,10 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 	};
 	private binding: VideoNodePlaybackBinding = {
 		assetUri: null,
+		assetId: null,
 		fps: DEFAULT_FPS,
 		runtimeManager: null,
+		targetColorSpace: DEFAULT_TEXTURE_TARGET_COLOR_SPACE,
 		active: true,
 	};
 	private loadEpoch = 0;
@@ -207,14 +217,28 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		const nextFps = normalizeFps(binding.fps);
 		const nextRuntimeManager = binding.runtimeManager ?? null;
 		const nextActive = binding.active !== false;
+		const nextAssetId =
+			typeof binding.assetId === "string" && binding.assetId.trim().length > 0
+				? binding.assetId
+				: null;
+		const nextTargetColorSpace =
+			binding.targetColorSpace ?? DEFAULT_TEXTURE_TARGET_COLOR_SPACE;
 		const previousAssetUri = this.binding.assetUri;
+		const previousAssetId = this.binding.assetId ?? null;
 		const previousActive = this.binding.active !== false;
-		const assetChanged = previousAssetUri !== nextAssetUri;
+		const previousTargetColorSpace =
+			this.binding.targetColorSpace ?? DEFAULT_TEXTURE_TARGET_COLOR_SPACE;
+		const assetChanged =
+			previousAssetUri !== nextAssetUri || previousAssetId !== nextAssetId;
+		const targetColorSpaceChanged =
+			previousTargetColorSpace !== nextTargetColorSpace;
 
 		this.binding = {
 			assetUri: nextAssetUri,
+			assetId: nextAssetId,
 			fps: nextFps,
 			runtimeManager: nextRuntimeManager,
+			targetColorSpace: nextTargetColorSpace,
 			active: nextActive,
 		};
 
@@ -255,6 +279,7 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 
 		const shouldReload =
 			assetChanged ||
+			targetColorSpaceChanged ||
 			!previousActive ||
 			!this.videoSampleSink ||
 			!this.videoHandle;
@@ -792,17 +817,42 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 			return existed;
 		}
 
-		const decoded = videoSampleToSkImage(frame);
+		const decoded = videoSampleToColorManagedSkImage(frame, {
+			targetColorSpace:
+				this.binding.targetColorSpace ?? DEFAULT_TEXTURE_TARGET_COLOR_SPACE,
+		});
 		if (!decoded) return null;
+		this.persistDetectedColorSpace(decoded.sourceColorSpace);
 
 		const cachedAfterDecode = handle.asset.getCachedFrame(timestamp);
 		if (cachedAfterDecode) {
-			decoded.dispose?.();
+			decoded.image.dispose?.();
 			return cachedAfterDecode;
 		}
 
-		handle.asset.storeFrame(timestamp, decoded);
-		return decoded;
+		handle.asset.storeFrame(timestamp, decoded.image);
+		return decoded.image;
+	}
+
+	private persistDetectedColorSpace(sourceColorSpace: ColorSpaceDescriptor) {
+		const assetId = this.binding.assetId;
+		if (!assetId) return;
+		useProjectStore.getState().updateProjectAssetMeta(assetId, (prev) => {
+			const previousDetected = prev?.color?.detected;
+			if (
+				JSON.stringify(previousDetected ?? null) ===
+				JSON.stringify(sourceColorSpace)
+			) {
+				return prev;
+			}
+			return {
+				...(prev ?? {}),
+				color: {
+					...(prev?.color ?? {}),
+					detected: sourceColorSpace,
+				},
+			};
+		});
 	}
 
 	private disposeAssetHandles() {

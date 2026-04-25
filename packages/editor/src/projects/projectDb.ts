@@ -4,6 +4,10 @@ import {
 } from "core/timeline-system/loader";
 import { createEmptyStudioOt } from "@/studio/project/ot";
 import type { StudioProject } from "@/studio/project/types";
+import {
+	cloneColorManagementSettings,
+	DEFAULT_COLOR_MANAGEMENT_SETTINGS,
+} from "core";
 import { type DBSchema, type IDBPDatabase, openDB } from "idb";
 
 export interface ProjectRecord {
@@ -74,6 +78,7 @@ export const buildEmptyProject = (projectId: string): StudioProject => {
 	return {
 		id: projectId,
 		revision: 0,
+		color: cloneColorManagementSettings(DEFAULT_COLOR_MANAGEMENT_SETTINGS),
 		canvas: {
 			nodes: [
 				{

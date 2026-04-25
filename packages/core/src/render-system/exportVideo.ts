@@ -14,7 +14,9 @@ import {
 	JsiSkSurface,
 	Skia,
 	SkiaSGRoot,
+	type SkiaWebCanvasColorSpace,
 } from "react-skia-lite";
+import type { ColorManagementSettings } from "../color-management";
 import type { TimelineElement } from "../timeline-system/types";
 import { resolveTimelineElementClipGainLinear } from "../audio-system/clipGain";
 import { renderMixedAudioForExport } from "../audio-system/dsp/exportRenderer";
@@ -82,6 +84,7 @@ export type ExportTimelineAsVideoOptions = {
 	>["getModelStore"];
 	waitForReady?: () => Promise<void>;
 	onFrame?: (frame: number) => void;
+	colorSettings?: ColorManagementSettings;
 };
 
 type ExportAudioTarget = {
@@ -161,6 +164,7 @@ const createSurfaceForExport = (
 	canvas: HTMLCanvasElement | OffscreenCanvas,
 	width: number,
 	height: number,
+	colorSpace: SkiaWebCanvasColorSpace = "srgb",
 ): {
 	surface: JsiSkSurface;
 	canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -178,7 +182,12 @@ const createSurfaceForExport = (
 		if (!canvasKit) {
 			throw new Error("CanvasKit 未初始化");
 		}
-		surface = createSkiaCanvasSurface(canvasKit, canvas);
+		surface = createSkiaCanvasSurface(
+			canvasKit,
+			canvas,
+			getSkiaRenderBackend(),
+			{ colorSpace },
+		);
 		if (!surface) {
 			throw new Error(`无法创建 ${getSkiaRenderBackend().kind} Surface`);
 		}
@@ -188,6 +197,11 @@ const createSurfaceForExport = (
 		return null;
 	}
 };
+
+const resolveExportCanvasColorSpace = (
+	settings: ColorManagementSettings | undefined,
+): SkiaWebCanvasColorSpace =>
+	settings?.export.primaries === "display-p3" ? "p3" : "srgb";
 
 const downloadBlob = (blob: Blob, filename: string): void => {
 	const link = document.createElement("a");
@@ -594,6 +608,9 @@ export const exportTimelineAsVideoCore = async (
 		});
 
 		const renderBackend = getSkiaRenderBackend();
+		const exportColorSpace = resolveExportCanvasColorSpace(
+			options.colorSettings,
+		);
 		let exportCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
 		const getExportCanvas = () => {
 			if (exportCanvas) {
@@ -637,6 +654,7 @@ export const exportTimelineAsVideoCore = async (
 				getExportCanvas(),
 				width,
 				height,
+				exportColorSpace,
 			);
 			if (!surfaceResult) {
 				throw new Error(`导出失败：无法创建 ${renderBackend.kind} Surface`);
@@ -650,6 +668,7 @@ export const exportTimelineAsVideoCore = async (
 					getExportCanvas(),
 					width,
 					height,
+					exportColorSpace,
 				);
 				if (!surfaceResult) {
 					throw new Error("导出失败：无法创建 webgpu Surface");
