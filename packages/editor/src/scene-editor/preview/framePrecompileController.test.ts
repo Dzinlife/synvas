@@ -1,9 +1,12 @@
 import { createFramePrecompileController } from "core/render-system/framePrecompileController";
+import type { Mock } from "vitest";
 import { describe, expect, it, vi } from "vitest";
+
+type DisposeMock = Mock<() => void>;
 
 type MockFrameState = {
 	frame: number;
-	dispose: ReturnType<typeof vi.fn>;
+	dispose: DisposeMock;
 };
 
 const waitForMicrotasks = async () => {
@@ -42,7 +45,7 @@ describe("framePrecompileController", () => {
 		});
 		const factory = vi.fn(async (frame: number) => ({
 			frame,
-			dispose: vi.fn(),
+			dispose: vi.fn<() => void>(),
 		}));
 
 		const entry = await controller.getOrBuildCurrent(10, factory);
@@ -63,13 +66,13 @@ describe("framePrecompileController", () => {
 
 	it("invalidates buffered future frames when jump exceeds lookahead window", async () => {
 		const scheduler = createManualScheduler();
-		const disposeByFrame = new Map<number, ReturnType<typeof vi.fn>>();
+		const disposeByFrame = new Map<number, DisposeMock>();
 		const controller = createFramePrecompileController<MockFrameState>({
 			lookaheadFrames: 3,
 			scheduleTask: scheduler.scheduleTask,
 		});
 		const factory = vi.fn(async (frame: number) => {
-			const dispose = vi.fn();
+			const dispose = vi.fn<() => void>();
 			disposeByFrame.set(frame, dispose);
 			return { frame, dispose };
 		});
@@ -96,7 +99,7 @@ describe("framePrecompileController", () => {
 		});
 		const factory = vi.fn(async (frame: number) => ({
 			frame,
-			dispose: vi.fn(),
+			dispose: vi.fn<() => void>(),
 		}));
 
 		const entry = await controller.getOrBuildCurrent(50, factory);

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";
 import { __resetTextFontProviderCacheForTests, createTextModel } from "./model";
@@ -19,7 +20,7 @@ const mocks = vi.hoisted(() => {
 		[];
 	return {
 		resolveRenderContext: vi.fn(async (text: string) => ({
-			fontProvider: { registerFont: vi.fn() },
+			fontProvider: { registerFont: vi.fn<() => void>() },
 			primaryTypeface: null,
 			runPlan: runPlanByText.get(text) ?? [
 				{
@@ -146,7 +147,7 @@ describe("Text model", () => {
 	beforeEach(() => {
 		mocks.clearState();
 		mocks.resolveRenderContext.mockImplementation(async (text: string) => ({
-			fontProvider: { registerFont: vi.fn() },
+			fontProvider: { registerFont: vi.fn<() => void>() },
 			primaryTypeface: null,
 			runPlan: [
 				{
@@ -259,7 +260,7 @@ describe("Text model", () => {
 
 	it("waitForReady 会等待当前重建周期完成", async () => {
 		const deferred = createDeferred<{
-			fontProvider: { registerFont: ReturnType<typeof vi.fn> };
+			fontProvider: { registerFont: Mock<() => void> };
 			primaryTypeface: null;
 			runPlan: Array<{
 				text: string;
@@ -288,7 +289,7 @@ describe("Text model", () => {
 		expect(readyResolved).toBe(false);
 
 		deferred.resolve({
-			fontProvider: { registerFont: vi.fn() },
+			fontProvider: { registerFont: vi.fn<() => void>() },
 			primaryTypeface: null,
 			runPlan: [
 				{

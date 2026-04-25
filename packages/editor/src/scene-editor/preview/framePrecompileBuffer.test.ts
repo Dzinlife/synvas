@@ -1,9 +1,12 @@
 import { createFramePrecompileBuffer } from "core/render-system/framePrecompileBuffer";
+import type { Mock } from "vitest";
 import { describe, expect, it, vi } from "vitest";
+
+type DisposeMock = Mock<() => void>;
 
 type MockFrameState = {
 	frame: number;
-	dispose: ReturnType<typeof vi.fn>;
+	dispose: DisposeMock;
 };
 
 const waitForMicrotasks = async () => {
@@ -26,7 +29,7 @@ describe("framePrecompileBuffer", () => {
 		});
 		const factory = vi.fn(async (frame: number) => ({
 			frame,
-			dispose: vi.fn(),
+			dispose: vi.fn<() => void>(),
 		}));
 
 		const currentEntry = await buffer.getOrBuildCurrent(10, factory);
@@ -49,10 +52,10 @@ describe("framePrecompileBuffer", () => {
 		const buffer = createFramePrecompileBuffer<MockFrameState>({
 			lookaheadFrames: 3,
 		});
-		const disposeByFrame = new Map<number, ReturnType<typeof vi.fn>>();
+		const disposeByFrame = new Map<number, DisposeMock>();
 		const prefetchedFrame = createDeferred<MockFrameState>();
 		const factory = vi.fn(async (frame: number) => {
-			const dispose = vi.fn();
+			const dispose = vi.fn<() => void>();
 			disposeByFrame.set(frame, dispose);
 			if (frame === 20) {
 				return prefetchedFrame.promise;
@@ -83,7 +86,7 @@ describe("framePrecompileBuffer", () => {
 			lookaheadFrames: 3,
 		});
 		const slowPrefetch = createDeferred<MockFrameState>();
-		const slowDispose = vi.fn();
+		const slowDispose = vi.fn<() => void>();
 		const factory = vi
 			.fn<(_: number) => Promise<MockFrameState>>()
 			.mockImplementationOnce(async () => slowPrefetch.promise);
@@ -116,7 +119,7 @@ describe("framePrecompileBuffer", () => {
 		await waitForMicrotasks();
 		expect(factory).toHaveBeenCalledTimes(1);
 
-		const dispose = vi.fn();
+		const dispose = vi.fn<() => void>();
 		deferred.resolve({ frame: 30, dispose });
 		const entry = await currentPromise;
 		const transferredDispose = buffer.takeDispose(entry);
@@ -131,9 +134,9 @@ describe("framePrecompileBuffer", () => {
 		const buffer = createFramePrecompileBuffer<MockFrameState>({
 			lookaheadFrames: 3,
 		});
-		const disposeByFrame = new Map<number, ReturnType<typeof vi.fn>>();
+		const disposeByFrame = new Map<number, DisposeMock>();
 		const factory = vi.fn(async (frame: number) => {
-			const dispose = vi.fn();
+			const dispose = vi.fn<() => void>();
 			disposeByFrame.set(frame, dispose);
 			return { frame, dispose };
 		});
@@ -160,7 +163,7 @@ describe("framePrecompileBuffer", () => {
 		await waitForMicrotasks();
 		buffer.invalidateAll();
 
-		const dispose = vi.fn();
+		const dispose = vi.fn<() => void>();
 		deferred.resolve({ frame: 50, dispose });
 		await waitForMicrotasks();
 
@@ -171,9 +174,9 @@ describe("framePrecompileBuffer", () => {
 		const buffer = createFramePrecompileBuffer<MockFrameState>({
 			lookaheadFrames: 3,
 		});
-		const disposeByFrame = new Map<number, ReturnType<typeof vi.fn>>();
+		const disposeByFrame = new Map<number, DisposeMock>();
 		const factory = vi.fn(async (frame: number) => {
-			const dispose = vi.fn();
+			const dispose = vi.fn<() => void>();
 			disposeByFrame.set(frame, dispose);
 			return { frame, dispose };
 		});
@@ -204,8 +207,8 @@ describe("framePrecompileBuffer", () => {
 			lookaheadFrames: 3,
 		});
 		const pending = createDeferred<MockFrameState>();
-		const readyDispose = vi.fn();
-		const pendingDispose = vi.fn();
+		const readyDispose = vi.fn<() => void>();
+		const pendingDispose = vi.fn<() => void>();
 		const factory = vi.fn(async (frame: number) => {
 			if (frame === 100) {
 				return { frame, dispose: readyDispose };

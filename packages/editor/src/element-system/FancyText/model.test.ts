@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";
 import {
@@ -20,7 +21,7 @@ const mocks = vi.hoisted(() => {
 	let primaryTypeface: { id: string } | null = { id: "primary-typeface" };
 	return {
 		resolveRenderContext: vi.fn(async (text: string) => ({
-			fontProvider: { registerFont: vi.fn() },
+			fontProvider: { registerFont: vi.fn<() => void>() },
 			primaryTypeface,
 			runPlan: runPlanByText.get(text) ?? [
 				{
@@ -156,7 +157,7 @@ describe("FancyText model", () => {
 		});
 
 		mocks.resolveRenderContext.mockImplementation(async (text: string) => ({
-			fontProvider: { registerFont: vi.fn() },
+			fontProvider: { registerFont: vi.fn<() => void>() },
 			primaryTypeface: { id: "primary-typeface" },
 			runPlan: [
 				{
@@ -242,7 +243,7 @@ describe("FancyText model", () => {
 			runtime,
 		);
 		mocks.resolveRenderContext.mockImplementation(async () => ({
-			fontProvider: { registerFont: vi.fn() },
+			fontProvider: { registerFont: vi.fn<() => void>() },
 			primaryTypeface: { id: "primary-typeface" },
 			runPlan: currentRunPlan,
 			primaryFamily: "Noto Sans SC",
@@ -289,7 +290,7 @@ describe("FancyText model", () => {
 
 	it("unknown/pending 字符不会提前 fallback", async () => {
 		mocks.resolveRenderContext.mockImplementation(async (text: string) => ({
-			fontProvider: { registerFont: vi.fn() },
+			fontProvider: { registerFont: vi.fn<() => void>() },
 			primaryTypeface: { id: "primary-typeface" },
 			runPlan: [{ text, fontFamilies: ["Noto Sans SC"], status: "primary" }],
 			primaryFamily: "Noto Sans SC",
@@ -343,7 +344,7 @@ describe("FancyText model", () => {
 
 	it("epoch 竞争下保留最新文本构建结果", async () => {
 		type RenderContext = {
-			fontProvider: { registerFont: ReturnType<typeof vi.fn> };
+			fontProvider: { registerFont: Mock<() => void> };
 			primaryTypeface: { id: string };
 			runPlan: Array<{
 				text: string;
@@ -361,7 +362,7 @@ describe("FancyText model", () => {
 		mocks.resolveRenderContext
 			.mockImplementationOnce(() => firstContextPromise)
 			.mockImplementation(async (text: string) => ({
-				fontProvider: { registerFont: vi.fn() },
+				fontProvider: { registerFont: vi.fn<() => void>() },
 				primaryTypeface: { id: "primary-typeface" },
 				runPlan: [{ text, fontFamilies: ["Noto Sans SC"], status: "primary" }],
 				primaryFamily: "Noto Sans SC",
@@ -380,7 +381,7 @@ describe("FancyText model", () => {
 			throw new Error("resolveFirstContext is not initialized");
 		}
 		firstContextResolver.current({
-			fontProvider: { registerFont: vi.fn() },
+			fontProvider: { registerFont: vi.fn<() => void>() },
 			primaryTypeface: { id: "primary-typeface" },
 			runPlan: [
 				{ text: "first", fontFamilies: ["Noto Sans SC"], status: "primary" },
