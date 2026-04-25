@@ -552,7 +552,7 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 		<button
 			type="button"
 			className={cn(
-				"group relative w-full py-1 text-left",
+				"group relative w-full touch-none py-1 text-left",
 				!disabled && "cursor-pointer",
 				disabled && "cursor-not-allowed",
 			)}
