@@ -2521,6 +2521,105 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
+	it("auto layout force-live active node 取消选中后会等 static tile ready 再退出 live", async () => {
+		tilePipelineMockState.enabled = true;
+		let frameReady = false;
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockImplementation(() => {
+				return {
+					...createEmptyTileFrameResult(),
+					hasPendingWork: !frameReady,
+					stats: {
+						...createEmptyTileFrameResult().stats,
+						queuedCount: frameReady ? 0 : 1,
+					},
+				};
+			});
+		try {
+			const activeNode = createSceneNode("node-scene-active-live-retained", 0);
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [activeNode],
+				scenes: emptyScenes,
+				assets: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={activeNode.id}
+					selectedNodeIds={[activeNode.id]}
+					animatedLayoutNodeIds={[activeNode.id]}
+					frozenNodeIds={[activeNode.id]}
+					forceLiveNodeIds={[activeNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					activeNode.id,
+				);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					animatedLayoutNodeIds={[activeNode.id]}
+					frozenNodeIds={[activeNode.id]}
+					forceLiveNodeIds={[]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					activeNode.id,
+				);
+			});
+
+			frameReady = true;
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					animatedLayoutNodeIds={[activeNode.id]}
+					frozenNodeIds={[activeNode.id]}
+					forceLiveNodeIds={[]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					activeNode.id,
+				);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+					animatedLayoutNodeIds={[]}
+					frozenNodeIds={[]}
+					forceLiveNodeIds={[]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					activeNode.id,
+				);
+			});
+		} finally {
+			beginFrameSpy.mockRestore();
+		}
+	});
+
 	it("auto layout frozen snapshot 从 tile 裁剪时会使用真实纹理像素尺寸", async () => {
 		tilePipelineMockState.enabled = true;
 		skiaSurfaceMockState.defaultPixelRatio = 2;
