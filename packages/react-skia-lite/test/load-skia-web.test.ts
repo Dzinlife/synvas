@@ -49,6 +49,17 @@ const createWebGPUCanvasKitStub = (
 	};
 };
 
+const createWebGLCanvasKitStub = (
+	overrides: Record<string, unknown> = {},
+) => {
+	return {
+		GetWebGLContext: vi.fn(),
+		MakeWebGLContext: vi.fn(),
+		MakeOnScreenGLSurface: vi.fn(),
+		...overrides,
+	};
+};
+
 const loadSkiaModules = async () => {
 	const loadModule = await import("../src/LoadSkiaWeb");
 	const renderBackendModule = await import("../src/skia/web/renderBackend");
@@ -77,9 +88,7 @@ describe("LoadSkiaWeb", () => {
 			createTexture: vi.fn(),
 		};
 		const webgpuCanvasKit = createWebGPUCanvasKitStub();
-		const webglCanvasKit = {
-			MakeWebGLCanvasSurface: vi.fn(),
-		};
+		const webglCanvasKit = createWebGLCanvasKitStub();
 		vi.stubGlobal("navigator", {
 			gpu: {
 				requestAdapter: vi.fn(async () => ({
@@ -141,9 +150,7 @@ describe("LoadSkiaWeb", () => {
 		const webgpuCanvasKit = createWebGPUCanvasKitStub({
 			MakeGPUDeviceContext: vi.fn(() => null),
 		});
-		const webglCanvasKit = {
-			MakeWebGLCanvasSurface: vi.fn(),
-		};
+		const webglCanvasKit = createWebGLCanvasKitStub();
 		vi.stubGlobal("navigator", {
 			gpu: {
 				requestAdapter: vi.fn(async () => ({
@@ -183,9 +190,7 @@ describe("LoadSkiaWeb", () => {
 			},
 			MakeGPUDeviceContext: makeGPUDeviceContext,
 		});
-		const webglCanvasKit = {
-			MakeWebGLCanvasSurface: vi.fn(),
-		};
+		const webglCanvasKit = createWebGLCanvasKitStub();
 		vi.stubGlobal("navigator", {
 			gpu: {
 				requestAdapter: vi.fn(async () => ({
@@ -222,7 +227,7 @@ describe("LoadSkiaWeb", () => {
 				}
 			).JsValStore?.add,
 		).toEqual(expect.any(Function));
-		expect(webglCanvasKit.MakeWebGLCanvasSurface).not.toHaveBeenCalled();
+		expect(webglCanvasKit.GetWebGLContext).not.toHaveBeenCalled();
 	});
 
 	it("真实 WebGPU bundle 的 canvas helper 默认使用透明 alphaMode", async () => {
@@ -320,9 +325,7 @@ describe("LoadSkiaWeb", () => {
 				prototype: {},
 			},
 		};
-		const webglCanvasKit = {
-			MakeWebGLCanvasSurface: vi.fn(),
-		};
+		const webglCanvasKit = createWebGLCanvasKitStub();
 		vi.stubGlobal("navigator", {
 			gpu: {
 				requestAdapter: vi.fn(async () => ({
@@ -349,34 +352,25 @@ describe("LoadSkiaWeb", () => {
 		});
 	});
 
-	it("auto 模式在 WebGL 不可用时回退到 software", async () => {
-		const webglCanvasKit = {
-			MakeSWCanvasSurface: vi.fn(),
-		};
+	it("auto 模式在 WebGL 不可用时直接失败", async () => {
+		const webglCanvasKit = {};
 		const {
 			LoadSkiaWeb,
 			__setSkiaBundleLoadersForTests,
-			getSkiaRenderBackend,
 		} = await loadSkiaModules();
 		const webglLoader = createBundleLoader(webglCanvasKit);
 		__setSkiaBundleLoadersForTests({
 			webgl: webglLoader,
 		});
 
-		const canvasKit = await LoadSkiaWeb({ backendPreference: "auto" });
-
-		expect(canvasKit).toBe(webglCanvasKit);
-		expect(getSkiaRenderBackend()).toMatchObject({
-			bundle: "webgl",
-			kind: "software",
-		});
+		await expect(LoadSkiaWeb({ backendPreference: "auto" })).rejects.toThrow(
+			/Could not initialize auto backend from webgl bundle/,
+		);
 		expect(webglLoader).toHaveBeenCalledTimes(1);
 	});
 
 	it("已初始化后切换到不兼容后端会提示刷新页面", async () => {
-		const webglCanvasKit = {
-			MakeWebGLCanvasSurface: vi.fn(),
-		};
+		const webglCanvasKit = createWebGLCanvasKitStub();
 		const {
 			LoadSkiaWeb,
 			__setSkiaBundleLoadersForTests,

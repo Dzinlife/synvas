@@ -1145,11 +1145,15 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 		}
 		const resolvedOptions = normalizeWebGPUCanvasOptions(opts);
 		const textureFormat = resolvedOptions.format ?? getPreferredCanvasFormat();
-		canvasContext.configure({
+		const configuration = {
 			device: context._device,
 			format: textureFormat,
 			alphaMode: resolvedOptions.alphaMode,
-		});
+			...(resolvedOptions.colorSpace
+				? { colorSpace: resolvedOptions.colorSpace }
+				: {}),
+		} as GPUCanvasConfiguration;
+		canvasContext.configure(configuration);
 		const webgpuCanvasContext = {
 			_inner: canvasContext,
 			_deviceContext: context,

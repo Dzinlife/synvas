@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -261,6 +263,7 @@ describe("surfaceFactory", () => {
 			makeImageSnapshot: vi.fn(),
 		}));
 		const canvasKit = {
+			ColorSpace: { SRGB: "srgb", DISPLAY_P3: "display-p3" },
 			MakeGPUCanvasContext: makeGPUCanvasContextMock,
 			MakeGPUCanvasSurface: makeGPUCanvasSurfaceMock,
 		} as never;
@@ -296,6 +299,7 @@ describe("surfaceFactory", () => {
 			{
 				format: "rgba8unorm",
 				alphaMode: "premultiplied",
+				colorSpace: "srgb",
 			},
 		);
 		expect(makeGPUCanvasContextMock).toHaveBeenNthCalledWith(
@@ -305,24 +309,150 @@ describe("surfaceFactory", () => {
 			{
 				format: "rgba8unorm",
 				alphaMode: "premultiplied",
+				colorSpace: "srgb",
 			},
 		);
 		expect(makeGPUCanvasSurfaceMock).toHaveBeenCalledTimes(3);
-		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(1, gpuCanvasContext);
-		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(2, gpuCanvasContext);
-		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(3, gpuCanvasContext);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(
+			1,
+			gpuCanvasContext,
+			"srgb",
+		);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(
+			2,
+			gpuCanvasContext,
+			"srgb",
+		);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenNthCalledWith(
+			3,
+			gpuCanvasContext,
+			"srgb",
+		);
 	});
 
-	it("WebGL offscreen surface 缺少当前 GrDirectContext 时回退到软件 surface", () => {
-		const surfaceDeleteMock = vi.fn();
+	it("WebGPU canvas surface 会在设备支持时配置 Display P3", () => {
+		const previousMatchMedia = window.matchMedia;
+		Object.defineProperty(window, "matchMedia", {
+			configurable: true,
+			value: vi.fn((query: string) => ({
+				matches: query === "(color-gamut: p3)",
+				media: query,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+			})),
+		});
+		const gpuCanvasContext = {
+			id: "canvas-context",
+		};
+		const makeGPUCanvasContextMock = vi.fn(() => gpuCanvasContext);
+		const makeGPUCanvasSurfaceMock = vi.fn(() => ({
+			delete: vi.fn(),
+			flush: vi.fn(),
+			width: () => 64,
+			height: () => 32,
+			getCanvas: () => ({
+				clear: vi.fn(),
+				save: vi.fn(),
+				restore: vi.fn(),
+				scale: vi.fn(),
+				drawPicture: vi.fn(),
+			}),
+			makeImageSnapshot: vi.fn(),
+		}));
+		const canvasKit = {
+			ColorSpace: { SRGB: "srgb", DISPLAY_P3: "display-p3" },
+			MakeGPUCanvasContext: makeGPUCanvasContextMock,
+			MakeGPUCanvasSurface: makeGPUCanvasSurfaceMock,
+		} as never;
+		const canvas = {
+			getContext: vi.fn(() => null),
+		} as unknown as HTMLCanvasElement;
+		const backend = {
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: { id: "ctx" },
+		} as const;
+		vi.stubGlobal("navigator", {
+			gpu: {
+				getPreferredCanvasFormat: vi.fn(() => "rgba8unorm"),
+			},
+		});
+
+		try {
+			const surface = createSkiaCanvasSurface(canvasKit, canvas, backend, {
+				colorSpace: "p3",
+			});
+			surface?.dispose();
+		} finally {
+			Object.defineProperty(window, "matchMedia", {
+				configurable: true,
+				value: previousMatchMedia,
+			});
+		}
+
+		expect(makeGPUCanvasContextMock).toHaveBeenCalledWith(
+			backend.deviceContext,
+			canvas,
+			{
+				format: "rgba8unorm",
+				alphaMode: "premultiplied",
+				colorSpace: "display-p3",
+			},
+		);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenCalledWith(
+			gpuCanvasContext,
+			"display-p3",
+		);
+	});
+
+	it("WebGL offscreen surface 缺少当前 GrDirectContext 时直接失败", () => {
 		const canvasKit = {
 			getCurrentGrDirectContext: vi.fn(() => null),
 			MakeRenderTarget: vi.fn(),
-			MakeSurface: vi.fn(() => ({
+			MakeSurface: vi.fn(),
+		} as never;
+		const backend = {
+			bundle: "webgl",
+			kind: "webgl",
+		} as const;
+
+		const surface = createSkiaOffscreenSurface(canvasKit, 96, 54, backend);
+		surface?.dispose();
+
+		expect(surface).toBeNull();
+		expect(canvasKit.getCurrentGrDirectContext).toHaveBeenCalledTimes(2);
+		expect(canvasKit.MakeRenderTarget).not.toHaveBeenCalled();
+		expect(canvasKit.MakeSurface).not.toHaveBeenCalled();
+	});
+
+	it("WebGL canvas surface 会在设备支持时使用 Display P3", () => {
+		const previousMatchMedia = window.matchMedia;
+		Object.defineProperty(window, "matchMedia", {
+			configurable: true,
+			value: vi.fn((query: string) => ({
+				matches: query === "(color-gamut: p3)",
+				media: query,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+			})),
+		});
+		const webglContext = {
+			drawingBufferColorSpace: "srgb",
+		};
+		const surfaceDeleteMock = vi.fn();
+		const grContext = {
+			delete: vi.fn(),
+		};
+		const canvasKit = {
+			ColorSpace: { SRGB: "srgb", DISPLAY_P3: "display-p3" },
+			GetWebGLContext: vi.fn(() => 11),
+			MakeWebGLContext: vi.fn(() => grContext),
+			MakeOnScreenGLSurface: vi.fn(() => ({
 				delete: surfaceDeleteMock,
 				flush: vi.fn(),
-				width: () => 96,
-				height: () => 54,
+				width: () => 64,
+				height: () => 32,
 				getCanvas: () => ({
 					clear: vi.fn(),
 					save: vi.fn(),
@@ -333,30 +463,135 @@ describe("surfaceFactory", () => {
 				makeImageSnapshot: vi.fn(),
 			})),
 		} as never;
+		const canvas = {
+			width: 64,
+			height: 32,
+			getContext: vi.fn(() => webglContext),
+		} as unknown as HTMLCanvasElement;
 		const backend = {
 			bundle: "webgl",
 			kind: "webgl",
 		} as const;
 
-		const surface = createSkiaOffscreenSurface(canvasKit, 96, 54, backend);
-		surface?.dispose();
+		try {
+			const surface = createSkiaCanvasSurface(canvasKit, canvas, backend, {
+				colorSpace: "p3",
+			});
+			surface?.dispose();
+		} finally {
+			Object.defineProperty(window, "matchMedia", {
+				configurable: true,
+				value: previousMatchMedia,
+			});
+		}
 
-		expect(canvasKit.getCurrentGrDirectContext).toHaveBeenCalledTimes(2);
-		expect(canvasKit.MakeRenderTarget).not.toHaveBeenCalled();
-		expect(canvasKit.MakeSurface).toHaveBeenCalledWith(96, 54);
+		expect(webglContext.drawingBufferColorSpace).toBe("display-p3");
+		expect(canvasKit.GetWebGLContext).toHaveBeenCalledWith(canvas);
+		expect(canvasKit.MakeWebGLContext).toHaveBeenCalledWith(11);
+		expect(canvasKit.MakeOnScreenGLSurface).toHaveBeenCalledWith(
+			grContext,
+			64,
+			32,
+			"display-p3",
+		);
+		expect(grContext.delete).not.toHaveBeenCalled();
+		expect(surfaceDeleteMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("WebGL Display P3 surface 创建失败时回退到 sRGB WebGL surface", () => {
+		const previousMatchMedia = window.matchMedia;
+		Object.defineProperty(window, "matchMedia", {
+			configurable: true,
+			value: vi.fn((query: string) => ({
+				matches: query === "(color-gamut: p3)",
+				media: query,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+			})),
+		});
+		const webglContext = {
+			drawingBufferColorSpace: "display-p3",
+		};
+		const surfaceDeleteMock = vi.fn();
+		const grContext = {
+			delete: vi.fn(),
+		};
+		const surface = {
+			delete: surfaceDeleteMock,
+			flush: vi.fn(),
+			width: () => 64,
+			height: () => 32,
+			getCanvas: () => ({
+				clear: vi.fn(),
+				save: vi.fn(),
+				restore: vi.fn(),
+				scale: vi.fn(),
+				drawPicture: vi.fn(),
+			}),
+			makeImageSnapshot: vi.fn(),
+		};
+		const canvasKit = {
+			ColorSpace: { SRGB: "srgb", DISPLAY_P3: "display-p3" },
+			GetWebGLContext: vi.fn(() => 12),
+			MakeWebGLContext: vi.fn(() => grContext),
+			MakeOnScreenGLSurface: vi
+				.fn()
+				.mockReturnValueOnce(null)
+				.mockReturnValueOnce(surface),
+		} as never;
+		const canvas = {
+			width: 64,
+			height: 32,
+			getContext: vi.fn(() => webglContext),
+		} as unknown as HTMLCanvasElement;
+		const backend = {
+			bundle: "webgl",
+			kind: "webgl",
+		} as const;
+
+		try {
+			const result = createSkiaCanvasSurface(canvasKit, canvas, backend, {
+				colorSpace: "p3",
+			});
+			result?.dispose();
+		} finally {
+			Object.defineProperty(window, "matchMedia", {
+				configurable: true,
+				value: previousMatchMedia,
+			});
+		}
+
+		expect(canvasKit.MakeOnScreenGLSurface).toHaveBeenNthCalledWith(
+			1,
+			grContext,
+			64,
+			32,
+			"display-p3",
+		);
+		expect(canvasKit.MakeOnScreenGLSurface).toHaveBeenNthCalledWith(
+			2,
+			grContext,
+			64,
+			32,
+			"srgb",
+		);
+		expect(webglContext.drawingBufferColorSpace).toBe("srgb");
+		expect(grContext.delete).not.toHaveBeenCalled();
 		expect(surfaceDeleteMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("WebGL offscreen surface 会激活主画布 context 后复用 RenderTarget", () => {
 		const screenSurfaceDeleteMock = vi.fn();
 		const offscreenSurfaceDeleteMock = vi.fn();
-		const currentGrContext = {
+		const screenGrContext = {
+			delete: vi.fn(),
 			isDeleted: vi.fn(() => false),
 		};
-		let hasCurrentContext = false;
 		const canvasKit = {
-			MakeWebGLCanvasSurface: vi.fn(() => ({
-				_context: 9,
+			ColorSpace: { SRGB: "srgb" },
+			GetWebGLContext: vi.fn(() => 9),
+			MakeWebGLContext: vi.fn(() => screenGrContext),
+			MakeOnScreenGLSurface: vi.fn(() => ({
 				delete: screenSurfaceDeleteMock,
 				flush: vi.fn(),
 				width: () => 64,
@@ -370,16 +605,7 @@ describe("surfaceFactory", () => {
 				}),
 				makeImageSnapshot: vi.fn(),
 			})),
-			setCurrentContext: vi.fn((context: unknown) => {
-				if (context === 9) {
-					hasCurrentContext = true;
-					return true;
-				}
-				return false;
-			}),
-			getCurrentGrDirectContext: vi.fn(() =>
-				hasCurrentContext ? currentGrContext : null,
-			),
+			setCurrentContext: vi.fn(() => true),
 			MakeRenderTarget: vi.fn(() => ({
 				delete: offscreenSurfaceDeleteMock,
 				flush: vi.fn(),
@@ -401,6 +627,8 @@ describe("surfaceFactory", () => {
 			kind: "webgl",
 		} as const;
 		const canvas = {
+			width: 64,
+			height: 32,
 			getContext: vi.fn(() => null),
 		} as unknown as HTMLCanvasElement;
 
@@ -411,12 +639,19 @@ describe("surfaceFactory", () => {
 		screenSurface?.dispose();
 
 		expect(canvasKit.setCurrentContext).toHaveBeenCalledWith(9);
+		expect(canvasKit.MakeOnScreenGLSurface).toHaveBeenCalledWith(
+			screenGrContext,
+			64,
+			32,
+			"srgb",
+		);
 		expect(canvasKit.MakeRenderTarget).toHaveBeenCalledWith(
-			currentGrContext,
+			screenGrContext,
 			64,
 			32,
 		);
 		expect(canvasKit.MakeSurface).not.toHaveBeenCalled();
+		expect(screenGrContext.delete).not.toHaveBeenCalled();
 		expect(offscreenSurfaceDeleteMock).toHaveBeenCalledTimes(1);
 		expect(screenSurfaceDeleteMock).toHaveBeenCalledTimes(1);
 	});

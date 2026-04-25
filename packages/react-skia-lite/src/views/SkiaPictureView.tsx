@@ -15,6 +15,7 @@ import {
 	invalidateSkiaWebGPUCanvasContext,
 } from "../skia/web/surfaceFactory";
 import { createSkiaResourceScope } from "../skia/web/resourceLifecycle";
+import type { SkiaWebCanvasColorSpace } from "../skia/web/canvasColorSpace";
 import { SkiaViewApi } from "./api";
 import { SkiaViewNativeId } from "./SkiaViewNativeId";
 import type { SkiaPictureViewNativeProps } from "./types";
@@ -87,6 +88,7 @@ class CanvasSurfaceRenderer implements Renderer {
 		private canvas: HTMLCanvasElement,
 		private pd: number,
 		private backend: SkiaRenderBackend,
+		private colorSpace: SkiaWebCanvasColorSpace,
 	) {
 		this.onResize();
 	}
@@ -114,6 +116,7 @@ class CanvasSurfaceRenderer implements Renderer {
 			CanvasKit,
 			this.canvas,
 			this.backend,
+			{ colorSpace: this.colorSpace },
 		);
 		if (!surface) {
 			throw new Error("Could not create surface");
@@ -134,6 +137,7 @@ class CanvasSurfaceRenderer implements Renderer {
 			CanvasKit,
 			this.canvas,
 			this.backend,
+			{ colorSpace: this.colorSpace },
 		);
 		if (!surface) {
 			throw new Error("Could not create WebGPU surface");
@@ -147,6 +151,7 @@ class CanvasSurfaceRenderer implements Renderer {
 				CanvasKit,
 				this.canvas,
 				this.backend,
+				{ colorSpace: this.colorSpace },
 			);
 			if (!surface) {
 				return;
@@ -181,13 +186,26 @@ class CanvasSurfaceRenderer implements Renderer {
 const createRenderer = (
 	canvas: HTMLCanvasElement,
 	pd: number,
-	forceSoftware: boolean,
+	colorSpace: SkiaWebCanvasColorSpace,
 ): Renderer => {
-	const backend: SkiaRenderBackend = forceSoftware
-		? { bundle: "webgl", kind: "software" }
-		: getSkiaRenderBackend();
-	return new CanvasSurfaceRenderer(canvas, pd, backend);
+	const backend: SkiaRenderBackend = getSkiaRenderBackend();
+	return new CanvasSurfaceRenderer(canvas, pd, backend, colorSpace);
 };
+
+type RendererConfig = {
+	pd: number;
+	colorSpace: SkiaWebCanvasColorSpace;
+};
+
+const createRendererConfig = (
+	pd: number,
+	colorSpace: SkiaWebCanvasColorSpace,
+): RendererConfig => ({ pd, colorSpace });
+
+const isSameRendererConfig = (
+	current: RendererConfig | null,
+	next: RendererConfig,
+) => current?.pd === next.pd && current.colorSpace === next.colorSpace;
 
 export interface SkiaPictureViewHandle {
 	setPicture(picture: SkPicture): void;
@@ -216,8 +234,10 @@ export interface SkiaPictureViewProps extends SkiaPictureViewNativeProps {
 
 export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	const { ref, pd = Platform.PixelRatio } = props;
+	const colorSpace = props.colorSpace ?? "srgb";
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const renderer = useRef<Renderer | null>(null);
+	const rendererConfigRef = useRef<RendererConfig | null>(null);
 	const redrawRequestsRef = useRef(0);
 	const requestIdRef = useRef<number | null>(null);
 	const pictureRef = useRef<SkPicture | null>(null);
@@ -326,25 +346,34 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 		[],
 	);
 
+	const rebuildRenderer = useCallback(
+		(canvas: HTMLCanvasElement) => {
+			const nextConfig = createRendererConfig(pd, colorSpace);
+			renderer.current?.dispose();
+			renderer.current = createRenderer(
+				canvas,
+				nextConfig.pd,
+				nextConfig.colorSpace,
+			);
+			rendererConfigRef.current = nextConfig;
+			if (pictureRef.current) {
+				renderer.current.draw(pictureRef.current);
+			}
+		},
+		[pd, colorSpace],
+	);
+
 	const onLayoutEvent = useCallback(
 		(evt: LayoutChangeEvent) => {
 			const canvas = canvasRef.current;
 			if (canvas) {
-				renderer.current?.dispose();
-				renderer.current = createRenderer(
-					canvas,
-					pd,
-					props.__destroyWebGLContextAfterRender === true,
-				);
-				if (pictureRef.current) {
-					renderer.current.draw(pictureRef.current);
-				}
+				rebuildRenderer(canvas);
 			}
 			if (onLayout) {
 				onLayout(evt);
 			}
 		},
-		[onLayout, pd, props.__destroyWebGLContextAfterRender],
+		[onLayout, rebuildRenderer],
 	);
 
 	useImperativeHandle(
@@ -393,6 +422,18 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	}, [setPicture, props.picture]);
 
 	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas || !renderer.current) {
+			return;
+		}
+		const nextConfig = createRendererConfig(pd, colorSpace);
+		if (isSameRendererConfig(rendererConfigRef.current, nextConfig)) {
+			return;
+		}
+		rebuildRenderer(canvas);
+	}, [pd, colorSpace, rebuildRenderer]);
+
+	useEffect(() => {
 		return () => {
 			if (requestIdRef.current !== null) {
 				cancelAnimationFrame(requestIdRef.current);
@@ -406,6 +447,7 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 				renderer.current.dispose();
 				renderer.current = null;
 			}
+			rendererConfigRef.current = null;
 		};
 	}, []);
 
@@ -415,7 +457,12 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 		}
 	}, [picture, redraw]);
 
-	const { debug: _debug, ref: _ref, ...viewProps } = props;
+	const {
+		debug: _debug,
+		ref: _ref,
+		colorSpace: _colorSpace,
+		...viewProps
+	} = props;
 	return (
 		<Platform.View {...viewProps} onLayout={onLayoutEvent}>
 			<canvas ref={canvasRef} style={{ display: "flex", flex: 1 }} />

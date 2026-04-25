@@ -1,10 +1,12 @@
 import { createElement } from "react";
 import type { ViewProps } from "../react-native-types/ViewPropTypes";
+import type { SkiaWebCanvasColorSpace } from "../skia/web/canvasColorSpace";
 import { SkiaPictureView } from "../views/SkiaPictureView";
 
 export interface NativeProps extends ViewProps {
 	debug?: boolean;
 	opaque?: boolean;
+	colorSpace?: SkiaWebCanvasColorSpace;
 	nativeID: string;
 	pd?: number;
 }

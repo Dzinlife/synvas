@@ -191,7 +191,6 @@ export default function Header() {
 						<option value="auto">Auto</option>
 						<option value="webgpu">WebGPU</option>
 						<option value="webgl">WebGL</option>
-						<option value="software">Software</option>
 					</select>
 				</label>
 			</div>

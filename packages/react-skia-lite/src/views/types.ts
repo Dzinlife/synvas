@@ -1,6 +1,7 @@
 import type { Node } from "../dom/types";
 import type { SharedValue, ViewProps } from "../react-native-types";
 import type { SkImage, SkPicture, SkRect, SkSize } from "../skia/types";
+import type { SkiaWebCanvasColorSpace } from "../skia/web/canvasColorSpace";
 
 export type NativeSkiaViewProps = ViewProps & {
 	debug?: boolean;
@@ -29,9 +30,7 @@ export interface SkiaBaseViewProps extends ViewProps {
 	onSize?: SharedValue<SkSize>;
 
 	opaque?: boolean;
-
-	// Web 端上下文数量受限，设为 true 时退回 software surface，避免长期占用 GPU context。
-	__destroyWebGLContextAfterRender?: boolean;
+	colorSpace?: SkiaWebCanvasColorSpace;
 }
 
 export interface SkiaPictureViewNativeProps extends SkiaBaseViewProps {

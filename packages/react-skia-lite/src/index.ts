@@ -32,6 +32,7 @@ export type {
 	TrackedSkiaHostObjectStats,
 } from "./skia/web/resourceTracker";
 export * from "./skia/web/resourceLifecycle";
+export * from "./skia/web/canvasColorSpace";
 export * from "./skia/web/surfaceFactory";
 export * from "./skia/web/webgpuReadback";
 export * from "./skia/web/webgpuResourceCache";

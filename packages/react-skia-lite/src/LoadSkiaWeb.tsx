@@ -49,7 +49,6 @@ const validPreferences = new Set<SkiaWebBackendPreference>([
 	"auto",
 	"webgpu",
 	"webgl",
-	"software",
 ]);
 
 const defaultBundleModuleLoaders: Record<
@@ -186,7 +185,6 @@ const buildBundleCandidates = (preference: SkiaWebBackendPreference) => {
 		case "webgpu":
 			return ["webgpu"] as const;
 		case "webgl":
-		case "software":
 			return ["webgl"] as const;
 		case "auto":
 		default:

@@ -25,6 +25,7 @@ import { SkiaSGRoot } from "../sksg/Reconciler";
 import SkiaPictureViewNativeComponent from "../specs/SkiaPictureViewNativeComponent";
 import { SkiaViewApi } from "../views/api";
 import { SkiaViewNativeId } from "../views/SkiaViewNativeId";
+import type { SkiaWebCanvasColorSpace } from "../skia/web/canvasColorSpace";
 
 export interface CanvasRef extends FC<CanvasProps> {
 	makeImageSnapshot(rect?: SkRect): SkImage;
@@ -63,10 +64,9 @@ export interface CanvasProps extends Omit<ViewProps, "onLayout"> {
 	debug?: boolean;
 	opaque?: boolean;
 	onSize?: SharedValue<SkSize>;
-	colorSpace?: "p3" | "srgb";
+	colorSpace?: SkiaWebCanvasColorSpace;
 	ref?: React.Ref<CanvasRef>;
 	androidWarmup?: boolean;
-	__destroyWebGLContextAfterRender?: boolean;
 	pd?: number;
 }
 
@@ -277,7 +277,7 @@ export const Canvas = ({
 			nativeID={`${nativeId}`}
 			debug={debug}
 			opaque={opaque}
-			// colorSpace={colorSpace}
+			colorSpace={colorSpace}
 			// androidWarmup={androidWarmup}
 			onLayout={
 				Platform.OS === "web" && (onSize || onLayout) ? onLayoutWeb : onLayout

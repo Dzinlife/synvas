@@ -18,8 +18,7 @@ type WebGPUNavigator = Navigator & {
 export type SkiaWebBackendPreference =
 	| "auto"
 	| "webgpu"
-	| "webgl"
-	| "software";
+	| "webgl";
 
 export type SkiaBundleKind = "webgpu" | "webgl";
 
@@ -32,7 +31,7 @@ export type SkiaRenderBackend =
 	  }
 	| {
 			bundle: "webgl";
-			kind: "webgl" | "software";
+			kind: "webgl";
 	  };
 
 export type CanvasKitWebGPU = CanvasKit & {
@@ -52,10 +51,14 @@ export type CanvasKitWebGPU = CanvasKit & {
 	SkImages?: SkImagesFactory;
 };
 
-let renderBackend: SkiaRenderBackend = { bundle: "webgl", kind: "software" };
+let renderBackend: SkiaRenderBackend = { bundle: "webgl", kind: "webgl" };
 
 const hasWebGLSurfaceFactory = (CanvasKit: CanvasKit) => {
-	return typeof CanvasKit.MakeWebGLCanvasSurface === "function";
+	return (
+		typeof CanvasKit.GetWebGLContext === "function" &&
+		typeof CanvasKit.MakeWebGLContext === "function" &&
+		typeof CanvasKit.MakeOnScreenGLSurface === "function"
+	);
 };
 
 const hasWebGPUSurfaceFactory = (CanvasKit: CanvasKit) => {
@@ -119,20 +122,18 @@ export const resolveSkiaRenderBackendForBundle = async (
 	},
 ): Promise<SkiaRenderBackend | null> => {
 	if (options.bundle === "webgpu") {
-		if (options.preference === "software" || options.preference === "webgl") {
+		if (options.preference === "webgl") {
 			return null;
 		}
 		return resolveWebGPURenderBackend(CanvasKit);
 	}
-	if (options.preference === "software") {
-		return { bundle: "webgl", kind: "software" };
+	if (options.preference === "webgpu") {
+		return null;
 	}
 	if (hasWebGLSurfaceFactory(CanvasKit)) {
 		return { bundle: "webgl", kind: "webgl" };
 	}
-	return options.preference === "auto"
-		? { bundle: "webgl", kind: "software" }
-		: null;
+	return null;
 };
 
 export const setSkiaRenderBackend = (backend: SkiaRenderBackend) => {
@@ -167,5 +168,5 @@ export const toCanvasKitWebGPU = (CanvasKit: CanvasKit) =>
 	CanvasKit as CanvasKitWebGPU;
 
 export const __resetSkiaRenderBackendForTests = () => {
-	renderBackend = { bundle: "webgl", kind: "software" };
+	renderBackend = { bundle: "webgl", kind: "webgl" };
 };

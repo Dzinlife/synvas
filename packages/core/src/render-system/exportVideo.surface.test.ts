@@ -30,7 +30,6 @@ describe("exportVideo surface selection", () => {
 	it.each([
 		{ bundle: "webgpu", kind: "webgpu" },
 		{ bundle: "webgl", kind: "webgl" },
-		{ bundle: "webgl", kind: "software" },
 	] as const)(
 		"resolved backend 为 $kind 时会走统一 surface 工厂",
 		({ bundle, kind }) => {
