@@ -271,7 +271,10 @@ const hasCanvasKitWebGPUBuildPatch = () => {
 		bindings.includes('"_currentBudgetedBytes"') &&
 		bindings.includes('"_currentPurgeableBytes"') &&
 		bindings.includes('"_maxBudgetedBytes"') &&
-		bindings.includes('"_setMaxBudgetedBytes"')
+		bindings.includes('"_setMaxBudgetedBytes"') &&
+		bindings.includes("wgpu::TextureFormat::RGBA16Float") &&
+		bindings.includes("SkColorType colorType") &&
+		bindings.includes("SkColorType::kRGBA_F16_SkColorType")
 	);
 };
 
@@ -313,6 +316,10 @@ export const applySkiaPatch = () => {
 				path.join(skiaDir, "modules", "canvaskit", "npm_build", "types", "index.d.ts"),
 				"utf8",
 			).includes("ReadSurfacePixelsYUV420Async") &&
+			readFileSync(
+				path.join(skiaDir, "modules", "canvaskit", "npm_build", "types", "index.d.ts"),
+				"utf8",
+			).includes('toneMapping?: { mode: "standard" | "extended" };') &&
 			readFileSync(
 				path.join(
 					skiaDir,
@@ -383,6 +390,15 @@ export const applySkiaPatch = () => {
 			) &&
 			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
 				"context.ReadSurfacePixelsAsync = function(",
+			) &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"configuration.toneMapping = opts.toneMapping",
+			) &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"CanvasKit.WebGPU = WebGPU",
+			) &&
+			readFileSync(path.join(skiaDir, "modules", "canvaskit", "webgpu.js"), "utf8").includes(
+				"_SkSurfaces_WrapBackendTextureSupportsColorType",
 			);
 	});
 	applyGitPatch("Skia Dawn build jobs", dawnPatchFile, () => {

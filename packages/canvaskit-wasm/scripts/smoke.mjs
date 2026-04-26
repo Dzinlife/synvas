@@ -62,6 +62,12 @@ const assertWebGPUBundle = (canvasKit) => {
 	if (typeof canvasKit.gpu !== "undefined" && canvasKit.gpu !== true) {
 		throw new Error("Expected CanvasKit.gpu to be true when exposed.");
 	}
+	if (!Array.isArray(canvasKit.WebGPU?.TextureFormat)) {
+		throw new Error("Expected CanvasKit.WebGPU.TextureFormat to be exposed.");
+	}
+	if (typeof canvasKit.JsValStore?.add !== "function") {
+		throw new Error("Expected CanvasKit.JsValStore to be exposed.");
+	}
 	for (const method of [
 		"MakeGPUDeviceContext",
 		"MakeGPUCanvasContext",
@@ -132,6 +138,12 @@ const assertWebGPUHelperInterop = (entryPath) => {
 	}
 	if (!source.includes("context.ReadSurfacePixelsAsync=function(")) {
 		throw new Error("Expected WebGPU helper to install Graphite async readback wrappers.");
+	}
+	if (!source.includes("toneMapping")) {
+		throw new Error("Expected WebGPU helper to pass through canvas toneMapping.");
+	}
+	if (!source.includes("_SkSurfaces_WrapBackendTextureSupportsColorType")) {
+		throw new Error("Expected WebGPU helper to mark colorType-aware surface wrapping.");
 	}
 };
 

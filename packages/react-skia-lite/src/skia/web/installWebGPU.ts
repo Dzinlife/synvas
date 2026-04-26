@@ -49,6 +49,53 @@ type GPUCanvasContextWithConfiguration = GPUCanvasContext & {
 	};
 };
 
+const DEFAULT_WEBGPU_TEXTURE_FORMATS: readonly (string | undefined)[] = [
+	undefined,
+	"r8unorm",
+	"r8snorm",
+	"r8uint",
+	"r8sint",
+	"r16unorm",
+	"r16snorm",
+	"r16uint",
+	"r16sint",
+	"r16float",
+	"rg8unorm",
+	"rg8snorm",
+	"rg8uint",
+	"rg8sint",
+	"r32float",
+	"r32uint",
+	"r32sint",
+	"rg16unorm",
+	"rg16snorm",
+	"rg16uint",
+	"rg16sint",
+	"rg16float",
+	"rgba8unorm",
+	"rgba8unorm-srgb",
+	"rgba8snorm",
+	"rgba8uint",
+	"rgba8sint",
+	"bgra8unorm",
+	"bgra8unorm-srgb",
+	"rgb10a2uint",
+	"rgb10a2unorm",
+	"rg11b10ufloat",
+	"rgb9e5ufloat",
+	"rg32float",
+	"rg32uint",
+	"rg32sint",
+	"rgba16unorm",
+	"rgba16snorm",
+	"rgba16uint",
+	"rgba16sint",
+	"rgba16float",
+	"rgba32float",
+	"rgba32uint",
+	"rgba32sint",
+];
+
 type WebGPUExternalImageCopy = Parameters<
 	GPUQueue["copyExternalImageToTexture"]
 >[0];
@@ -253,6 +300,7 @@ type InternalCanvasKitWebGPU = Omit<
 		textureUsage: number,
 		width: number,
 		height: number,
+		colorType: unknown,
 		colorSpace: unknown,
 		releaseCallback: ReleaseCallback | null,
 		label: string,
@@ -303,6 +351,7 @@ type InternalCanvasKitWebGPU = Omit<
 		offset: { x: number; y: number };
 	} | null;
 	_defaultWebGPUDeviceContext?: InternalWebGPUDeviceContext;
+	_SkSurfaces_WrapBackendTextureSupportsColorType?: boolean;
 	JsValStore?: {
 		add: (value: unknown) => number;
 		get: (handle: number) => unknown;
@@ -455,8 +504,7 @@ const hasLowLevelWebGPUExports = (canvasKit: InternalCanvasKitWebGPU) => {
 		typeof canvasKit._SkImages_WrapTexture === "function" &&
 		typeof canvasKit._SkImages_PromiseTextureFrom === "function" &&
 		typeof canvasKit._SkImages_MakeWithFilter === "function" &&
-		typeof canvasKit.JsValStore?.add === "function" &&
-		Array.isArray(canvasKit.WebGPU?.TextureFormat)
+		typeof canvasKit.JsValStore?.add === "function"
 	);
 };
 
@@ -639,7 +687,61 @@ const getTextureFormatIndex = (
 	canvasKit: InternalCanvasKitWebGPU,
 	textureFormat: GPUTextureFormat,
 ) => {
-	return canvasKit.WebGPU?.TextureFormat?.indexOf(textureFormat) ?? -1;
+	const textureFormats: readonly (string | undefined)[] =
+		canvasKit.WebGPU?.TextureFormat ?? DEFAULT_WEBGPU_TEXTURE_FORMATS;
+	return textureFormats.indexOf(textureFormat);
+};
+
+const resolveWebGPUTextureColorType = (
+	canvasKit: InternalCanvasKitWebGPU,
+	textureFormat: GPUTextureFormat,
+) => {
+	const colorTypes = canvasKit.ColorType as CanvasKit["ColorType"] & {
+		RGBA_F16?: unknown;
+		RGBA_F32?: unknown;
+	};
+	switch (textureFormat) {
+		case "bgra8unorm":
+		case "bgra8unorm-srgb":
+			return colorTypes.BGRA_8888;
+		case "rgba16float":
+			return colorTypes.RGBA_F16 ?? colorTypes.RGBA_8888;
+		case "rgba32float":
+			return colorTypes.RGBA_F32 ?? colorTypes.RGBA_8888;
+		case "rgba8unorm":
+		case "rgba8unorm-srgb":
+		default:
+			return colorTypes.RGBA_8888;
+	}
+};
+
+const wrapBackendTextureSurface = (
+	canvasKit: InternalCanvasKitWebGPU,
+	context: InternalWebGPUDeviceContext,
+	textureHandle: number,
+	textureFormatIndex: number,
+	textureFormat: GPUTextureFormat,
+	textureUsage: number,
+	width: number,
+	height: number,
+	colorSpace: unknown,
+	releaseCallback: ReleaseCallback | null,
+	label: string,
+) => {
+	return (
+		canvasKit._SkSurfaces_WrapBackendTexture?.(
+			context,
+			textureHandle,
+			textureFormatIndex,
+			textureUsage,
+			width,
+			height,
+			resolveWebGPUTextureColorType(canvasKit, textureFormat),
+			colorSpace,
+			releaseCallback,
+			label,
+		) ?? null
+	);
 };
 
 const toSimpleIRect = (
@@ -1025,10 +1127,12 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 			if (textureFormatIndex < 0) {
 				return null;
 			}
-			const surface = canvasKit._SkSurfaces_WrapBackendTexture?.(
+			const surface = wrapBackendTextureSurface(
+				canvasKit,
 				context,
 				jsValStore.add(texture),
 				textureFormatIndex,
+				texture.format,
 				texture.usage,
 				texture.width,
 				texture.height,
@@ -1233,10 +1337,12 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 		if (textureFormatIndex < 0) {
 			return null;
 		}
-		const surface = canvasKit._SkSurfaces_WrapBackendTexture?.(
+		const surface = wrapBackendTextureSurface(
+			canvasKit,
 			canvasContext._deviceContext,
 			jsValStore.add(currentTexture),
 			textureFormatIndex,
+			canvasContext._textureFormat,
 			currentTexture.usage,
 			width ?? canvasContext._inner.canvas.width,
 			height ?? canvasContext._inner.canvas.height,

@@ -22,7 +22,11 @@ const createLowLevelCanvasKitStub = () => {
 				TextureFormat: ["rgba16float", "rgba8unorm", "bgra8unorm"],
 			},
 			ColorSpace: { SRGB: "srgb" },
-			ColorType: { RGBA_8888: "rgba8888" },
+			ColorType: {
+				RGBA_8888: "rgba8888",
+				BGRA_8888: "bgra8888",
+				RGBA_F16: "rgbaf16",
+			},
 			AlphaType: { Premul: "premul" },
 			Origin: { TopLeft: "top-left" },
 			GenerateMipmapsFromBase: { No: "no-mips" },
@@ -39,9 +43,13 @@ const createLowLevelCanvasKitStub = () => {
 				},
 			},
 			MakeGPUCanvasContext: originalMakeGPUCanvasContext,
+			_SkSurfaces_WrapBackendTextureSupportsColorType: true,
 			_MakeWebGPUDeviceContext: vi.fn(() => deviceContext),
 			_SkSurfaces_RenderTarget: vi.fn(),
-			_SkSurfaces_WrapBackendTexture: vi.fn(),
+			_SkSurfaces_WrapBackendTexture: vi.fn(() => ({
+				_deviceContext: null,
+				_canvasContext: null,
+			})),
 			_SkImages_WrapTexture: vi.fn(),
 			_SkImages_PromiseTextureFrom: vi.fn(),
 			_SkImages_MakeWithFilter: vi.fn(),
@@ -106,5 +114,108 @@ describe("installCanvasKitWebGPU", () => {
 			_deviceContext: deviceContext,
 			_inner: gpuCanvasContext,
 		});
+
+		canvasKit.MakeGPUCanvasSurface?.(canvasContext as never, "srgb");
+
+		expect(canvasKit._SkSurfaces_WrapBackendTexture).toHaveBeenCalledWith(
+			deviceContext,
+			expect.any(Number),
+			0,
+			1,
+			640,
+			360,
+			"rgbaf16",
+			"srgb",
+			null,
+			"",
+		);
+	});
+
+	it("低层 bundle 未暴露 CanvasKit.WebGPU 时使用内置 texture format 表", () => {
+		const { canvasKit } = createLowLevelCanvasKitStub();
+		delete (canvasKit as { WebGPU?: unknown }).WebGPU;
+		const device = { queue: {} };
+		const gpuCanvasContext = {
+			canvas: { width: 640, height: 360 },
+			configure: vi.fn(),
+			getCurrentTexture: vi.fn(() => ({
+				format: "rgba16float",
+				usage: 1,
+				width: 640,
+				height: 360,
+			})),
+		};
+		const canvas = {
+			getContext: vi.fn((contextId: string) =>
+				contextId === "webgpu" ? gpuCanvasContext : null,
+			),
+		};
+
+		installCanvasKitWebGPU(canvasKit as never);
+		const deviceContext = canvasKit.MakeGPUDeviceContext?.(device as never);
+		const canvasContext = canvasKit.MakeGPUCanvasContext?.(
+			deviceContext as never,
+			canvas as never,
+			{ format: "rgba16float" },
+		);
+
+		canvasKit.MakeGPUCanvasSurface?.(canvasContext as never, "srgb");
+
+		expect(canvasKit._SkSurfaces_WrapBackendTexture).toHaveBeenCalledWith(
+			deviceContext,
+			expect.any(Number),
+			40,
+			1,
+			640,
+			360,
+			"rgbaf16",
+			"srgb",
+			null,
+			"",
+		);
+	});
+
+	it("低层 WrapBackendTexture 固定使用带 colorType 的项目内签名", () => {
+		const { canvasKit } = createLowLevelCanvasKitStub();
+		canvasKit._SkSurfaces_WrapBackendTextureSupportsColorType = false;
+		const device = { queue: {} };
+		const gpuCanvasContext = {
+			canvas: { width: 640, height: 360 },
+			configure: vi.fn(),
+			getCurrentTexture: vi.fn(() => ({
+				format: "rgba16float",
+				usage: 1,
+				width: 640,
+				height: 360,
+			})),
+		};
+		const canvas = {
+			getContext: vi.fn((contextId: string) =>
+				contextId === "webgpu" ? gpuCanvasContext : null,
+			),
+		};
+
+		installCanvasKitWebGPU(canvasKit as never);
+		const deviceContext = canvasKit.MakeGPUDeviceContext?.(device as never);
+		const canvasContext = canvasKit.MakeGPUCanvasContext?.(
+			deviceContext as never,
+			canvas as never,
+			{ format: "rgba16float" },
+		);
+
+		canvasKit.MakeGPUCanvasSurface?.(canvasContext as never, "srgb");
+
+		expect(canvasKit._SkSurfaces_WrapBackendTexture).toHaveBeenCalledWith(
+			deviceContext,
+			expect.any(Number),
+			0,
+			1,
+			640,
+			360,
+			"rgbaf16",
+			"srgb",
+			null,
+			"",
+		);
 	});
 });

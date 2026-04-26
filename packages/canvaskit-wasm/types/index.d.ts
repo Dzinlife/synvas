@@ -3430,6 +3430,7 @@ export interface WebGPUCanvasOptions {
     format?: GPUTextureFormat;
     alphaMode?: GPUCanvasAlphaMode;
     colorSpace?: PredefinedColorSpace;
+    toneMapping?: { mode: "standard" | "extended" };
 }
 
 export interface DefaultConstructor<T> {

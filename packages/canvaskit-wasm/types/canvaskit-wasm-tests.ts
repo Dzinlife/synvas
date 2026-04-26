@@ -1092,6 +1092,8 @@ function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElemen
     const canvasContext = CK.MakeGPUCanvasContext(gpuContext, canvas, { // $ExpectType WebGPUCanvasContext
         format: "bgra8unorm",
         alphaMode: "premultiplied",
+        colorSpace: "display-p3",
+        toneMapping: { mode: "extended" },
     })!;
     canvasContext.requestAnimationFrame((canvas: Canvas) => {
         canvas.clear([0, 0, 0, 0]);

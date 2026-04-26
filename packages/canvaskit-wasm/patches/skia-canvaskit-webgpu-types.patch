@@ -1,5 +1,5 @@
 diff --git a/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts b/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
-index 99bcc75..4d4f681 100644
+index 99bcc753..55e47d2d 100644
 --- a/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
 +++ b/modules/canvaskit/npm_build/types/canvaskit-wasm-tests.ts
 @@ -265,19 +265,6 @@ function imageTests(CK: CanvasKit, imgElement?: HTMLImageElement) {
@@ -22,16 +22,16 @@ index 99bcc75..4d4f681 100644
      if (!img) return;
      const dOne = img.encodeToBytes(); // $ExpectType Uint8Array | null
      const dTwo = img.encodeToBytes(CK.ImageFormat.JPEG, 97);
-@@ -1056,17 +1043,51 @@ function verticesTests(CK: CanvasKit) {
+@@ -1056,21 +1043,57 @@ function verticesTests(CK: CanvasKit) {
      const id = vertices.uniqueID(); // $ExpectType number
  }
- 
+
 -function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElement, texture?: GPUTexture) {
 +function webGPUTest(CK: CanvasKit, device?: GPUDevice, canvas?: HTMLCanvasElement | OffscreenCanvas, texture?: GPUTexture) {
      if (!device || !canvas || !texture) {
          return;
      }
- 
+
 -    const gpuContext: WebGPUDeviceContext = CK.MakeGPUDeviceContext(device)!; // $ExpectType GrDirectContext
 -
 -    // Texture surface.
@@ -76,17 +76,24 @@ index 99bcc75..4d4f681 100644
 +            colorSpace: CK.ColorSpace.SRGB,
 +        },
 +    ); // $ExpectType Promise<AsyncReadResult | null>
- 
+
      // Canvas surfaces.
      const canvasContext = CK.MakeGPUCanvasContext(gpuContext, canvas, { // $ExpectType WebGPUCanvasContext
+         format: "bgra8unorm",
+         alphaMode: "premultiplied",
++        colorSpace: "display-p3",
++        toneMapping: { mode: "extended" },
+     })!;
+     canvasContext.requestAnimationFrame((canvas: Canvas) => {
+         canvas.clear([0, 0, 0, 0]);
 diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
-index 892a27e..eec6a4c 100644
+index 892a27eb..5fe76a56 100644
 --- a/modules/canvaskit/npm_build/types/index.d.ts
 +++ b/modules/canvaskit/npm_build/types/index.d.ts
 @@ -280,17 +280,6 @@ export interface CanvasKit {
       */
      MakeGPUDeviceContext(device: GPUDevice): WebGPUDeviceContext | null;
- 
+
 -    /**
 -     * Creates a Surface that draws to the given GPU texture.
 -     * @param ctx
@@ -104,7 +111,7 @@ index 892a27e..eec6a4c 100644
 @@ -315,6 +304,16 @@ export interface CanvasKit {
      MakeGPUCanvasSurface(canvasContext: WebGPUCanvasContext, colorSpace: ColorSpace,
                           width?: number, height?: number): Surface | null;
- 
+
 +    /**
 +     * Graphite surface factories for the WebGPU bundle.
 +     */
@@ -121,7 +128,7 @@ index 892a27e..eec6a4c 100644
 @@ -332,22 +331,6 @@ export interface CanvasKit {
       */
      MakeRenderTarget(ctx: GrDirectContext, info: ImageInfo): Surface | null;
- 
+
 -    /**
 -     * Returns a texture-backed image based on the content in src. It assumes the image is
 -     * RGBA_8888, unpremul and SRGB. This image can be re-used across multiple surfaces.
@@ -144,7 +151,7 @@ index 892a27e..eec6a4c 100644
 @@ -692,10 +675,95 @@ export interface GrDirectContext extends EmbindObject<"GrDirectContext"> {
      setResourceCacheLimitBytes(bytes: number): void;
  }
- 
+
 +export interface AsyncReadResult {
 +    planes: Uint8Array[];
 +    rowBytes: number[];
@@ -236,10 +243,69 @@ index 892a27e..eec6a4c 100644
 +                                 dstSize: ISize, rescaleGamma?: RescaleGamma,
 +                                 rescaleMode?: RescaleMode): Promise<AsyncReadResult | null>;
 +}
- 
+
  /**
   * Represents the canvas context and swapchain backed by a WebGPU device.
-@@ -4587,15 +4678,20 @@ export type FillType = EmbindEnumEntity;
+@@ -3361,6 +3429,8 @@ export interface WebGLOptions {
+ export interface WebGPUCanvasOptions {
+     format?: GPUTextureFormat;
+     alphaMode?: GPUCanvasAlphaMode;
++    colorSpace?: PredefinedColorSpace;
++    toneMapping?: { mode: "standard" | "extended" };
+ }
+
+ export interface DefaultConstructor<T> {
+@@ -3909,6 +3979,16 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromCmds(cmds: InputCommands): Path | null;
+
++    /**
++     * Creates a new path by drawing each glyph at the corresponding x/y position.
++     * Positions are provided as a flattened point array `[x0, y0, x1, y1, ...]`.
++     * @param glyphs
++     * @param positions
++     * @param font
++     */
++    MakeFromGlyphs(glyphs: InputGlyphIDArray, positions: InputFlattenedPointArray,
++                   font: Font): Path | null;
++
+     /**
+      * Creates a new path by combining the given paths according to op. If this fails, null will
+      * be returned instead.
+@@ -3940,6 +4020,15 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromPathInterpolation(start: Path, end: Path, weight: number): Path | null;
+
++    /**
++     * Creates a new path by drawing each glyph with the corresponding rsxform.
++     * @param glyphs
++     * @param rsxforms
++     * @param font
++     */
++    MakeFromRSXformGlyphs(glyphs: InputGlyphIDArray, rsxforms: InputFlattenedRSXFormArray,
++                          font: Font): Path | null;
++
+     /**
+      * Creates a new path from the provided SVG string. If this fails, null will be
+      * returned instead.
+@@ -3947,6 +4036,16 @@ export interface PathConstructorAndFactory extends DefaultConstructor<Path> {
+      */
+     MakeFromSVGString(str: string): Path | null;
+
++    /**
++     * Creates a new path from text laid out with the provided font, with the
++     * first glyph positioned at x/y.
++     * @param str
++     * @param x
++     * @param y
++     * @param font
++     */
++    MakeFromText(str: string, x: number, y: number, font: Font): Path | null;
++
+     /**
+      * Creates a new path using the provided verbs and associated points and weights. The process
+      * reads the first verb from verbs and then the appropriate number of points from the
+@@ -4587,15 +4686,20 @@ export type FillType = EmbindEnumEntity;
  export type FilterMode = EmbindEnumEntity;
  export type FontEdging = EmbindEnumEntity;
  export type FontHinting = EmbindEnumEntity;
@@ -259,4 +325,4 @@ index 892a27e..eec6a4c 100644
 +export type YUVColorSpace = EmbindEnumEntity;
  export type InputState = EmbindEnumEntity;
  export type ModifierKey = EmbindEnumEntity;
- 
+

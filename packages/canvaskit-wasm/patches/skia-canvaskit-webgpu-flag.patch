@@ -1,12 +1,15 @@
 diff --git a/modules/canvaskit/webgpu.js b/modules/canvaskit/webgpu.js
-index 0e937d4..c47e5ba 100644
+index 0e937d41..eca4ff0e 100644
 --- a/modules/canvaskit/webgpu.js
 +++ b/modules/canvaskit/webgpu.js
-@@ -4,28 +4,267 @@
+@@ -4,42 +4,320 @@
  (function(CanvasKit){
      CanvasKit._extraInitializations = CanvasKit._extraInitializations || [];
      CanvasKit._extraInitializations.push(function() {
 +      CanvasKit.webgpu = true;
++      CanvasKit.WebGPU = WebGPU;
++      CanvasKit.JsValStore = JsValStore;
++      CanvasKit._SkSurfaces_WrapBackendTextureSupportsColorType = true;
 +
 +      var originalSurfaceFlush = CanvasKit.Surface.prototype.flush;
 +
@@ -21,6 +24,22 @@ index 0e937d4..c47e5ba 100644
 +
 +      function getTextureFormatIndex(textureFormat) {
 +        return WebGPU.TextureFormat.indexOf(textureFormat);
++      }
++
++      function resolveWebGPUTextureColorType(textureFormat) {
++        switch (textureFormat) {
++          case 'bgra8unorm':
++          case 'bgra8unorm-srgb':
++            return CanvasKit.ColorType.BGRA_8888;
++          case 'rgba16float':
++            return CanvasKit.ColorType.RGBA_F16 || CanvasKit.ColorType.RGBA_8888;
++          case 'rgba32float':
++            return CanvasKit.ColorType.RGBA_F32 || CanvasKit.ColorType.RGBA_8888;
++          case 'rgba8unorm':
++          case 'rgba8unorm-srgb':
++          default:
++            return CanvasKit.ColorType.RGBA_8888;
++        }
 +      }
 +
 +      function toSimpleIRect(rect, fallbackWidth, fallbackHeight) {
@@ -112,7 +131,7 @@ index 0e937d4..c47e5ba 100644
          if (!device) {
            return null;
          }
- 
+
 -        // This allows native code to access this device by calling
 -        // `emscripten_webgpu_get_device().`
          CanvasKit.preinitializedWebGPUDevice = device;
@@ -173,7 +192,7 @@ index 0e937d4..c47e5ba 100644
 +        };
          return context;
        };
- 
+
 +      CanvasKit.SkSurfaces = {
 +        RenderTarget: function(devCtx, imageInfo, mipmapped, surfaceProps, label) {
 +          return CanvasKit._SkSurfaces_RenderTarget(
@@ -190,6 +209,7 @@ index 0e937d4..c47e5ba 100644
 +              texture.usage,
 +              texture.width,
 +              texture.height,
++              resolveWebGPUTextureColorType(texture.format),
 +              colorSpace || null,
 +              makeReleaseCallback(releaseProc, releaseContext),
 +              label || '');
@@ -270,14 +290,39 @@ index 0e937d4..c47e5ba 100644
 +        if (!canvasCtx || !devCtx || !devCtx._device) {
            return null;
          }
- 
+
 -        let format = (opts && opts.format) ? opts.format : navigator.gpu.getPreferredCanvasFormat();
 -        // GPUCanvasConfiguration
+-        canvasCtx.configure({
 +        var format = (opts && opts.format) ? opts.format : navigator.gpu.getPreferredCanvasFormat();
-         canvasCtx.configure({
++        var configuration = {
              device: devCtx._device,
              format: format,
-@@ -37,9 +276,9 @@
+             alphaMode: (opts && opts.alphaMode) ? opts.alphaMode : undefined,
+-        });
++        };
++        if (opts && opts.colorSpace) {
++          configuration.colorSpace = opts.colorSpace;
++        }
++        if (opts && opts.toneMapping) {
++          configuration.toneMapping = opts.toneMapping;
++        }
++        try {
++          canvasCtx.configure(configuration);
++        } catch (e) {
++          return null;
++        }
++        if (opts && opts.toneMapping && opts.toneMapping.mode === 'extended' &&
++            typeof canvasCtx.getConfiguration === 'function') {
++          var configuredToneMapping = canvasCtx.getConfiguration().toneMapping;
++          if (configuredToneMapping && configuredToneMapping.mode &&
++              configuredToneMapping.mode !== 'extended') {
++            return null;
++          }
++        }
+
+         var context = {
+           '_inner': canvasCtx,
            '_deviceContext': devCtx,
            '_textureFormat': format,
          };
@@ -290,9 +335,9 @@ index 0e937d4..c47e5ba 100644
              if (!surface) {
                console.error('Failed to initialize Surface for current canvas swapchain texture');
                return;
-@@ -53,53 +292,35 @@
+@@ -53,53 +331,36 @@
        };
- 
+
        CanvasKit.MakeGPUCanvasSurface = function(canvasCtx, colorSpace, width, height) {
 -        let context = canvasCtx._inner;
 -        if (!width) {
@@ -309,6 +354,7 @@ index 0e937d4..c47e5ba 100644
 +            texture.usage,
 +            width || context.canvas.width,
 +            height || context.canvas.height,
++            resolveWebGPUTextureColorType(canvasCtx._textureFormat),
 +            colorSpace || null,
 +            null,
 +            '');
@@ -323,7 +369,7 @@ index 0e937d4..c47e5ba 100644
          surface._canvasContext = canvasCtx;
          return surface;
        };
- 
+
 -      CanvasKit.MakeGPUTextureSurface = function (devCtx, texture, textureFormat, width, height, colorSpace) {
 -          colorSpace = colorSpace || null;
 -
@@ -346,29 +392,30 @@ index 0e937d4..c47e5ba 100644
 +      CanvasKit.Surface.prototype.assignCurrentSwapChainTexture = function() {
 +        return false;
        };
- 
+
 -      CanvasKit.Surface.prototype.assignCurrentSwapChainTexture = function() {
 -        // This feature is only supported for a Surface that was created via MakeGPUCanvasSurface.
 -        if (!this._canvasContext) {
 -          console.log('Surface is not bound to a canvas context');
 -          return false;
-+      CanvasKit.Surface.prototype.flush = function(dirtyRect) {
-+        originalSurfaceFlush.call(this, dirtyRect);
-+        if (this._deviceContext) {
-+          this._deviceContext.submit();
-         }
+-        }
 -        let ctx = this._canvasContext._inner;
 -        return this._replaceBackendTexture(
 -            CanvasKit.JsValStore.add(ctx.getCurrentTexture()),
 -            CanvasKit.WebGPU.TextureFormat.indexOf(this._canvasContext._textureFormat),
 -            ctx.canvas.width, ctx.canvas.height);
++      CanvasKit.Surface.prototype.flush = function(dirtyRect) {
++        originalSurfaceFlush.call(this, dirtyRect);
++        if (this._deviceContext) {
++          this._deviceContext.submit();
++        }
        };
- 
+
        CanvasKit.Surface.prototype.requestAnimationFrame = function(callback, dirtyRect) {
-@@ -107,11 +328,16 @@
+@@ -107,11 +368,16 @@
            return this._requestAnimationFrameInternal(callback, dirtyRect);
          }
- 
+
 -        return requestAnimationFrame(function() {
 -          // Replace the render target of the Surface with the current swapchain surface if this is
 -          // bound to a canvas context.
@@ -387,10 +434,10 @@ index 0e937d4..c47e5ba 100644
              return;
            }
            callback(this.getCanvas());
-@@ -125,11 +351,16 @@
+@@ -125,11 +391,16 @@
            return;
          }
- 
+
 -        requestAnimationFrame(function() {
 -          // Replace the render target of the Surface with the current swapchain surface if this is
 -          // bound to a canvas context.

@@ -1,10 +1,29 @@
 diff --git a/modules/canvaskit/canvaskit_bindings.cpp b/modules/canvaskit/canvaskit_bindings.cpp
-index 59c6249..bbcba1e 100644
+index 59c62491..04e9dba7 100644
 --- a/modules/canvaskit/canvaskit_bindings.cpp
 +++ b/modules/canvaskit/canvaskit_bindings.cpp
+@@ -32,7 +32,9 @@
+ #include "include/core/SkPicture.h"
+ #include "include/core/SkPictureRecorder.h"
+ #include "include/core/SkPoint3.h"
++#include "include/core/SkPathBuilder.h"
+ #include "include/core/SkRRect.h"
++#include "include/core/SkRSXform.h"
+ #include "include/core/SkSamplingOptions.h"
+ #include "include/core/SkScalar.h"
+ #include "include/core/SkSerialProcs.h"
+@@ -73,7 +75,7 @@
+ #include <emscripten/html5.h>
+ #include "modules/canvaskit/WasmCommon.h"
+
+-#if defined(CK_ENABLE_WEBGL) || defined(CK_ENABLE_WEBGPU)
++#ifdef CK_ENABLE_WEBGL
+ #define ENABLE_GPU
+ #endif
+
 @@ -103,9 +105,32 @@
  #endif  // CK_ENABLE_WEBGL
- 
+
  #ifdef CK_ENABLE_WEBGPU
 -#include <emscripten/html5_webgpu.h>
 +#include "include/gpu/graphite/BackendTexture.h"
@@ -34,12 +53,12 @@ index 59c6249..bbcba1e 100644
 +    JsValStore.remove(textureHandle);
 +});
  #endif  // CK_ENABLE_WEBGPU
- 
+
  #ifndef CK_NO_FONTS
 @@ -257,6 +282,26 @@ struct SimpleImageInfo {
      sk_sp<SkColorSpace> colorSpace;
  };
- 
+
 +#ifdef CK_ENABLE_WEBGPU
 +struct SimpleColorInfo {
 +    SkColorType colorType;
@@ -66,7 +85,7 @@ index 59c6249..bbcba1e 100644
 @@ -265,6 +310,26 @@ SkImageInfo toSkImageInfo(const SimpleImageInfo& sii) {
                               sii.colorSpace ? sii.colorSpace : SkColorSpace::MakeSRGB());
  }
- 
+
 +#ifdef CK_ENABLE_WEBGPU
 +SkColorInfo toSkColorInfo(const SimpleColorInfo& sci) {
 +    return SkColorInfo(sci.colorType,
@@ -88,12 +107,12 @@ index 59c6249..bbcba1e 100644
 +#endif  // CK_ENABLE_WEBGPU
 +
  #ifdef CK_ENABLE_WEBGL
- 
+
  // Set the pixel format based on the colortype.
-@@ -367,71 +432,570 @@ sk_sp<SkSurface> MakeRenderTarget(sk_sp<GrDirectContext> dContext, SimpleImageIn
- 
+@@ -367,71 +432,606 @@ sk_sp<SkSurface> MakeRenderTarget(sk_sp<GrDirectContext> dContext, SimpleImageIn
+
  #ifdef CK_ENABLE_WEBGPU
- 
+
 -sk_sp<GrDirectContext> MakeGrContext() {
 -    GrContextOptions options;
 +class WebGPUImageProvider final : public skgpu::graphite::ImageProvider {
@@ -408,7 +427,7 @@ index 59c6249..bbcba1e 100644
 +
 +    return new WebGPUDeviceContext(std::move(context), std::move(recorder));
  }
- 
+
 -sk_sp<SkSurface> MakeGPUTextureSurface(sk_sp<GrDirectContext> dContext,
 -                                       uint32_t textureHandle,
 -                                       uint32_t textureFormat,
@@ -420,6 +439,10 @@ index 59c6249..bbcba1e 100644
 +        case wgpu::TextureFormat::BGRA8Unorm:
 +        case wgpu::TextureFormat::BGRA8UnormSrgb:
 +            return SkColorType::kBGRA_8888_SkColorType;
++        case wgpu::TextureFormat::RGBA16Float:
++            return SkColorType::kRGBA_F16_SkColorType;
++        case wgpu::TextureFormat::RGBA32Float:
++            return SkColorType::kRGBA_F32_SkColorType;
 +        case wgpu::TextureFormat::RGBA8Unorm:
 +        case wgpu::TextureFormat::RGBA8UnormSrgb:
 +        default:
@@ -462,13 +485,17 @@ index 59c6249..bbcba1e 100644
 +                                              uint32_t textureUsage,
 +                                              int width,
 +                                              int height,
++                                              SkColorType colorType,
 +                                              sk_sp<SkColorSpace> colorSpace,
 +                                              JSObject releaseCallbackObj,
 +                                              std::string label) {
      if (!colorSpace) {
          colorSpace = SkColorSpace::MakeSRGB();
      }
- 
++    if (colorType == SkColorType::kUnknown_SkColorType) {
++        colorType = ResolveWebGPUTextureColorType(static_cast<wgpu::TextureFormat>(textureFormat));
++    }
+
 -    wgpu::TextureFormat format = static_cast<wgpu::TextureFormat>(textureFormat);
 -    wgpu::Texture texture(emscripten_webgpu_import_texture(textureHandle));
 -    emscripten_webgpu_release_js_handle(textureHandle);
@@ -477,7 +504,7 @@ index 59c6249..bbcba1e 100644
 +    if (!backendTexture.isValid()) {
 +        return nullptr;
 +    }
- 
+
 -    // GrDawnRenderTargetInfo currently only supports a 1-mip TextureView.
 -    constexpr uint32_t mipLevelCount = 1;
 -    constexpr uint32_t sampleCount = 1;
@@ -489,10 +516,10 @@ index 59c6249..bbcba1e 100644
 +        releaseContext = reinterpret_cast<SkSurfaces::ReleaseContext>(callbackContext);
 +    }
 +    return SkSurfaces::WrapBackendTexture(
-+            dContext.recorder(), backendTexture, colorSpace, nullptr, releaseProc, releaseContext,
-+            label);
++            dContext.recorder(), backendTexture, colorType, colorSpace, nullptr, releaseProc,
++            releaseContext, label);
 +}
- 
+
 -    GrDawnTextureInfo info;
 -    info.fTexture = texture;
 -    info.fFormat = format;
@@ -504,7 +531,7 @@ index 59c6249..bbcba1e 100644
 +    sk_sp<const SkSurface> constSurface = sk_ref_sp(surface.get());
 +    return SkSurfaces::AsImage(std::move(constSurface));
 +}
- 
+
 -    GrBackendTexture target(width, height, info);
 -    return SkSurfaces::WrapBackendTexture(
 -            dContext.get(),
@@ -742,22 +769,142 @@ index 59c6249..bbcba1e 100644
 +    result.set("offset", offsetValue);
 +    return result;
  }
- 
+
  #endif  // CK_ENABLE_WEBGPU
-@@ -1118,10 +1746,10 @@ private:
+@@ -724,6 +1324,119 @@ SkPath MakePathFromVerbsPointsWeights(WASMPointerU8 verbsPtr,
+                        SkPathFillType::kDefault);
+ }
+
++#ifndef CK_NO_FONTS
++struct GlyphPathBuilderContext {
++    const SkPoint* positions = nullptr;
++    const SkRSXform* rsxforms = nullptr;
++    size_t index = 0;
++    SkPathBuilder builder;
++    bool useRSXform = false;
++};
++
++SkMatrix RSXformToMatrix(const SkRSXform& rsxform) {
++    SkMatrix matrix;
++    matrix.setAll(rsxform.fSCos,
++                  -rsxform.fSSin,
++                  rsxform.fTx,
++                  rsxform.fSSin,
++                  rsxform.fSCos,
++                  rsxform.fTy,
++                  0,
++                  0,
++                  1);
++    return matrix;
++}
++
++void AppendGlyphPath(const SkPath* glyphPath, const SkMatrix& mx, void* rawCtx) {
++    auto* ctx = reinterpret_cast<GlyphPathBuilderContext*>(rawCtx);
++    const size_t glyphIndex = ctx->index++;
++    if (!glyphPath) {
++        return;
++    }
++
++    SkPath transformed = glyphPath->makeTransform(mx);
++    if (ctx->useRSXform) {
++        transformed = transformed.makeTransform(RSXformToMatrix(ctx->rsxforms[glyphIndex]));
++    } else {
++        const SkPoint& position = ctx->positions[glyphIndex];
++        transformed = transformed.makeOffset(position.fX, position.fY);
++    }
++    ctx->builder.addPath(transformed);
++}
++
++SkPathOrNull MakePathFromGlyphs(const SkFont& font,
++                                WASMPointerU16 gPtr,
++                                size_t byteLen,
++                                WASMPointerF32 pPtr,
++                                size_t numPos) {
++    const size_t numGlyphs = byteLen >> 1;
++    if (numGlyphs == 0) {
++        return emscripten::val(SkPath());
++    }
++    if ((numPos >> 1) < numGlyphs) {
++        return emscripten::val::null();
++    }
++
++    const auto* glyphs = reinterpret_cast<const SkGlyphID*>(gPtr);
++    const auto* positions = reinterpret_cast<const SkPoint*>(pPtr);
++    GlyphPathBuilderContext ctx;
++    ctx.positions = positions;
++    font.getPaths({glyphs, numGlyphs}, AppendGlyphPath, &ctx);
++    return emscripten::val(ctx.builder.detach());
++}
++
++SkPathOrNull MakePathFromRSXformGlyphs(const SkFont& font,
++                                       WASMPointerU16 gPtr,
++                                       size_t byteLen,
++                                       WASMPointerF32 xPtr,
++                                       size_t numXforms) {
++    const size_t numGlyphs = byteLen >> 1;
++    if (numGlyphs == 0) {
++        return emscripten::val(SkPath());
++    }
++    if ((numXforms >> 2) < numGlyphs) {
++        return emscripten::val::null();
++    }
++
++    const auto* glyphs = reinterpret_cast<const SkGlyphID*>(gPtr);
++    const auto* rsxforms = reinterpret_cast<const SkRSXform*>(xPtr);
++    GlyphPathBuilderContext ctx;
++    ctx.rsxforms = rsxforms;
++    ctx.useRSXform = true;
++    font.getPaths({glyphs, numGlyphs}, AppendGlyphPath, &ctx);
++    return emscripten::val(ctx.builder.detach());
++}
++
++SkPathOrNull MakePathFromText(WASMPointerU8 sptr,
++                              size_t len,
++                              float x,
++                              float y,
++                              const SkFont& font) {
++    const char* str = reinterpret_cast<const char*>(sptr);
++    const size_t glyphCount = font.countText(str, len, SkTextEncoding::kUTF8);
++    if (glyphCount == 0) {
++        return emscripten::val(SkPath());
++    }
++
++    std::vector<SkGlyphID> glyphs(glyphCount);
++    font.textToGlyphs(str,
++                      len,
++                      SkTextEncoding::kUTF8,
++                      {glyphs.data(), glyphs.size()});
++
++    std::vector<SkPoint> positions(glyphCount);
++    font.getPos({glyphs.data(), glyphs.size()},
++                {positions.data(), positions.size()},
++                {x, y});
++
++    return MakePathFromGlyphs(font,
++                              reinterpret_cast<WASMPointerU16>(glyphs.data()),
++                              glyphs.size() * sizeof(SkGlyphID),
++                              reinterpret_cast<WASMPointerF32>(positions.data()),
++                              positions.size() * 2);
++}
++#endif
++
+ void PathAddVerbsPointsWeights(SkPathBuilder& self,
+                                WASMPointerU8 verbsPtr,
+                                int numVerbs,
+@@ -1118,10 +1831,10 @@ private:
  EMSCRIPTEN_BINDINGS(Skia) {
  #ifdef ENABLE_GPU
      constant("gpu", true);
 -    function("_MakeGrContext", &MakeGrContext);
  #endif  // ENABLE_GPU
- 
+
  #ifdef CK_ENABLE_WEBGL
 +    function("_MakeGrContext", &MakeGrContext);
      constant("webgl", true);
      function("_MakeOnScreenGLSurface",
               select_overload<sk_sp<SkSurface>(
-@@ -1141,7 +1769,26 @@ EMSCRIPTEN_BINDINGS(Skia) {
- 
+@@ -1141,7 +1854,26 @@ EMSCRIPTEN_BINDINGS(Skia) {
+
  #ifdef CK_ENABLE_WEBGPU
      constant("webgpu", true);
 -    function("_MakeGPUTextureSurface", &MakeGPUTextureSurface);
@@ -782,9 +929,22 @@ index 59c6249..bbcba1e 100644
 +    function("_SkImages_PromiseTextureFrom", &SkImagesPromiseTextureFrom);
 +    function("_SkImages_MakeWithFilter", &SkImagesMakeWithFilter, allow_raw_pointers());
  #endif  // CK_ENABLE_WEBGPU
- 
+
      function("getDecodeCacheLimitBytes", &SkResourceCache::GetTotalByteLimit);
-@@ -2893,16 +3540,6 @@ EMSCRIPTEN_BINDINGS(Skia) {
+@@ -2323,6 +3055,12 @@ EMSCRIPTEN_BINDINGS(Skia) {
+             .class_function("MakeFromPathInterpolation", &MakePathFromInterpolation)
+             .class_function("_MakeFromCmds", &MakePathFromCmds)
+             .class_function("_MakeFromVerbsPointsWeights", &MakePathFromVerbsPointsWeights)
++#ifndef CK_NO_FONTS
++            .class_function("_MakeFromGlyphs", &MakePathFromGlyphs, allow_raw_pointers())
++            .class_function(
++                    "_MakeFromRSXformGlyphs", &MakePathFromRSXformGlyphs, allow_raw_pointers())
++            .class_function("_MakeFromText", &MakePathFromText, allow_raw_pointers())
++#endif
+             .function("countPoints", &SkPath::countPoints)
+             .function("contains", optional_override(
+                               [](const SkPath& self, float x, float y) -> bool {
+@@ -2893,16 +3631,6 @@ EMSCRIPTEN_BINDINGS(Skia) {
                                    releaseCtx);
                        }))
  #endif  // CK_ENABLE_WEBGL
@@ -801,10 +961,10 @@ index 59c6249..bbcba1e 100644
              .function("_makeImageSnapshot",
                        optional_override([](SkSurface& self, WASMPointerU32 iPtr) -> sk_sp<SkImage> {
                            SkIRect* bounds = reinterpret_cast<SkIRect*>(iPtr);
-@@ -3141,6 +3778,33 @@ EMSCRIPTEN_BINDINGS(Skia) {
+@@ -3141,6 +3869,33 @@ EMSCRIPTEN_BINDINGS(Skia) {
              .value("RGB_F16F16F16x", SkColorType::kRGB_F16F16F16x_SkColorType)
              .value("RGBA_F32", SkColorType::kRGBA_F32_SkColorType);
- 
+
 +#ifdef CK_ENABLE_WEBGPU
 +    enum_<skgpu::Origin>("Origin")
 +            .value("TopLeft", skgpu::Origin::kTopLeft)
@@ -835,10 +995,10 @@ index 59c6249..bbcba1e 100644
      enum_<SkPathFillType>("FillType")
              .value("Winding", SkPathFillType::kWinding)
              .value("EvenOdd", SkPathFillType::kEvenOdd);
-@@ -3231,6 +3895,23 @@ EMSCRIPTEN_BINDINGS(Skia) {
+@@ -3231,6 +3986,23 @@ EMSCRIPTEN_BINDINGS(Skia) {
              .field("alphaType", &SimpleImageInfo::alphaType)
              .field("colorSpace", &SimpleImageInfo::colorSpace);
- 
+
 +#ifdef CK_ENABLE_WEBGPU
 +    value_object<SimpleColorInfo>("ColorInfo")
 +            .field("colorType", &SimpleColorInfo::colorType)
