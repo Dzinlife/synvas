@@ -836,6 +836,69 @@ describe("tile scheduler", () => {
 		scheduler.dispose();
 	});
 
+	it("LOD 兜底不会复用 input 签名已变化的旧缓存", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 8,
+		});
+		const oldInput = createRasterInput({
+			nodeId: "node-moving-cache",
+			left: 64,
+			top: 64,
+			right: 220,
+			bottom: 220,
+		});
+		const nextInput = createRasterInput({
+			nodeId: "node-moving-cache",
+			left: 700,
+			top: 64,
+			right: 900,
+			bottom: 220,
+		});
+		scheduler.setInputs([oldInput]);
+		warmScheduler(scheduler, 20, {
+			zoom: 0.5,
+			stageWidth: 512,
+			stageHeight: 512,
+		});
+		scheduler.setInputs([nextInput]);
+		scheduler.markDirtyUnion(oldInput.aabb, nextInput.aabb);
+		const queuedFrame = scheduler.beginFrame(
+			createFrameInput({
+				zoom: 0.5,
+				stageWidth: 512,
+				stageHeight: 512,
+				maxTasksPerTick: 0,
+			}),
+		);
+		expect(queuedFrame.stats.queuedCount).toBeGreaterThan(0);
+		scheduler.beginFrame(
+			createFrameInput({
+				x: -4096,
+				zoom: 0.5,
+				stageWidth: 512,
+				stageHeight: 512,
+				maxTasksPerTick: 1,
+			}),
+		);
+		const zoomInFrame = scheduler.beginFrame(
+			createFrameInput({
+				x: -512,
+				zoom: 1,
+				stageWidth: 512,
+				stageHeight: 512,
+				maxTasksPerTick: 0,
+				debugEnabled: true,
+			}),
+		);
+		expect(zoomInFrame.drawItems.some((item) => item.sourceLod === -1)).toBe(
+			false,
+		);
+		expect(
+			zoomInFrame.debugItems.some((item) => item.coverMode === "PARENT"),
+		).toBe(false);
+		scheduler.dispose();
+	});
+
 	it("一跳子级兜底可在切到更粗 lod 时复用已有细节 tile", () => {
 		const scheduler = new StaticTileScheduler({
 			maxTasksPerTick: 8,

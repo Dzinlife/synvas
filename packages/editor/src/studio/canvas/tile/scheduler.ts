@@ -508,6 +508,38 @@ export class StaticTileScheduler {
 		return segments.join("|");
 	}
 
+	private resolveRecordTileRect(record: TileRecord): TileAabb {
+		return createTileAabb(
+			record.worldLeft,
+			record.worldTop,
+			record.worldLeft + record.worldSize,
+			record.worldTop + record.worldSize,
+		);
+	}
+
+	private resolveRecordCurrentInputSignature(record: TileRecord): string {
+		const tileRect = this.resolveRecordTileRect(record);
+		return this.buildTileInputSignature(
+			tileRect,
+			this.queryInputsByRect(tileRect),
+		);
+	}
+
+	private isRecordImageCurrent(record: TileRecord): boolean {
+		return (
+			Boolean(record.image) &&
+			record.lastRenderedInputSignature ===
+				this.resolveRecordCurrentInputSignature(record)
+		);
+	}
+
+	private ensureReadyRecordCurrent(record: TileRecord): boolean {
+		if (record.state !== "READY" || !record.image) return false;
+		if (this.isRecordImageCurrent(record)) return true;
+		record.state = "STALE";
+		return false;
+	}
+
 	private resolveVisibleKeys(input: TileSchedulerFrameInput): void {
 		this.visibleKeys.length = 0;
 		if (input.stageWidth <= 0 || input.stageHeight <= 0) {
@@ -586,12 +618,7 @@ export class StaticTileScheduler {
 		for (const key of this.visibleCoveredKeySet) {
 			const record = this.ensureTileRecord(key);
 			record.lastUsedTick = this.tick;
-			const tileRect = createTileAabb(
-				record.worldLeft,
-				record.worldTop,
-				record.worldLeft + record.worldSize,
-				record.worldTop + record.worldSize,
-			);
+			const tileRect = this.resolveRecordTileRect(record);
 			const candidateInputs = this.queryInputsByRect(tileRect);
 			const nextInputSignature = this.buildTileInputSignature(
 				tileRect,
@@ -657,7 +684,11 @@ export class StaticTileScheduler {
 				continue;
 			}
 			if (!this.visibleCoveredKeySet.has(task.key)) {
-				record.state = record.image ? "READY" : "STALE";
+				record.state = this.isRecordImageCurrent(record)
+					? "READY"
+					: record.image
+						? "STALE"
+						: "EMPTY";
 				this.taskPool.release(task);
 				continue;
 			}
@@ -818,11 +849,7 @@ export class StaticTileScheduler {
 			ty: Math.floor(ty / 2),
 		});
 		const parentRecord = this.tileByKey.get(parentKey);
-		if (
-			!parentRecord ||
-			parentRecord.state !== "READY" ||
-			!parentRecord.image
-		) {
+		if (!parentRecord || !this.ensureReadyRecordCurrent(parentRecord)) {
 			return null;
 		}
 		return parentRecord;
@@ -844,11 +871,7 @@ export class StaticTileScheduler {
 					ty: ty * 2 + offsetY,
 				});
 				const childRecord = this.tileByKey.get(childKey);
-				if (
-					!childRecord ||
-					childRecord.state !== "READY" ||
-					!childRecord.image
-				) {
+				if (!childRecord || !this.ensureReadyRecordCurrent(childRecord)) {
 					return null;
 				}
 				children.push(childRecord);
@@ -876,7 +899,12 @@ export class StaticTileScheduler {
 			const tx = decoded.tx;
 			const ty = decoded.ty;
 			const isCovered = this.visibleCoveredKeySet.has(key);
-			if (record && record.state === "READY" && record.image) {
+			if (
+				record &&
+				record.state === "READY" &&
+				record.image &&
+				this.ensureReadyRecordCurrent(record)
+			) {
 				if (!isCovered) {
 					// tile 当前无任何输入覆盖时，不应继续复用旧 READY 纹理。
 					record.state = "STALE";
@@ -897,6 +925,7 @@ export class StaticTileScheduler {
 			const canReuseLastFrameImage =
 				Boolean(record?.image) &&
 				Boolean(isCovered) &&
+				Boolean(record && this.isRecordImageCurrent(record)) &&
 				(record?.state === "STALE" ||
 					record?.state === "QUEUED" ||
 					record?.state === "RENDERING");
