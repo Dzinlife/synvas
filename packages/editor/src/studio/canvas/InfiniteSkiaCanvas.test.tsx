@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
+import { resolveTileDrawBleed } from "./infiniteSkiaCanvasTilePipeline";
 import {
 	TILE_MAX_TASKS_PER_TICK_DRAG,
 	TILE_PIXEL_SIZE,
@@ -410,12 +411,31 @@ vi.mock("@/node-system/registry", async () => {
 		getSourceSignature: textTilePictureSourceSignatureMock,
 		generate: textTilePictureGenerateMock,
 	};
+	const boardTilePictureCapability = {
+		getSourceSignature: ({ node }: { node: BoardCanvasNode }) =>
+			`${node.id}:${node.width}:${node.height}`,
+		generate: async ({ node }: { node: BoardCanvasNode }) => {
+			const picture = renderNodeToPictureMock();
+			if (!picture) return null;
+			return {
+				picture,
+				sourceWidth: Math.max(1, Math.round(Math.abs(node.width))),
+				sourceHeight: Math.max(1, Math.round(Math.abs(node.height))),
+				dispose: vi.fn(),
+			};
+		},
+	};
 	return {
 		getCanvasNodeDefinition: (type: string) => ({
 			skiaRenderer: () => null,
 			thumbnail:
 				type === "scene" || type === "video" ? thumbnailCapability : undefined,
-			tilePicture: type === "text" ? textTilePictureCapability : undefined,
+			tilePicture:
+				type === "text"
+					? textTilePictureCapability
+					: type === "board"
+						? boardTilePictureCapability
+						: undefined,
 			focusEditorLayer: type === "scene" ? FocusSceneSkiaLayer : undefined,
 			focusEditorBridge: type === "scene" ? SceneFocusEditorBridge : undefined,
 		}),
@@ -1588,11 +1608,13 @@ describe("InfiniteSkiaCanvas", () => {
 				);
 				expect(liveNodeIds).toEqual([]);
 			});
-			const containsBoardInput = setInputsSpy.mock.calls.some((call) => {
-				const inputs = call[0] as Array<{ nodeId?: string }>;
-				return inputs.some((input) => input.nodeId === "node-board-active");
+			await waitFor(() => {
+				const containsBoardInput = setInputsSpy.mock.calls.some((call) => {
+					const inputs = call[0] as Array<{ nodeId?: string }>;
+					return inputs.some((input) => input.nodeId === "node-board-active");
+				});
+				expect(containsBoardInput).toBe(true);
 			});
-			expect(containsBoardInput).toBe(true);
 		} finally {
 			setInputsSpy.mockRestore();
 		}
@@ -1625,7 +1647,7 @@ describe("InfiniteSkiaCanvas", () => {
 		expect(liveNodeIds).toEqual([]);
 	});
 
-	it("非 active 的 text/audio 会进入 tile picture 输入且不走 live", async () => {
+	it("非 active 的 text 会进入 tile picture 输入且 audio 不走通用 fallback/live", async () => {
 		tilePipelineMockState.enabled = true;
 		render(
 			<InfiniteSkiaCanvas
@@ -1660,7 +1682,7 @@ describe("InfiniteSkiaCanvas", () => {
 			expect(liveNodeIds).toEqual([]);
 		});
 		expect(textTilePictureGenerateMock).toHaveBeenCalled();
-		expect(renderNodeToPictureMock).toHaveBeenCalled();
+		expect(renderNodeToPictureMock).not.toHaveBeenCalled();
 	});
 
 	it("text 节点会通过 node-system tilePicture capability 生成 tile 输入", async () => {
@@ -2494,7 +2516,8 @@ describe("InfiniteSkiaCanvas", () => {
 			expect(getFrozenRenderedNodeIds(tree)).toContain(activeNode.id);
 			expect(getLiveRenderedNodeIds(tree)).not.toContain(activeNode.id);
 		});
-		expect(renderNodeToPictureMock).toHaveBeenCalled();
+		expect(textTilePictureGenerateMock).toHaveBeenCalled();
+		expect(renderNodeToPictureMock).not.toHaveBeenCalled();
 	});
 
 	it("forceLiveNodeIds 会让 animated active node 保持 live render", async () => {
@@ -2754,23 +2777,22 @@ describe("InfiniteSkiaCanvas", () => {
 			height: vi.fn(() => tileImageSize),
 			dispose: vi.fn(),
 		};
+		const tileDrawItem = {
+			key: 1,
+			lod: 0,
+			sourceLod: 0,
+			tx: 0,
+			ty: 0,
+			left: 0,
+			top: 0,
+			size: tileDrawSize,
+			image: tileImage as unknown as TileDrawItem["image"],
+		};
 		const beginFrameSpy = vi
 			.spyOn(StaticTileScheduler.prototype, "beginFrame")
 			.mockReturnValue({
 				...createEmptyTileFrameResult(),
-				drawItems: [
-					{
-						key: 1,
-						lod: 0,
-						sourceLod: 0,
-						tx: 0,
-						ty: 0,
-						left: 0,
-						top: 0,
-						size: tileDrawSize,
-						image: tileImage as unknown as TileDrawItem["image"],
-					},
-				],
+				drawItems: [tileDrawItem],
 			});
 		try {
 			const animatedNode = createImageNode("node-image-dpr-layout", 0, {
@@ -2823,7 +2845,7 @@ describe("InfiniteSkiaCanvas", () => {
 			const sourceRect = drawCall?.[1] as
 				| { x: number; y: number; width: number; height: number }
 				| undefined;
-			const bleed = (tileDrawSize / TILE_PIXEL_SIZE) * 0.5;
+			const bleed = resolveTileDrawBleed(tileDrawItem);
 			const drawSize = tileDrawSize + bleed * 2;
 			expect(sourceRect?.x).toBeCloseTo(
 				((animatedNode.x + bleed) / drawSize) * tileImageSize,

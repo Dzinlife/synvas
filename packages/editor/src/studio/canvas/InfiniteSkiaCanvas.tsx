@@ -1299,7 +1299,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			const renderNode = latestNode;
 			const ancestorClipAabbs = resolveNodeAncestorClipAabbs(
 				latestNode,
-				latestNodeById,
+				latestNodeByIdRef.current,
 			);
 			const scene =
 				latestNode.type === "scene"
@@ -1359,7 +1359,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						if (!snapshot) return null;
 						const ancestorClipAabbs = resolveNodeAncestorClipAabbs(
 							latestNode,
-							latestNodeById,
+							latestNodeByIdRef.current,
 						);
 						return (
 							<CanvasNodeFrozenRenderItem
@@ -1431,7 +1431,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		onSelectionResize,
 		onLabelHitTesterChange,
 		liveRenderNodes,
-		latestNodeById,
 		marqueeRectScreen,
 		effectiveFrozenNodeIdSet,
 		retainedFrozenNodeIdSet,
