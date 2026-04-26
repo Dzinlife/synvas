@@ -63,6 +63,47 @@ const { renderNodeToPictureMock } = vi.hoisted(() => ({
 		dispose: vi.fn(),
 	})),
 }));
+const { imageTilePictureSourceSignatureMock } = vi.hoisted(() => ({
+	imageTilePictureSourceSignatureMock: vi.fn(
+		(context: {
+			node: ImageCanvasNode;
+			asset: StudioProject["assets"][number] | null;
+		}) =>
+			`${context.node.id}:${context.node.assetId}:${context.asset?.id ?? "none"}`,
+	),
+}));
+const { imageTilePictureGenerateMock } = vi.hoisted(() => ({
+	imageTilePictureGenerateMock: vi.fn(
+		async (context: {
+			node: ImageCanvasNode;
+			asset: StudioProject["assets"][number] | null;
+		}) => {
+			const locator = context.asset?.locator;
+			const uri =
+				locator?.type === "linked-remote"
+					? locator.uri
+					: locator?.type === "linked-file"
+						? `file://${locator.filePath}`
+						: locator?.type === "managed"
+							? `opfs://test/images/${locator.fileName}`
+							: null;
+			const handle = uri ? await acquireImageAssetMock(uri) : null;
+			const picture = renderNodeToPictureMock();
+			if (!picture) {
+				handle?.release?.();
+				return null;
+			}
+			return {
+				picture,
+				sourceWidth: Math.max(1, Math.round(Math.abs(context.node.width))),
+				sourceHeight: Math.max(1, Math.round(Math.abs(context.node.height))),
+				dispose: vi.fn(() => {
+					handle?.release?.();
+				}),
+			};
+		},
+	),
+}));
 const { textTilePictureSourceSignatureMock } = vi.hoisted(() => ({
 	textTilePictureSourceSignatureMock: vi.fn(
 		(context: { node: TextCanvasNode }) =>
@@ -411,6 +452,10 @@ vi.mock("@/node-system/registry", async () => {
 		getSourceSignature: textTilePictureSourceSignatureMock,
 		generate: textTilePictureGenerateMock,
 	};
+	const imageTilePictureCapability = {
+		getSourceSignature: imageTilePictureSourceSignatureMock,
+		generate: imageTilePictureGenerateMock,
+	};
 	const boardTilePictureCapability = {
 		getSourceSignature: ({ node }: { node: BoardCanvasNode }) =>
 			`${node.id}:${node.width}:${node.height}`,
@@ -431,11 +476,13 @@ vi.mock("@/node-system/registry", async () => {
 			thumbnail:
 				type === "scene" || type === "video" ? thumbnailCapability : undefined,
 			tilePicture:
-				type === "text"
-					? textTilePictureCapability
-					: type === "board"
-						? boardTilePictureCapability
-						: undefined,
+				type === "image"
+					? imageTilePictureCapability
+					: type === "text"
+						? textTilePictureCapability
+						: type === "board"
+							? boardTilePictureCapability
+							: undefined,
 			focusEditorLayer: type === "scene" ? FocusSceneSkiaLayer : undefined,
 			focusEditorBridge: type === "scene" ? SceneFocusEditorBridge : undefined,
 		}),
@@ -817,6 +864,45 @@ describe("InfiniteSkiaCanvas", () => {
 		skiaSurfaceMockState.surfaces.length = 0;
 		acquireImageAssetMock.mockReset();
 		renderNodeToPictureMock.mockReset();
+		imageTilePictureSourceSignatureMock.mockReset();
+		imageTilePictureSourceSignatureMock.mockImplementation(
+			(context: {
+				node: ImageCanvasNode;
+				asset: StudioProject["assets"][number] | null;
+			}) =>
+				`${context.node.id}:${context.node.assetId}:${context.asset?.id ?? "none"}`,
+		);
+		imageTilePictureGenerateMock.mockReset();
+		imageTilePictureGenerateMock.mockImplementation(
+			async (context: {
+				node: ImageCanvasNode;
+				asset: StudioProject["assets"][number] | null;
+			}) => {
+				const locator = context.asset?.locator;
+				const uri =
+					locator?.type === "linked-remote"
+						? locator.uri
+						: locator?.type === "linked-file"
+							? `file://${locator.filePath}`
+							: locator?.type === "managed"
+								? `opfs://test/images/${locator.fileName}`
+								: null;
+				const handle = uri ? await acquireImageAssetMock(uri) : null;
+				const picture = renderNodeToPictureMock();
+				if (!picture) {
+					handle?.release?.();
+					return null;
+				}
+				return {
+					picture,
+					sourceWidth: Math.max(1, Math.round(Math.abs(context.node.width))),
+					sourceHeight: Math.max(1, Math.round(Math.abs(context.node.height))),
+					dispose: vi.fn(() => {
+						handle?.release?.();
+					}),
+				};
+			},
+		);
 		textTilePictureSourceSignatureMock.mockReset();
 		textTilePictureSourceSignatureMock.mockImplementation(
 			(context: { node: TextCanvasNode }) =>
@@ -2394,7 +2480,7 @@ describe("InfiniteSkiaCanvas", () => {
 		}
 	});
 
-	it("auto layout 动画节点复用已加载 tile cache，避免 live renderer 重新加载闪烁", async () => {
+	it("image 节点进入 live renderer 时会释放 tile picture cache", async () => {
 		tilePipelineMockState.enabled = true;
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
 		const releaseMock = vi.fn();
@@ -2477,10 +2563,227 @@ describe("InfiniteSkiaCanvas", () => {
 					latestInputs.some((input) => input.nodeId === animatedNode.id),
 				).toBe(false);
 			});
-			expect(acquireImageAssetMock).toHaveBeenCalledTimes(1);
-			expect(releaseMock).not.toHaveBeenCalled();
+			expect(acquireImageAssetMock).toHaveBeenCalledTimes(3);
+			expect(releaseMock).toHaveBeenCalled();
 		} finally {
 			setInputsSpy.mockRestore();
+		}
+	});
+
+	it("image 节点点击 active 时会等 live 图片 ready 再移出 static tile", async () => {
+		tilePipelineMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const liveImageDeferred =
+			createDeferred<Awaited<ReturnType<typeof acquireImageAssetMock>>>();
+		imageTilePictureGenerateMock.mockResolvedValue({
+			picture: { dispose: vi.fn() },
+			sourceWidth: 320,
+			sourceHeight: 180,
+			dispose: vi.fn(),
+		});
+		acquireImageAssetMock.mockImplementation(
+			async () => liveImageDeferred.promise,
+		);
+		try {
+			const imageNode = createImageNode("node-image-active-ready", 0);
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [imageNode],
+				scenes: emptyScenes,
+				assets: [createImageAsset(imageNode.assetId)],
+				activeNodeId: null,
+				selectedNodeIds: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === imageNode.id),
+				).toBe(true);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={imageNode.id}
+					selectedNodeIds={[imageNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(acquireImageAssetMock).toHaveBeenCalled();
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					imageNode.id,
+				);
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === imageNode.id),
+				).toBe(true);
+			});
+
+			await act(async () => {
+				liveImageDeferred.resolve({
+					asset: {
+						image: {
+							id: "live-image",
+							width: 256,
+							height: 144,
+							dispose: vi.fn(),
+						},
+					},
+					release: vi.fn(),
+				});
+				await Promise.resolve();
+			});
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					imageNode.id,
+				);
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === imageNode.id),
+				).toBe(false);
+			});
+		} finally {
+			setInputsSpy.mockRestore();
+		}
+	});
+
+	it("image 节点取消 active 后 retained live 会等 static tilePicture ready 再释放", async () => {
+		tilePipelineMockState.enabled = true;
+		const imageNodeId = "node-image-retained-live";
+		const tileImage = {
+			width: vi.fn(() => 512),
+			height: vi.fn(() => 512),
+			dispose: vi.fn(),
+		};
+		let frameHasImageTileDrawItem = false;
+		let frameHasImageFallback = false;
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockImplementation(() => {
+				const baseFrame = createEmptyTileFrameResult();
+				return {
+					...baseFrame,
+					drawItems: frameHasImageTileDrawItem
+						? [
+								{
+									key: 1,
+									lod: 0,
+									sourceLod: 0,
+									tx: 0,
+									ty: 0,
+									left: 0,
+									top: 0,
+									size: 512,
+									image: tileImage as unknown as TileDrawItem["image"],
+								},
+							]
+						: [],
+					fallbackNodeIds: frameHasImageFallback ? [imageNodeId] : [],
+					hasPendingWork: true,
+					stats: {
+						...baseFrame.stats,
+						visibleCount: 1,
+						readyVisibleCount:
+							frameHasImageTileDrawItem && !frameHasImageFallback ? 1 : 0,
+						fallbackNodeCount: frameHasImageFallback ? 1 : 0,
+						queuedCount: 1,
+					},
+				};
+			});
+		const tilePictureDeferred =
+			createDeferred<
+				Awaited<ReturnType<typeof imageTilePictureGenerateMock>>
+			>();
+		imageTilePictureGenerateMock.mockImplementation(
+			async () => tilePictureDeferred.promise,
+		);
+		try {
+			const imageNode = createImageNode(imageNodeId, 0);
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [imageNode],
+				scenes: emptyScenes,
+				assets: [createImageAsset(imageNode.assetId)],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={imageNode.id}
+					selectedNodeIds={[imageNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					imageNode.id,
+				);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(imageTilePictureGenerateMock).toHaveBeenCalled();
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					imageNode.id,
+				);
+			});
+
+			frameHasImageTileDrawItem = true;
+			frameHasImageFallback = true;
+			await act(async () => {
+				tilePictureDeferred.resolve({
+					picture: { dispose: vi.fn() },
+					sourceWidth: Math.max(1, Math.round(Math.abs(imageNode.width))),
+					sourceHeight: Math.max(1, Math.round(Math.abs(imageNode.height))),
+					dispose: vi.fn(),
+				});
+				await Promise.resolve();
+			});
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					imageNode.id,
+				);
+			});
+
+			frameHasImageFallback = false;
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					imageNode.id,
+				);
+			});
+		} finally {
+			beginFrameSpy.mockRestore();
 		}
 	});
 

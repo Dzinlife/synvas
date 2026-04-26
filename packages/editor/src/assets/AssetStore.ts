@@ -76,6 +76,12 @@ class AssetStore {
 		}
 	}
 
+	peek<T>(kind: AssetKind, key: string): T | null {
+		const id = this.getId(kind, key);
+		const entry = this.entries.get(id) as AssetEntry<T> | undefined;
+		return entry?.value ?? null;
+	}
+
 	private release(kind: AssetKind, key: string) {
 		const id = this.getId(kind, key);
 		const entry = this.entries.get(id) as AssetEntry<unknown> | undefined;

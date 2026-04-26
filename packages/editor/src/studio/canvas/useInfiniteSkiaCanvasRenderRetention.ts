@@ -18,6 +18,7 @@ interface ReleaseRetainedNodesInput {
 	releaseRetainedFrozenNodes: boolean;
 	dropRetainedFrozenNodesForZoom: boolean;
 	releaseRetainedLiveNodes: boolean;
+	releaseRetainedLiveNodeIds?: ReadonlySet<string>;
 }
 
 export const useInfiniteSkiaCanvasRenderRetention = ({
@@ -264,6 +265,7 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 			releaseRetainedFrozenNodes,
 			dropRetainedFrozenNodesForZoom,
 			releaseRetainedLiveNodes,
+			releaseRetainedLiveNodeIds,
 		}: ReleaseRetainedNodesInput) => {
 			if (releaseRetainedFrozenNodes || dropRetainedFrozenNodesForZoom) {
 				previousEffectiveFrozenNodeIdSetRef.current = new Set(
@@ -290,6 +292,21 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 				setRetainedLiveNodeIds((previous) => {
 					const next = previous.filter((nodeId) => {
 						return liveNodeIdSet.has(nodeId) || frozenNodeIdSet.has(nodeId);
+					});
+					if (
+						next.length === previous.length &&
+						next.every((nodeId, index) => nodeId === previous[index])
+					) {
+						return previous;
+					}
+					return next;
+				});
+			} else if (releaseRetainedLiveNodeIds?.size) {
+				previousLiveNodeIdSetRef.current = new Set(liveNodeIdSet);
+				setLiveRetentionVersion((previous) => previous + 1);
+				setRetainedLiveNodeIds((previous) => {
+					const next = previous.filter((nodeId) => {
+						return !releaseRetainedLiveNodeIds.has(nodeId);
 					});
 					if (
 						next.length === previous.length &&

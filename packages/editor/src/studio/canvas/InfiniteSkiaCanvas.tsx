@@ -23,7 +23,8 @@ import {
 	useSharedValue,
 	withTiming,
 } from "react-skia-lite";
-import { acquireImageAsset } from "@/assets/imageAsset";
+import type { AssetHandle } from "@/assets/AssetStore";
+import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
@@ -158,6 +159,12 @@ interface InfiniteSkiaCanvasProps {
 	onSelectionResize?: (event: CanvasSelectionResizeEvent) => void;
 	onLabelHitTesterChange?: (tester: CanvasNodeLabelHitTester | null) => void;
 }
+
+interface LiveImageAssetCacheEntry {
+	uri: string;
+	handle: AssetHandle<ImageAsset> | null;
+	loading: boolean;
+}
 const EMPTY_SNAP_GUIDES_SCREEN: CanvasSnapGuidesScreen = {
 	vertical: [],
 	horizontal: [],
@@ -260,6 +267,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const [tileTick, setTileTick] = useState(0);
 	const [tileAsyncPictureVersion, setTileAsyncPictureVersion] = useState(0);
 	const [rasterCacheVersion, setRasterCacheVersion] = useState(0);
+	const [liveImageAssetVersion, setLiveImageAssetVersion] = useState(0);
 	const assetById = useMemo(() => {
 		return new Map(assets.map((asset) => [asset.id, asset]));
 	}, [assets]);
@@ -269,6 +277,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, []);
 	const tileSchedulerRef = useRef<StaticTileScheduler | null>(null);
 	const rasterCacheRef = useRef(new Map<string, RasterImageCacheEntry>());
+	const liveImageAssetCacheRef = useRef(
+		new Map<string, LiveImageAssetCacheEntry>(),
+	);
 	const nodeRasterUriRef = useRef(new Map<string, string | null>());
 	const tileNodeAabbRef = useRef(new Map<string, TileAabb>());
 	const tileNodeSourceSignatureRef = useRef(new Map<string, string>());
@@ -297,6 +308,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			for (const entry of rasterCacheRef.current.values()) {
 				entry.handle?.release();
 			}
+			for (const entry of liveImageAssetCacheRef.current.values()) {
+				entry.handle?.release();
+			}
 			for (const entry of tileInputCacheRef.current.values()) {
 				disposeTileInput(entry.input);
 			}
@@ -307,6 +321,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				disposeTileAsyncPictureCacheEntry(entry);
 			}
 			rasterCacheRef.current.clear();
+			liveImageAssetCacheRef.current.clear();
 			nodeRasterUriRef.current.clear();
 			tileNodeAabbRef.current.clear();
 			tileNodeSourceSignatureRef.current.clear();
@@ -361,6 +376,28 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			);
 		},
 		[assetById, currentProjectId],
+	);
+	const resolveNodeImageAssetUri = useCallback(
+		(node: CanvasNode): string | null => {
+			if (node.type !== "image") return null;
+			const imageAsset = assetById.get(node.assetId);
+			if (imageAsset?.kind !== "image") return null;
+			return (
+				resolveAssetPlayableUri(imageAsset, {
+					projectId: currentProjectId,
+				}) ?? null
+			);
+		},
+		[assetById, currentProjectId],
+	);
+	const isLiveImageNodeReady = useCallback(
+		(node: CanvasNode): boolean => {
+			void liveImageAssetVersion;
+			const uri = resolveNodeImageAssetUri(node);
+			if (!uri) return false;
+			return Boolean(liveImageAssetCacheRef.current.get(uri)?.handle);
+		},
+		[liveImageAssetVersion, resolveNodeImageAssetUri],
 	);
 	const activeNode = useMemo(() => {
 		if (!activeNodeId) return null;
@@ -447,9 +484,32 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (liveNodeIdSet.size === 0) return [];
 		return renderNodes.filter((node) => {
 			if (effectiveFrozenNodeIdSet.has(node.id)) return false;
+			if (
+				supportsTilePipeline &&
+				node.type === "image" &&
+				!isLiveImageNodeReady(node)
+			) {
+				return false;
+			}
 			return liveNodeIdSet.has(node.id);
 		});
-	}, [effectiveFrozenNodeIdSet, liveNodeIdSet, renderNodes]);
+	}, [
+		effectiveFrozenNodeIdSet,
+		isLiveImageNodeReady,
+		liveNodeIdSet,
+		renderNodes,
+		supportsTilePipeline,
+	]);
+	const liveLayerRenderNodes = useMemo(() => {
+		if (retainedLiveRenderNodes.length === 0) return liveRenderNodes;
+		if (liveRenderNodes.length === 0) return retainedLiveRenderNodes;
+		const liveLayerNodes = [...retainedLiveRenderNodes];
+		for (const node of liveRenderNodes) {
+			if (retainedLiveNodeIdSet.has(node.id)) continue;
+			liveLayerNodes.push(node);
+		}
+		return liveLayerNodes;
+	}, [liveRenderNodes, retainedLiveNodeIdSet, retainedLiveRenderNodes]);
 	const frozenLayoutRenderNodes = useMemo(() => {
 		if (renderFrozenNodeIdSet.size === 0) return [];
 		return renderNodes.filter((node) => renderFrozenNodeIdSet.has(node.id));
@@ -595,12 +655,80 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (previousProjectId === currentProjectId) return;
 		resetTilePipelineResources();
 		setRasterCacheVersion((prev) => prev + 1);
+		setLiveImageAssetVersion((prev) => prev + 1);
 		if (!tileTickPausedRef.current) {
 			scheduleTileTick();
 		}
 	}, [
 		currentProjectId,
 		resetTilePipelineResources,
+		scheduleTileTick,
+		supportsTilePipeline,
+	]);
+
+	useEffect(() => {
+		if (!supportsTilePipeline) return;
+		const requiredUris = new Set<string>();
+		for (const nodeId of liveNodeIdSet) {
+			const node = latestNodeById.get(nodeId);
+			if (!node) continue;
+			const uri = resolveNodeImageAssetUri(node);
+			if (uri) {
+				requiredUris.add(uri);
+			}
+		}
+		for (const nodeId of retainedLiveNodeIdSet) {
+			const node = latestNodeById.get(nodeId);
+			if (!node) continue;
+			const uri = resolveNodeImageAssetUri(node);
+			if (uri) {
+				requiredUris.add(uri);
+			}
+		}
+		for (const [uri, entry] of liveImageAssetCacheRef.current.entries()) {
+			if (requiredUris.has(uri)) continue;
+			entry.handle?.release();
+			liveImageAssetCacheRef.current.delete(uri);
+		}
+		for (const uri of requiredUris) {
+			const existing = liveImageAssetCacheRef.current.get(uri);
+			if (existing) continue;
+			const nextEntry: LiveImageAssetCacheEntry = {
+				uri,
+				handle: null,
+				loading: true,
+			};
+			liveImageAssetCacheRef.current.set(uri, nextEntry);
+			void (async () => {
+				try {
+					const handle = await acquireImageAsset(uri);
+					if (tilePipelineDisposedRef.current) {
+						handle.release();
+						return;
+					}
+					const current = liveImageAssetCacheRef.current.get(uri);
+					if (current !== nextEntry) {
+						handle.release();
+						return;
+					}
+					nextEntry.handle = handle;
+					nextEntry.loading = false;
+					setLiveImageAssetVersion((prev) => prev + 1);
+					scheduleTileTick();
+				} catch {
+					if (tilePipelineDisposedRef.current) return;
+					const current = liveImageAssetCacheRef.current.get(uri);
+					if (current !== nextEntry) return;
+					nextEntry.loading = false;
+					setLiveImageAssetVersion((prev) => prev + 1);
+				}
+			})();
+		}
+	}, [
+		latestNodeById,
+		liveNodeIdSet,
+		retainedLiveNodeIdSet,
+		resolveNodeImageAssetUri,
 		scheduleTileTick,
 		supportsTilePipeline,
 	]);
@@ -741,7 +869,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			const clipSignature = resolveTileClipSignature(clipAabbs, visibleAabb);
 			const oldAabb = tileNodeAabbRef.current.get(node.id) ?? null;
 			if (staticTileExcludedNodeIdSet.has(node.id)) {
-				if (!oldAabb || !isTileAabbEqual(oldAabb, nextAabb)) {
+				const prevSignature = tileNodeSourceSignatureRef.current.get(node.id);
+				if (
+					prevSignature !== undefined ||
+					!oldAabb ||
+					!isTileAabbEqual(oldAabb, nextAabb)
+				) {
 					scheduler.markDirtyUnion(oldAabb, nextAabb);
 					tileNodeAabbRef.current.set(node.id, nextAabb);
 					shouldTick = true;
@@ -813,6 +946,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const inputs: TileInput[] = [];
 		const inputByNodeId = new Map<string, TileInput>();
 		const asyncPictureRequests: TileAsyncPictureRequest[] = [];
+		const pendingPictureNodeIdSet = new Set<string>();
 		const visitedNodeIds = new Set<string>();
 		const createFrozenNodeSnapshotInput = (
 			latestNode: CanvasNode,
@@ -862,6 +996,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					node: latestNode,
 					scene,
 					asset,
+					projectId: currentProjectId,
 					runtimeManager,
 				};
 			const tilePictureCapabilitySourceSignature =
@@ -971,6 +1106,31 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				continue;
 			}
 			if (liveNodeIdSet.has(latestNode.id)) {
+				if (latestNode.type === "image") {
+					if (!isLiveImageNodeReady(latestNode)) {
+						const cachedInput =
+							tileInputCacheRef.current.get(latestNode.id)?.input ?? null;
+						if (cachedInput) {
+							inputs.push(cachedInput);
+							inputByNodeId.set(latestNode.id, cachedInput);
+						}
+						visitedNodeIds.add(latestNode.id);
+						continue;
+					}
+					// image 选中后由 live 层绘制；同步移出 static tile 输入，
+					// 避免底层 tile 与 live 层重叠，也释放旧 picture 持有的源图资源。
+					const cachedEntry = tileInputCacheRef.current.get(latestNode.id);
+					disposeTileInput(cachedEntry?.input);
+					tileInputCacheRef.current.delete(latestNode.id);
+					tileInputIdRef.current.delete(latestNode.id);
+					const asyncPictureEntry = tileAsyncPictureCacheRef.current.get(
+						latestNode.id,
+					);
+					disposeTileAsyncPictureCacheEntry(asyncPictureEntry);
+					tileAsyncPictureCacheRef.current.delete(latestNode.id);
+					visitedNodeIds.add(latestNode.id);
+					continue;
+				}
 				// 拖拽中的 live 节点保留上一帧 tile input，drop 后的布局动画会复用它。
 				visitedNodeIds.add(latestNode.id);
 				continue;
@@ -1015,6 +1175,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					node: latestNode,
 					scene,
 					asset,
+					projectId: currentProjectId,
 					runtimeManager,
 				};
 			const tilePictureCapabilitySourceSignature =
@@ -1091,6 +1252,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							dispose: null,
 						};
 					} else {
+						pendingPictureNodeIdSet.add(latestNode.id);
 						disposeTileInput(cachedEntry?.input);
 					}
 				} else {
@@ -1129,6 +1291,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			inputs,
 			inputByNodeId,
 			asyncPictureRequests,
+			pendingPictureNodeIdSet,
 		};
 	}, [
 		assetById,
@@ -1136,6 +1299,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		effectiveFrozenNodeIdSet,
 		latestNodeById,
 		liveNodeIdSet,
+		currentProjectId,
+		isLiveImageNodeReady,
 		rasterCacheVersion,
 		resolveNodeRasterUri,
 		resolveTileInputId,
@@ -1194,8 +1359,11 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						latestEntry.sourceSignature !== request.sourceSignature
 					) {
 						try {
-							result?.dispose?.();
-							result?.picture?.dispose?.();
+							try {
+								result?.picture?.dispose?.();
+							} finally {
+								result?.dispose?.();
+							}
 						} catch {}
 						return;
 					}
@@ -1223,11 +1391,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					);
 					latestEntry.dispose = () => {
 						try {
-							result.dispose?.();
+							result.picture.dispose?.();
 						} finally {
-							try {
-								result.picture.dispose?.();
-							} catch {}
+							result.dispose?.();
 						}
 					};
 					setTileAsyncPictureVersion((prev) => prev + 1);
@@ -1287,6 +1453,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		let tileDebugItems: TileDebugItem[] = [];
 		let shouldReleaseRetainedFrozenNodes = false;
 		let shouldReleaseRetainedLiveNodes = false;
+		let releaseRetainedLiveNodeIds: ReadonlySet<string> | undefined;
 		const shouldDropRetainedFrozenNodes = shouldDropRetainedFrozenNodesForZoom(
 			camera.value.zoom,
 		);
@@ -1311,11 +1478,52 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				if (frameResult.hasPendingWork) {
 					scheduleTileTick();
 				}
+				const hasPendingRetainedLiveTile = [...retainedLiveNodeIdSet].some(
+					(nodeId) => staticTileSnapshot.pendingPictureNodeIdSet.has(nodeId),
+				);
+				const fallbackNodeIdSet = new Set(frameResult.fallbackNodeIds);
+				const releaseImageRetainedLiveNodeIds = new Set<string>();
+				for (const nodeId of retainedLiveNodeIdSet) {
+					const node = getLatestNodeById(nodeId);
+					if (!node || node.type !== "image") continue;
+					if (!staticTileSnapshot.inputByNodeId.has(nodeId)) continue;
+					if (staticTileSnapshot.pendingPictureNodeIdSet.has(nodeId)) continue;
+					if (fallbackNodeIdSet.has(nodeId)) continue;
+					const nodeAabb = resolveNodeWorldAabb(node);
+					const nodeVisibleAabb = resolveClippedTileInputAabb(
+						nodeAabb,
+						resolveNodeAncestorClipAabbs(node, latestNodeByIdRef.current),
+					);
+					if (!nodeVisibleAabb) {
+						releaseImageRetainedLiveNodeIds.add(nodeId);
+						continue;
+					}
+					const hasStaticDrawItem = frameResult.drawItems.some((item) => {
+						const drawAabb =
+							item.clipAabb ??
+							({
+								left: item.left,
+								top: item.top,
+								right: item.left + item.size,
+								bottom: item.top + item.size,
+								width: item.size,
+								height: item.size,
+							} satisfies TileAabb);
+						return isTileAabbIntersected(drawAabb, nodeVisibleAabb);
+					});
+					if (hasStaticDrawItem) {
+						releaseImageRetainedLiveNodeIds.add(nodeId);
+					}
+				}
+				if (releaseImageRetainedLiveNodeIds.size > 0) {
+					releaseRetainedLiveNodeIds = releaseImageRetainedLiveNodeIds;
+				}
 				shouldReleaseRetainedFrozenNodes =
 					retainedFrozenNodeIdSet.size > 0 &&
 					isStaticTileFrameFullyReady(frameResult);
 				shouldReleaseRetainedLiveNodes =
 					retainedLiveNodeIdSet.size > 0 &&
+					!hasPendingRetainedLiveTile &&
 					isStaticTileFrameFullyReady(frameResult);
 			} else {
 				const previousFrameResult = latestTileFrameResultRef.current;
@@ -1404,8 +1612,17 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							/>
 						);
 					})}
-					{retainedLiveRenderNodes.map(renderLiveNodeItem)}
-					{liveRenderNodes.map(renderLiveNodeItem)}
+					{liveLayerRenderNodes.map((node) => {
+						if (
+							node.type === "image" &&
+							retainedLiveNodeIdSet.has(node.id) &&
+							(shouldReleaseRetainedLiveNodes ||
+								releaseRetainedLiveNodeIds?.has(node.id))
+						) {
+							return null;
+						}
+						return renderLiveNodeItem(node);
+					})}
 				</Group>
 				{shouldRenderNodeLabels && (
 					<Group opacity={nodeHudOpacity}>
@@ -1447,6 +1664,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			releaseRetainedFrozenNodes: shouldReleaseRetainedFrozenNodes,
 			dropRetainedFrozenNodesForZoom: shouldDropRetainedFrozenNodes,
 			releaseRetainedLiveNodes: shouldReleaseRetainedLiveNodes,
+			releaseRetainedLiveNodeIds,
 		});
 	}, [
 		activeNode,
@@ -1463,11 +1681,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		hoverNode,
 		onSelectionResize,
 		onLabelHitTesterChange,
-		liveRenderNodes,
+		liveLayerRenderNodes,
 		marqueeRectScreen,
 		effectiveFrozenNodeIdSet,
 		retainedFrozenNodeIdSet,
-		retainedLiveRenderNodes,
 		retainedLiveNodeIdSet,
 		releaseRetainedNodesAfterRender,
 		scheduleTileTick,

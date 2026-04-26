@@ -163,6 +163,7 @@ export interface CanvasNodeTilePictureCapabilityContext<
 	node: TNode;
 	scene: SceneDocument | null;
 	asset: TimelineAsset | null;
+	projectId?: string | null;
 	runtimeManager: StudioRuntimeManager;
 }
 

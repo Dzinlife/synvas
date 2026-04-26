@@ -836,6 +836,21 @@ export class StaticTileScheduler {
 		});
 	}
 
+	private markFallbackInputsForTile(key: number): void {
+		const { lod, tx, ty } = decodeTileKey(key);
+		const tileRect = resolveTileWorldRect(tx, ty, lod);
+		for (const input of this.queryInputsByRect(tileRect)) {
+			if (
+				!isTileAabbIntersected(tileRect, resolveTileInputVisibleAabb(input))
+			) {
+				continue;
+			}
+			if (this.fallbackNodeIdSet.has(input.nodeId)) continue;
+			this.fallbackNodeIdSet.add(input.nodeId);
+			this.fallbackNodeIds.push(input.nodeId);
+		}
+	}
+
 	private resolveParentCoverRecord(
 		lod: number,
 		tx: number,
@@ -975,8 +990,9 @@ export class StaticTileScheduler {
 				});
 				continue;
 			}
+			this.markFallbackInputsForTile(key);
 			this.visibleCoverInfoByKey.set(key, {
-				mode: "NONE",
+				mode: "LIVE",
 				sourceLod: null,
 			});
 		}

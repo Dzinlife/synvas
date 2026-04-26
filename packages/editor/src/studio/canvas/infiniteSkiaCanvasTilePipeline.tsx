@@ -84,10 +84,12 @@ const EMPTY_STATIC_TILE_SNAPSHOT: {
 	inputs: TileInput[];
 	inputByNodeId: Map<string, TileInput>;
 	asyncPictureRequests: TileAsyncPictureRequest[];
+	pendingPictureNodeIdSet: ReadonlySet<string>;
 } = {
 	inputs: [],
 	inputByNodeId: new Map<string, TileInput>(),
 	asyncPictureRequests: [],
+	pendingPictureNodeIdSet: new Set<string>(),
 };
 
 const resolveTileNodeSourceSignature = (
@@ -611,9 +613,10 @@ const resolveTileRasterAsset = (
 	node: CanvasNode,
 	assetById: Map<string, TimelineAsset>,
 ): TimelineAsset | null => {
+	const definition = getCanvasNodeDefinition(node.type);
 	if ("assetId" in node) {
 		const sourceAsset = assetById.get(node.assetId);
-		if (sourceAsset?.kind === "image") {
+		if (sourceAsset?.kind === "image" && !definition.tilePicture) {
 			return sourceAsset;
 		}
 	}

@@ -9,14 +9,18 @@ import { ImageNodeSkiaRenderer } from "./renderer";
 
 const mocks = vi.hoisted(() => ({
 	acquireImageAsset: vi.fn(),
+	peekImageAsset: vi.fn(),
 }));
 
 vi.mock("@/assets/imageAsset", () => ({
 	acquireImageAsset: mocks.acquireImageAsset,
+	peekImageAsset: mocks.peekImageAsset,
 }));
 
 vi.mock("@/projects/projectStore", () => ({
-	useProjectStore: (selector: (state: { currentProjectId: string | null }) => unknown) =>
+	useProjectStore: (
+		selector: (state: { currentProjectId: string | null }) => unknown,
+	) =>
 		selector({
 			currentProjectId: "project-1",
 		}),
@@ -80,6 +84,7 @@ const createMockHandle = (image: object) => {
 describe("ImageNodeSkiaRenderer", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mocks.peekImageAsset.mockReturnValue(null);
 	});
 
 	afterEach(() => {
@@ -108,6 +113,27 @@ describe("ImageNodeSkiaRenderer", () => {
 			);
 			expect(screen.getByTestId("image-shader")).toBeTruthy();
 		});
+	});
+
+	it("已有图片缓存时首帧直接渲染 ImageShader", () => {
+		const image = { id: "img-cached" };
+		mocks.peekImageAsset.mockReturnValue({
+			image,
+		});
+		mocks.acquireImageAsset.mockReturnValue(new Promise(() => {}));
+
+		render(
+			<ImageNodeSkiaRenderer
+				node={createNode()}
+				scene={null}
+				asset={createImageAsset("https://example.com/image.png")}
+				isActive={false}
+				isFocused={false}
+				runtimeManager={{} as never}
+			/>,
+		);
+
+		expect(screen.getByTestId("image-shader")).toBeTruthy();
 	});
 
 	it("URI 变化时会释放旧 handle 并加载新图片", async () => {
@@ -156,7 +182,7 @@ describe("ImageNodeSkiaRenderer", () => {
 		expect(handleB.release).toHaveBeenCalledTimes(1);
 	});
 
-	it("缺少图片资源时保留占位并跳过加载", () => {
+	it("缺少图片资源时跳过绘制和加载", () => {
 		render(
 			<ImageNodeSkiaRenderer
 				node={createNode()}
@@ -169,7 +195,7 @@ describe("ImageNodeSkiaRenderer", () => {
 		);
 
 		expect(mocks.acquireImageAsset).not.toHaveBeenCalled();
-		expect(screen.getByTestId("rect")).toBeTruthy();
+		expect(screen.queryByTestId("rect")).toBeNull();
 		expect(screen.queryByTestId("image-shader")).toBeNull();
 	});
 });

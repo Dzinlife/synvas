@@ -13,6 +13,11 @@ export type ImageAsset = {
 	releaseSource?: () => void;
 };
 
+export const disposeImageAsset = (asset: ImageAsset): void => {
+	asset.image.dispose();
+	asset.releaseSource?.();
+};
+
 export const acquireImageAsset = (
 	uri: string,
 ): Promise<AssetHandle<ImageAsset>> => {
@@ -20,11 +25,16 @@ export const acquireImageAsset = (
 		"image",
 		uri,
 		() => createImageAsset(uri),
-		(asset) => {
-			asset.image.dispose();
-			asset.releaseSource?.();
-		},
+		disposeImageAsset,
 	);
+};
+
+export const loadUncachedImageAsset = (uri: string): Promise<ImageAsset> => {
+	return createImageAsset(uri);
+};
+
+export const peekImageAsset = (uri: string): ImageAsset | null => {
+	return assetStore.peek<ImageAsset>("image", uri);
 };
 
 const isElectronEnv = (): boolean => {

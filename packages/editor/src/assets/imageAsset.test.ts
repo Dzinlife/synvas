@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acquireImageAsset } from "./imageAsset";
+import {
+	acquireImageAsset,
+	disposeImageAsset,
+	loadUncachedImageAsset,
+} from "./imageAsset";
 
 const mocks = vi.hoisted(() => ({
 	resolveProjectOpfsFile: vi.fn(),
@@ -68,14 +72,38 @@ describe("imageAsset", () => {
 		expect(mockImage.dispose).toHaveBeenCalledTimes(1);
 	});
 
+	it("uncached 加载不会复用 asset store", async () => {
+		const imageA = createMockImage("uncached-a");
+		const imageB = createMockImage("uncached-b");
+		mocks.makeImageFromEncoded
+			.mockReturnValueOnce(imageA)
+			.mockReturnValueOnce(imageB);
+		const fetchMock = vi.fn(async () => ({
+			ok: true,
+			arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+		}));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const assetA = await loadUncachedImageAsset("https://example.com/raw.png");
+		const assetB = await loadUncachedImageAsset("https://example.com/raw.png");
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(assetA).not.toBe(assetB);
+		expect(assetA.image).toBe(imageA);
+		expect(assetB.image).toBe(imageB);
+
+		disposeImageAsset(assetA);
+		disposeImageAsset(assetB);
+		expect(imageA.dispose).toHaveBeenCalledTimes(1);
+		expect(imageB.dispose).toHaveBeenCalledTimes(1);
+	});
+
 	it("支持 opfs:// 分支读取", async () => {
 		const mockImage = createMockImage("opfs-image");
 		mocks.makeImageFromEncoded.mockReturnValue(mockImage);
-		mocks.resolveProjectOpfsFile.mockResolvedValue(
-			{
-				arrayBuffer: async () => new Uint8Array([7, 8, 9]).buffer,
-			} as File,
-		);
+		mocks.resolveProjectOpfsFile.mockResolvedValue({
+			arrayBuffer: async () => new Uint8Array([7, 8, 9]).buffer,
+		} as File);
 		const fetchMock = vi.fn();
 		vi.stubGlobal("fetch", fetchMock);
 
@@ -96,14 +124,16 @@ describe("imageAsset", () => {
 
 		const stat = vi.fn(async () => ({ size: 3 }));
 		const read = vi.fn(async () => new Uint8Array([1, 2, 3]));
-		(window as Window & {
-			synvasElectron?: {
-				file?: {
-					stat: typeof stat;
-					read: typeof read;
+		(
+			window as Window & {
+				synvasElectron?: {
+					file?: {
+						stat: typeof stat;
+						read: typeof read;
+					};
 				};
-			};
-		}).synvasElectron = {
+			}
+		).synvasElectron = {
 			file: {
 				stat,
 				read,
