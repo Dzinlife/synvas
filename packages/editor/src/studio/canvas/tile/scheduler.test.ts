@@ -1,9 +1,18 @@
 import type { SkImage } from "react-skia-lite";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createTileAabb } from "./geometry";
+import {
+	createTileAabb,
+	isTileAabbIntersected,
+	resolveTileWorldSize,
+} from "./geometry";
 import { StaticTileScheduler } from "./scheduler";
 import { PriorityTaskQueue, RenderTaskPool } from "./taskQueue";
-import type { TileInput } from "./types";
+import {
+	TILE_LOD_HYSTERESIS,
+	TILE_LOD_STEP_PER_FRAME,
+	TILE_PIXEL_SIZE,
+} from "./constants";
+import type { TileDrawItem, TileInput } from "./types";
 
 const { makeOffscreenSpy, createdCanvases } = vi.hoisted(() => {
 	return {
@@ -168,6 +177,18 @@ const findTileRecord = (
 				record.worldSize === rect.size
 			);
 		}) ?? null
+	);
+};
+
+const resolveDrawCoverageAabb = (item: TileDrawItem) => {
+	return (
+		item.clipAabb ??
+		createTileAabb(
+			item.left,
+			item.top,
+			item.left + item.size,
+			item.top + item.size,
+		)
 	);
 };
 
@@ -338,7 +359,7 @@ describe("tile scheduler", () => {
 		scheduler.dispose();
 	});
 
-	it("LOD 切换会逐帧推进 composeLod（每帧最多一级）", () => {
+	it("LOD 切换会按配置步长推进 composeLod", () => {
 		const scheduler = new StaticTileScheduler({
 			maxTasksPerTick: 0,
 		});
@@ -367,8 +388,10 @@ describe("tile scheduler", () => {
 		);
 		expect(stable.stats.composeLod).toBe(0);
 		expect(farZoom1.stats.targetLod).toBeLessThanOrEqual(-5);
-		expect(farZoom1.stats.composeLod).toBe(-1);
-		expect(farZoom2.stats.composeLod).toBe(-2);
+		expect(farZoom1.stats.composeLod).toBe(-TILE_LOD_STEP_PER_FRAME);
+		expect(farZoom2.stats.composeLod).toBe(
+			Math.max(farZoom2.stats.targetLod, -TILE_LOD_STEP_PER_FRAME * 2),
+		);
 		scheduler.dispose();
 	});
 
@@ -443,12 +466,12 @@ describe("tile scheduler", () => {
 		);
 		const nearThresholdFrame = scheduler.beginFrame(
 			createFrameInput({
-				zoom: 2 ** 0.6,
+				zoom: 2 ** (0.5 + TILE_LOD_HYSTERESIS - 0.01),
 			}),
 		);
 		const passThresholdFrame = scheduler.beginFrame(
 			createFrameInput({
-				zoom: 2 ** 0.75,
+				zoom: 2 ** (0.5 + TILE_LOD_HYSTERESIS + 0.01),
 			}),
 		);
 		expect(baseFrame.stats.targetLod).toBe(0);
@@ -555,7 +578,7 @@ describe("tile scheduler", () => {
 				bottom: 2048,
 			}),
 		]);
-		scheduler.beginFrame(
+		const frame = scheduler.beginFrame(
 			createFrameInput({
 				zoom: 0.5,
 				stageWidth: 512,
@@ -563,8 +586,13 @@ describe("tile scheduler", () => {
 			}),
 		);
 		const firstCanvas = createdCanvases[0];
+		const expectedScale =
+			TILE_PIXEL_SIZE / resolveTileWorldSize(frame.stats.composeLod);
 		expect(firstCanvas).toBeTruthy();
-		expect(firstCanvas.scale).toHaveBeenCalledWith(0.375, 0.375);
+		expect(firstCanvas.scale).toHaveBeenCalledWith(
+			expectedScale,
+			expectedScale,
+		);
 		scheduler.dispose();
 	});
 
@@ -746,6 +774,68 @@ describe("tile scheduler", () => {
 		scheduler.dispose();
 	});
 
+	it("父级 LOD 兜底只覆盖缺失子 tile，避免半透明内容叠画", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 8,
+		});
+		scheduler.setInputs([
+			createRasterInput({
+				nodeId: "node-parent-cover-alpha",
+				left: -2048,
+				top: -2048,
+				right: 2048,
+				bottom: 2048,
+			}),
+		]);
+		warmScheduler(scheduler, 20, {
+			zoom: 0.5,
+			stageWidth: 512,
+			stageHeight: 512,
+		});
+		const switchedFrame = scheduler.beginFrame(
+			createFrameInput({
+				zoom: 1,
+				stageWidth: 512,
+				stageHeight: 512,
+				maxTasksPerTick: 1,
+				debugEnabled: true,
+			}),
+		);
+		const parentFallbackItems = switchedFrame.drawItems.filter((item) => {
+			return item.sourceLod === -1 && item.clipAabb;
+		});
+		const readyChildItems = switchedFrame.drawItems.filter((item) => {
+			return item.sourceLod === 0 && !item.clipAabb;
+		});
+		expect(parentFallbackItems.length).toBeGreaterThan(0);
+		expect(readyChildItems.length).toBeGreaterThan(0);
+		expect(
+			parentFallbackItems.every((item) => {
+				return item.clipAabb?.width === item.size / 2;
+			}),
+		).toBe(true);
+		for (
+			let leftIndex = 0;
+			leftIndex < switchedFrame.drawItems.length;
+			leftIndex += 1
+		) {
+			const leftAabb = resolveDrawCoverageAabb(
+				switchedFrame.drawItems[leftIndex],
+			);
+			for (
+				let rightIndex = leftIndex + 1;
+				rightIndex < switchedFrame.drawItems.length;
+				rightIndex += 1
+			) {
+				const rightAabb = resolveDrawCoverageAabb(
+					switchedFrame.drawItems[rightIndex],
+				);
+				expect(isTileAabbIntersected(leftAabb, rightAabb)).toBe(false);
+			}
+		}
+		scheduler.dispose();
+	});
+
 	it("一跳子级兜底可在切到更粗 lod 时复用已有细节 tile", () => {
 		const scheduler = new StaticTileScheduler({
 			maxTasksPerTick: 8,
@@ -828,9 +918,9 @@ describe("tile scheduler", () => {
 		expect(dirtyFrame.stats.queuedCount).toBeGreaterThan(0);
 		expect(dirtyFrame.drawItems.length).toBeGreaterThan(0);
 		expect(dirtyFrame.fallbackNodeIds.length).toBe(0);
-		expect(dirtyFrame.debugItems.some((item) => item.coverMode === "LIVE")).toBe(
-			false,
-		);
+		expect(
+			dirtyFrame.debugItems.some((item) => item.coverMode === "LIVE"),
+		).toBe(false);
 		scheduler.dispose();
 	});
 
@@ -881,9 +971,9 @@ describe("tile scheduler", () => {
 			}),
 		);
 		expect(uncoveredFrame.drawItems.length).toBe(0);
-		expect(uncoveredFrame.debugItems.every((item) => item.coverMode === "NONE")).toBe(
-			true,
-		);
+		expect(
+			uncoveredFrame.debugItems.every((item) => item.coverMode === "NONE"),
+		).toBe(true);
 		expect(
 			uncoveredFrame.debugItems.some(
 				(item) => item.hasImage && item.state === "READY",

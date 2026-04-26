@@ -257,13 +257,25 @@ const resolveTileDrawBleed = (tile: TileDrawItem): number => {
 	return (tile.size / TILE_PIXEL_SIZE) * TILE_DRAW_BLEED_TEXEL;
 };
 
-const resolveTileDrawWorldAabb = (tile: TileDrawItem): TileAabb => {
+const resolveTileDrawSourceWorldAabb = (tile: TileDrawItem): TileAabb => {
 	const bleed = resolveTileDrawBleed(tile);
 	return createTileAabb(
 		tile.left - bleed,
 		tile.top - bleed,
 		tile.left + tile.size + bleed,
 		tile.top + tile.size + bleed,
+	);
+};
+
+const resolveTileDrawCoverageAabb = (tile: TileDrawItem): TileAabb => {
+	return (
+		tile.clipAabb ??
+		createTileAabb(
+			tile.left,
+			tile.top,
+			tile.left + tile.size,
+			tile.top + tile.size,
+		)
 	);
 };
 
@@ -295,7 +307,7 @@ const isTileAabbCoveredByDrawItems = (
 ): boolean => {
 	let uncovered = [aabb];
 	for (const tile of drawItems) {
-		const tileAabb = resolveTileDrawWorldAabb(tile);
+		const tileAabb = resolveTileDrawCoverageAabb(tile);
 		if (!isTileAabbIntersected(aabb, tileAabb)) continue;
 		uncovered = uncovered.flatMap((piece) => subtractTileAabb(piece, tileAabb));
 		if (uncovered.length === 0) return true;
@@ -308,14 +320,14 @@ const createFrozenNodeRasterSnapshotFromTiles = (
 	drawItems: TileDrawItem[],
 ): FrozenNodeRasterSnapshot | null => {
 	const intersectedTiles = drawItems.filter((tile) => {
-		const tileAabb = resolveTileDrawWorldAabb(tile);
+		const tileAabb = resolveTileDrawCoverageAabb(tile);
 		return isTileAabbIntersected(input.aabb, tileAabb);
 	});
 	if (intersectedTiles.length === 0) return null;
 	if (!isTileAabbCoveredByDrawItems(input.aabb, intersectedTiles)) return null;
 	const baseTile = intersectedTiles[0];
 	if (!baseTile) return null;
-	const baseTileAabb = resolveTileDrawWorldAabb(baseTile);
+	const baseTileAabb = resolveTileDrawSourceWorldAabb(baseTile);
 	const pixelPerWorld = TILE_PIXEL_SIZE / Math.max(1, baseTileAabb.width);
 	const rawWidth = Math.max(1, Math.ceil(input.aabb.width * pixelPerWorld));
 	const rawHeight = Math.max(1, Math.ceil(input.aabb.height * pixelPerWorld));
@@ -341,22 +353,23 @@ const createFrozenNodeRasterSnapshotFromTiles = (
 		const canvas = surface.getCanvas();
 		canvas.clear(Float32Array.of(0, 0, 0, 0));
 		for (const tile of intersectedTiles) {
-			const tileAabb = resolveTileDrawWorldAabb(tile);
-			const intersection = intersectTileAabb(input.aabb, tileAabb);
+			const sourceAabb = resolveTileDrawSourceWorldAabb(tile);
+			const coverageAabb = resolveTileDrawCoverageAabb(tile);
+			const intersection = intersectTileAabb(input.aabb, coverageAabb);
 			if (!intersection) continue;
 			const tileImageSize = resolveTileImageSize(tile);
 			canvas.drawImageRect(
 				tile.image,
 				{
 					x:
-						((intersection.left - tileAabb.left) / tileAabb.width) *
+						((intersection.left - sourceAabb.left) / sourceAabb.width) *
 						tileImageSize.width,
 					y:
-						((intersection.top - tileAabb.top) / tileAabb.height) *
+						((intersection.top - sourceAabb.top) / sourceAabb.height) *
 						tileImageSize.height,
-					width: (intersection.width / tileAabb.width) * tileImageSize.width,
+					width: (intersection.width / sourceAabb.width) * tileImageSize.width,
 					height:
-						(intersection.height / tileAabb.height) * tileImageSize.height,
+						(intersection.height / sourceAabb.height) * tileImageSize.height,
 				},
 				{
 					x: (intersection.left - input.aabb.left) * worldToSnapshotX,

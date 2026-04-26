@@ -18,7 +18,7 @@ import type { CanvasNodeLayoutState } from "./canvasNodeLabelUtils";
 import { resolveCanvasNodeLayoutWorldRect } from "./canvasNodeLabelUtils";
 import type { CameraState } from "./canvasWorkspaceUtils";
 import type { TileAabb, TileDebugItem, TileDrawItem } from "./tile";
-import { TILE_CAMERA_EPSILON } from "./tile";
+import { createTileAabb, TILE_CAMERA_EPSILON } from "./tile";
 import type { FrozenNodeRasterSnapshot } from "./infiniteSkiaCanvasTilePipeline";
 import { resolveTileDrawBleed } from "./infiniteSkiaCanvasTilePipeline";
 import { LAYOUT_EPSILON } from "./infiniteSkiaCanvasNodeUtils";
@@ -34,11 +34,19 @@ const resolvePixelRoundedTileClip = (
 	tile: TileDrawItem,
 	camera: CameraState,
 ) => {
+	const clipAabb =
+		tile.clipAabb ??
+		createTileAabb(
+			tile.left,
+			tile.top,
+			tile.left + tile.size,
+			tile.top + tile.size,
+		);
 	const safeZoom = Math.max(camera.zoom, TILE_CAMERA_EPSILON);
-	const screenLeft = Math.round((tile.left + camera.x) * safeZoom);
-	const screenTop = Math.round((tile.top + camera.y) * safeZoom);
-	const screenRight = Math.round((tile.left + tile.size + camera.x) * safeZoom);
-	const screenBottom = Math.round((tile.top + tile.size + camera.y) * safeZoom);
+	const screenLeft = Math.round((clipAabb.left + camera.x) * safeZoom);
+	const screenTop = Math.round((clipAabb.top + camera.y) * safeZoom);
+	const screenRight = Math.round((clipAabb.right + camera.x) * safeZoom);
+	const screenBottom = Math.round((clipAabb.bottom + camera.y) * safeZoom);
 	return {
 		x: screenLeft / safeZoom - camera.x,
 		y: screenTop / safeZoom - camera.y,
@@ -268,7 +276,7 @@ const StaticTileLayerComponent = ({
 		<Group pointerEvents="none">
 			{drawItems.map((tile) => (
 				<StaticTileImageItem
-					key={`tile-ready-${tile.key}`}
+					key={`tile-ready-${tile.drawKey ?? tile.key}`}
 					tile={tile}
 					camera={camera}
 				/>

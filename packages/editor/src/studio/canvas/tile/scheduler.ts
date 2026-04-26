@@ -188,8 +188,6 @@ export class StaticTileScheduler {
 
 	private composeLod: number = TILE_LOD_BASE;
 
-	private missingVisibleCount = 0;
-
 	private readyVisibleCount = 0;
 
 	private coverFallbackCount = 0;
@@ -318,7 +316,6 @@ export class StaticTileScheduler {
 			this.drawItems.length = 0;
 			this.debugItems.length = 0;
 			this.fallbackNodeIds.length = 0;
-			this.missingVisibleCount = 0;
 			this.readyVisibleCount = 0;
 			this.coverFallbackCount = 0;
 			const stats = this.collectStats(0);
@@ -386,7 +383,6 @@ export class StaticTileScheduler {
 		this.debugItems.length = 0;
 		this.fallbackNodeIdSet.clear();
 		this.fallbackNodeIds.length = 0;
-		this.missingVisibleCount = 0;
 		this.readyVisibleCount = 0;
 		this.coverFallbackCount = 0;
 		this.targetLod = TILE_LOD_BASE;
@@ -630,7 +626,9 @@ export class StaticTileScheduler {
 		}
 	}
 
-	private resolveFrameMaxTasksPerTick(overrideValue: number | undefined): number {
+	private resolveFrameMaxTasksPerTick(
+		overrideValue: number | undefined,
+	): number {
 		if (overrideValue === undefined) return this.maxTasksPerTick;
 		if (!Number.isFinite(overrideValue)) return this.maxTasksPerTick;
 		return Math.max(0, Math.floor(overrideValue));
@@ -779,13 +777,22 @@ export class StaticTileScheduler {
 		}
 	}
 
-	private pushDrawRecord(record: TileRecord): void {
+	private pushDrawRecord(
+		record: TileRecord,
+		options: {
+			clipAabb?: TileAabb;
+			drawKey?: string;
+			dedupeSource?: boolean;
+		} = {},
+	): void {
 		if (!record.image) return;
-		if (this.drawSourceKeySet.has(record.key)) return;
+		const shouldDedupeSource = options.dedupeSource ?? !options.clipAabb;
+		if (shouldDedupeSource && this.drawSourceKeySet.has(record.key)) return;
 		this.drawSourceKeySet.add(record.key);
 		record.lastUsedTick = this.tick;
 		this.drawItems.push({
 			key: record.key,
+			drawKey: options.drawKey,
 			lod: record.lod,
 			sourceLod: record.lod,
 			tx: record.tx,
@@ -793,6 +800,7 @@ export class StaticTileScheduler {
 			left: record.worldLeft,
 			top: record.worldTop,
 			size: record.worldSize,
+			clipAabb: options.clipAabb,
 			image: record.image,
 		});
 	}
@@ -810,7 +818,11 @@ export class StaticTileScheduler {
 			ty: Math.floor(ty / 2),
 		});
 		const parentRecord = this.tileByKey.get(parentKey);
-		if (!parentRecord || parentRecord.state !== "READY" || !parentRecord.image) {
+		if (
+			!parentRecord ||
+			parentRecord.state !== "READY" ||
+			!parentRecord.image
+		) {
 			return null;
 		}
 		return parentRecord;
@@ -832,7 +844,11 @@ export class StaticTileScheduler {
 					ty: ty * 2 + offsetY,
 				});
 				const childRecord = this.tileByKey.get(childKey);
-				if (!childRecord || childRecord.state !== "READY" || !childRecord.image) {
+				if (
+					!childRecord ||
+					childRecord.state !== "READY" ||
+					!childRecord.image
+				) {
 					return null;
 				}
 				children.push(childRecord);
@@ -849,7 +865,6 @@ export class StaticTileScheduler {
 		this.visibleFallbackKeySet.clear();
 		this.visibleCoverInfoByKey.clear();
 		this.drawSourceKeySet.clear();
-		this.missingVisibleCount = 0;
 		this.readyVisibleCount = 0;
 		this.coverFallbackCount = 0;
 
@@ -903,10 +918,14 @@ export class StaticTileScheduler {
 				continue;
 			}
 
-			this.missingVisibleCount += 1;
 			const parentRecord = this.resolveParentCoverRecord(lod, tx, ty);
 			if (parentRecord) {
-				this.pushDrawRecord(parentRecord);
+				const targetTileRect = resolveTileWorldRect(tx, ty, lod);
+				this.pushDrawRecord(parentRecord, {
+					clipAabb: targetTileRect,
+					drawKey: `parent:${parentRecord.key}:${key}`,
+					dedupeSource: false,
+				});
 				this.coverFallbackCount += 1;
 				this.visibleCoverInfoByKey.set(key, {
 					mode: "PARENT",
@@ -935,8 +954,14 @@ export class StaticTileScheduler {
 
 		this.drawItems.sort((left, right) => {
 			if (left.lod !== right.lod) return left.lod - right.lod;
-			if (left.top !== right.top) return left.top - right.top;
-			if (left.left !== right.left) return left.left - right.left;
+			const leftClip = left.clipAabb;
+			const rightClip = right.clipAabb;
+			const leftTop = leftClip?.top ?? left.top;
+			const rightTop = rightClip?.top ?? right.top;
+			if (leftTop !== rightTop) return leftTop - rightTop;
+			const leftLeft = leftClip?.left ?? left.left;
+			const rightLeft = rightClip?.left ?? right.left;
+			if (leftLeft !== rightLeft) return leftLeft - rightLeft;
 			return left.key - right.key;
 		});
 	}

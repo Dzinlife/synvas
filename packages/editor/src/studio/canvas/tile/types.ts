@@ -71,6 +71,7 @@ export interface RenderTask {
 
 export interface TileDrawItem {
 	key: number;
+	drawKey?: string;
 	lod: number;
 	sourceLod?: number;
 	tx: number;
@@ -78,6 +79,7 @@ export interface TileDrawItem {
 	left: number;
 	top: number;
 	size: number;
+	clipAabb?: TileAabb;
 	image: SkImage;
 }
 
