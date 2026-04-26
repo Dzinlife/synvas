@@ -294,6 +294,46 @@ const resolveTileImagePixelRatio = (tile: TileDrawItem): number => {
 	return Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
 };
 
+const resolveSnapshotPixelRoundedIntersection = (
+	intersection: TileAabb,
+	targetAabb: TileAabb,
+	worldToSnapshotX: number,
+	worldToSnapshotY: number,
+): {
+	worldAabb: TileAabb;
+	snapshotRect: { x: number; y: number; width: number; height: number };
+} | null => {
+	const snapshotLeft = Math.round(
+		(intersection.left - targetAabb.left) * worldToSnapshotX,
+	);
+	const snapshotTop = Math.round(
+		(intersection.top - targetAabb.top) * worldToSnapshotY,
+	);
+	const snapshotRight = Math.round(
+		(intersection.right - targetAabb.left) * worldToSnapshotX,
+	);
+	const snapshotBottom = Math.round(
+		(intersection.bottom - targetAabb.top) * worldToSnapshotY,
+	);
+	if (snapshotLeft >= snapshotRight || snapshotTop >= snapshotBottom) {
+		return null;
+	}
+	return {
+		worldAabb: createTileAabb(
+			targetAabb.left + snapshotLeft / worldToSnapshotX,
+			targetAabb.top + snapshotTop / worldToSnapshotY,
+			targetAabb.left + snapshotRight / worldToSnapshotX,
+			targetAabb.top + snapshotBottom / worldToSnapshotY,
+		),
+		snapshotRect: {
+			x: snapshotLeft,
+			y: snapshotTop,
+			width: snapshotRight - snapshotLeft,
+			height: snapshotBottom - snapshotTop,
+		},
+	};
+};
+
 const canCreateFrozenSnapshotFromCompositedTiles = (
 	node: CanvasNode,
 ): boolean => {
@@ -357,26 +397,33 @@ const createFrozenNodeRasterSnapshotFromTiles = (
 			const coverageAabb = resolveTileDrawCoverageAabb(tile);
 			const intersection = intersectTileAabb(input.aabb, coverageAabb);
 			if (!intersection) continue;
+			// drag start 从 tile buffer 截图时，tile 分界必须落在 snapshot 像素边界上，
+			// 否则 drawImageRect 的抗锯齿会把透明边缘采进冻结纹理，拖拽中就会出现接缝。
+			const roundedIntersection = resolveSnapshotPixelRoundedIntersection(
+				intersection,
+				input.aabb,
+				worldToSnapshotX,
+				worldToSnapshotY,
+			);
+			if (!roundedIntersection) continue;
+			const roundedWorldAabb = roundedIntersection.worldAabb;
 			const tileImageSize = resolveTileImageSize(tile);
 			canvas.drawImageRect(
 				tile.image,
 				{
 					x:
-						((intersection.left - sourceAabb.left) / sourceAabb.width) *
+						((roundedWorldAabb.left - sourceAabb.left) / sourceAabb.width) *
 						tileImageSize.width,
 					y:
-						((intersection.top - sourceAabb.top) / sourceAabb.height) *
+						((roundedWorldAabb.top - sourceAabb.top) / sourceAabb.height) *
 						tileImageSize.height,
-					width: (intersection.width / sourceAabb.width) * tileImageSize.width,
+					width:
+						(roundedWorldAabb.width / sourceAabb.width) * tileImageSize.width,
 					height:
-						(intersection.height / sourceAabb.height) * tileImageSize.height,
+						(roundedWorldAabb.height / sourceAabb.height) *
+						tileImageSize.height,
 				},
-				{
-					x: (intersection.left - input.aabb.left) * worldToSnapshotX,
-					y: (intersection.top - input.aabb.top) * worldToSnapshotY,
-					width: intersection.width * worldToSnapshotX,
-					height: intersection.height * worldToSnapshotY,
-				},
+				roundedIntersection.snapshotRect,
 				imagePaint,
 				true,
 			);

@@ -2865,6 +2865,124 @@ describe("InfiniteSkiaCanvas", () => {
 		}
 	});
 
+	it("auto layout frozen snapshot 从多个 tile 截图时会按 snapshot 像素边界拼接", async () => {
+		tilePipelineMockState.enabled = true;
+		skiaSurfaceMockState.defaultPixelRatio = 2;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const tileDrawSize = 512;
+		const tilePixelRatio = 2;
+		const tileImageSize = TILE_PIXEL_SIZE * tilePixelRatio;
+		const firstTileImage = {
+			width: vi.fn(() => tileImageSize),
+			height: vi.fn(() => tileImageSize),
+			dispose: vi.fn(),
+		};
+		const secondTileImage = {
+			width: vi.fn(() => tileImageSize),
+			height: vi.fn(() => tileImageSize),
+			dispose: vi.fn(),
+		};
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockReturnValue({
+				...createEmptyTileFrameResult(),
+				drawItems: [
+					{
+						key: 1,
+						lod: 0,
+						sourceLod: 0,
+						tx: 0,
+						ty: 0,
+						left: 0,
+						top: 0,
+						size: tileDrawSize,
+						image: firstTileImage as unknown as TileDrawItem["image"],
+					},
+					{
+						key: 2,
+						lod: 0,
+						sourceLod: 0,
+						tx: 1,
+						ty: 0,
+						left: tileDrawSize,
+						top: 0,
+						size: tileDrawSize,
+						image: secondTileImage as unknown as TileDrawItem["image"],
+					},
+				],
+			});
+		try {
+			const animatedNode = createImageNode("node-image-snapshot-seam", 0, {
+				x: 384,
+				y: 64,
+				width: 256,
+				height: 80,
+			});
+			const baseProps = {
+				width: 1024,
+				height: 512,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [animatedNode],
+				scenes: emptyScenes,
+				assets: [createImageAsset(animatedNode.assetId)],
+				activeNodeId: null,
+				selectedNodeIds: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === animatedNode.id),
+				).toBe(true);
+			});
+
+			skiaSurfaceMockState.surfaces.length = 0;
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					animatedLayoutNodeIds={[animatedNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).toContain(
+					animatedNode.id,
+				);
+			});
+			const snapshotSurface = skiaSurfaceMockState.surfaces.find(
+				(surface) => surface.pixelRatio === tilePixelRatio,
+			);
+			expect(snapshotSurface).toBeTruthy();
+			const drawCalls = snapshotSurface?.canvas.drawImageRect.mock.calls ?? [];
+			expect(drawCalls).toHaveLength(2);
+			const firstDestRect = drawCalls[0]?.[2] as
+				| { x: number; y: number; width: number; height: number }
+				| undefined;
+			const secondDestRect = drawCalls[1]?.[2] as
+				| { x: number; y: number; width: number; height: number }
+				| undefined;
+			expect(firstDestRect).toBeTruthy();
+			expect(secondDestRect).toBeTruthy();
+			for (const rect of [firstDestRect, secondDestRect]) {
+				expect(Number.isInteger(rect?.x)).toBe(true);
+				expect(Number.isInteger(rect?.y)).toBe(true);
+				expect(Number.isInteger(rect?.width)).toBe(true);
+				expect(Number.isInteger(rect?.height)).toBe(true);
+			}
+			expect(firstDestRect && secondDestRect).toBeTruthy();
+			expect((firstDestRect?.x ?? 0) + (firstDestRect?.width ?? 0)).toBe(
+				secondDestRect?.x,
+			);
+		} finally {
+			setInputsSpy.mockRestore();
+			beginFrameSpy.mockRestore();
+		}
+	});
+
 	it("auto layout frozen board snapshot 不会从合成 tile 裁出 children", async () => {
 		tilePipelineMockState.enabled = true;
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
