@@ -404,32 +404,16 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (liveNodeIds.size === 0) return EMPTY_NODE_ID_SET;
 		return liveNodeIds;
 	}, [forceLiveNodeIdSet, latestNodeById]);
-	const hdrTestLiveNodeIdSet = useMemo(() => {
-		const liveNodeIds = new Set<string>();
-		for (const node of renderNodes) {
-			if (node.type === "hdr-test") {
-				liveNodeIds.add(node.id);
-			}
-		}
-		return liveNodeIds.size === 0 ? EMPTY_NODE_ID_SET : liveNodeIds;
-	}, [renderNodes]);
 	const liveNodeIdSet = useMemo(() => {
-		if (
-			!activeLiveNodeId &&
-			forcedLiveRenderableNodeIdSet.size === 0 &&
-			hdrTestLiveNodeIdSet.size === 0
-		) {
+		if (!activeLiveNodeId && forcedLiveRenderableNodeIdSet.size === 0) {
 			return EMPTY_NODE_ID_SET;
 		}
 		const liveNodeIds = new Set(forcedLiveRenderableNodeIdSet);
-		for (const nodeId of hdrTestLiveNodeIdSet) {
-			liveNodeIds.add(nodeId);
-		}
 		if (activeLiveNodeId) {
 			liveNodeIds.add(activeLiveNodeId);
 		}
 		return liveNodeIds;
-	}, [activeLiveNodeId, forcedLiveRenderableNodeIdSet, hdrTestLiveNodeIdSet]);
+	}, [activeLiveNodeId, forcedLiveRenderableNodeIdSet]);
 	const {
 		effectiveFrozenNodeIdSet,
 		renderFrozenNodeIdSet,
@@ -1353,6 +1337,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			if (!layout) return null;
 			const latestNode = getLatestNodeById(node.id) ?? node;
 			const renderNode = latestNode;
+			const ancestorClipAabbs = resolveNodeAncestorClipAabbs(
+				latestNode,
+				latestNodeById,
+			);
 			const scene =
 				latestNode.type === "scene"
 					? (scenes[latestNode.sceneId] ?? null)
@@ -1366,6 +1354,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					key={`canvas-node-render-${node.id}`}
 					node={renderNode}
 					layout={layout}
+					ancestorClipAabbs={ancestorClipAabbs}
 					scene={scene}
 					asset={asset}
 					isActive={node.id === activeNodeId}
@@ -1405,11 +1394,16 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						const latestNode = getLatestNodeById(node.id) ?? node;
 						const snapshot = frozenNodeSnapshotRef.current.get(node.id) ?? null;
 						if (!snapshot) return null;
+						const ancestorClipAabbs = resolveNodeAncestorClipAabbs(
+							latestNode,
+							latestNodeById,
+						);
 						return (
 							<CanvasNodeFrozenRenderItem
 								key={`canvas-node-frozen-render-${node.id}`}
 								node={latestNode}
 								layout={layout}
+								ancestorClipAabbs={ancestorClipAabbs}
 								snapshot={snapshot}
 							/>
 						);
@@ -1474,6 +1468,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		onSelectionResize,
 		onLabelHitTesterChange,
 		liveRenderNodes,
+		latestNodeById,
 		marqueeRectScreen,
 		effectiveFrozenNodeIdSet,
 		retainedFrozenNodeIdSet,

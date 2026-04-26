@@ -16,7 +16,7 @@ import { getCanvasNodeDefinition } from "@/node-system/registry";
 import type { CanvasNodeSkiaRenderProps } from "@/node-system/types";
 import type { CanvasNodeLayoutState } from "./canvasNodeLabelUtils";
 import { resolveCanvasNodeLayoutWorldRect } from "./canvasNodeLabelUtils";
-import type { TileDebugItem, TileDrawItem } from "./tile";
+import type { TileAabb, TileDebugItem, TileDrawItem } from "./tile";
 import { TILE_CAMERA_EPSILON } from "./tile";
 import type { FrozenNodeRasterSnapshot } from "./infiniteSkiaCanvasTilePipeline";
 import { resolveTileDrawBleed } from "./infiniteSkiaCanvasTilePipeline";
@@ -29,6 +29,37 @@ const TILE_DEBUG_TEXT_COLOR = "rgba(255,255,255,0.96)";
 const TILE_DEBUG_LABEL_OFFSET_X = 4;
 const TILE_DEBUG_LABEL_OFFSET_Y = 4;
 
+const resolveClippedWorldRect = (
+	layout: CanvasNodeLayoutState,
+	ancestorClipAabbs: readonly TileAabb[],
+) => {
+	const worldRect = resolveCanvasNodeLayoutWorldRect(layout);
+	let left = worldRect.left;
+	let top = worldRect.top;
+	let right = worldRect.right;
+	let bottom = worldRect.bottom;
+	for (const clipAabb of ancestorClipAabbs) {
+		left = Math.max(left, clipAabb.left);
+		top = Math.max(top, clipAabb.top);
+		right = Math.min(right, clipAabb.right);
+		bottom = Math.min(bottom, clipAabb.bottom);
+		if (left >= right || top >= bottom) {
+			return {
+				x: left,
+				y: top,
+				width: 0,
+				height: 0,
+			};
+		}
+	}
+	return {
+		x: left,
+		y: top,
+		width: right - left,
+		height: bottom - top,
+	};
+};
+
 interface CanvasNodeRenderItemProps {
 	node: CanvasNode;
 	layout: SharedValue<CanvasNodeLayoutState>;
@@ -36,6 +67,7 @@ interface CanvasNodeRenderItemProps {
 	asset: StudioProject["assets"][number] | null;
 	isActive: boolean;
 	isFocused: boolean;
+	ancestorClipAabbs: readonly TileAabb[];
 	runtimeManager: ReturnType<typeof useStudioRuntimeManager>;
 }
 
@@ -46,6 +78,7 @@ const CanvasNodeRenderItemComponent = ({
 	asset,
 	isActive,
 	isFocused,
+	ancestorClipAabbs,
 	runtimeManager,
 }: CanvasNodeRenderItemProps) => {
 	const definition = getCanvasNodeDefinition(node.type);
@@ -53,13 +86,7 @@ const CanvasNodeRenderItemComponent = ({
 		CanvasNodeSkiaRenderProps<CanvasNode>
 	>;
 	const clip = useDerivedValue(() => {
-		const worldRect = resolveCanvasNodeLayoutWorldRect(layout.value);
-		return {
-			x: worldRect.left,
-			y: worldRect.top,
-			width: worldRect.width,
-			height: worldRect.height,
-		};
+		return resolveClippedWorldRect(layout.value, ancestorClipAabbs);
 	});
 	const renderTransform = useDerivedValue(() => {
 		const safeWidth = Math.max(Math.abs(node.width), LAYOUT_EPSILON);
@@ -113,22 +140,18 @@ CanvasNodeRenderItem.displayName = "CanvasNodeRenderItem";
 interface CanvasNodeFrozenRenderItemProps {
 	node: CanvasNode;
 	layout: SharedValue<CanvasNodeLayoutState>;
+	ancestorClipAabbs: readonly TileAabb[];
 	snapshot: FrozenNodeRasterSnapshot;
 }
 
 const CanvasNodeFrozenRenderItemComponent = ({
 	node,
 	layout,
+	ancestorClipAabbs,
 	snapshot,
 }: CanvasNodeFrozenRenderItemProps) => {
 	const clip = useDerivedValue(() => {
-		const worldRect = resolveCanvasNodeLayoutWorldRect(layout.value);
-		return {
-			x: worldRect.left,
-			y: worldRect.top,
-			width: worldRect.width,
-			height: worldRect.height,
-		};
+		return resolveClippedWorldRect(layout.value, ancestorClipAabbs);
 	});
 	const renderTransform = useDerivedValue(() => {
 		const safeWidth = Math.max(Math.abs(node.width), LAYOUT_EPSILON);
