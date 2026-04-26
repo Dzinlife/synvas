@@ -1,4 +1,4 @@
-import type { ColorManagementSettings, TimelineAsset } from "core";
+import type { TimelineAsset } from "core";
 import type {
 	OtCommand,
 	OtOpEnvelope,
@@ -107,7 +107,6 @@ export interface SceneDocument {
 	id: string;
 	name: string;
 	timeline: TimelineJSON;
-	color?: Partial<ColorManagementSettings>;
 	posterFrame: number;
 	createdAt: number;
 	updatedAt: number;
@@ -137,7 +136,6 @@ export interface StudioProject {
 	canvas: CanvasDocument;
 	scenes: Record<string, SceneDocument>;
 	assets: TimelineAsset[];
-	color?: ColorManagementSettings;
 	ot?: StudioProjectOt;
 	ui: {
 		activeSceneId: string | null;

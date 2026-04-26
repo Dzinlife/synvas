@@ -22,6 +22,7 @@ import {
 	type SkiaRenderBackend,
 	toCanvasKitWebGPU,
 } from "./renderBackend";
+import type { SkiaOffscreenSurfaceOptions } from "../types/Surface/SurfaceFactory";
 
 type CanvasElement = HTMLCanvasElement | OffscreenCanvas;
 type CachedWebGPUCanvasContext = {
@@ -34,9 +35,6 @@ type CachedWebGPUCanvasContext = {
 type SkiaCanvasSurfaceOptions = {
 	colorSpace?: SkiaWebCanvasColorSpace;
 	dynamicRange?: SkiaWebCanvasDynamicRange;
-};
-type SkiaOffscreenSurfaceOptions = SkiaCanvasSurfaceOptions & {
-	pixelRatio?: number;
 };
 type WebGLSurface = Surface & { _context?: unknown };
 type WebGLOnScreenSurface = {

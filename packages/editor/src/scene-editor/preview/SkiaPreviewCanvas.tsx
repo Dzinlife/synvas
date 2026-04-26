@@ -15,7 +15,6 @@ import {
 	useContextBridge,
 } from "react-skia-lite";
 import { useTimelineStore } from "@/scene-editor/contexts/TimelineContext";
-import { useProjectStore } from "@/projects/projectStore";
 import {
 	EditorRuntimeContext,
 	useEditorRuntime,
@@ -23,7 +22,7 @@ import {
 	useTimelineStoreApi,
 } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
-import { resolveSkiaCanvasColorSpaceForScene } from "@/studio/project/colorManagement";
+import { useResolvedAppPreviewColorOutput } from "@/studio/previewColorSettings";
 import type { TimelineTrack } from "@/scene-editor/timeline/types";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import { textTypographyFacade } from "@/typography/textTypographyFacade";
@@ -134,11 +133,13 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	);
 	const fps = useTimelineStore((state) => state.fps);
 	const isPlaying = useTimelineStore((state) => state.isPlaying);
-	const currentProject = useProjectStore((state) => state.currentProject);
-	const rootScene = rootSceneId ? (currentProject?.scenes[rootSceneId] ?? null) : null;
-	const canvasColorSpace = useMemo(
-		() => resolveSkiaCanvasColorSpaceForScene(currentProject, rootScene),
-		[currentProject, rootScene],
+	const previewColorOutput = useResolvedAppPreviewColorOutput();
+	const previewSurfaceOptions = useMemo(
+		() => ({
+			colorSpace: previewColorOutput.colorSpace,
+			dynamicRange: previewColorOutput.dynamicRange,
+		}),
+		[previewColorOutput.colorSpace, previewColorOutput.dynamicRange],
 	);
 
 	const preemptBuildQueue = useCallback(() => {
@@ -257,6 +258,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 								<RuntimeContextBridge>{node}</RuntimeContextBridge>
 							),
 							resolveCompositionTimeline,
+							offscreenSurfaceOptions: previewSurfaceOptions,
 						},
 					);
 					if (!frameSnapshot.picture) {
@@ -404,6 +406,7 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 			isPlaying,
 			modelRegistry,
 			preemptBuildQueue,
+			previewSurfaceOptions,
 			renderBlackFrame,
 			rootSceneId,
 			RuntimeContextBridge,
@@ -421,7 +424,13 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 	useEffect(() => {
 		// 构建输入（fps/轨道/尺寸等）变化时保守失效，避免复用旧条件下的缓存。
 		invalidateBuffer();
-	}, [invalidateBuffer]);
+		renderSkia();
+	}, [
+		invalidateBuffer,
+		previewSurfaceOptions.colorSpace,
+		previewSurfaceOptions.dynamicRange,
+		renderSkia,
+	]);
 
 	useEffect(() => {
 		const unsub1 = timelineStore.subscribe(
@@ -513,11 +522,12 @@ export const SkiaPreviewCanvas: React.FC<SkiaPreviewCanvasProps> = ({
 					height: canvasHeight,
 					overflow: "hidden",
 				}}
-				colorSpace={canvasColorSpace}
+				colorSpace={previewSurfaceOptions.colorSpace}
+				dynamicRange={previewSurfaceOptions.dynamicRange}
 				ref={targetCanvasRef}
 			/>
 		);
-	}, [canvasColorSpace, canvasWidth, canvasHeight, targetCanvasRef]);
+	}, [canvasWidth, canvasHeight, previewSurfaceOptions, targetCanvasRef]);
 
 	return skiaCanvas;
 };

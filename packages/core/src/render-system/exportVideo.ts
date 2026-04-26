@@ -16,7 +16,6 @@ import {
 	SkiaSGRoot,
 	type SkiaWebCanvasColorSpace,
 } from "react-skia-lite";
-import type { ColorManagementSettings } from "../color-management";
 import type { TimelineElement } from "../timeline-system/types";
 import { resolveTimelineElementClipGainLinear } from "../audio-system/clipGain";
 import { renderMixedAudioForExport } from "../audio-system/dsp/exportRenderer";
@@ -84,7 +83,6 @@ export type ExportTimelineAsVideoOptions = {
 	>["getModelStore"];
 	waitForReady?: () => Promise<void>;
 	onFrame?: (frame: number) => void;
-	colorSettings?: ColorManagementSettings;
 };
 
 type ExportAudioTarget = {
@@ -197,11 +195,6 @@ const createSurfaceForExport = (
 		return null;
 	}
 };
-
-const resolveExportCanvasColorSpace = (
-	settings: ColorManagementSettings | undefined,
-): SkiaWebCanvasColorSpace =>
-	settings?.export.primaries === "display-p3" ? "p3" : "srgb";
 
 const downloadBlob = (blob: Blob, filename: string): void => {
 	const link = document.createElement("a");
@@ -608,9 +601,11 @@ export const exportTimelineAsVideoCore = async (
 		});
 
 		const renderBackend = getSkiaRenderBackend();
-		const exportColorSpace = resolveExportCanvasColorSpace(
-			options.colorSettings,
-		);
+		const exportColorSpace: SkiaWebCanvasColorSpace = "srgb";
+		const exportOffscreenSurfaceOptions = {
+			colorSpace: exportColorSpace,
+			dynamicRange: "standard" as const,
+		};
 		let exportCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
 		const getExportCanvas = () => {
 			if (exportCanvas) {
@@ -770,6 +765,7 @@ export const exportTimelineAsVideoCore = async (
 						retainedResources.push(
 							...liveRoot.drawOnCanvas(frameSurface.skiaCanvas, {
 								retainResources: true,
+								offscreenSurfaceOptions: exportOffscreenSurfaceOptions,
 							}),
 						);
 						frameSurface.surface.flush();

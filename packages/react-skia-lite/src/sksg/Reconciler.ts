@@ -3,6 +3,7 @@ import type { OpaqueRoot } from "react-reconciler";
 import ReactReconciler from "react-reconciler";
 import { NodeType } from "../dom/types";
 import type { SkCanvas, Skia } from "../skia/types";
+import type { SkiaOffscreenSurfaceOptions } from "../skia/types/Surface/SurfaceFactory";
 import { attachDisposeCleanup } from "../skia/web/Host";
 import { createContainer } from "./Container";
 import { debug, sksgHostConfig } from "./HostConfig";
@@ -132,9 +133,14 @@ export class SkiaSGRoot {
 		canvas: SkCanvas,
 		options?: {
 			retainResources?: boolean;
+			offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions;
 		},
 	) {
 		return this.container.drawOnCanvas(canvas, options);
+	}
+
+	setOffscreenSurfaceOptions(options: SkiaOffscreenSurfaceOptions | undefined) {
+		this.container.setOffscreenSurfaceOptions(options);
 	}
 
 	getPicture() {

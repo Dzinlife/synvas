@@ -8,7 +8,7 @@ import type {
 	StudioProject,
 } from "@/studio/project/types";
 import type React from "react";
-import type { SkPicture } from "react-skia-lite";
+import type { SkiaOffscreenSurfaceOptions, SkPicture } from "react-skia-lite";
 import type { IngestExternalFileAssetResult } from "@/projects/assetIngest";
 import type {
 	CanvasNodeCreateInput,
@@ -165,6 +165,7 @@ export interface CanvasNodeTilePictureCapabilityContext<
 	asset: TimelineAsset | null;
 	projectId?: string | null;
 	runtimeManager: StudioRuntimeManager;
+	offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions;
 }
 
 export interface CanvasNodeTilePictureGenerationResult {

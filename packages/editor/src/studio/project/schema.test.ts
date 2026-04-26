@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_COLOR_MANAGEMENT_SETTINGS } from "core";
 import { parseStudioProject } from "./schema";
 
 const createValidProject = () => ({
@@ -184,14 +183,17 @@ describe("studio schema", () => {
 		expect(parsed.ui.canvasSnapEnabled).toBe(true);
 	});
 
-	it("缺失色彩管理字段时应回填项目默认值", () => {
-		const legacy = createValidProject();
-		const parsed = parseStudioProject(legacy);
-		expect(parsed.color).toEqual(DEFAULT_COLOR_MANAGEMENT_SETTINGS);
+	it("不会生成项目级色彩管理字段", () => {
+		const project = createValidProject();
+		const parsed = parseStudioProject(project);
+		expect("color" in parsed).toBe(false);
 	});
 
-	it("会保留 scene 与 asset 的色彩 metadata", () => {
+	it("会丢弃 scene 与 asset 的色彩 metadata", () => {
 		const project = createValidProject();
+		(project as { color?: unknown }).color = {
+			preview: "display-p3",
+		};
 		(project.scenes["scene-1"] as { color?: unknown }).color = {
 			preview: "srgb",
 		};
@@ -207,8 +209,9 @@ describe("studio schema", () => {
 
 		const parsed = parseStudioProject(project);
 
-		expect(parsed.scenes["scene-1"]?.color?.preview).toBe("srgb");
-		expect(parsed.assets[0]?.meta?.color?.detected?.transfer).toBe("pq");
+		expect("color" in parsed).toBe(false);
+		expect("color" in (parsed.scenes["scene-1"] ?? {})).toBe(false);
+		expect("color" in (parsed.assets[0]?.meta ?? {})).toBe(false);
 	});
 
 	it("缺失 parentId 时应回填 null", () => {

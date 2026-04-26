@@ -1,6 +1,5 @@
 import { createFramePrecompileController } from "core/render-system/framePrecompileController";
 import { schedulePrecompileTask } from "core/render-system/framePrecompileScheduler";
-import type { ColorSpaceDescriptor } from "core";
 import type { AudioBufferSink, VideoSample, VideoSampleSink } from "mediabunny";
 import type { SkImage, TextureSourceTargetColorSpace } from "react-skia-lite";
 import type { AssetHandle } from "@/assets/AssetStore";
@@ -18,7 +17,6 @@ import {
 	probeVideoRawFrameAccess,
 	videoSampleToColorManagedSkImage,
 } from "@/lib/videoFrameUtils";
-import { useProjectStore } from "@/projects/projectStore";
 import {
 	type AudioPlaybackController,
 	createAudioPlaybackController,
@@ -297,7 +295,8 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		if (shouldReload) {
 			void this.loadAsset(nextAssetUri, {
 				initialSeekTime: !assetChanged ? this.snapshot.currentTime : 0,
-				preserveCurrentFrame: !assetChanged,
+				preserveCurrentFrame: !assetChanged && !targetColorSpaceChanged,
+				clearFrameCache: targetColorSpaceChanged,
 			});
 		}
 	}
@@ -453,9 +452,11 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 		options: {
 			initialSeekTime?: number;
 			preserveCurrentFrame?: boolean;
+			clearFrameCache?: boolean;
 		} = {},
 	): Promise<void> {
 		const preserveCurrentFrame = options.preserveCurrentFrame === true;
+		const clearFrameCache = options.clearFrameCache === true;
 		const pendingSeekTime =
 			options.initialSeekTime ?? this.snapshot.currentTime;
 		this.loadEpoch += 1;
@@ -502,6 +503,9 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 			if (this.disposed || loadEpoch !== this.loadEpoch) {
 				nextVideoHandle.release();
 				return;
+			}
+			if (clearFrameCache) {
+				nextVideoHandle.asset.clearCache?.();
 			}
 
 			nextAudioHandle = await acquireAudioAsset(uri).catch(() => null);
@@ -840,7 +844,6 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 				this.binding.targetColorSpace ?? DEFAULT_TEXTURE_TARGET_COLOR_SPACE,
 		});
 		if (!decoded) return null;
-		this.persistDetectedColorSpace(decoded.sourceColorSpace);
 
 		const cachedAfterDecode = handle.asset.getCachedFrame(timestamp);
 		if (cachedAfterDecode) {
@@ -850,27 +853,6 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 
 		handle.asset.storeFrame(timestamp, decoded.image);
 		return decoded.image;
-	}
-
-	private persistDetectedColorSpace(sourceColorSpace: ColorSpaceDescriptor) {
-		const assetId = this.binding.assetId;
-		if (!assetId) return;
-		useProjectStore.getState().updateProjectAssetMeta(assetId, (prev) => {
-			const previousDetected = prev?.color?.detected;
-			if (
-				JSON.stringify(previousDetected ?? null) ===
-				JSON.stringify(sourceColorSpace)
-			) {
-				return prev;
-			}
-			return {
-				...(prev ?? {}),
-				color: {
-					...(prev?.color ?? {}),
-					detected: sourceColorSpace,
-				},
-			};
-		});
 	}
 
 	private disposeAssetHandles() {

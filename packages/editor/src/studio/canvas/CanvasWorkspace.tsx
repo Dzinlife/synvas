@@ -1,15 +1,11 @@
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import {
-	canDisplayHdrColors,
-	type SkiaWebCanvasDynamicRange,
-} from "react-skia-lite";
+import { useContext, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useProjectStore } from "@/projects/projectStore";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { useCanvasCameraStore } from "@/studio/canvas/cameraStore";
-import { resolveSkiaCanvasColorSpaceForScene } from "@/studio/project/colorManagement";
+import { useResolvedAppPreviewColorOutput } from "@/studio/previewColorSettings";
 import CanvasWorkspaceOverlay from "./CanvasWorkspaceOverlay";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
 import { useCanvasInteractionStore } from "./canvasInteractionStore";
@@ -17,33 +13,6 @@ import { useCanvasInteractionController } from "./useCanvasInteractionController
 import { useCanvasRenderCullController } from "./useCanvasRenderCullController";
 import { useCanvasSceneGraph } from "./useCanvasSceneGraph";
 import { useNodeThumbnailGeneration } from "./useNodeThumbnailGeneration";
-
-const HDR_DYNAMIC_RANGE_MEDIA_QUERY = "(dynamic-range: high)";
-
-const resolveCanvasDynamicRange = (): SkiaWebCanvasDynamicRange =>
-	canDisplayHdrColors() ? "extended" : "standard";
-
-const useCanvasDynamicRange = (): SkiaWebCanvasDynamicRange => {
-	const [dynamicRange, setDynamicRange] = useState(resolveCanvasDynamicRange);
-	useEffect(() => {
-		if (
-			typeof window === "undefined" ||
-			typeof window.matchMedia !== "function"
-		) {
-			return;
-		}
-		const mediaQuery = window.matchMedia(HDR_DYNAMIC_RANGE_MEDIA_QUERY);
-		const updateDynamicRange = () => {
-			setDynamicRange(resolveCanvasDynamicRange());
-		};
-		updateDynamicRange();
-		mediaQuery.addEventListener?.("change", updateDynamicRange);
-		return () => {
-			mediaQuery.removeEventListener?.("change", updateDynamicRange);
-		};
-	}, []);
-	return dynamicRange;
-};
 
 const isProjectEqualExceptCamera = (
 	left: {
@@ -99,14 +68,7 @@ const CanvasWorkspace = () => {
 	});
 	const focusedNodeId = currentProject?.ui.focusedNodeId ?? null;
 	const activeSceneId = currentProject?.ui.activeSceneId ?? null;
-	const activeScene = activeSceneId
-		? (currentProject?.scenes[activeSceneId] ?? null)
-		: null;
-	const canvasColorSpace = useMemo(
-		() => resolveSkiaCanvasColorSpaceForScene(currentProject, activeScene),
-		[currentProject, activeScene],
-	);
-	const canvasDynamicRange = useCanvasDynamicRange();
+	const previewColorOutput = useResolvedAppPreviewColorOutput();
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
 	const isCanvasInteractionLocked = Boolean(focusedNodeId);
@@ -263,8 +225,8 @@ const CanvasWorkspace = () => {
 				tileDebugEnabled={tileDebugEnabled}
 				tileMaxTasksPerTick={tileMaxTasksPerTick}
 				tileLodTransition={effectiveTileLodTransition}
-				colorSpace={canvasColorSpace}
-				dynamicRange={canvasDynamicRange}
+				colorSpace={previewColorOutput.colorSpace}
+				dynamicRange={previewColorOutput.dynamicRange}
 				onNodeResize={handleSkiaNodeResize}
 				onSelectionResize={handleSelectionResize}
 				onLabelHitTesterChange={handleLabelHitTesterChange}

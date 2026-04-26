@@ -52,11 +52,7 @@ import {
   isRenderTarget,
   materializeCommand,
 } from "./Core";
-import type {
-  Command,
-  GroupCommand,
-  RenderTargetCommand,
-} from "./Core";
+import type { Command, GroupCommand, RenderTargetCommand } from "./Core";
 import {
   createDrawingContext,
   makeSurfaceSnapshotImage,
@@ -64,6 +60,7 @@ import {
   type SurfaceSnapshotSource,
 } from "./DrawingContext";
 import { getSkiaRenderBackend } from "../../skia/web/renderBackend";
+import type { SkiaOffscreenSurfaceOptions } from "../../skia/types/Surface/SurfaceFactory";
 
 const renderTargetFallbackWarnings = new Set<string>();
 const MAX_RENDER_TARGET_POOL_KEYS = 16;
@@ -73,7 +70,7 @@ const renderTargetSurfacePool = new Map<string, SkSurface[]>();
 const resolveImageSize = (
   image: unknown,
   fallbackWidth: number,
-  fallbackHeight: number
+  fallbackHeight: number,
 ) => {
   const target = image as {
     width?: number | (() => number);
@@ -89,7 +86,9 @@ const resolveImageSize = (
         ? rawWidth
         : fallbackWidth,
     height:
-      typeof rawHeight === "number" && Number.isFinite(rawHeight) && rawHeight > 0
+      typeof rawHeight === "number" &&
+      Number.isFinite(rawHeight) &&
+      rawHeight > 0
         ? rawHeight
         : fallbackHeight,
   };
@@ -97,7 +96,7 @@ const resolveImageSize = (
 
 const resolveRenderTargetPixelRatio = (
   explicitPixelRatio: number | undefined,
-  inheritedPixelRatio: number | undefined
+  inheritedPixelRatio: number | undefined,
 ) => {
   if (
     typeof explicitPixelRatio === "number" &&
@@ -127,9 +126,12 @@ const resolveRenderTargetSurfacePoolKey = (
   backendKind: string,
   width: number,
   height: number,
-  pixelRatio: number
+  pixelRatio: number,
+  options?: SkiaOffscreenSurfaceOptions,
 ) => {
-  return `${backendKind}:${width}x${height}@${pixelRatio}`;
+  return `${backendKind}:${width}x${height}@${pixelRatio}:${
+    options?.colorSpace ?? "default"
+  }:${options?.dynamicRange ?? "default"}`;
 };
 
 const disposeSurfaceList = (surfaces: SkSurface[]) => {
@@ -155,13 +157,15 @@ const acquireRenderTargetSurface = (
   width: number,
   height: number,
   backendKind: string,
-  pixelRatio: number
+  pixelRatio: number,
+  offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions,
 ) => {
   const key = resolveRenderTargetSurfacePoolKey(
     backendKind,
     width,
     height,
-    pixelRatio
+    pixelRatio,
+    offscreenSurfaceOptions,
   );
   const pooled = renderTargetSurfacePool.get(key);
   if (pooled && pooled.length > 0) {
@@ -176,7 +180,10 @@ const acquireRenderTargetSurface = (
       };
     }
   }
-  const created = Skia.Surface.MakeOffscreen(width, height, pixelRatio);
+  const created = Skia.Surface.MakeOffscreen(width, height, {
+    ...offscreenSurfaceOptions,
+    pixelRatio,
+  });
   if (!created) {
     return null;
   }
@@ -191,13 +198,15 @@ const releaseRenderTargetSurface = (
   width: number,
   height: number,
   backendKind: string,
-  pixelRatio: number
+  pixelRatio: number,
+  offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions,
 ) => {
   const key = resolveRenderTargetSurfacePoolKey(
     backendKind,
     width,
     height,
-    pixelRatio
+    pixelRatio,
+    offscreenSurfaceOptions,
   );
   let pooled = renderTargetSurfacePool.get(key);
   if (!pooled) {
@@ -236,7 +245,7 @@ export type RenderTargetReplayMetrics = {
 };
 
 type RenderTargetReplayMetricsListener = (
-  metrics: RenderTargetReplayMetrics
+  metrics: RenderTargetReplayMetrics,
 ) => void;
 
 const createReplayMetrics = (): RenderTargetReplayMetrics => ({
@@ -257,7 +266,10 @@ const createReplayMetrics = (): RenderTargetReplayMetrics => ({
 });
 
 const resolveNow = () => {
-  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+  if (
+    typeof performance !== "undefined" &&
+    typeof performance.now === "function"
+  ) {
     return performance.now();
   }
   return Date.now();
@@ -267,7 +279,7 @@ let replayMetricsListener: RenderTargetReplayMetricsListener | null = null;
 let activeReplayMetrics: RenderTargetReplayMetrics | null = null;
 
 export const setRenderTargetReplayMetricsListener = (
-  listener: RenderTargetReplayMetricsListener | null
+  listener: RenderTargetReplayMetricsListener | null,
 ) => {
   replayMetricsListener = listener;
 };
@@ -281,7 +293,7 @@ const warnRenderTargetFallback = (debugLabel?: string) => {
   console.warn(
     `[react-skia-lite] RenderTarget ${
       debugLabel ? `"${debugLabel}" ` : ""
-    }failed to allocate offscreen surface, fallback to direct replay`
+    }failed to allocate offscreen surface, fallback to direct replay`,
   );
 };
 
@@ -310,7 +322,7 @@ const getZIndex = (command: GroupCommand) => {
 const flushPendingGroups = (
   ctx: DrawingContext,
   pendingGroups: PendingGroup[],
-  playFn: (ctx: DrawingContext, cmd: Command) => void
+  playFn: (ctx: DrawingContext, cmd: Command) => void,
 ) => {
   "worklet";
   if (pendingGroups.length === 0) {
@@ -318,7 +330,7 @@ const flushPendingGroups = (
   }
   pendingGroups
     .sort((a, b) =>
-      a.zIndex === b.zIndex ? a.order - b.order : a.zIndex - b.zIndex
+      a.zIndex === b.zIndex ? a.order - b.order : a.zIndex - b.zIndex,
     )
     .forEach(({ command }) => {
       playFn(ctx, command);
@@ -329,7 +341,7 @@ const flushPendingGroups = (
 const playGroup = (
   ctx: DrawingContext,
   group: GroupCommand,
-  playFn: (ctx: DrawingContext, cmd: Command) => void
+  playFn: (ctx: DrawingContext, cmd: Command) => void,
 ) => {
   "worklet";
   const pending: PendingGroup[] = [];
@@ -356,7 +368,10 @@ const hasBackdropFilterInCommands = (commands: Command[]): boolean => {
     if (isGroup(command) && hasBackdropFilterInCommands(command.children)) {
       return true;
     }
-    if (isRenderTarget(command) && hasBackdropFilterInCommands(command.children)) {
+    if (
+      isRenderTarget(command) &&
+      hasBackdropFilterInCommands(command.children)
+    ) {
       return true;
     }
   }
@@ -366,7 +381,7 @@ const hasBackdropFilterInCommands = (commands: Command[]): boolean => {
 const playRenderTarget = (
   ctx: DrawingContext,
   command: RenderTargetCommand,
-  playFn: (ctx: DrawingContext, cmd: Command) => void
+  playFn: (ctx: DrawingContext, cmd: Command) => void,
 ) => {
   const metrics = activeReplayMetrics;
   const renderBackend = getSkiaRenderBackend();
@@ -374,7 +389,7 @@ const playRenderTarget = (
   const height = Math.max(1, Math.ceil(command.props.height));
   const pixelRatio = resolveRenderTargetPixelRatio(
     command.props.pixelRatio,
-    ctx.renderTarget?.pixelRatio
+    ctx.renderTarget?.pixelRatio,
   );
   if (metrics) {
     metrics.renderTargetCount += 1;
@@ -388,18 +403,21 @@ const playRenderTarget = (
     width,
     height,
     renderBackend.kind,
-    pixelRatio
+    pixelRatio,
+    ctx.offscreenSurfaceOptions,
   );
   if (!acquiredSurface) {
     if (metrics) {
       metrics.offscreenAllocFailureCount += 1;
     }
-    const hasBackdropFilterCommand = hasBackdropFilterInCommands(command.children);
+    const hasBackdropFilterCommand = hasBackdropFilterInCommands(
+      command.children,
+    );
     if (renderBackend.kind === "webgpu" && hasBackdropFilterCommand) {
       throw new Error(
         `[react-skia-lite] RenderTarget ${
           command.props.debugLabel ? `"${command.props.debugLabel}" ` : ""
-        }failed to allocate offscreen surface on webgpu`
+        }failed to allocate offscreen surface on webgpu`,
       );
     }
     warnRenderTargetFallback(command.props.debugLabel);
@@ -421,7 +439,9 @@ const playRenderTarget = (
 
   const childPaintPool: DrawingContext["paintPool"] = [];
   const childCanvas = surface.getCanvas();
-  childCanvas.clear(processColor(ctx.Skia, command.props.clearColor ?? "transparent"));
+  childCanvas.clear(
+    processColor(ctx.Skia, command.props.clearColor ?? "transparent"),
+  );
   const childCtx = createDrawingContext(ctx.Skia, childPaintPool, childCanvas, {
     renderTarget: {
       surface,
@@ -431,6 +451,7 @@ const playRenderTarget = (
       debugLabel: command.props.debugLabel,
     },
     retainResources: ctx.retainResources,
+    offscreenSurfaceOptions: ctx.offscreenSurfaceOptions,
   });
 
   let retainedSnapshotImage = false;
@@ -468,7 +489,7 @@ const playRenderTarget = (
           height,
         },
         ctx.paint,
-        true
+        true,
       );
       if (metrics) {
         metrics.compositeDrawImageCount += 1;
@@ -484,7 +505,8 @@ const playRenderTarget = (
               width,
               height,
               renderBackend.kind,
-              pixelRatio
+              pixelRatio,
+              ctx.offscreenSurfaceOptions,
             );
           }
         });
@@ -505,7 +527,8 @@ const playRenderTarget = (
         width,
         height,
         renderBackend.kind,
-        pixelRatio
+        pixelRatio,
+        ctx.offscreenSurfaceOptions,
       );
     }
   }
@@ -645,7 +668,8 @@ export function replay(ctx: DrawingContext, commands: Command[]) {
   "worklet";
   //console.log(debugTree(commands));
   const previousMetrics = activeReplayMetrics;
-  const ownsMetrics = previousMetrics === null && replayMetricsListener !== null;
+  const ownsMetrics =
+    previousMetrics === null && replayMetricsListener !== null;
   const metrics = ownsMetrics ? createReplayMetrics() : previousMetrics;
   const startedAt = metrics ? resolveNow() : 0;
   if (metrics) {

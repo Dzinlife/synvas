@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { ImageShader, Rect } from "react-skia-lite";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
-import { resolveSceneColorContext } from "@/studio/project/colorManagement";
+import { useResolvedAppPreviewColorOutput } from "@/studio/previewColorSettings";
 import type { CanvasNodeSkiaRenderProps } from "../types";
 import { useCanvasNodeThumbnailImage } from "../thumbnail/useCanvasNodeThumbnailImage";
 import { useVideoNodePlayback } from "./useVideoNodePlayback";
@@ -32,19 +32,14 @@ const resolvePlaybackFps = (
 
 export const VideoNodeSkiaRenderer: React.FC<
 	CanvasNodeSkiaRenderProps<VideoCanvasNode>
-> = ({ node, scene, asset, isActive, runtimeManager }) => {
+> = ({ node, asset, isActive, runtimeManager }) => {
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
-	const currentProject = useProjectStore((state) => state.currentProject);
+	const previewColorOutput = useResolvedAppPreviewColorOutput();
 	const width = Math.max(1, node.width);
 	const height = Math.max(1, node.height);
 	const assetUri = useMemo(
 		() => resolveVideoAssetUri(asset, currentProjectId),
 		[asset, currentProjectId],
-	);
-	const targetColorSpace = useMemo(
-		() =>
-			resolveSceneColorContext(currentProject, scene).previewTargetColorSpace,
-		[currentProject, scene],
 	);
 	const fps = resolvePlaybackFps(runtimeManager);
 	const { snapshot } = useVideoNodePlayback({
@@ -53,7 +48,7 @@ export const VideoNodeSkiaRenderer: React.FC<
 		assetId: asset?.id ?? null,
 		fps,
 		runtimeManager,
-		targetColorSpace,
+		targetColorSpace: previewColorOutput.textureTargetColorSpace,
 		active: isActive,
 	});
 	const thumbnailImage = useCanvasNodeThumbnailImage(node.thumbnail);

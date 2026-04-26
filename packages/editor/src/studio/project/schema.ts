@@ -1,8 +1,3 @@
-import {
-	COLOR_SPACE_PRESETS,
-	DEFAULT_COLOR_MANAGEMENT_SETTINGS,
-	cloneColorManagementSettings,
-} from "core";
 import { z } from "zod";
 import { ensureStudioProjectOt } from "./ot";
 import type { CanvasNode, StudioProject } from "./types";
@@ -196,52 +191,10 @@ const timelineAssetLocatorSchema = z.discriminatedUnion("type", [
 	}),
 ]);
 
-const colorPrimariesSchema = z.enum([
-	"srgb",
-	"display-p3",
-	"bt2020",
-	"unknown",
-]);
-const colorTransferSchema = z.enum([
-	"srgb",
-	"bt709",
-	"pq",
-	"hlg",
-	"linear",
-	"unknown",
-]);
-const colorMatrixSchema = z.enum(["rgb", "bt709", "bt2020-ncl", "unknown"]);
-const colorRangeSchema = z.enum(["full", "limited", "unknown"]);
-const colorSpaceDescriptorSchema = z.object({
-	primaries: colorPrimariesSchema,
-	transfer: colorTransferSchema,
-	matrix: colorMatrixSchema,
-	range: colorRangeSchema,
-	label: z.string().optional(),
-});
-const previewColorSpaceTargetSchema = z.enum(["auto", "srgb", "display-p3"]);
-const colorManagementSettingsSchema = z.object({
-	working: colorSpaceDescriptorSchema.default(() => ({
-		...COLOR_SPACE_PRESETS.displayP3Sdr,
-	})),
-	preview: previewColorSpaceTargetSchema.default(
-		DEFAULT_COLOR_MANAGEMENT_SETTINGS.preview,
-	),
-	export: colorSpaceDescriptorSchema.default(() => ({
-		...COLOR_SPACE_PRESETS.rec709Sdr,
-	})),
-});
-
 const timelineAssetMetaSchema = z
 	.object({
 		hash: nonEmptyStringSchema.optional(),
 		fileName: nonEmptyStringSchema.optional(),
-		color: z
-			.object({
-				detected: colorSpaceDescriptorSchema.optional(),
-				override: colorSpaceDescriptorSchema.optional(),
-			})
-			.optional(),
 		sourceSize: z
 			.object({
 				width: z.number().positive(),
@@ -249,7 +202,11 @@ const timelineAssetMetaSchema = z
 			})
 			.optional(),
 	})
-	.catchall(z.unknown());
+	.catchall(z.unknown())
+	.transform((meta) => {
+		const { color: _color, ...rest } = meta;
+		return rest;
+	});
 
 const timelineAssetSchema = z.object({
 	id: nonEmptyStringSchema,
@@ -263,7 +220,6 @@ const sceneDocumentSchema = z.object({
 	id: nonEmptyStringSchema,
 	name: nonEmptyStringSchema,
 	timeline: timelineSchema,
-	color: colorManagementSettingsSchema.partial().optional(),
 	posterFrame: z.number().int().nonnegative(),
 	createdAt: z.number(),
 	updatedAt: z.number(),
@@ -325,9 +281,6 @@ const studioProjectSchema = z.object({
 	canvas: canvasDocumentSchema,
 	scenes: z.record(nonEmptyStringSchema, sceneDocumentSchema),
 	assets: z.array(timelineAssetSchema),
-	color: colorManagementSettingsSchema.default(() =>
-		cloneColorManagementSettings(DEFAULT_COLOR_MANAGEMENT_SETTINGS),
-	),
 	ot: studioOtSchema.optional(),
 	ui: z.object({
 		activeSceneId: nonEmptyStringSchema.nullable(),

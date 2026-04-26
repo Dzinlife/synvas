@@ -1,6 +1,7 @@
 import type { CanvasKit } from "canvaskit-wasm";
 
 import type { SurfaceFactory } from "../types";
+import type { SkiaOffscreenSurfaceOptions } from "../types/Surface/SurfaceFactory";
 
 import { Host } from "./Host";
 import { JsiSkSurface } from "./JsiSkSurface";
@@ -18,13 +19,17 @@ export class JsiSkSurfaceFactory extends Host implements SurfaceFactory {
 		);
 	}
 
-	MakeOffscreen(width: number, height: number, pixelRatio?: number) {
+	MakeOffscreen(
+		width: number,
+		height: number,
+		optionsOrPixelRatio?: number | SkiaOffscreenSurfaceOptions,
+	) {
 		return createSkiaOffscreenSurface(
 			this.CanvasKit,
 			width,
 			height,
 			undefined,
-			pixelRatio,
+			optionsOrPixelRatio,
 		);
 	}
 }

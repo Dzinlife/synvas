@@ -109,6 +109,10 @@ export const Canvas = ({
 
 	// Render effects
 	useLayoutEffect(() => {
+		root.setOffscreenSurfaceOptions({ colorSpace, dynamicRange });
+	}, [colorSpace, dynamicRange, root]);
+
+	useLayoutEffect(() => {
 		root.render(children);
 	}, [children, root, nativeId]);
 

@@ -16,6 +16,7 @@ import {
 	Group,
 	makeMutable,
 	markSkiaRuntimeActivity,
+	type SkiaOffscreenSurfaceOptions,
 	type SkiaWebCanvasColorSpace,
 	type SkiaWebCanvasDynamicRange,
 	type SharedValue,
@@ -298,6 +299,13 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const supportsTilePipeline = useMemo(() => {
 		return canUseTilePipeline();
 	}, []);
+	const previewSurfaceOptions = useMemo<SkiaOffscreenSurfaceOptions>(
+		() => ({
+			colorSpace,
+			dynamicRange,
+		}),
+		[colorSpace, dynamicRange],
+	);
 	const tileSchedulerRef = useRef<StaticTileScheduler | null>(null);
 	const rasterCacheRef = useRef(new Map<string, RasterImageCacheEntry>());
 	const liveRenderPreparationCacheRef = useRef(
@@ -326,6 +334,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const tileTickPausedRef = useRef(isFocusMode);
 	const latestTileFrameResultRef = useRef<TileFrameResult | null>(null);
 	const previousTileProjectIdRef = useRef<string | null>(currentProjectId);
+	const previousPreviewSurfaceKeyRef = useRef(
+		`${colorSpace ?? "default"}:${dynamicRange ?? "default"}`,
+	);
 	const activeNodeIdRef = useRef<string | null>(activeNodeId);
 	const retainedLiveNodeIdSetRef =
 		useRef<ReadonlySet<string>>(EMPTY_NODE_ID_SET);
@@ -703,7 +714,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 	useEffect(() => {
 		if (!supportsTilePipeline) return;
-		const scheduler = new StaticTileScheduler();
+		const scheduler = new StaticTileScheduler({
+			colorSpace: previewSurfaceOptions.colorSpace,
+			dynamicRange: previewSurfaceOptions.dynamicRange,
+		});
 		tileSchedulerRef.current = scheduler;
 		scheduleTileTick();
 		return () => {
@@ -711,7 +725,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			tileSchedulerRef.current = null;
 			latestTileFrameResultRef.current = null;
 		};
-	}, [scheduleTileTick, supportsTilePipeline]);
+	}, [
+		previewSurfaceOptions.colorSpace,
+		previewSurfaceOptions.dynamicRange,
+		scheduleTileTick,
+		supportsTilePipeline,
+	]);
 
 	useEffect(() => {
 		return () => {
@@ -756,6 +775,28 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		}
 	}, [
 		currentProjectId,
+		resetTilePipelineResources,
+		scheduleTileTick,
+		supportsTilePipeline,
+	]);
+
+	useEffect(() => {
+		if (!supportsTilePipeline) return;
+		const nextKey = `${previewSurfaceOptions.colorSpace ?? "default"}:${
+			previewSurfaceOptions.dynamicRange ?? "default"
+		}`;
+		const previousKey = previousPreviewSurfaceKeyRef.current;
+		previousPreviewSurfaceKeyRef.current = nextKey;
+		if (previousKey === nextKey) return;
+		resetTilePipelineResources({ flushDisposals: false });
+		setRasterCacheVersion((prev) => prev + 1);
+		setTileAsyncPictureVersion((prev) => prev + 1);
+		if (!tileTickPausedRef.current) {
+			scheduleTileTick();
+		}
+	}, [
+		previewSurfaceOptions.colorSpace,
+		previewSurfaceOptions.dynamicRange,
 		resetTilePipelineResources,
 		scheduleTileTick,
 		supportsTilePipeline,
@@ -1108,6 +1149,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				asset,
 				projectId: currentProjectId,
 				runtimeManager,
+				offscreenSurfaceOptions: previewSurfaceOptions,
 			};
 			const capabilitySourceSignature =
 				capability.getSourceSignature?.(context) ?? null;
@@ -1258,10 +1300,15 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							? createFrozenNodeRasterSnapshotFromTiles(
 									cachedInput,
 									latestTileFrameResultRef.current?.drawItems ?? [],
+									previewSurfaceOptions,
 								)
 							: null) ??
 						(snapshotInput
-							? createFrozenNodeRasterSnapshot(snapshotInput, camera.value.zoom)
+							? createFrozenNodeRasterSnapshot(
+									snapshotInput,
+									camera.value.zoom,
+									previewSurfaceOptions,
+								)
 							: null);
 					if (snapshot) {
 						frozenNodeSnapshotRef.current.set(latestNode.id, snapshot);
@@ -1462,6 +1509,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		latestNodeById,
 		liveNodeIdSet,
 		currentProjectId,
+		previewSurfaceOptions,
 		isLiveNodeReady,
 		rasterCacheVersion,
 		resolveNodeRasterUri,

@@ -1,4 +1,14 @@
+import type {
+  SkiaWebCanvasColorSpace,
+  SkiaWebCanvasDynamicRange,
+} from "../../web/canvasColorSpace";
 import type { SkSurface } from "./Surface";
+
+export interface SkiaOffscreenSurfaceOptions {
+  pixelRatio?: number;
+  colorSpace?: SkiaWebCanvasColorSpace;
+  dynamicRange?: SkiaWebCanvasDynamicRange;
+}
 
 export interface SurfaceFactory {
   /**
@@ -19,6 +29,6 @@ export interface SurfaceFactory {
   MakeOffscreen: (
     width: number,
     height: number,
-    pixelRatio?: number
+    optionsOrPixelRatio?: number | SkiaOffscreenSurfaceOptions,
   ) => SkSurface | null;
 }

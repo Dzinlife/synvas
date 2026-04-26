@@ -1,6 +1,7 @@
 import { scheduleAnimationFrameTask } from "../animation/runtime/core";
 import type { SharedValue } from "../react-native-types";
 import type { SkCanvas, Skia, SkPaint } from "../skia/types";
+import type { SkiaOffscreenSurfaceOptions } from "../skia/types/Surface/SurfaceFactory";
 import { attachDisposeCleanup } from "../skia/web/Host";
 import { SkiaViewApi } from "../views/api";
 import {
@@ -22,6 +23,7 @@ export abstract class Container {
 	protected recording: Recording | null = null;
 	protected unmounted = false;
 	protected paintPool: SkPaint[] = [];
+	protected offscreenSurfaceOptions: SkiaOffscreenSurfaceOptions | undefined;
 
 	constructor(protected Skia: Skia) {}
 
@@ -48,21 +50,37 @@ export abstract class Container {
 		this.paintPool.length = 0;
 	}
 
+	setOffscreenSurfaceOptions(options: SkiaOffscreenSurfaceOptions | undefined) {
+		const nextOptions = options ? { ...options } : undefined;
+		const previousOptions = this.offscreenSurfaceOptions;
+		if (
+			previousOptions?.colorSpace === nextOptions?.colorSpace &&
+			previousOptions?.dynamicRange === nextOptions?.dynamicRange &&
+			previousOptions?.pixelRatio === nextOptions?.pixelRatio
+		) {
+			return;
+		}
+		this.offscreenSurfaceOptions = nextOptions;
+		if (!this.unmounted && this.recording) {
+			this.redraw();
+		}
+	}
+
 	drawOnCanvas(
 		canvas: SkCanvas,
 		options?: {
 			retainResources?: boolean;
+			offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions;
 		},
 	) {
 		if (!this.recording) {
 			throw new Error("No recording to draw");
 		}
-		const ctx = createDrawingContext(
-			this.Skia,
-			this.paintPool,
-			canvas,
-			options,
-		);
+		const ctx = createDrawingContext(this.Skia, this.paintPool, canvas, {
+			...options,
+			offscreenSurfaceOptions:
+				options?.offscreenSurfaceOptions ?? this.offscreenSurfaceOptions,
+		});
 		replay(ctx, this.recording.commands);
 		return ctx.takeRetainedResources();
 	}
@@ -134,8 +152,12 @@ export class StaticContainer extends Container {
 		}
 	}
 
-	private syncAnimationSubscriptions(animationValues: Set<SharedValue<unknown>>) {
-		for (const [sharedValue, listenerId] of [...this.animationListeners.entries()]) {
+	private syncAnimationSubscriptions(
+		animationValues: Set<SharedValue<unknown>>,
+	) {
+		for (const [sharedValue, listenerId] of [
+			...this.animationListeners.entries(),
+		]) {
 			if (animationValues.has(sharedValue)) {
 				continue;
 			}

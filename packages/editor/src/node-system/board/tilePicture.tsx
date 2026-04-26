@@ -15,7 +15,7 @@ export const boardNodeTilePictureCapability: CanvasNodeTilePictureCapability<Boa
 		getSourceSignature: ({ node }) => {
 			return resolveBoardTilePictureSignature(node);
 		},
-		generate: async ({ node }) => {
+		generate: async ({ node, offscreenSurfaceOptions }) => {
 			const sourceWidth = Math.max(1, Math.round(Math.abs(node.width)));
 			const sourceHeight = Math.max(1, Math.round(Math.abs(node.height)));
 			const picture = renderNodeToPicture(
@@ -30,6 +30,7 @@ export const boardNodeTilePictureCapability: CanvasNodeTilePictureCapability<Boa
 					width: sourceWidth,
 					height: sourceHeight,
 				},
+				offscreenSurfaceOptions,
 			);
 			if (!picture) return null;
 			return {

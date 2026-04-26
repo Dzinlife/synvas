@@ -68,10 +68,6 @@ vi.mock("react-skia-lite", () => ({
 }));
 
 import { exportTimelineAsVideoCore } from "./exportVideo";
-import {
-	COLOR_SPACE_PRESETS,
-	DEFAULT_COLOR_MANAGEMENT_SETTINGS,
-} from "../color-management";
 
 const createMockSurface = () => ({
 	getCanvas: () => ({
@@ -168,7 +164,7 @@ describe("exportTimelineAsVideoCore live render", () => {
 		expect(skiaRootUnmountMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("P3 SDR 导出会把 surface 目标切到 Display P3", async () => {
+	it("导出固定使用 sRGB SDR surface", async () => {
 		const buildSkiaFrameSnapshot = vi.fn(async () => ({
 			children: [],
 			orderedElements: [],
@@ -192,17 +188,13 @@ describe("exportTimelineAsVideoCore live render", () => {
 			endFrame: 1,
 			buildSkiaFrameSnapshot,
 			buildSkiaRenderState,
-			colorSettings: {
-				...DEFAULT_COLOR_MANAGEMENT_SETTINGS,
-				export: COLOR_SPACE_PRESETS.displayP3Sdr,
-			},
 		});
 
 		expect(createSkiaCanvasSurfaceMock).toHaveBeenCalledWith(
 			(globalThis as { CanvasKit?: unknown }).CanvasKit,
 			expect.anything(),
 			expect.objectContaining({ kind: "webgpu" }),
-			{ colorSpace: "p3" },
+			{ colorSpace: "srgb" },
 		);
 	});
 

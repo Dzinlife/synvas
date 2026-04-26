@@ -30,7 +30,7 @@ export const imageNodeTilePictureCapability: CanvasNodeTilePictureCapability<Ima
 		getSourceSignature: ({ node, asset, projectId }) => {
 			return resolveImageTilePictureSignature(node, asset, projectId);
 		},
-		generate: async ({ node, asset, projectId }) => {
+		generate: async ({ node, asset, projectId, offscreenSurfaceOptions }) => {
 			if (!asset || asset.kind !== "image") return null;
 			const assetUri = resolveAssetPlayableUri(asset, { projectId });
 			if (!assetUri) return null;
@@ -52,10 +52,14 @@ export const imageNodeTilePictureCapability: CanvasNodeTilePictureCapability<Ima
 				disposeImageAsset(imageAsset);
 				return null;
 			}
-			const picture = renderNodeToPicture(pictureElement, {
-				width: sourceWidth,
-				height: sourceHeight,
-			});
+			const picture = renderNodeToPicture(
+				pictureElement,
+				{
+					width: sourceWidth,
+					height: sourceHeight,
+				},
+				offscreenSurfaceOptions,
+			);
 			if (!picture) {
 				disposeImageAsset(imageAsset);
 				return null;

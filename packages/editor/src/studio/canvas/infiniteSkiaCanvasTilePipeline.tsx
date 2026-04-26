@@ -1,7 +1,12 @@
 import { renderNodeToPicture } from "core/render-system/renderNodeSnapshot";
 import type { TimelineAsset } from "core/timeline-system/types";
 import type React from "react";
-import { Skia, type SkImage, type SkPicture } from "react-skia-lite";
+import {
+	Skia,
+	type SkiaOffscreenSurfaceOptions,
+	type SkImage,
+	type SkPicture,
+} from "react-skia-lite";
 import type { AssetHandle } from "@/assets/AssetStore";
 import type { ImageAsset } from "@/assets/imageAsset";
 import type { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
@@ -377,6 +382,7 @@ const isTileAabbCoveredByDrawItems = (
 const createFrozenNodeRasterSnapshotFromTiles = (
 	input: TileInput,
 	drawItems: TileDrawItem[],
+	offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions,
 ): FrozenNodeRasterSnapshot | null => {
 	const intersectedTiles = drawItems.filter((tile) => {
 		const tileAabb = resolveTileDrawCoverageAabb(tile);
@@ -401,11 +407,10 @@ const createFrozenNodeRasterSnapshotFromTiles = (
 	const height = Math.max(1, Math.round(rawHeight * pixelScale));
 	const worldToSnapshotX = width / Math.max(1, input.aabb.width);
 	const worldToSnapshotY = height / Math.max(1, input.aabb.height);
-	const surface = Skia.Surface.MakeOffscreen(
-		width,
-		height,
-		resolveTileImagePixelRatio(baseTile),
-	);
+	const surface = Skia.Surface.MakeOffscreen(width, height, {
+		...offscreenSurfaceOptions,
+		pixelRatio: resolveTileImagePixelRatio(baseTile),
+	});
 	if (!surface) return null;
 	let image: SkImage | null = null;
 	const imagePaint = Skia.Paint();
@@ -479,9 +484,14 @@ const createFrozenNodeRasterSnapshotFromTiles = (
 const createFrozenNodeRasterSnapshot = (
 	input: TileInput,
 	cameraZoom: number,
+	offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions,
 ): FrozenNodeRasterSnapshot | null => {
 	const { width, height } = resolveFrozenNodeSnapshotSize(input, cameraZoom);
-	const surface = Skia.Surface.MakeOffscreen(width, height);
+	const surface = Skia.Surface.MakeOffscreen(
+		width,
+		height,
+		offscreenSurfaceOptions,
+	);
 	if (!surface) return null;
 	let image: SkImage | null = null;
 	let imagePaint: ReturnType<typeof Skia.Paint> | null = null;
@@ -651,11 +661,13 @@ const createTilePictureFromNodeRenderer = ({
 	scene,
 	asset,
 	runtimeManager,
+	offscreenSurfaceOptions,
 }: {
 	node: CanvasNode;
 	scene: StudioProject["scenes"][string] | null;
 	asset: TimelineAsset | null;
 	runtimeManager: ReturnType<typeof useStudioRuntimeManager>;
+	offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions;
 }): { picture: SkPicture; dispose: () => void } | null => {
 	// 暂时不要把这个通用 fallback 接回 tile pipeline。
 	// 它会直接录制完整 node renderer，绕过 tilePicture 的专用签名和资源准备；
@@ -679,6 +691,7 @@ const createTilePictureFromNodeRenderer = ({
 			width: sourceWidth,
 			height: sourceHeight,
 		},
+		offscreenSurfaceOptions,
 	);
 	if (!picture) return null;
 	return {

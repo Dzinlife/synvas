@@ -6,6 +6,7 @@ import {
 	Picture,
 	RenderTarget,
 	type SkImage,
+	type SkiaOffscreenSurfaceOptions,
 	Skia,
 	type SkPicture,
 } from "react-skia-lite";
@@ -71,10 +72,12 @@ export type BuildSkiaDeps = {
 	renderNodeToPicture: (
 		node: React.ReactNode,
 		size: { width: number; height: number },
+		offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions,
 	) => SkPicture | null | Promise<SkPicture | null>;
 	renderNodeToImage?: (
 		node: React.ReactNode,
 		size: { width: number; height: number },
+		offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions,
 	) => SkImage | null | Promise<SkImage | null>;
 	isTransitionElement?: (element: TimelineElement) => boolean;
 	resolveCompositionTimeline?: (
@@ -445,10 +448,11 @@ const buildSkiaRenderStateWithScopeCore = async (
 					typeof compositionTimeline.wrapRenderNode === "function"
 						? {
 								...deps,
-								renderNodeToPicture: (node, size) =>
+								renderNodeToPicture: (node, size, offscreenSurfaceOptions) =>
 									deps.renderNodeToPicture(
 										compositionTimeline.wrapRenderNode?.(node) ?? node,
 										size,
+										offscreenSurfaceOptions,
 									),
 							}
 						: deps;

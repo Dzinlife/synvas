@@ -537,7 +537,7 @@ describe("video playbackController", () => {
 		releaseVideoNodePlaybackController("node-scrub-fallback");
 	});
 
-	it("解码首帧时会写入素材色彩 metadata 并透传预览目标", async () => {
+	it("解码首帧时透传预览目标但不写入素材色彩 metadata", async () => {
 		const video = createVideoHandle(10);
 		const audio = createAudioHandle();
 		const sample = { timestamp: 0, close: vi.fn() };
@@ -602,10 +602,9 @@ describe("video playbackController", () => {
 			},
 		);
 		expect(mocks.probeVideoRawFrameAccess).not.toHaveBeenCalled();
-		expect(
-			useProjectStore.getState().currentProject?.assets[0]?.meta?.color
-				?.detected,
-		).toEqual(sourceColorSpace);
+		expect(useProjectStore.getState().currentProject?.assets[0]?.meta).toBe(
+			undefined,
+		);
 
 		releaseVideoNodePlaybackController("node-color-meta");
 	});

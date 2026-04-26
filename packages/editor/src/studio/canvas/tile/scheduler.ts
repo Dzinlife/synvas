@@ -2,6 +2,7 @@ import {
 	ClipOp,
 	scheduleSkiaDispose,
 	Skia,
+	type SkiaOffscreenSurfaceOptions,
 	type SkSurface,
 } from "react-skia-lite";
 import RBush from "rbush";
@@ -47,6 +48,8 @@ interface TileSchedulerOptions {
 	frameBudgetMs?: number;
 	maxTasksPerTick?: number;
 	maxReadyTiles?: number;
+	colorSpace?: SkiaOffscreenSurfaceOptions["colorSpace"];
+	dynamicRange?: SkiaOffscreenSurfaceOptions["dynamicRange"];
 }
 
 interface TileCoverInfo {
@@ -176,6 +179,8 @@ export class StaticTileScheduler {
 
 	private readonly imagePaint = Skia.Paint();
 
+	private readonly surfaceOptions: SkiaOffscreenSurfaceOptions | undefined;
+
 	private readonly inputSpatialIndex = new RBush<TileInputSpatialItem>();
 
 	private readonly inputQueryScratch: TileInput[] = [];
@@ -198,6 +203,13 @@ export class StaticTileScheduler {
 		this.frameBudgetMs = options.frameBudgetMs ?? TILE_FRAME_BUDGET_MS;
 		this.maxTasksPerTick = options.maxTasksPerTick ?? TILE_MAX_TASKS_PER_TICK;
 		this.maxReadyTiles = options.maxReadyTiles ?? TILE_MAX_READY_TILES;
+		this.surfaceOptions =
+			options.colorSpace || options.dynamicRange
+				? {
+						colorSpace: options.colorSpace,
+						dynamicRange: options.dynamicRange,
+					}
+				: undefined;
 	}
 
 	setInputs(inputs: TileInput[]): void {
@@ -706,10 +718,16 @@ export class StaticTileScheduler {
 		if (surface) {
 			return surface;
 		}
-		return Skia.Surface.MakeOffscreen(
-			TILE_TEXTURE_PIXEL_SIZE,
-			TILE_TEXTURE_PIXEL_SIZE,
-		);
+		return this.surfaceOptions
+			? Skia.Surface.MakeOffscreen(
+					TILE_TEXTURE_PIXEL_SIZE,
+					TILE_TEXTURE_PIXEL_SIZE,
+					this.surfaceOptions,
+				)
+			: Skia.Surface.MakeOffscreen(
+					TILE_TEXTURE_PIXEL_SIZE,
+					TILE_TEXTURE_PIXEL_SIZE,
+				);
 	}
 
 	private releaseSurface(surface: SkSurface): void {

@@ -13,6 +13,12 @@ export type ColorMatrix = "rgb" | "bt709" | "bt2020-ncl" | "unknown";
 export type ColorRange = "full" | "limited" | "unknown";
 
 export type PreviewColorSpaceTarget = "auto" | "srgb" | "display-p3";
+export type PreviewDynamicRangeTarget = "auto" | "standard" | "extended";
+
+export interface AppPreviewColorSettings {
+	colorSpace: PreviewColorSpaceTarget;
+	dynamicRange: PreviewDynamicRangeTarget;
+}
 
 export interface ColorSpaceDescriptor {
 	primaries: ColorPrimaries;
@@ -20,17 +26,6 @@ export interface ColorSpaceDescriptor {
 	matrix: ColorMatrix;
 	range: ColorRange;
 	label?: string;
-}
-
-export interface AssetColorMetadata {
-	detected?: ColorSpaceDescriptor;
-	override?: ColorSpaceDescriptor;
-}
-
-export interface ColorManagementSettings {
-	working: ColorSpaceDescriptor;
-	preview: PreviewColorSpaceTarget;
-	export: ColorSpaceDescriptor;
 }
 
 export const COLOR_SPACE_PRESETS = {
@@ -80,23 +75,14 @@ export const COLOR_SPACE_PRESETS = {
 
 export type ColorSpacePresetKey = keyof typeof COLOR_SPACE_PRESETS;
 
-export const DEFAULT_COLOR_MANAGEMENT_SETTINGS: ColorManagementSettings = {
-	working: COLOR_SPACE_PRESETS.displayP3Sdr,
-	preview: "auto",
-	export: COLOR_SPACE_PRESETS.rec709Sdr,
+export const DEFAULT_APP_PREVIEW_COLOR_SETTINGS: AppPreviewColorSettings = {
+	colorSpace: "auto",
+	dynamicRange: "auto",
 };
 
 export const cloneColorSpaceDescriptor = (
 	descriptor: ColorSpaceDescriptor,
 ): ColorSpaceDescriptor => ({ ...descriptor });
-
-export const cloneColorManagementSettings = (
-	settings: ColorManagementSettings,
-): ColorManagementSettings => ({
-	working: cloneColorSpaceDescriptor(settings.working),
-	preview: settings.preview,
-	export: cloneColorSpaceDescriptor(settings.export),
-});
 
 export const getColorSpacePresetKey = (
 	descriptor: ColorSpaceDescriptor | null | undefined,

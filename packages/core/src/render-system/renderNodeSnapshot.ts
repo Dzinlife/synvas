@@ -5,6 +5,7 @@ import {
 	type SkImage,
 	Skia,
 	SkiaSGRoot,
+	type SkiaOffscreenSurfaceOptions,
 	type SkPicture,
 } from "react-skia-lite";
 
@@ -57,6 +58,7 @@ const hasRenderTargetNode = (nodes: SceneGraphNodeLike[]): boolean => {
 export const renderNodeToPicture = (
 	node: ReactNode,
 	size: { width: number; height: number },
+	offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions,
 ): SkPicture | null => {
 	if (size.width <= 0 || size.height <= 0) return null;
 	const recorder = Skia.PictureRecorder();
@@ -71,6 +73,7 @@ export const renderNodeToPicture = (
 	let isolatedSurface: DisposableLike | null = null;
 	let isolatedSurfaceRetained = false;
 	let isolatedSnapshotImage: DisposableLike | null = null;
+	root.setOffscreenSurfaceOptions(offscreenSurfaceOptions);
 	root.render(node);
 	try {
 		const renderBackend = getSkiaRenderBackend();
@@ -89,7 +92,12 @@ export const renderNodeToPicture = (
 		} else {
 			// BackdropFilter 会读取当前画布内容；先在独立 raster surface 上重放一遍，
 			// 再把结果录回 picture，避免外层 overlay 污染 scene。
-			const surface = Skia.Surface.Make(size.width, size.height);
+			const surface =
+				Skia.Surface.MakeOffscreen(
+					size.width,
+					size.height,
+					offscreenSurfaceOptions,
+				) ?? Skia.Surface.Make(size.width, size.height);
 			if (!surface) {
 				retainedResources = root.drawOnCanvas(canvas, {
 					retainResources: true,
@@ -148,15 +156,20 @@ export const renderNodeToPicture = (
 export const renderNodeToImage = (
 	node: ReactNode,
 	size: { width: number; height: number },
+	offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions,
 ): SkImage | null => {
 	if (size.width <= 0 || size.height <= 0) return null;
 	const surface =
-		Skia.Surface.MakeOffscreen(size.width, size.height) ??
-		Skia.Surface.Make(size.width, size.height);
+		Skia.Surface.MakeOffscreen(
+			size.width,
+			size.height,
+			offscreenSurfaceOptions,
+		) ?? Skia.Surface.Make(size.width, size.height);
 	if (!surface) return null;
 	const root = new SkiaSGRoot(Skia);
 	let retainedResources: Array<() => void> = [];
 	try {
+		root.setOffscreenSurfaceOptions(offscreenSurfaceOptions);
 		root.render(node);
 		const canvas = surface.getCanvas();
 		canvas.clear(Skia.Color("transparent"));

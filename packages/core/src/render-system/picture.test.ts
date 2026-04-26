@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +7,7 @@ const {
 	finishRecordingAsPictureMock,
 	renderMock,
 	drawOnCanvasMock,
+	setOffscreenSurfaceOptionsMock,
 	unmountMock,
 	makeSurfaceMock,
 	makeOffscreenSurfaceMock,
@@ -23,6 +23,7 @@ const {
 	finishRecordingAsPictureMock: vi.fn(() => ({ id: "picture" })),
 	renderMock: vi.fn(),
 	drawOnCanvasMock: vi.fn(),
+	setOffscreenSurfaceOptionsMock: vi.fn(),
 	unmountMock: vi.fn(),
 	makeSurfaceMock: vi.fn(),
 	makeOffscreenSurfaceMock: vi.fn(),
@@ -34,7 +35,7 @@ const {
 		deviceContext: {} as never,
 	})),
 	sceneGraph: {
-		children: [] as Array<{ type: string; children?: ReactNode[] }>,
+		children: [] as Array<{ type: string; children?: unknown[] }>,
 	},
 }));
 
@@ -59,6 +60,7 @@ vi.mock("react-skia-lite", async () => {
 		SkiaSGRoot: class {
 			render = renderMock;
 			drawOnCanvas = drawOnCanvasMock;
+			setOffscreenSurfaceOptions = setOffscreenSurfaceOptionsMock;
 			unmount = unmountMock;
 			sg = sceneGraph;
 		},
@@ -127,6 +129,7 @@ describe("renderNodeToPicture", () => {
 
 		const picture = renderNodeToPicture(child, { width: 320, height: 180 });
 
+		expect(makeOffscreenSurfaceMock).toHaveBeenCalledWith(320, 180, undefined);
 		expect(makeSurfaceMock).toHaveBeenCalledWith(320, 180);
 		expect(makeColorMock).toHaveBeenCalledWith("transparent");
 		expect(surfaceCanvas.clear).toHaveBeenCalledWith("transparent");
@@ -207,7 +210,7 @@ describe("renderNodeToPicture", () => {
 
 		const rendered = renderNodeToImage(child, { width: 320, height: 180 });
 
-		expect(makeOffscreenSurfaceMock).toHaveBeenCalledWith(320, 180);
+		expect(makeOffscreenSurfaceMock).toHaveBeenCalledWith(320, 180, undefined);
 		expect(renderMock).toHaveBeenCalledWith(child);
 		expect(makeColorMock).toHaveBeenCalledWith("transparent");
 		expect(surfaceCanvas.clear).toHaveBeenCalledWith("transparent");

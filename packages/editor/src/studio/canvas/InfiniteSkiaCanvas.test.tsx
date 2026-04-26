@@ -45,6 +45,14 @@ interface SkiaSurfaceMockRecord {
 	};
 }
 
+type MakeOffscreenOptions =
+	| number
+	| {
+			pixelRatio?: number;
+			colorSpace?: string;
+			dynamicRange?: string;
+	  };
+
 interface SceneTilePictureMockContext {
 	node: SceneCanvasNode;
 	scene?: StudioProject["scenes"][string] | null;
@@ -427,8 +435,18 @@ vi.mock("react-skia-lite", async () => {
 		Surface: {
 			get MakeOffscreen() {
 				if (!tilePipelineMockState.enabled) return undefined;
-				return (width: number, height: number, pixelRatio?: number) =>
-					createSurface(width, height, pixelRatio);
+				return (
+					width: number,
+					height: number,
+					optionsOrPixelRatio?: MakeOffscreenOptions,
+				) =>
+					createSurface(
+						width,
+						height,
+						typeof optionsOrPixelRatio === "number"
+							? optionsOrPixelRatio
+							: optionsOrPixelRatio?.pixelRatio,
+					);
 			},
 		},
 	};

@@ -9,14 +9,10 @@ import type {
   SkImageFilter,
   SkPathEffect,
 } from "../../skia/types";
-import {
-  BlendMode,
-  PaintStyle,
-  StrokeCap,
-  StrokeJoin,
-} from "../../skia/types";
+import { BlendMode, PaintStyle, StrokeCap, StrokeJoin } from "../../skia/types";
 import { scheduleSkiaDispose } from "../../skia/web/resourceLifecycle";
 import { getSkiaRenderBackend } from "../../skia/web/renderBackend";
+import type { SkiaOffscreenSurfaceOptions } from "../../skia/types/Surface/SurfaceFactory";
 
 export type ActiveRenderTarget = {
   surface: SkSurface;
@@ -29,6 +25,7 @@ export type ActiveRenderTarget = {
 type DrawingContextOptions = {
   renderTarget?: ActiveRenderTarget | null;
   retainResources?: boolean;
+  offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions;
 };
 
 type BackdropExecution = {
@@ -54,7 +51,7 @@ const isCanvasMatrixIdentity = (canvas: SkCanvas) => {
 const resolveImageSize = (
   image: unknown,
   fallbackWidth: number,
-  fallbackHeight: number
+  fallbackHeight: number,
 ) => {
   const target = image as {
     width?: number | (() => number);
@@ -70,7 +67,9 @@ const resolveImageSize = (
         ? rawWidth
         : fallbackWidth,
     height:
-      typeof rawHeight === "number" && Number.isFinite(rawHeight) && rawHeight > 0
+      typeof rawHeight === "number" &&
+      Number.isFinite(rawHeight) &&
+      rawHeight > 0
         ? rawHeight
         : fallbackHeight,
   };
@@ -85,7 +84,7 @@ export type SurfaceSnapshotImage = {
 };
 
 export const makeSurfaceSnapshotImage = (
-  surface: SkSurface
+  surface: SkSurface,
 ): SurfaceSnapshotImage => {
   const asImageCopy = surface.asImageCopy?.();
   if (asImageCopy) {
@@ -106,7 +105,7 @@ export const createDrawingContext = (
   Skia: Skia,
   paintPool: SkPaint[],
   canvas: SkCanvas,
-  options?: DrawingContextOptions
+  options?: DrawingContextOptions,
 ) => {
   "worklet";
 
@@ -122,6 +121,7 @@ export const createDrawingContext = (
   const retainedResources: Array<() => void> = [];
   const renderTarget = options?.renderTarget ?? null;
   const retainResources = options?.retainResources ?? false;
+  const offscreenSurfaceOptions = options?.offscreenSurfaceOptions;
   const renderBackend = getSkiaRenderBackend();
 
   let nextPaintIndex = 1;
@@ -195,10 +195,13 @@ export const createDrawingContext = (
   };
 
   const queueDispose = (
-    target: {
-      dispose?: () => void;
-      delete?: () => void;
-    } | null | undefined
+    target:
+      | {
+          dispose?: () => void;
+          delete?: () => void;
+        }
+      | null
+      | undefined,
   ) => {
     if (!target) return;
     scheduleSkiaDispose(target, { timing: "animationFrame" });
@@ -208,7 +211,7 @@ export const createDrawingContext = (
     targets: Array<{
       dispose?: () => void;
       delete?: () => void;
-    }>
+    }>,
   ) => {
     for (const target of targets) {
       queueDispose(target);
@@ -219,10 +222,10 @@ export const createDrawingContext = (
     T extends {
       dispose?: () => void;
       delete?: () => void;
-    }
+    },
   >(
     values: T[],
-    compose: (outer: T, inner: T) => T
+    compose: (outer: T, inner: T) => T,
   ): { result: T; temporaries: T[] } => {
     if (values.length <= 0) {
       throw new Error("No host object to compose");
@@ -254,7 +257,10 @@ export const createDrawingContext = (
       const scratchSurface = Skia.Surface.MakeOffscreen(
         renderTarget.width,
         renderTarget.height,
-        renderTarget.pixelRatio
+        {
+          ...offscreenSurfaceOptions,
+          pixelRatio: renderTarget.pixelRatio,
+        },
       );
       if (scratchSurface) {
         const sourceImage = renderTarget.surface.makeImageSnapshot();
@@ -269,7 +275,7 @@ export const createDrawingContext = (
           const sourceImageSize = resolveImageSize(
             sourceImage,
             renderTarget.width,
-            renderTarget.height
+            renderTarget.height,
           );
           scratchCanvas.drawImageRect(
             sourceImage,
@@ -286,7 +292,7 @@ export const createDrawingContext = (
               height: renderTarget.height,
             },
             filteredPaint,
-            true
+            true,
           );
           scratchSurface.flush();
           const filteredSnapshot = makeSurfaceSnapshotImage(scratchSurface);
@@ -297,7 +303,7 @@ export const createDrawingContext = (
             const filteredImageSize = resolveImageSize(
               filteredImage,
               renderTarget.width,
-              renderTarget.height
+              renderTarget.height,
             );
             canvas.drawImageRect(
               filteredImage,
@@ -314,7 +320,7 @@ export const createDrawingContext = (
                 height: renderTarget.height,
               },
               backdropPaint,
-              true
+              true,
             );
             if (retainResources) {
               retainedFilteredImage = true;
@@ -370,11 +376,12 @@ export const createDrawingContext = (
     // Color Filters
     if (colorFilters.length > 0) {
       const pendingColorFilters = colorFilters.splice(0);
-      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> = [];
+      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> =
+        [];
       try {
         const { result, temporaries: createdTemporaries } = composeHostObjects(
           pendingColorFilters,
-          (outer, inner) => Skia.ColorFilter.MakeCompose(outer, inner)
+          (outer, inner) => Skia.ColorFilter.MakeCompose(outer, inner),
         );
         temporaries = createdTemporaries;
         getCurrentPaint().setColorFilter(result);
@@ -395,11 +402,12 @@ export const createDrawingContext = (
     // Image Filters
     if (imageFilters.length > 0) {
       const pendingImageFilters = imageFilters.splice(0);
-      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> = [];
+      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> =
+        [];
       try {
         const { result, temporaries: createdTemporaries } = composeHostObjects(
           pendingImageFilters,
-          (outer, inner) => Skia.ImageFilter.MakeCompose(outer, inner)
+          (outer, inner) => Skia.ImageFilter.MakeCompose(outer, inner),
         );
         temporaries = createdTemporaries;
         getCurrentPaint().setImageFilter(result);
@@ -412,11 +420,12 @@ export const createDrawingContext = (
     // Path Effects
     if (pathEffects.length > 0) {
       const pendingPathEffects = pathEffects.splice(0);
-      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> = [];
+      let temporaries: Array<{ dispose?: () => void; delete?: () => void }> =
+        [];
       try {
         const { result, temporaries: createdTemporaries } = composeHostObjects(
           pendingPathEffects,
-          (outer, inner) => Skia.PathEffect.MakeCompose(outer, inner)
+          (outer, inner) => Skia.PathEffect.MakeCompose(outer, inner),
         );
         temporaries = createdTemporaries;
         getCurrentPaint().setPathEffect(result);
@@ -441,6 +450,7 @@ export const createDrawingContext = (
     paintPool,
     renderTarget,
     retainResources,
+    offscreenSurfaceOptions,
 
     // Public methods
     savePaint,

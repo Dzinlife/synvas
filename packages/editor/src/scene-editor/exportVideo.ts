@@ -16,13 +16,11 @@ import {
 	buildSkiaFrameSnapshot,
 	buildSkiaRenderState,
 } from "@/scene-editor/preview/buildSkiaTree";
-import { useProjectStore } from "@/projects/projectStore";
 import { EditorRuntimeProvider } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type {
 	EditorRuntime,
 	StudioRuntimeManager,
 } from "@/scene-editor/runtime/types";
-import { resolveSceneColorSettings } from "@/studio/project/colorManagement";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 
 const waitForStaticModelsReady = async (
@@ -122,6 +120,10 @@ export const exportTimelineAsVideo = async (options: {
 	const fps = Number.isFinite(options?.fps)
 		? Math.round(options?.fps as number)
 		: Math.round(timelineState.fps || 30);
+	const exportSurfaceOptions = {
+		colorSpace: "srgb",
+		dynamicRange: "standard",
+	} as const;
 
 	const startFrame = Math.max(0, Math.round(options?.startFrame ?? 0));
 	const timelineEnd =
@@ -147,12 +149,6 @@ export const exportTimelineAsVideo = async (options: {
 		const runtimeManager = options.runtime as Partial<StudioRuntimeManager>;
 		const rootSceneId =
 			runtimeManager.getActiveEditTimelineRef?.()?.sceneId ?? null;
-		const currentProject = useProjectStore.getState().currentProject;
-		const rootScene =
-			rootSceneId && currentProject
-				? (currentProject.scenes[rootSceneId] ?? null)
-				: null;
-		const colorSettings = resolveSceneColorSettings(currentProject, rootScene);
 		const rootTimelineRuntime =
 			rootSceneId && runtimeManager.getTimelineRuntime
 				? runtimeManager.getTimelineRuntime(toSceneTimelineRef(rootSceneId))
@@ -191,6 +187,7 @@ export const exportTimelineAsVideo = async (options: {
 				{
 					wrapRenderNode: (node) =>
 						createElement(RuntimeProvider, { runtime: options.runtime }, node),
+					offscreenSurfaceOptions: exportSurfaceOptions,
 					resolveCompositionTimeline: (sceneId) => {
 						if (!runtimeManager.getTimelineRuntime) return null;
 						const childRuntime = runtimeManager.getTimelineRuntime(
@@ -247,6 +244,7 @@ export const exportTimelineAsVideo = async (options: {
 				{
 					wrapRenderNode: (node) =>
 						createElement(RuntimeProvider, { runtime: options.runtime }, node),
+					offscreenSurfaceOptions: exportSurfaceOptions,
 					resolveCompositionTimeline: (sceneId) => {
 						if (!runtimeManager.getTimelineRuntime) return null;
 						const childRuntime = runtimeManager.getTimelineRuntime(
@@ -298,7 +296,6 @@ export const exportTimelineAsVideo = async (options: {
 			buildSkiaRenderState: buildFrameRenderState,
 			getModelStore: (id) =>
 				modelRegistry.get(id) as CoreComponentModelStore | undefined,
-			colorSettings,
 			audio: {
 				audioTrackStates: timelineState.audioTrackStates,
 				getAudioSourceByElementId: (elementId) =>

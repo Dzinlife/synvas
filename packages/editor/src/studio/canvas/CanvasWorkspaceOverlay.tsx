@@ -1,3 +1,4 @@
+import type { PreviewColorSpaceTarget, PreviewDynamicRangeTarget } from "core";
 import type { TimelineAsset } from "core/timeline-system/types";
 import type {
 	CanvasNode,
@@ -6,6 +7,7 @@ import type {
 } from "@/studio/project/types";
 import {
 	Bug,
+	Palette,
 	PanelLeftOpen,
 	Plus,
 	Search,
@@ -49,6 +51,7 @@ import CanvasSidebar, {
 	type CanvasSidebarNodeSelectOptions,
 } from "@/studio/canvas/sidebar/CanvasSidebar";
 import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
+import { useAppPreviewColorSettingsStore } from "@/studio/previewColorSettings";
 import { toSceneTimelineRef } from "@/studio/scene/timelineRefAdapter";
 import CanvasActiveNodeMetaPanel from "./CanvasActiveNodeMetaPanel";
 import {
@@ -157,6 +160,25 @@ const SKIA_RESOURCE_TRACKER_DEFAULT_SAMPLE_LIMIT = 3;
 const SKIA_RESOURCE_TRACKER_DEBUG_SAMPLE_LIMIT = 200;
 const IS_JSDOM_ENV =
 	typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent);
+
+const PREVIEW_COLOR_SPACE_OPTIONS: Array<{
+	value: PreviewColorSpaceTarget;
+	label: string;
+}> = [
+	{ value: "auto", label: "Auto" },
+	{ value: "display-p3", label: "P3" },
+	{ value: "srgb", label: "sRGB" },
+];
+
+const PREVIEW_DYNAMIC_RANGE_OPTIONS: Array<{
+	value: PreviewDynamicRangeTarget;
+	label: string;
+}> = [
+	{ value: "auto", label: "Auto" },
+	{ value: "extended", label: "HDR" },
+	{ value: "standard", label: "SDR" },
+];
+
 interface AnimatedRightPanelProps {
 	rightPanelRect: OverlayRect;
 	children: React.ReactNode;
@@ -381,6 +403,15 @@ const CanvasWorkspaceOverlay = ({
 	const setCanvasSnapEnabled = useProjectStore(
 		(state) => state.setCanvasSnapEnabled,
 	);
+	const previewColorSettings = useAppPreviewColorSettingsStore(
+		(state) => state.settings,
+	);
+	const setPreviewColorSpace = useAppPreviewColorSettingsStore(
+		(state) => state.setColorSpace,
+	);
+	const setPreviewDynamicRange = useAppPreviewColorSettingsStore(
+		(state) => state.setDynamicRange,
+	);
 	const [skiaResourceTrackerDebugEnabled, setSkiaResourceTrackerDebugEnabled] =
 		useState(() => {
 			const config = getSkiaResourceTrackerConfig();
@@ -592,6 +623,43 @@ const CanvasWorkspaceOverlay = ({
 					>
 						<SnapIcon className="size-4" />
 					</button>
+					<div className="flex items-center gap-1 rounded bg-white/5 p-1 text-white/70">
+						<Palette className="size-3" />
+						<select
+							aria-label="预览色域"
+							data-testid="canvas-preview-color-space-select"
+							value={previewColorSettings.colorSpace}
+							onChange={(event) => {
+								setPreviewColorSpace(
+									event.currentTarget.value as PreviewColorSpaceTarget,
+								);
+							}}
+							className="h-6 rounded border border-white/10 bg-neutral-950 px-1 text-[11px] text-white outline-none"
+						>
+							{PREVIEW_COLOR_SPACE_OPTIONS.map((option) => (
+								<option key={option.value} value={option.value}>
+									{option.label}
+								</option>
+							))}
+						</select>
+						<select
+							aria-label="预览动态范围"
+							data-testid="canvas-preview-dynamic-range-select"
+							value={previewColorSettings.dynamicRange}
+							onChange={(event) => {
+								setPreviewDynamicRange(
+									event.currentTarget.value as PreviewDynamicRangeTarget,
+								);
+							}}
+							className="h-6 rounded border border-white/10 bg-neutral-950 px-1 text-[11px] text-white outline-none"
+						>
+							{PREVIEW_DYNAMIC_RANGE_OPTIONS.map((option) => (
+								<option key={option.value} value={option.value}>
+									{option.label}
+								</option>
+							))}
+						</select>
+					</div>
 					<button
 						type="button"
 						onClick={onToggleTileDebug}

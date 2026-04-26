@@ -1,4 +1,3 @@
-import type { AssetColorMetadata } from "../color-management";
 import type { TranscriptRecord } from "../asr/types";
 
 // ============================================================================
@@ -160,7 +159,6 @@ export interface AssetMetaSet {
 	hash?: string;
 	fileName?: string;
 	asr?: TranscriptRecord;
-	color?: AssetColorMetadata;
 	sourceSize?: {
 		width: number;
 		height: number;

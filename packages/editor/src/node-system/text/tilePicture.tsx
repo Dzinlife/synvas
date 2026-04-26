@@ -23,7 +23,7 @@ export const textNodeTilePictureCapability: CanvasNodeTilePictureCapability<Text
 		getSourceSignature: ({ node }) => {
 			return resolveTextTilePictureSignature(node);
 		},
-		generate: async ({ node }) => {
+		generate: async ({ node, offscreenSurfaceOptions }) => {
 			const text = typeof node.text === "string" ? node.text : "";
 			const sourceWidth = Math.max(1, Math.round(Math.abs(node.width)));
 			const sourceHeight = Math.max(1, Math.round(Math.abs(node.height)));
@@ -55,6 +55,7 @@ export const textNodeTilePictureCapability: CanvasNodeTilePictureCapability<Text
 					width: sourceWidth,
 					height: sourceHeight,
 				},
+				offscreenSurfaceOptions,
 			);
 			if (!picture) {
 				disposeTextNodeParagraph(paragraph);

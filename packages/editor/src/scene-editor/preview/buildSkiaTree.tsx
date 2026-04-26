@@ -10,6 +10,7 @@ import {
 } from "core/render-system/renderNodeSnapshot";
 import type { RendererPrepareFrameContext } from "core/timeline-system/model/types";
 import type { ReactNode } from "react";
+import type { SkiaOffscreenSurfaceOptions } from "react-skia-lite";
 import { componentRegistry } from "@/element-system/model/componentRegistry";
 import { isTransitionElement } from "@/scene-editor/utils/transitions";
 
@@ -18,6 +19,7 @@ type BuildSkiaOverrides = {
 	renderNodeToImage?: BuildSkiaDeps["renderNodeToImage"];
 	wrapRenderNode?: (node: ReactNode) => ReactNode;
 	resolveCompositionTimeline?: BuildSkiaDeps["resolveCompositionTimeline"];
+	offscreenSurfaceOptions?: SkiaOffscreenSurfaceOptions;
 };
 
 const createBuildSkiaDeps = (
@@ -30,14 +32,14 @@ const createBuildSkiaDeps = (
 			? overrides.wrapRenderNode(node)
 			: node;
 		const render = overrides?.renderNodeToPicture ?? renderNodeToPicture;
-		return render(wrappedNode, size);
+		return render(wrappedNode, size, overrides?.offscreenSurfaceOptions);
 	},
 	renderNodeToImage: (node, size) => {
 		const wrappedNode = overrides?.wrapRenderNode
 			? overrides.wrapRenderNode(node)
 			: node;
 		const render = overrides?.renderNodeToImage ?? renderNodeToImage;
-		return render(wrappedNode, size);
+		return render(wrappedNode, size, overrides?.offscreenSurfaceOptions);
 	},
 	isTransitionElement,
 	resolveCompositionTimeline: overrides?.resolveCompositionTimeline,
