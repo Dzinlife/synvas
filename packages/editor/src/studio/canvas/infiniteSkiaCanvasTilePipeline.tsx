@@ -8,6 +8,7 @@ import type { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRunti
 import type { CanvasNode, StudioProject } from "@/studio/project/types";
 import { getCanvasNodeDefinition } from "@/node-system/registry";
 import type {
+	CanvasNodeLiveRenderPreparationCapability,
 	CanvasNodeSkiaRenderProps,
 	CanvasNodeTilePictureCapability,
 	CanvasNodeTilePictureCapabilityContext,
@@ -124,6 +125,16 @@ const resolveTilePictureCapability = (
 	const definition = getCanvasNodeDefinition(node.type);
 	return (
 		(definition.tilePicture as CanvasNodeTilePictureCapability<CanvasNode>) ??
+		null
+	);
+};
+
+const resolveLiveRenderPreparationCapability = (
+	node: CanvasNode,
+): CanvasNodeLiveRenderPreparationCapability<CanvasNode> | null => {
+	const definition = getCanvasNodeDefinition(node.type);
+	return (
+		(definition.liveRenderPreparation as CanvasNodeLiveRenderPreparationCapability<CanvasNode>) ??
 		null
 	);
 };
@@ -723,6 +734,7 @@ export {
 	resolveTileClipSignature,
 	resolveTileDrawBleed,
 	resolveTileNodeSourceSignature,
+	resolveLiveRenderPreparationCapability,
 	resolveTilePictureCapability,
 	resolveTileRasterAsset,
 };

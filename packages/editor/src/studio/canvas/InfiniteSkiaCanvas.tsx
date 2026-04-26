@@ -23,8 +23,7 @@ import {
 	useSharedValue,
 	withTiming,
 } from "react-skia-lite";
-import type { AssetHandle } from "@/assets/AssetStore";
-import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
+import { acquireImageAsset } from "@/assets/imageAsset";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import { useProjectStore } from "@/projects/projectStore";
 import { useStudioRuntimeManager } from "@/scene-editor/runtime/EditorRuntimeProvider";
@@ -74,6 +73,7 @@ import {
 	resolveNodeScene,
 	resolveNodeWorldAabb,
 	resolveSkImageSize,
+	resolveLiveRenderPreparationCapability,
 	resolveTileClipSignature,
 	resolveTileNodeSourceSignature,
 	resolveTilePictureCapability,
@@ -91,6 +91,8 @@ import { getCanvasNodeDefinition } from "@/node-system/registry";
 import type {
 	CanvasNodeFocusEditorBridgeProps,
 	CanvasNodeFocusEditorLayerState,
+	CanvasNodeLiveRenderPreparationCapability,
+	CanvasNodeLiveRenderPreparationContext,
 	CanvasNodeTilePictureCapabilityContext,
 } from "@/node-system/types";
 import {
@@ -160,11 +162,29 @@ interface InfiniteSkiaCanvasProps {
 	onLabelHitTesterChange?: (tester: CanvasNodeLabelHitTester | null) => void;
 }
 
-interface LiveImageAssetCacheEntry {
-	uri: string;
-	handle: AssetHandle<ImageAsset> | null;
-	loading: boolean;
+interface LiveRenderPreparationCacheEntry {
+	sourceSignature: string;
+	status: "pending" | "ready" | "failed";
+	dispose: (() => void) | null;
+	taskId: number;
 }
+
+interface LiveRenderPreparationRequest {
+	nodeId: string;
+	sourceSignature: string;
+	capability: CanvasNodeLiveRenderPreparationCapability<CanvasNode>;
+	context: CanvasNodeLiveRenderPreparationContext<CanvasNode>;
+}
+
+const disposeLiveRenderPreparationCacheEntry = (
+	entry: LiveRenderPreparationCacheEntry | null | undefined,
+): void => {
+	if (!entry?.dispose) return;
+	try {
+		entry.dispose();
+	} catch {}
+};
+
 const EMPTY_SNAP_GUIDES_SCREEN: CanvasSnapGuidesScreen = {
 	vertical: [],
 	horizontal: [],
@@ -267,7 +287,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const [tileTick, setTileTick] = useState(0);
 	const [tileAsyncPictureVersion, setTileAsyncPictureVersion] = useState(0);
 	const [rasterCacheVersion, setRasterCacheVersion] = useState(0);
-	const [liveImageAssetVersion, setLiveImageAssetVersion] = useState(0);
+	const [liveRenderPreparationVersion, setLiveRenderPreparationVersion] =
+		useState(0);
 	const assetById = useMemo(() => {
 		return new Map(assets.map((asset) => [asset.id, asset]));
 	}, [assets]);
@@ -277,9 +298,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	}, []);
 	const tileSchedulerRef = useRef<StaticTileScheduler | null>(null);
 	const rasterCacheRef = useRef(new Map<string, RasterImageCacheEntry>());
-	const liveImageAssetCacheRef = useRef(
-		new Map<string, LiveImageAssetCacheEntry>(),
+	const liveRenderPreparationCacheRef = useRef(
+		new Map<string, LiveRenderPreparationCacheEntry>(),
 	);
+	const liveRenderPreparationTaskIdRef = useRef(0);
 	const nodeRasterUriRef = useRef(new Map<string, string | null>());
 	const tileNodeAabbRef = useRef(new Map<string, TileAabb>());
 	const tileNodeSourceSignatureRef = useRef(new Map<string, string>());
@@ -308,8 +330,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			for (const entry of rasterCacheRef.current.values()) {
 				entry.handle?.release();
 			}
-			for (const entry of liveImageAssetCacheRef.current.values()) {
-				entry.handle?.release();
+			for (const entry of liveRenderPreparationCacheRef.current.values()) {
+				disposeLiveRenderPreparationCacheEntry(entry);
 			}
 			for (const entry of tileInputCacheRef.current.values()) {
 				disposeTileInput(entry.input);
@@ -321,7 +343,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				disposeTileAsyncPictureCacheEntry(entry);
 			}
 			rasterCacheRef.current.clear();
-			liveImageAssetCacheRef.current.clear();
+			liveRenderPreparationCacheRef.current.clear();
+			liveRenderPreparationTaskIdRef.current += 1;
 			nodeRasterUriRef.current.clear();
 			tileNodeAabbRef.current.clear();
 			tileNodeSourceSignatureRef.current.clear();
@@ -377,27 +400,46 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		},
 		[assetById, currentProjectId],
 	);
-	const resolveNodeImageAssetUri = useCallback(
-		(node: CanvasNode): string | null => {
-			if (node.type !== "image") return null;
-			const imageAsset = assetById.get(node.assetId);
-			if (imageAsset?.kind !== "image") return null;
+	const resolveLivePreparationContext = useCallback(
+		(node: CanvasNode): CanvasNodeLiveRenderPreparationContext<CanvasNode> => {
+			return {
+				node,
+				scene: resolveNodeScene(node, scenes),
+				asset: resolveNodeAsset(node, assetById),
+				projectId: currentProjectId,
+				runtimeManager,
+			};
+		},
+		[assetById, currentProjectId, runtimeManager, scenes],
+	);
+	const resolveLivePreparationRequest = useCallback(
+		(node: CanvasNode): LiveRenderPreparationRequest | null => {
+			const capability = resolveLiveRenderPreparationCapability(node);
+			if (!capability) return null;
+			const context = resolveLivePreparationContext(node);
+			const sourceSignature = capability.getSourceSignature(context);
+			if (sourceSignature === null) return null;
+			return {
+				nodeId: node.id,
+				sourceSignature,
+				capability,
+				context,
+			};
+		},
+		[resolveLivePreparationContext],
+	);
+	const isLiveNodeReady = useCallback(
+		(node: CanvasNode): boolean => {
+			void liveRenderPreparationVersion;
+			const request = resolveLivePreparationRequest(node);
+			if (!request) return true;
+			const entry = liveRenderPreparationCacheRef.current.get(request.nodeId);
 			return (
-				resolveAssetPlayableUri(imageAsset, {
-					projectId: currentProjectId,
-				}) ?? null
+				entry?.sourceSignature === request.sourceSignature &&
+				entry.status === "ready"
 			);
 		},
-		[assetById, currentProjectId],
-	);
-	const isLiveImageNodeReady = useCallback(
-		(node: CanvasNode): boolean => {
-			void liveImageAssetVersion;
-			const uri = resolveNodeImageAssetUri(node);
-			if (!uri) return false;
-			return Boolean(liveImageAssetCacheRef.current.get(uri)?.handle);
-		},
-		[liveImageAssetVersion, resolveNodeImageAssetUri],
+		[liveRenderPreparationVersion, resolveLivePreparationRequest],
 	);
 	const activeNode = useMemo(() => {
 		if (!activeNodeId) return null;
@@ -472,30 +514,29 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (isFocusMode || retainedLiveNodeIdSet.size === 0) return [];
 		return renderNodes.filter((node) => {
 			if (effectiveFrozenNodeIdSet.has(node.id)) return false;
-			return retainedLiveNodeIdSet.has(node.id);
+			if (!retainedLiveNodeIdSet.has(node.id)) return false;
+			if (supportsTilePipeline && !isLiveNodeReady(node)) return false;
+			return true;
 		});
 	}, [
 		effectiveFrozenNodeIdSet,
 		isFocusMode,
+		isLiveNodeReady,
 		renderNodes,
 		retainedLiveNodeIdSet,
+		supportsTilePipeline,
 	]);
 	const liveRenderNodes = useMemo(() => {
 		if (liveNodeIdSet.size === 0) return [];
 		return renderNodes.filter((node) => {
 			if (effectiveFrozenNodeIdSet.has(node.id)) return false;
-			if (
-				supportsTilePipeline &&
-				node.type === "image" &&
-				!isLiveImageNodeReady(node)
-			) {
-				return false;
-			}
-			return liveNodeIdSet.has(node.id);
+			if (!liveNodeIdSet.has(node.id)) return false;
+			if (supportsTilePipeline && !isLiveNodeReady(node)) return false;
+			return true;
 		});
 	}, [
 		effectiveFrozenNodeIdSet,
-		isLiveImageNodeReady,
+		isLiveNodeReady,
 		liveNodeIdSet,
 		renderNodes,
 		supportsTilePipeline,
@@ -655,7 +696,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (previousProjectId === currentProjectId) return;
 		resetTilePipelineResources();
 		setRasterCacheVersion((prev) => prev + 1);
-		setLiveImageAssetVersion((prev) => prev + 1);
+		setLiveRenderPreparationVersion((prev) => prev + 1);
 		if (!tileTickPausedRef.current) {
 			scheduleTileTick();
 		}
@@ -668,59 +709,103 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 
 	useEffect(() => {
 		if (!supportsTilePipeline) return;
-		const requiredUris = new Set<string>();
-		for (const nodeId of liveNodeIdSet) {
+		const requiredRequests = new Map<string, LiveRenderPreparationRequest>();
+		const addRequiredRequest = (nodeId: string) => {
 			const node = latestNodeById.get(nodeId);
-			if (!node) continue;
-			const uri = resolveNodeImageAssetUri(node);
-			if (uri) {
-				requiredUris.add(uri);
-			}
+			if (!node) return;
+			const request = resolveLivePreparationRequest(node);
+			if (!request) return;
+			requiredRequests.set(node.id, request);
+		};
+		for (const nodeId of liveNodeIdSet) {
+			addRequiredRequest(nodeId);
 		}
 		for (const nodeId of retainedLiveNodeIdSet) {
-			const node = latestNodeById.get(nodeId);
-			if (!node) continue;
-			const uri = resolveNodeImageAssetUri(node);
-			if (uri) {
-				requiredUris.add(uri);
+			addRequiredRequest(nodeId);
+		}
+		for (const [
+			nodeId,
+			entry,
+		] of liveRenderPreparationCacheRef.current.entries()) {
+			const request = requiredRequests.get(nodeId) ?? null;
+			if (request?.sourceSignature === entry.sourceSignature) continue;
+			disposeLiveRenderPreparationCacheEntry(entry);
+			liveRenderPreparationCacheRef.current.delete(nodeId);
+		}
+		for (const request of requiredRequests.values()) {
+			const existing = liveRenderPreparationCacheRef.current.get(
+				request.nodeId,
+			);
+			if (existing?.sourceSignature === request.sourceSignature) continue;
+			if (existing) {
+				disposeLiveRenderPreparationCacheEntry(existing);
 			}
-		}
-		for (const [uri, entry] of liveImageAssetCacheRef.current.entries()) {
-			if (requiredUris.has(uri)) continue;
-			entry.handle?.release();
-			liveImageAssetCacheRef.current.delete(uri);
-		}
-		for (const uri of requiredUris) {
-			const existing = liveImageAssetCacheRef.current.get(uri);
-			if (existing) continue;
-			const nextEntry: LiveImageAssetCacheEntry = {
-				uri,
-				handle: null,
-				loading: true,
+			const taskId = liveRenderPreparationTaskIdRef.current + 1;
+			liveRenderPreparationTaskIdRef.current = taskId;
+			const nextEntry: LiveRenderPreparationCacheEntry = {
+				sourceSignature: request.sourceSignature,
+				status: "pending",
+				dispose: null,
+				taskId,
 			};
-			liveImageAssetCacheRef.current.set(uri, nextEntry);
+			liveRenderPreparationCacheRef.current.set(request.nodeId, nextEntry);
+			const markFailed = () => {
+				if (tilePipelineDisposedRef.current) return;
+				const current = liveRenderPreparationCacheRef.current.get(
+					request.nodeId,
+				);
+				if (
+					current !== nextEntry ||
+					current.taskId !== taskId ||
+					current.sourceSignature !== request.sourceSignature
+				) {
+					return;
+				}
+				current.status = "failed";
+				current.dispose = null;
+				setLiveRenderPreparationVersion((prev) => prev + 1);
+				scheduleTileTick();
+			};
+			let prepareResult: ReturnType<typeof request.capability.prepare> | null =
+				null;
+			try {
+				prepareResult = request.capability.prepare(request.context);
+			} catch {
+				markFailed();
+				continue;
+			}
 			void (async () => {
 				try {
-					const handle = await acquireImageAsset(uri);
+					const result = await prepareResult;
 					if (tilePipelineDisposedRef.current) {
-						handle.release();
+						result?.dispose?.();
 						return;
 					}
-					const current = liveImageAssetCacheRef.current.get(uri);
-					if (current !== nextEntry) {
-						handle.release();
+					const current = liveRenderPreparationCacheRef.current.get(
+						request.nodeId,
+					);
+					if (
+						current !== nextEntry ||
+						current.taskId !== taskId ||
+						current.sourceSignature !== request.sourceSignature
+					) {
+						result?.dispose?.();
 						return;
 					}
-					nextEntry.handle = handle;
-					nextEntry.loading = false;
-					setLiveImageAssetVersion((prev) => prev + 1);
+					if (!result) {
+						current.status = "failed";
+						current.dispose = null;
+						setLiveRenderPreparationVersion((prev) => prev + 1);
+						scheduleTileTick();
+						return;
+					}
+					current.status = "ready";
+					current.dispose =
+						typeof result.dispose === "function" ? result.dispose : null;
+					setLiveRenderPreparationVersion((prev) => prev + 1);
 					scheduleTileTick();
 				} catch {
-					if (tilePipelineDisposedRef.current) return;
-					const current = liveImageAssetCacheRef.current.get(uri);
-					if (current !== nextEntry) return;
-					nextEntry.loading = false;
-					setLiveImageAssetVersion((prev) => prev + 1);
+					markFailed();
 				}
 			})();
 		}
@@ -728,7 +813,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		latestNodeById,
 		liveNodeIdSet,
 		retainedLiveNodeIdSet,
-		resolveNodeImageAssetUri,
+		resolveLivePreparationRequest,
 		scheduleTileTick,
 		supportsTilePipeline,
 	]);
@@ -1105,20 +1190,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				visitedNodeIds.add(latestNode.id);
 				continue;
 			}
-			if (liveNodeIdSet.has(latestNode.id)) {
-				if (latestNode.type === "image") {
-					if (!isLiveImageNodeReady(latestNode)) {
-						const cachedInput =
-							tileInputCacheRef.current.get(latestNode.id)?.input ?? null;
-						if (cachedInput) {
-							inputs.push(cachedInput);
-							inputByNodeId.set(latestNode.id, cachedInput);
-						}
-						visitedNodeIds.add(latestNode.id);
-						continue;
-					}
-					// image 选中后由 live 层绘制；同步移出 static tile 输入，
-					// 避免底层 tile 与 live 层重叠，也释放旧 picture 持有的源图资源。
+			if (liveNodeIdSet.has(latestNode.id) && isLiveNodeReady(latestNode)) {
+				if (resolveLiveRenderPreparationCapability(latestNode)) {
+					// 注册 live 准备能力的节点切到 live 后不保留 static 输入，
+					// 避免准备资源与 tilePicture 资源叠画。
 					const cachedEntry = tileInputCacheRef.current.get(latestNode.id);
 					disposeTileInput(cachedEntry?.input);
 					tileInputCacheRef.current.delete(latestNode.id);
@@ -1300,7 +1375,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		latestNodeById,
 		liveNodeIdSet,
 		currentProjectId,
-		isLiveImageNodeReady,
+		isLiveNodeReady,
 		rasterCacheVersion,
 		resolveNodeRasterUri,
 		resolveTileInputId,

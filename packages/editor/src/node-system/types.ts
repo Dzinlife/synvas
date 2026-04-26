@@ -188,6 +188,34 @@ export interface CanvasNodeTilePictureCapability<
 		| null;
 }
 
+export interface CanvasNodeLiveRenderPreparationContext<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	node: TNode;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+	projectId?: string | null;
+	runtimeManager: StudioRuntimeManager;
+}
+
+export interface CanvasNodeLiveRenderPreparationResult {
+	dispose?: () => void;
+}
+
+export interface CanvasNodeLiveRenderPreparationCapability<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	getSourceSignature: (
+		context: CanvasNodeLiveRenderPreparationContext<TNode>,
+	) => string | null;
+	prepare: (
+		context: CanvasNodeLiveRenderPreparationContext<TNode>,
+	) =>
+		| Promise<CanvasNodeLiveRenderPreparationResult | null>
+		| CanvasNodeLiveRenderPreparationResult
+		| null;
+}
+
 export interface CanvasExternalFileContext {
 	projectId: string;
 	fps: number;
@@ -234,6 +262,7 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	skiaRenderer: React.FC<CanvasNodeSkiaRenderProps<TNode>>;
 	thumbnail?: CanvasNodeThumbnailCapability<TNode>;
 	tilePicture?: CanvasNodeTilePictureCapability<TNode>;
+	liveRenderPreparation?: CanvasNodeLiveRenderPreparationCapability<TNode>;
 	focusEditorLayer?: React.ComponentType<unknown>;
 	focusEditorBridge?: React.FC<CanvasNodeFocusEditorBridgeProps<TNode>>;
 	toolbar: React.FC<CanvasNodeToolbarProps<TNode>>;

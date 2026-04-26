@@ -5,6 +5,7 @@ import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
 import { resolveSceneTimelineInsertionSize } from "../timelineInsertionSize";
 import { secondsToFrames } from "@/utils/timecode";
+import { imageNodeLiveRenderPreparationCapability } from "./liveRenderPreparation";
 import { ImageNodeSkiaRenderer } from "./renderer";
 import { imageNodeTilePictureCapability } from "./tilePicture";
 import { ImageNodeToolbar } from "./toolbar";
@@ -65,6 +66,7 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 	create: () => ({ type: "image" }),
 	skiaRenderer: ImageNodeSkiaRenderer,
 	tilePicture: imageNodeTilePictureCapability,
+	liveRenderPreparation: imageNodeLiveRenderPreparationCapability,
 	toolbar: ImageNodeToolbar,
 	focusable: true,
 	resolveResizeConstraints: ({ node, asset }) => {

@@ -104,6 +104,48 @@ const { imageTilePictureGenerateMock } = vi.hoisted(() => ({
 		},
 	),
 }));
+const { imageLivePreparationSourceSignatureMock } = vi.hoisted(() => ({
+	imageLivePreparationSourceSignatureMock: vi.fn(
+		(context: {
+			node: ImageCanvasNode;
+			asset: StudioProject["assets"][number] | null;
+		}) => {
+			const locator = context.asset?.locator;
+			return locator?.type === "linked-remote"
+				? locator.uri
+				: locator?.type === "linked-file"
+					? `file://${locator.filePath}`
+					: locator?.type === "managed"
+						? `opfs://test/images/${locator.fileName}`
+						: null;
+		},
+	),
+}));
+const { imageLivePreparationPrepareMock } = vi.hoisted(() => ({
+	imageLivePreparationPrepareMock: vi.fn(
+		async (context: {
+			node: ImageCanvasNode;
+			asset: StudioProject["assets"][number] | null;
+		}) => {
+			const locator = context.asset?.locator;
+			const uri =
+				locator?.type === "linked-remote"
+					? locator.uri
+					: locator?.type === "linked-file"
+						? `file://${locator.filePath}`
+						: locator?.type === "managed"
+							? `opfs://test/images/${locator.fileName}`
+							: null;
+			if (!uri) return null;
+			const handle = await acquireImageAssetMock(uri);
+			return {
+				dispose: vi.fn(() => {
+					handle.release?.();
+				}),
+			};
+		},
+	),
+}));
 const { textTilePictureSourceSignatureMock } = vi.hoisted(() => ({
 	textTilePictureSourceSignatureMock: vi.fn(
 		(context: { node: TextCanvasNode }) =>
@@ -123,6 +165,26 @@ const { textTilePictureGenerateMock } = vi.hoisted(() => ({
 			};
 		},
 	),
+}));
+const { textLivePreparationMockState } = vi.hoisted(() => ({
+	textLivePreparationMockState: {
+		enabled: false,
+	},
+}));
+const { textLivePreparationSourceSignatureMock } = vi.hoisted(() => ({
+	textLivePreparationSourceSignatureMock: vi.fn(
+		(context: { node: TextCanvasNode }) =>
+			`${context.node.id}:${context.node.updatedAt}:${context.node.text}`,
+	),
+}));
+const { textLivePreparationPrepareMock } = vi.hoisted(() => ({
+	textLivePreparationPrepareMock: vi.fn<
+		(context: {
+			node: TextCanvasNode;
+		}) => Promise<{ dispose?: () => void } | null>
+	>(async () => ({
+		dispose: vi.fn(),
+	})),
 }));
 const {
 	focusLayerPointerDownSpy,
@@ -456,6 +518,14 @@ vi.mock("@/node-system/registry", async () => {
 		getSourceSignature: imageTilePictureSourceSignatureMock,
 		generate: imageTilePictureGenerateMock,
 	};
+	const imageLivePreparationCapability = {
+		getSourceSignature: imageLivePreparationSourceSignatureMock,
+		prepare: imageLivePreparationPrepareMock,
+	};
+	const textLivePreparationCapability = {
+		getSourceSignature: textLivePreparationSourceSignatureMock,
+		prepare: textLivePreparationPrepareMock,
+	};
 	const boardTilePictureCapability = {
 		getSourceSignature: ({ node }: { node: BoardCanvasNode }) =>
 			`${node.id}:${node.width}:${node.height}`,
@@ -483,6 +553,12 @@ vi.mock("@/node-system/registry", async () => {
 						: type === "board"
 							? boardTilePictureCapability
 							: undefined,
+			liveRenderPreparation:
+				type === "image"
+					? imageLivePreparationCapability
+					: type === "text" && textLivePreparationMockState.enabled
+						? textLivePreparationCapability
+						: undefined,
 			focusEditorLayer: type === "scene" ? FocusSceneSkiaLayer : undefined,
 			focusEditorBridge: type === "scene" ? SceneFocusEditorBridge : undefined,
 		}),
@@ -903,6 +979,46 @@ describe("InfiniteSkiaCanvas", () => {
 				};
 			},
 		);
+		imageLivePreparationSourceSignatureMock.mockReset();
+		imageLivePreparationSourceSignatureMock.mockImplementation(
+			(context: {
+				node: ImageCanvasNode;
+				asset: StudioProject["assets"][number] | null;
+			}) => {
+				const locator = context.asset?.locator;
+				return locator?.type === "linked-remote"
+					? locator.uri
+					: locator?.type === "linked-file"
+						? `file://${locator.filePath}`
+						: locator?.type === "managed"
+							? `opfs://test/images/${locator.fileName}`
+							: null;
+			},
+		);
+		imageLivePreparationPrepareMock.mockReset();
+		imageLivePreparationPrepareMock.mockImplementation(
+			async (context: {
+				node: ImageCanvasNode;
+				asset: StudioProject["assets"][number] | null;
+			}) => {
+				const locator = context.asset?.locator;
+				const uri =
+					locator?.type === "linked-remote"
+						? locator.uri
+						: locator?.type === "linked-file"
+							? `file://${locator.filePath}`
+							: locator?.type === "managed"
+								? `opfs://test/images/${locator.fileName}`
+								: null;
+				if (!uri) return null;
+				const handle = await acquireImageAssetMock(uri);
+				return {
+					dispose: vi.fn(() => {
+						handle.release?.();
+					}),
+				};
+			},
+		);
 		textTilePictureSourceSignatureMock.mockReset();
 		textTilePictureSourceSignatureMock.mockImplementation(
 			(context: { node: TextCanvasNode }) =>
@@ -919,6 +1035,16 @@ describe("InfiniteSkiaCanvas", () => {
 				dispose: vi.fn(),
 			}),
 		);
+		textLivePreparationMockState.enabled = false;
+		textLivePreparationSourceSignatureMock.mockReset();
+		textLivePreparationSourceSignatureMock.mockImplementation(
+			(context: { node: TextCanvasNode }) =>
+				`${context.node.id}:${context.node.updatedAt}:${context.node.text}`,
+		);
+		textLivePreparationPrepareMock.mockReset();
+		textLivePreparationPrepareMock.mockImplementation(async () => ({
+			dispose: vi.fn(),
+		}));
 		renderNodeToPictureMock.mockReturnValue({
 			dispose: vi.fn(),
 		});
@@ -1801,6 +1927,237 @@ describe("InfiniteSkiaCanvas", () => {
 		});
 	});
 
+	it("liveRenderPreparation pending 时保留 static tile，ready 后切到 live", async () => {
+		tilePipelineMockState.enabled = true;
+		textLivePreparationMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const livePreparationDeferred = createDeferred<{
+			dispose?: () => void;
+		} | null>();
+		const disposeMock = vi.fn();
+		textLivePreparationPrepareMock.mockImplementation(
+			async () => livePreparationDeferred.promise,
+		);
+		try {
+			const textNode = createTextNode("node-text-live-prep", 0);
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [textNode],
+				scenes: emptyScenes,
+				assets: [],
+				activeNodeId: null,
+				selectedNodeIds: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(latestInputs.some((input) => input.nodeId === textNode.id)).toBe(
+					true,
+				);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={textNode.id}
+					selectedNodeIds={[textNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(textLivePreparationPrepareMock).toHaveBeenCalledTimes(1);
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					textNode.id,
+				);
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(latestInputs.some((input) => input.nodeId === textNode.id)).toBe(
+					true,
+				);
+			});
+
+			await act(async () => {
+				livePreparationDeferred.resolve({ dispose: disposeMock });
+				await Promise.resolve();
+			});
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					textNode.id,
+				);
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(latestInputs.some((input) => input.nodeId === textNode.id)).toBe(
+					false,
+				);
+			});
+			expect(disposeMock).not.toHaveBeenCalled();
+		} finally {
+			setInputsSpy.mockRestore();
+		}
+	});
+
+	it("liveRenderPreparation 返回 null 时不进入 live 且保留 static tile", async () => {
+		tilePipelineMockState.enabled = true;
+		textLivePreparationMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		textLivePreparationPrepareMock.mockResolvedValue(null);
+		try {
+			const textNode = createTextNode("node-text-live-prep-null", 0);
+			render(
+				<InfiniteSkiaCanvas
+					width={128}
+					height={128}
+					camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+					nodes={[textNode]}
+					scenes={emptyScenes}
+					assets={[]}
+					activeNodeId={textNode.id}
+					selectedNodeIds={[textNode.id]}
+					focusedNodeId={null}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(textLivePreparationPrepareMock).toHaveBeenCalledTimes(1);
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					textNode.id,
+				);
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(latestInputs.some((input) => input.nodeId === textNode.id)).toBe(
+					true,
+				);
+			});
+		} finally {
+			setInputsSpy.mockRestore();
+		}
+	});
+
+	it("liveRenderPreparation 失败时不进入 live 且保留 static tile", async () => {
+		tilePipelineMockState.enabled = true;
+		textLivePreparationMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		textLivePreparationPrepareMock.mockRejectedValue(
+			new Error("prepare failed"),
+		);
+		try {
+			const textNode = createTextNode("node-text-live-prep-failed", 0);
+			render(
+				<InfiniteSkiaCanvas
+					width={128}
+					height={128}
+					camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+					nodes={[textNode]}
+					scenes={emptyScenes}
+					assets={[]}
+					activeNodeId={textNode.id}
+					selectedNodeIds={[textNode.id]}
+					focusedNodeId={null}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(textLivePreparationPrepareMock).toHaveBeenCalledTimes(1);
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					textNode.id,
+				);
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(latestInputs.some((input) => input.nodeId === textNode.id)).toBe(
+					true,
+				);
+			});
+		} finally {
+			setInputsSpy.mockRestore();
+		}
+	});
+
+	it("liveRenderPreparation source signature 变化会释放旧准备并重新 prepare", async () => {
+		tilePipelineMockState.enabled = true;
+		textLivePreparationMockState.enabled = true;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const disposeA = vi.fn();
+		const disposeB = vi.fn();
+		const secondPreparationDeferred = createDeferred<{
+			dispose?: () => void;
+		} | null>();
+		textLivePreparationPrepareMock
+			.mockResolvedValueOnce({ dispose: disposeA })
+			.mockImplementationOnce(async () => secondPreparationDeferred.promise);
+		try {
+			const textNode = createTextNode("node-text-live-prep-source", 0, {
+				updatedAt: 1,
+				text: "first",
+			});
+			const baseProps = {
+				width: 128,
+				height: 128,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				scenes: emptyScenes,
+				assets: [],
+				activeNodeId: textNode.id,
+				selectedNodeIds: [textNode.id],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(
+				<InfiniteSkiaCanvas {...baseProps} nodes={[textNode]} />,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					textNode.id,
+				);
+			});
+			expect(textLivePreparationPrepareMock).toHaveBeenCalledTimes(1);
+
+			const nextTextNode = {
+				...textNode,
+				text: "second",
+				updatedAt: 2,
+			};
+			rerender(<InfiniteSkiaCanvas {...baseProps} nodes={[nextTextNode]} />);
+
+			await waitFor(() => {
+				expect(disposeA).toHaveBeenCalledTimes(1);
+				expect(textLivePreparationPrepareMock).toHaveBeenCalledTimes(2);
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).not.toContain(
+					textNode.id,
+				);
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(latestInputs.some((input) => input.nodeId === textNode.id)).toBe(
+					true,
+				);
+			});
+
+			await act(async () => {
+				secondPreparationDeferred.resolve({ dispose: disposeB });
+				await Promise.resolve();
+			});
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					textNode.id,
+				);
+			});
+			expect(disposeB).not.toHaveBeenCalled();
+		} finally {
+			setInputsSpy.mockRestore();
+		}
+	});
+
 	it("text 节点仅位置变化时不会重复生成 tile picture", async () => {
 		tilePipelineMockState.enabled = true;
 		textTilePictureSourceSignatureMock.mockImplementation(
@@ -2618,6 +2975,7 @@ describe("InfiniteSkiaCanvas", () => {
 
 			await waitFor(() => {
 				expect(acquireImageAssetMock).toHaveBeenCalled();
+				expect(imageLivePreparationPrepareMock).toHaveBeenCalledTimes(1);
 				expect(getLiveRenderedNodeIds(getLatestRenderTree())).not.toContain(
 					imageNode.id,
 				);
