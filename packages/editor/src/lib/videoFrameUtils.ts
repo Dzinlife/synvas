@@ -9,7 +9,6 @@ import {
 } from "core";
 import type { VideoSample, VideoSampleSink } from "mediabunny";
 import {
-	getSkiaRenderBackend,
 	makeImageFromTextureSourceDirect,
 	type SkImage,
 	type TextureSourceImageOptions,
@@ -133,10 +132,9 @@ const withPresetLabel = (
 	};
 };
 
-export const normalizeVideoFrameColorSpace = (
-	frame: Pick<VideoFrame, "colorSpace"> | null | undefined,
+const normalizeRawVideoColorSpace = (
+	rawColorSpace: RawVideoColorSpace | null | undefined,
 ): ColorSpaceDescriptor => {
-	const rawColorSpace = frame?.colorSpace as RawVideoColorSpace | undefined;
 	const serialized = rawColorSpace?.toJSON?.() ?? rawColorSpace;
 	return withPresetLabel({
 		primaries: normalizeVideoPrimaries(serialized?.primaries),
@@ -145,6 +143,20 @@ export const normalizeVideoFrameColorSpace = (
 		range: normalizeVideoRange(serialized?.fullRange),
 	});
 };
+
+export const normalizeVideoFrameColorSpace = (
+	frame: Pick<VideoFrame, "colorSpace"> | null | undefined,
+): ColorSpaceDescriptor =>
+	normalizeRawVideoColorSpace(
+		frame?.colorSpace as RawVideoColorSpace | undefined,
+	);
+
+export const normalizeVideoSampleColorSpace = (
+	sample: Pick<VideoSample, "colorSpace"> | null | undefined,
+): ColorSpaceDescriptor =>
+	normalizeRawVideoColorSpace(
+		sample?.colorSpace as RawVideoColorSpace | undefined,
+	);
 
 const RAW_VIDEO_PROBE_FORMATS = ["I420", "NV12"] as const;
 const RAW_VIDEO_PROBE_MAX_COPY_BYTES = 64 * 1024 * 1024;
@@ -378,30 +390,93 @@ export interface ColorManagedVideoFrameImage {
 	sourceColorSpace: ColorSpaceDescriptor;
 }
 
+type VideoCanvasImageSource = OffscreenCanvas | HTMLCanvasElement;
+
+const toPositiveCanvasSize = (...values: unknown[]): number => {
+	for (const value of values) {
+		if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+			return Math.max(1, Math.round(value));
+		}
+	}
+	return 1;
+};
+
+const resolveVideoSampleCanvasSize = (sample: VideoSample) => ({
+	width: toPositiveCanvasSize(
+		sample.displayWidth,
+		sample.codedWidth,
+		sample.squarePixelWidth,
+	),
+	height: toPositiveCanvasSize(
+		sample.displayHeight,
+		sample.codedHeight,
+		sample.squarePixelHeight,
+	),
+});
+
+const createVideoCanvases = (
+	width: number,
+	height: number,
+): VideoCanvasImageSource[] => {
+	const canvases: VideoCanvasImageSource[] = [];
+	if (typeof OffscreenCanvas !== "undefined") {
+		canvases.push(new OffscreenCanvas(width, height));
+	}
+	if (typeof document !== "undefined") {
+		const canvas = document.createElement("canvas");
+		canvas.width = width;
+		canvas.height = height;
+		canvases.push(canvas);
+	}
+	return canvases;
+};
+
+const getVideoCanvasContext2D = (
+	canvas: VideoCanvasImageSource,
+	options: TextureSourceImageOptions | undefined,
+): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null => {
+	const settings: CanvasRenderingContext2DSettings = {
+		alpha: false,
+		colorSpace: options?.targetColorSpace ?? "srgb",
+	};
+	try {
+		return canvas.getContext("2d", settings as never);
+	} catch {
+		return canvas.getContext("2d", { alpha: false } as never);
+	}
+};
+
+const drawVideoSampleToCanvas = (
+	sample: VideoSample,
+	options: TextureSourceImageOptions | undefined,
+): VideoCanvasImageSource => {
+	const { width, height } = resolveVideoSampleCanvasSize(sample);
+	for (const canvas of createVideoCanvases(width, height)) {
+		const context = getVideoCanvasContext2D(canvas, options);
+		if (!context) continue;
+		context.clearRect(0, 0, width, height);
+		sample.draw(context, 0, 0, width, height);
+		return canvas;
+	}
+	throw new Error("Canvas2D is unavailable for video sample rendering.");
+};
+
 export const videoSampleToColorManagedSkImage = (
 	sample: VideoSample,
 	options?: TextureSourceImageOptions,
 ): ColorManagedVideoFrameImage | null => {
-	let frame: VideoFrame | null = null;
-	const shouldCloseFrameAfterUpload = getSkiaRenderBackend().kind === "webgpu";
 	try {
-		frame = sample.toVideoFrame();
-		const sourceColorSpace = normalizeVideoFrameColorSpace(frame);
-		const image = makeImageFromTextureSourceDirect(frame, {
+		const sourceColorSpace = normalizeVideoSampleColorSpace(sample);
+		const canvas = drawVideoSampleToCanvas(sample, options);
+		const image = makeImageFromTextureSourceDirect(canvas, {
 			colorConversion: "browser",
 			...options,
 		});
 		return image ? { image, sourceColorSpace } : null;
 	} catch (error) {
 		console.warn("VideoSample to SkImage failed:", error);
-		closeVideoFrame(frame);
 		return null;
 	} finally {
-		if (shouldCloseFrameAfterUpload) {
-			// WebGPU 路径会先把外部帧拷进内部纹理，拷贝完成后即可释放 VideoFrame。
-			closeVideoFrame(frame);
-		}
-		// sample 与生成出来的 VideoFrame 生命周期分离，这里只关闭 sample 本体。
 		closeVideoSample(sample);
 	}
 };

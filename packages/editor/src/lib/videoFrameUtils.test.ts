@@ -4,73 +4,98 @@ import {
 	closeVideoFrame,
 	closeVideoSample,
 	normalizeVideoFrameColorSpace,
+	normalizeVideoSampleColorSpace,
 	probeVideoRawFrameAccess,
 	videoSampleToColorManagedSkImage,
 	videoSampleToSkImage,
 } from "./videoFrameUtils";
 
 const mocks = vi.hoisted(() => ({
-	getSkiaRenderBackend: vi.fn(),
 	makeImageFromTextureSourceDirect: vi.fn(),
 }));
 
 vi.mock("react-skia-lite", () => ({
-	getSkiaRenderBackend: mocks.getSkiaRenderBackend,
 	makeImageFromTextureSourceDirect: mocks.makeImageFromTextureSourceDirect,
 }));
+
+const createMockCanvasEnvironment = () => {
+	const context = {
+		clearRect: vi.fn(),
+	};
+	const canvases: Array<{
+		width: number;
+		height: number;
+		getContext: ReturnType<typeof vi.fn>;
+	}> = [];
+	const OffscreenCanvasMock = vi.fn(function (
+		this: {
+			width: number;
+			height: number;
+			getContext: ReturnType<typeof vi.fn>;
+		},
+		width: number,
+		height: number,
+	) {
+		const canvas = {
+			width,
+			height,
+			getContext: vi.fn(() => context),
+		};
+		canvases.push(canvas);
+		return canvas;
+	});
+	vi.stubGlobal("OffscreenCanvas", OffscreenCanvasMock);
+	return { canvases, context, OffscreenCanvasMock };
+};
 
 describe("videoFrameUtils", () => {
 	afterEach(() => {
 		vi.clearAllMocks();
+		vi.unstubAllGlobals();
 	});
 
-	it("WebGPU 下成功创建 SkImage 后会关闭 VideoFrame", () => {
-		const frame = {
-			close: vi.fn(),
-		} as unknown as VideoFrame;
+	it("会先通过 Canvas2D 绘制 VideoSample 再创建 SkImage", () => {
+		const canvasEnv = createMockCanvasEnvironment();
 		const sample = {
-			toVideoFrame: vi.fn(() => frame),
+			displayWidth: 1920,
+			displayHeight: 1080,
+			codedWidth: 1920,
+			codedHeight: 1080,
+			draw: vi.fn(),
 			close: vi.fn(),
 		} as unknown as VideoSample;
 		const image = { id: "image" };
-		mocks.getSkiaRenderBackend.mockReturnValue({
-			bundle: "webgpu",
-			kind: "webgpu",
-			device: {} as GPUDevice,
-			deviceContext: {} as never,
-		});
 		mocks.makeImageFromTextureSourceDirect.mockReturnValue(image);
 
 		expect(videoSampleToSkImage(sample)).toBe(image);
-		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(frame, {
-			colorConversion: "browser",
+		expect(canvasEnv.OffscreenCanvasMock).toHaveBeenCalledWith(1920, 1080);
+		expect(canvasEnv.canvases[0]?.getContext).toHaveBeenCalledWith("2d", {
+			alpha: false,
+			colorSpace: "srgb",
 		});
-		expect(frame.close).toHaveBeenCalledTimes(1);
+		expect(canvasEnv.context.clearRect).toHaveBeenCalledWith(0, 0, 1920, 1080);
+		expect(sample.draw).toHaveBeenCalledWith(
+			canvasEnv.context,
+			0,
+			0,
+			1920,
+			1080,
+		);
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(
+			canvasEnv.canvases[0],
+			{
+				colorConversion: "browser",
+			},
+		);
 		expect(sample.close).toHaveBeenCalledTimes(1);
 	});
 
-	it("WebGL 下成功创建 SkImage 后不会提前关闭 VideoFrame", () => {
-		const frame = {
-			close: vi.fn(),
-		} as unknown as VideoFrame;
+	it("color-managed 版本会返回归一化 sample 色彩空间", () => {
+		const canvasEnv = createMockCanvasEnvironment();
 		const sample = {
-			toVideoFrame: vi.fn(() => frame),
-			close: vi.fn(),
-		} as unknown as VideoSample;
-		const image = { id: "image" };
-		mocks.getSkiaRenderBackend.mockReturnValue({
-			bundle: "webgl",
-			kind: "webgl",
-		});
-		mocks.makeImageFromTextureSourceDirect.mockReturnValue(image);
-
-		expect(videoSampleToSkImage(sample)).toBe(image);
-		expect(frame.close).not.toHaveBeenCalled();
-		expect(sample.close).toHaveBeenCalledTimes(1);
-	});
-
-	it("color-managed 版本会返回归一化视频色彩空间", () => {
-		const frame = {
+			displayWidth: 2,
+			displayHeight: 2,
+			draw: vi.fn(),
 			colorSpace: {
 				toJSON: () => ({
 					primaries: "bt2020",
@@ -80,18 +105,8 @@ describe("videoFrameUtils", () => {
 				}),
 			},
 			close: vi.fn(),
-		} as unknown as VideoFrame;
-		const sample = {
-			toVideoFrame: vi.fn(() => frame),
-			close: vi.fn(),
 		} as unknown as VideoSample;
 		const image = { id: "image" };
-		mocks.getSkiaRenderBackend.mockReturnValue({
-			bundle: "webgpu",
-			kind: "webgpu",
-			device: {} as GPUDevice,
-			deviceContext: {} as never,
-		});
 		mocks.makeImageFromTextureSourceDirect.mockReturnValue(image);
 
 		expect(
@@ -108,32 +123,32 @@ describe("videoFrameUtils", () => {
 				label: "Rec.2100 PQ",
 			},
 		});
-		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(frame, {
-			colorConversion: "browser",
-			targetColorSpace: "display-p3",
+		expect(canvasEnv.canvases[0]?.getContext).toHaveBeenCalledWith("2d", {
+			alpha: false,
+			colorSpace: "display-p3",
 		});
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(
+			canvasEnv.canvases[0],
+			{
+				colorConversion: "browser",
+				targetColorSpace: "display-p3",
+			},
+		);
 	});
 
-	it("失败时仍会关闭 VideoFrame 与 sample", () => {
-		const frame = {
-			close: vi.fn(),
-		} as unknown as VideoFrame;
+	it("失败时仍会关闭 sample", () => {
+		createMockCanvasEnvironment();
 		const sample = {
-			toVideoFrame: vi.fn(() => frame),
+			displayWidth: 2,
+			displayHeight: 2,
+			draw: vi.fn(),
 			close: vi.fn(),
 		} as unknown as VideoSample;
-		mocks.getSkiaRenderBackend.mockReturnValue({
-			bundle: "webgpu",
-			kind: "webgpu",
-			device: {} as GPUDevice,
-			deviceContext: {} as never,
-		});
 		mocks.makeImageFromTextureSourceDirect.mockImplementation(() => {
 			throw new Error("decode failed");
 		});
 
 		expect(videoSampleToSkImage(sample)).toBeNull();
-		expect(frame.close).toHaveBeenCalled();
 		expect(sample.close).toHaveBeenCalledTimes(1);
 	});
 
@@ -184,6 +199,24 @@ describe("videoFrameUtils", () => {
 			transfer: "unknown",
 			matrix: "unknown",
 			range: "unknown",
+		});
+		expect(
+			normalizeVideoSampleColorSpace({
+				colorSpace: {
+					toJSON: () => ({
+						primaries: "bt2020",
+						transfer: "hlg",
+						matrix: "bt2020-ncl",
+						fullRange: false,
+					}),
+				},
+			} as unknown as VideoSample),
+		).toEqual({
+			primaries: "bt2020",
+			transfer: "hlg",
+			matrix: "bt2020-ncl",
+			range: "limited",
+			label: "Rec.2100 HLG",
 		});
 	});
 

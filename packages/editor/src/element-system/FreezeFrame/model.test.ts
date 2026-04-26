@@ -2,10 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestEditorRuntime } from "@/scene-editor/runtime/testUtils";
-import {
-	alignSourceTime,
-	createFreezeFrameModel,
-} from "./model";
+import { alignSourceTime, createFreezeFrameModel } from "./model";
 
 const mocks = vi.hoisted(() => ({
 	acquireVideoAsset: vi.fn(),
@@ -20,26 +17,56 @@ vi.mock("react-skia-lite", () => ({
 	makeImageFromTextureSourceDirect: mocks.makeImageFromTextureSourceDirect,
 }));
 
-const createVideoSampleGenerator = (
-	frame: VideoFrame,
-): AsyncGenerator<any, void, unknown> =>
-	(async function* () {
-		yield {
-			timestamp: 0,
-			toVideoFrame: vi.fn(() => frame),
-			close: vi.fn(),
+const createMockCanvasEnvironment = () => {
+	const context = {
+		clearRect: vi.fn(),
+	};
+	const canvases: Array<{
+		width: number;
+		height: number;
+		getContext: ReturnType<typeof vi.fn>;
+	}> = [];
+	const OffscreenCanvasMock = vi.fn(function (
+		this: {
+			width: number;
+			height: number;
+			getContext: ReturnType<typeof vi.fn>;
+		},
+		width: number,
+		height: number,
+	) {
+		const canvas = {
+			width,
+			height,
+			getContext: vi.fn(() => context),
 		};
-	})();
+		canvases.push(canvas);
+		return canvas;
+	});
+	vi.stubGlobal("OffscreenCanvas", OffscreenCanvasMock);
+	return { canvases, context };
+};
 
-const createMockVideoSample = (frame: VideoFrame) => ({
+const createMockVideoSample = () => ({
 	timestamp: 0,
-	toVideoFrame: vi.fn(() => frame),
+	displayWidth: 1920,
+	displayHeight: 1080,
+	draw: vi.fn(),
 	close: vi.fn(),
 });
 
+type MockVideoSample = ReturnType<typeof createMockVideoSample>;
+
+const createVideoSampleGenerator = (
+	sample = createMockVideoSample(),
+): AsyncGenerator<MockVideoSample, void, unknown> =>
+	(async function* () {
+		yield sample;
+	})();
+
 const createMockVideoHandle = (options: {
 	cachedImage?: object | null;
-	decodedGenerator?: AsyncGenerator<any, void, unknown>;
+	decodedGenerator?: AsyncGenerator<MockVideoSample, void, unknown>;
 	videoRotation?: 0 | 90 | 180 | 270;
 }) => {
 	const samples = vi.fn(
@@ -71,6 +98,7 @@ describe("FreezeFrame model", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		createMockCanvasEnvironment();
 		timelineStore.setState({ fps: 30 });
 	});
 
@@ -85,10 +113,14 @@ describe("FreezeFrame model", () => {
 		});
 		mocks.acquireVideoAsset.mockResolvedValue(handle);
 
-		const store = createFreezeFrameModel("freeze-1", {
-			uri: "clip.mp4",
-			sourceTime: 1,
-		}, runtime);
+		const store = createFreezeFrameModel(
+			"freeze-1",
+			{
+				uri: "clip.mp4",
+				sourceTime: 1,
+			},
+			runtime,
+		);
 		await store.getState().init();
 
 		expect(mocks.acquireVideoAsset).toHaveBeenCalledWith("clip.mp4");
@@ -105,17 +137,21 @@ describe("FreezeFrame model", () => {
 
 	it("缓存未命中时解码并回填缓存", async () => {
 		const decodedImage = { id: "decoded-image" };
-		const frame = { id: "frame", close: vi.fn() } as unknown as VideoFrame;
+		const sample = createMockVideoSample();
 		const handle = createMockVideoHandle({
-			decodedGenerator: createVideoSampleGenerator(frame),
+			decodedGenerator: createVideoSampleGenerator(sample),
 		});
 		mocks.acquireVideoAsset.mockResolvedValue(handle);
 		mocks.makeImageFromTextureSourceDirect.mockReturnValue(decodedImage);
 
-		const store = createFreezeFrameModel("freeze-2", {
-			uri: "clip.mp4",
-			sourceTime: 1.01,
-		}, runtime);
+		const store = createFreezeFrameModel(
+			"freeze-2",
+			{
+				uri: "clip.mp4",
+				sourceTime: 1.01,
+			},
+			runtime,
+		);
 		await store.getState().init();
 
 		const alignedTime = alignSourceTime(1.01, 30);
@@ -123,7 +159,22 @@ describe("FreezeFrame model", () => {
 		expect(handle.asset.videoSampleSink.samples).toHaveBeenCalledWith(
 			alignedTime,
 		);
-		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(frame);
+		expect(sample.draw).toHaveBeenCalledWith(
+			expect.anything(),
+			0,
+			0,
+			1920,
+			1080,
+		);
+		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledWith(
+			expect.objectContaining({
+				width: 1920,
+				height: 1080,
+			}),
+			{
+				colorConversion: "browser",
+			},
+		);
 		expect(mocks.makeImageFromTextureSourceDirect).toHaveBeenCalledTimes(1);
 		expect(handle.asset.storeFrame).toHaveBeenCalledWith(
 			alignedTime,
@@ -146,10 +197,14 @@ describe("FreezeFrame model", () => {
 			.mockResolvedValueOnce(handleA)
 			.mockResolvedValueOnce(handleB);
 
-		const store = createFreezeFrameModel("freeze-3", {
-			uri: "clip.mp4",
-			sourceTime: 1,
-		}, runtime);
+		const store = createFreezeFrameModel(
+			"freeze-3",
+			{
+				uri: "clip.mp4",
+				sourceTime: 1,
+			},
+			runtime,
+		);
 		await store.getState().init();
 		store.getState().setProps({ sourceTime: 2 });
 		await store.getState().init();
@@ -168,17 +223,21 @@ describe("FreezeFrame model", () => {
 		const decodedImage = { id: "decoded-image" };
 		const handle = createMockVideoHandle({
 			decodedGenerator: (async function* () {
-				yield createMockVideoSample({ close: vi.fn() } as unknown as VideoFrame);
+				yield createMockVideoSample();
 			})(),
 			videoRotation: 90,
 		});
 		mocks.acquireVideoAsset.mockResolvedValue(handle);
 		mocks.makeImageFromTextureSourceDirect.mockReturnValue(decodedImage);
 
-		const store = createFreezeFrameModel("freeze-rotation", {
-			uri: "clip.mp4",
-			sourceTime: 0,
-		}, runtime);
+		const store = createFreezeFrameModel(
+			"freeze-rotation",
+			{
+				uri: "clip.mp4",
+				sourceTime: 0,
+			},
+			runtime,
+		);
 		await store.getState().init();
 
 		expect(store.getState().internal.videoRotation).toBe(90);

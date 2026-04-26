@@ -184,6 +184,7 @@ const createFrameWithCloneSpy = (id: string) => {
 describe("video playbackController", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		window.localStorage.clear();
 		useProjectStore.setState({
 			currentProject: null,
 			currentProjectId: null,
@@ -216,6 +217,7 @@ describe("video playbackController", () => {
 	});
 
 	afterEach(() => {
+		window.localStorage.clear();
 		useProjectStore.setState({
 			currentProject: null,
 			currentProjectId: null,
@@ -599,10 +601,7 @@ describe("video playbackController", () => {
 				targetColorSpace: "display-p3",
 			},
 		);
-		expect(mocks.probeVideoRawFrameAccess).toHaveBeenCalledWith(sample, {
-			key: "asset-video-1",
-			label: "video node node-color-meta",
-		});
+		expect(mocks.probeVideoRawFrameAccess).not.toHaveBeenCalled();
 		expect(
 			useProjectStore.getState().currentProject?.assets[0]?.meta?.color
 				?.detected,

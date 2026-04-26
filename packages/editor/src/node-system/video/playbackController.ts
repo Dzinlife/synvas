@@ -42,6 +42,15 @@ const DEFAULT_TEXTURE_TARGET_COLOR_SPACE: TextureSourceTargetColorSpace =
 
 type ClockMode = "audio" | "perf" | null;
 
+const isVideoRawFrameProbeEnabled = () => {
+	if (typeof localStorage === "undefined") return false;
+	try {
+		return localStorage.getItem("synvas.videoRawProbe") === "1";
+	} catch {
+		return false;
+	}
+};
+
 const getNowMs = (): number => {
 	if (
 		typeof performance !== "undefined" &&
@@ -819,10 +828,12 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 			return existed;
 		}
 
-		void probeVideoRawFrameAccess(frame, {
-			key: this.binding.assetId ?? this.binding.assetUri ?? this.nodeId,
-			label: `video node ${this.nodeId}`,
-		});
+		if (isVideoRawFrameProbeEnabled()) {
+			void probeVideoRawFrameAccess(frame, {
+				key: this.binding.assetId ?? this.binding.assetUri ?? this.nodeId,
+				label: `video node ${this.nodeId}`,
+			});
+		}
 
 		const decoded = videoSampleToColorManagedSkImage(frame, {
 			targetColorSpace:

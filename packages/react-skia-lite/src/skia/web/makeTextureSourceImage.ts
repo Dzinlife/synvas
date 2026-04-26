@@ -28,6 +28,8 @@ export interface TextureSourceImageOptions {
 	colorConversion?: "browser" | "none";
 }
 
+type DirectTextureSource = TextureSource | CanvasImageSource | VideoFrame;
+
 const WEBGPU_TEXTURE_USAGE_FALLBACK = 0x01 | 0x02 | 0x04 | 0x10;
 let didWarnWebGLColorManagedTextureSource = false;
 
@@ -61,7 +63,7 @@ const destroyWebGPUTextureWhenQueueIdle = (
 		});
 };
 
-const getTextureSourceWidth = (source: TextureSource | VideoFrame) => {
+const getTextureSourceWidth = (source: DirectTextureSource) => {
 	return (
 		(source as { naturalWidth?: number }).naturalWidth ??
 		(source as { videoWidth?: number }).videoWidth ??
@@ -71,7 +73,7 @@ const getTextureSourceWidth = (source: TextureSource | VideoFrame) => {
 	);
 };
 
-const getTextureSourceHeight = (source: TextureSource | VideoFrame) => {
+const getTextureSourceHeight = (source: DirectTextureSource) => {
 	return (
 		(source as { naturalHeight?: number }).naturalHeight ??
 		(source as { videoHeight?: number }).videoHeight ??
@@ -81,7 +83,7 @@ const getTextureSourceHeight = (source: TextureSource | VideoFrame) => {
 	);
 };
 
-const toExternalTextureSource = (source: TextureSource | VideoFrame) =>
+const toExternalTextureSource = (source: DirectTextureSource) =>
 	({
 		source: source as never,
 	}) as WebGPUExternalImageCopy;
@@ -89,8 +91,7 @@ const toExternalTextureSource = (source: TextureSource | VideoFrame) =>
 const resolveTargetColorSpace = (
 	options: TextureSourceImageOptions | undefined,
 ): TextureSourceTargetColorSpace =>
-	options?.targetColorSpace === "display-p3" &&
-	CanvasKit.ColorSpace.DISPLAY_P3
+	options?.targetColorSpace === "display-p3" && CanvasKit.ColorSpace.DISPLAY_P3
 		? "display-p3"
 		: "srgb";
 
@@ -113,7 +114,7 @@ const toExternalTextureDestination = (
 });
 
 export const makeImageFromTextureSourceDirect = (
-	source: TextureSource | VideoFrame,
+	source: DirectTextureSource,
 	options?: TextureSourceImageOptions,
 ): JsiSkImage | null => {
 	const backend = getSkiaRenderBackend();
@@ -131,9 +132,8 @@ export const makeImageFromTextureSourceDirect = (
 		try {
 			const canvasKit = CanvasKit as CanvasKitWithLazyTextureSourceImage;
 			const image =
-				canvasKit.MakeLazyImageFromTextureSource?.(
-					source as TextureSource,
-				) ?? CanvasKit.MakeImageFromCanvasImageSource(source as CanvasImageSource);
+				canvasKit.MakeLazyImageFromTextureSource?.(source as TextureSource) ??
+				CanvasKit.MakeImageFromCanvasImageSource(source as CanvasImageSource);
 			return new JsiSkImage(CanvasKit, image);
 		} catch (error) {
 			console.warn("Failed to create WebGL texture-source image", error);
