@@ -59,6 +59,7 @@ interface TileAsyncPictureCacheEntry {
 	sourceSignature: string;
 	status: "pending" | "ready" | "failed";
 	picture: SkPicture | null;
+	pictureSourceSignature: string | null;
 	sourceWidth: number;
 	sourceHeight: number;
 	dispose: (() => void) | null;

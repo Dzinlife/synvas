@@ -88,6 +88,7 @@ import {
 import { useInfiniteSkiaCanvasRenderRetention } from "./useInfiniteSkiaCanvasRenderRetention";
 import type { CanvasNodeDragEvent } from "./NodeInteractionWrapper";
 import { getCanvasNodeDefinition } from "@/node-system/registry";
+import { subscribeSceneNodeLastLiveFrame } from "@/node-system/scene/lastLiveFrame";
 import type {
 	CanvasNodeFocusEditorBridgeProps,
 	CanvasNodeFocusEditorLayerState,
@@ -289,6 +290,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const [rasterCacheVersion, setRasterCacheVersion] = useState(0);
 	const [liveRenderPreparationVersion, setLiveRenderPreparationVersion] =
 		useState(0);
+	const [sceneLastLiveFrameVersion, setSceneLastLiveFrameVersion] = useState(0);
 	const assetById = useMemo(() => {
 		return new Map(assets.map((asset) => [asset.id, asset]));
 	}, [assets]);
@@ -324,6 +326,11 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const tileTickPausedRef = useRef(isFocusMode);
 	const latestTileFrameResultRef = useRef<TileFrameResult | null>(null);
 	const previousTileProjectIdRef = useRef<string | null>(currentProjectId);
+	const activeNodeIdRef = useRef<string | null>(activeNodeId);
+	const retainedLiveNodeIdSetRef =
+		useRef<ReadonlySet<string>>(EMPTY_NODE_ID_SET);
+	const pendingSceneLastLiveFrameNodeIdsRef = useRef(new Set<string>());
+	const sceneLastLiveFrameRefreshRafRef = useRef<number | null>(null);
 	const resetTilePipelineResources = useCallback(
 		(options?: { flushDisposals?: boolean }) => {
 			tileSchedulerRef.current?.reset({ disposeTiming: "immediate" });
@@ -551,6 +558,53 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		}
 		return liveLayerNodes;
 	}, [liveRenderNodes, retainedLiveNodeIdSet, retainedLiveRenderNodes]);
+	useLayoutEffect(() => {
+		activeNodeIdRef.current = activeNodeId;
+		retainedLiveNodeIdSetRef.current = retainedLiveNodeIdSet;
+	}, [activeNodeId, retainedLiveNodeIdSet]);
+	useEffect(() => {
+		if (!supportsTilePipeline) return;
+		const flushSceneLastLiveFrameRefresh = () => {
+			sceneLastLiveFrameRefreshRafRef.current = null;
+			const nodeIds = [...pendingSceneLastLiveFrameNodeIdsRef.current];
+			pendingSceneLastLiveFrameNodeIdsRef.current.clear();
+			const shouldRefresh = nodeIds.some((nodeId) => {
+				return (
+					retainedLiveNodeIdSetRef.current.has(nodeId) ||
+					activeNodeIdRef.current !== nodeId
+				);
+			});
+			if (!shouldRefresh) return;
+			setSceneLastLiveFrameVersion((prev) => prev + 1);
+			scheduleTileTick();
+		};
+		const unsubscribe = subscribeSceneNodeLastLiveFrame((_record, nodeId) => {
+			pendingSceneLastLiveFrameNodeIdsRef.current.add(nodeId);
+			if (sceneLastLiveFrameRefreshRafRef.current !== null) return;
+			if (
+				typeof window !== "undefined" &&
+				typeof window.requestAnimationFrame === "function"
+			) {
+				sceneLastLiveFrameRefreshRafRef.current = window.requestAnimationFrame(
+					flushSceneLastLiveFrameRefresh,
+				);
+				return;
+			}
+			void Promise.resolve().then(flushSceneLastLiveFrameRefresh);
+		});
+		return () => {
+			unsubscribe();
+			if (
+				sceneLastLiveFrameRefreshRafRef.current !== null &&
+				typeof window !== "undefined" &&
+				typeof window.cancelAnimationFrame === "function"
+			) {
+				window.cancelAnimationFrame(sceneLastLiveFrameRefreshRafRef.current);
+			}
+			sceneLastLiveFrameRefreshRafRef.current = null;
+			pendingSceneLastLiveFrameNodeIdsRef.current.clear();
+		};
+	}, [scheduleTileTick, supportsTilePipeline]);
 	const frozenLayoutRenderNodes = useMemo(() => {
 		if (renderFrozenNodeIdSet.size === 0) return [];
 		return renderNodes.filter((node) => renderFrozenNodeIdSet.has(node.id));
@@ -1025,6 +1079,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	const staticTileSnapshot = useMemo(() => {
 		void rasterCacheVersion;
 		void tileAsyncPictureVersion;
+		void sceneLastLiveFrameVersion;
 		if (!supportsTilePipeline) {
 			return EMPTY_STATIC_TILE_SNAPSHOT;
 		}
@@ -1033,6 +1088,42 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		const asyncPictureRequests: TileAsyncPictureRequest[] = [];
 		const pendingPictureNodeIdSet = new Set<string>();
 		const visitedNodeIds = new Set<string>();
+		const resolveTilePictureState = (
+			latestNode: CanvasNode,
+			scene: StudioProject["scenes"][string] | null,
+			asset: ReturnType<typeof resolveNodeAsset>,
+		) => {
+			const capability = resolveTilePictureCapability(latestNode);
+			if (!capability) {
+				return {
+					capability: null,
+					context: null,
+					sourceSignature: null,
+					preferOverThumbnail: false,
+				};
+			}
+			const context: CanvasNodeTilePictureCapabilityContext<CanvasNode> = {
+				node: latestNode,
+				scene,
+				asset,
+				projectId: currentProjectId,
+				runtimeManager,
+			};
+			const capabilitySourceSignature =
+				capability.getSourceSignature?.(context) ?? null;
+			const sourceSignature =
+				typeof capabilitySourceSignature === "string"
+					? capabilitySourceSignature
+					: null;
+			return {
+				capability,
+				context,
+				sourceSignature,
+				preferOverThumbnail:
+					sourceSignature !== null &&
+					capability.preferOverThumbnail?.(context) === true,
+			};
+		};
 		const createFrozenNodeSnapshotInput = (
 			latestNode: CanvasNode,
 		): TileInput | null => {
@@ -1060,7 +1151,18 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				rasterEntry?.height ??
 				Math.max(1, Math.round(Math.abs(latestNode.height)));
 			const inputId = resolveTileInputId(latestNode.id);
-			if (image) {
+			const sourceSignature = resolveTileNodeSourceSignature(
+				latestNode,
+				scene,
+				asset,
+				thumbnailCapabilityEnabled,
+			);
+			const tilePictureState = resolveTilePictureState(
+				latestNode,
+				scene,
+				asset,
+			);
+			if (image && !tilePictureState.preferOverThumbnail) {
 				return {
 					kind: "raster",
 					id: inputId,
@@ -1073,32 +1175,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					epoch: 0,
 				};
 			}
-			if (thumbnailCapabilityEnabled) return null;
-			const tilePictureCapability = resolveTilePictureCapability(latestNode);
-			if (!tilePictureCapability) return null;
-			const tilePictureContext: CanvasNodeTilePictureCapabilityContext<CanvasNode> =
-				{
-					node: latestNode,
-					scene,
-					asset,
-					projectId: currentProjectId,
-					runtimeManager,
-				};
-			const tilePictureCapabilitySourceSignature =
-				tilePictureCapability.getSourceSignature?.(tilePictureContext) ?? null;
-			const tilePictureSourceSignature =
-				typeof tilePictureCapabilitySourceSignature === "string"
-					? tilePictureCapabilitySourceSignature
-					: null;
-			const sourceSignature = resolveTileNodeSourceSignature(
-				latestNode,
-				scene,
-				asset,
-				thumbnailCapabilityEnabled,
-			);
+			if (thumbnailCapabilityEnabled && !tilePictureState.preferOverThumbnail) {
+				return null;
+			}
+			if (!tilePictureState.capability || !tilePictureState.context)
+				return null;
 			const sourceKey =
-				tilePictureSourceSignature !== null
-					? `fallback-picture:async:${tilePictureSourceSignature}`
+				tilePictureState.sourceSignature !== null
+					? `fallback-picture:async:${tilePictureState.sourceSignature}`
 					: `${sourceSignature}:fallback-picture:async:none`;
 			const asyncPictureEntry =
 				tileAsyncPictureCacheRef.current.get(latestNode.id) ?? null;
@@ -1106,8 +1190,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				asyncPictureRequests.push({
 					nodeId: latestNode.id,
 					sourceSignature: sourceKey,
-					capability: tilePictureCapability,
-					context: tilePictureContext,
+					capability: tilePictureState.capability,
+					context: tilePictureState.context,
 				});
 			}
 			if (!asyncPictureEntry?.picture) return null;
@@ -1241,34 +1325,35 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			const sourceHeight =
 				rasterEntry?.height ??
 				Math.max(1, Math.round(Math.abs(latestNode.height)));
-			const shouldUsePictureFallback = !image && !thumbnailCapabilityEnabled;
-			const tilePictureCapability = shouldUsePictureFallback
-				? resolveTilePictureCapability(latestNode)
-				: null;
-			const tilePictureContext: CanvasNodeTilePictureCapabilityContext<CanvasNode> =
-				{
-					node: latestNode,
-					scene,
-					asset,
-					projectId: currentProjectId,
-					runtimeManager,
-				};
-			const tilePictureCapabilitySourceSignature =
-				tilePictureCapability?.getSourceSignature?.(tilePictureContext) ?? null;
-			const tilePictureSourceSignature =
-				typeof tilePictureCapabilitySourceSignature === "string"
-					? tilePictureCapabilitySourceSignature
-					: null;
+			const tilePictureState = resolveTilePictureState(
+				latestNode,
+				scene,
+				asset,
+			);
+			const shouldUsePictureFallback =
+				tilePictureState.preferOverThumbnail ||
+				(!image && !thumbnailCapabilityEnabled);
 			const sourceKey = shouldUsePictureFallback
-				? tilePictureCapability
+				? tilePictureState.capability
 					? // 当 capability 提供专用签名时，不再混入 updatedAt（拖拽位移也会变化），
 						// 避免位置拖拽触发 picture 缓存抖动导致闪烁。
-						tilePictureSourceSignature !== null
-						? `fallback-picture:async:${tilePictureSourceSignature}`
+						tilePictureState.sourceSignature !== null
+						? `fallback-picture:async:${tilePictureState.sourceSignature}`
 						: `${sourceSignature}:fallback-picture:async:none`
 					: `${sourceSignature}:fallback-picture:disabled`
 				: sourceSignature;
-			const inputSourceKey = `${sourceKey}:clip:${clipSignature}`;
+			const asyncPictureEntryForInput =
+				shouldUsePictureFallback && tilePictureState.capability
+					? (tileAsyncPictureCacheRef.current.get(latestNode.id) ?? null)
+					: null;
+			const pictureInputSourceKey =
+				asyncPictureEntryForInput?.picture &&
+				asyncPictureEntryForInput.pictureSourceSignature
+					? asyncPictureEntryForInput.pictureSourceSignature
+					: sourceKey;
+			const inputSourceKey = `${
+				shouldUsePictureFallback ? pictureInputSourceKey : sourceKey
+			}:clip:${clipSignature}`;
 			const modeKey: TileInputCacheEntry["mode"] = shouldUsePictureFallback
 				? "fallback-picture"
 				: "raster";
@@ -1283,7 +1368,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			let input: TileInput | null = null;
 			if (!visibleAabb) {
 				disposeTileInput(cachedEntry?.input);
-			} else if (image) {
+			} else if (image && !shouldUsePictureFallback) {
 				if (cachedEntry?.input?.kind === "picture") {
 					disposeTileInput(cachedEntry.input);
 				}
@@ -1299,9 +1384,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					epoch,
 				};
 			} else if (shouldUsePictureFallback) {
-				if (tilePictureCapability) {
-					const asyncPictureEntry =
-						tileAsyncPictureCacheRef.current.get(latestNode.id) ?? null;
+				if (tilePictureState.capability && tilePictureState.context) {
+					const asyncPictureEntry = asyncPictureEntryForInput;
 					const hasMatchingAsyncPictureSource =
 						asyncPictureEntry?.sourceSignature === sourceKey;
 					const shouldQueueAsyncPictureRequest = !hasMatchingAsyncPictureSource;
@@ -1309,11 +1393,14 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 						asyncPictureRequests.push({
 							nodeId: latestNode.id,
 							sourceSignature: sourceKey,
-							capability: tilePictureCapability,
-							context: tilePictureContext,
+							capability: tilePictureState.capability,
+							context: tilePictureState.context,
 						});
 					}
 					if (asyncPictureEntry?.picture) {
+						if (asyncPictureEntry.pictureSourceSignature !== sourceKey) {
+							pendingPictureNodeIdSet.add(latestNode.id);
+						}
 						input = {
 							kind: "picture",
 							id: inputId,
@@ -1380,6 +1467,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		resolveNodeRasterUri,
 		resolveTileInputId,
 		runtimeManager,
+		sceneLastLiveFrameVersion,
 		scenes,
 		supportsTilePipeline,
 		tileAsyncPictureVersion,
@@ -1402,11 +1490,17 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			const taskId = tileAsyncPictureTaskIdRef.current + 1;
 			tileAsyncPictureTaskIdRef.current = taskId;
 			const fallbackPicture = existingEntry?.picture ?? null;
+			const fallbackPictureSourceSignature = fallbackPicture
+				? (existingEntry?.pictureSourceSignature ??
+					existingEntry?.sourceSignature ??
+					null)
+				: null;
 			const fallbackDispose = existingEntry?.dispose ?? null;
 			tileAsyncPictureCacheRef.current.set(request.nodeId, {
 				sourceSignature: request.sourceSignature,
 				status: "pending",
 				picture: fallbackPicture,
+				pictureSourceSignature: fallbackPictureSourceSignature,
 				sourceWidth: Math.max(
 					1,
 					Math.round(
@@ -1435,7 +1529,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					) {
 						try {
 							try {
-								result?.picture?.dispose?.();
+								if (!result?.disposeIncludesPicture) {
+									result?.picture?.dispose?.();
+								}
 							} finally {
 								result?.dispose?.();
 							}
@@ -1456,6 +1552,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					}
 					latestEntry.status = "ready";
 					latestEntry.picture = result.picture;
+					latestEntry.pictureSourceSignature = request.sourceSignature;
 					latestEntry.sourceWidth = Math.max(
 						1,
 						Math.round(result.sourceWidth || latestEntry.sourceWidth),
@@ -1466,7 +1563,9 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					);
 					latestEntry.dispose = () => {
 						try {
-							result.picture.dispose?.();
+							if (!result.disposeIncludesPicture) {
+								result.picture.dispose?.();
+							}
 						} finally {
 							result.dispose?.();
 						}
@@ -1650,7 +1749,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					ancestorClipAabbs={ancestorClipAabbs}
 					scene={scene}
 					asset={asset}
-					isActive={node.id === activeNodeId}
+					isActive={
+						node.id === activeNodeId ||
+						(latestNode.type === "scene" && retainedLiveNodeIdSet.has(node.id))
+					}
 					isFocused={node.id === focusedNodeId}
 					runtimeManager={runtimeManager}
 				/>

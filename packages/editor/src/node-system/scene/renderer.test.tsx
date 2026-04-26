@@ -3,6 +3,11 @@
 import { act, render, waitFor } from "@testing-library/react";
 import type { TimelineElement } from "core/timeline-system/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+	StudioRuntimeManager,
+	TimelineRuntime,
+} from "@/scene-editor/runtime/types";
+import type { SceneDocument, SceneNode } from "@/studio/project/types";
 
 const { buildSkiaFrameSnapshotMock, timelineStoreState, thumbnailImageMock } =
 	vi.hoisted(() => {
@@ -276,6 +281,10 @@ vi.mock("@/typography/textTypographyFacade", () => ({
 }));
 
 import { SceneNodeSkiaRenderer } from "./renderer";
+import {
+	clearSceneNodeLastLiveFrames,
+	getSceneNodeLastLiveFrame,
+} from "./lastLiveFrame";
 
 const createElement = (id: string): TimelineElement => ({
 	id,
@@ -305,7 +314,7 @@ const createFrameSnapshot = (label: string) => ({
 	dispose: vi.fn(),
 });
 
-const createRuntimeManager = () => {
+const createRuntimeManager = (): StudioRuntimeManager => {
 	const runtime = {
 		id: "runtime:scene-1",
 		ref: {
@@ -319,16 +328,21 @@ const createRuntimeManager = () => {
 		modelRegistry: {
 			get: vi.fn(() => undefined),
 		},
-	};
+	} as unknown as TimelineRuntime;
 	return {
 		ensureTimelineRuntime: vi.fn(() => runtime),
 		getTimelineRuntime: vi.fn(() => runtime),
+		removeTimelineRuntime: vi.fn(),
+		listTimelineRuntimes: vi.fn(() => [runtime]),
+		setActiveEditTimeline: vi.fn(),
+		getActiveEditTimelineRef: vi.fn(() => runtime.ref),
+		getActiveEditTimelineRuntime: vi.fn(() => runtime),
 	};
 };
 
 const createRendererProps = (
 	isActive: boolean,
-	runtimeManager: any = createRuntimeManager() as any,
+	runtimeManager: StudioRuntimeManager = createRuntimeManager(),
 ) => ({
 	node: {
 		id: "node-scene-1",
@@ -344,7 +358,7 @@ const createRendererProps = (
 		hidden: false,
 		createdAt: 0,
 		updatedAt: 0,
-	} as any,
+	} satisfies SceneNode,
 	scene: {
 		id: "scene-1",
 		name: "Scene 1",
@@ -354,7 +368,7 @@ const createRendererProps = (
 		posterFrame: 0,
 		createdAt: 0,
 		updatedAt: 0,
-	} as any,
+	} as unknown as SceneDocument,
 	asset: null,
 	isActive,
 	isFocused: false,
@@ -366,6 +380,7 @@ describe("SceneNodeSkiaRenderer", () => {
 		buildSkiaFrameSnapshotMock.mockReset();
 		thumbnailImageMock.mockReset();
 		thumbnailImageMock.mockReturnValue(null);
+		clearSceneNodeLastLiveFrames();
 		timelineStoreState.reset();
 		typographyRevisionMock.reset();
 		timelineStoreState.setState({
@@ -406,6 +421,39 @@ describe("SceneNodeSkiaRenderer", () => {
 		expect(
 			view.container.querySelector('[data-skia="image-shader"]'),
 		).toBeTruthy();
+	});
+
+	it("成功提交 live picture 后会记录最后一帧", async () => {
+		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) =>
+			createFrameSnapshot(`frame-${displayTime}`),
+		);
+		const props = createRendererProps(true);
+
+		render(<SceneNodeSkiaRenderer {...props} />);
+
+		await waitFor(() => {
+			const record = getSceneNodeLastLiveFrame(props.node, props.scene);
+			expect(record?.nodeId).toBe("node-scene-1");
+			expect(record?.sceneId).toBe("scene-1");
+			expect(record?.frameIndex).toBe(0);
+			expect(record?.sourceWidth).toBe(1920);
+			expect(record?.sourceHeight).toBe(1080);
+		});
+	});
+
+	it("构帧失败时不会记录最后一帧", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		buildSkiaFrameSnapshotMock.mockRejectedValue(new Error("frame failed"));
+		const props = createRendererProps(true);
+
+		render(<SceneNodeSkiaRenderer {...props} />);
+
+		await waitFor(() => {
+			expect(buildSkiaFrameSnapshotMock).toHaveBeenCalled();
+			expect(errorSpy).toHaveBeenCalled();
+		});
+		expect(getSceneNodeLastLiveFrame(props.node, props.scene)).toBeNull();
+		errorSpy.mockRestore();
 	});
 
 	it("构帧失败时会清空为占位块并释放上一帧", async () => {
@@ -464,7 +512,7 @@ describe("SceneNodeSkiaRenderer", () => {
 		buildSkiaFrameSnapshotMock.mockImplementation(async ({ displayTime }) =>
 			createFrameSnapshot(`frame-${displayTime}`),
 		);
-		const runtimeManager = createRuntimeManager() as any;
+		const runtimeManager = createRuntimeManager();
 
 		const { rerender, container } = render(
 			<SceneNodeSkiaRenderer {...createRendererProps(true, runtimeManager)} />,

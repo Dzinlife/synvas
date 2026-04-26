@@ -41,6 +41,7 @@ export const boardNodeTilePictureCapability: CanvasNodeTilePictureCapability<Boa
 						picture.dispose?.();
 					} catch {}
 				},
+				disposeIncludesPicture: true,
 			};
 		},
 	};

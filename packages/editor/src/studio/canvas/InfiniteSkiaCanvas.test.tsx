@@ -5,6 +5,8 @@ import type {
 	AudioCanvasNode,
 	BoardCanvasNode,
 	ImageCanvasNode,
+	SceneCanvasNode,
+	SceneDocument,
 	StudioProject,
 	TextCanvasNode,
 	VideoCanvasNode,
@@ -14,6 +16,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasNodeOverlayLayer } from "./CanvasNodeOverlayLayer";
 import { CanvasTriDotGridBackground } from "./CanvasTriDotGridBackground";
 import InfiniteSkiaCanvas from "./InfiniteSkiaCanvas";
+import {
+	clearSceneNodeLastLiveFrames,
+	getSceneNodeLastLiveFrame,
+	recordSceneNodeLastLiveFrame,
+} from "@/node-system/scene/lastLiveFrame";
 import { resolveTileDrawBleed } from "./infiniteSkiaCanvasTilePipeline";
 import {
 	TILE_MAX_TASKS_PER_TICK_DRAG,
@@ -36,6 +43,11 @@ interface SkiaSurfaceMockRecord {
 		height: ReturnType<typeof vi.fn>;
 		dispose: ReturnType<typeof vi.fn>;
 	};
+}
+
+interface SceneTilePictureMockContext {
+	node: SceneCanvasNode;
+	scene?: StudioProject["scenes"][string] | null;
 }
 
 const { rootRenderSpy } = vi.hoisted(() => ({
@@ -164,6 +176,37 @@ const { textTilePictureGenerateMock } = vi.hoisted(() => ({
 				dispose: vi.fn(),
 			};
 		},
+	),
+}));
+const { sceneTilePictureMockState } = vi.hoisted(() => ({
+	sceneTilePictureMockState: {
+		preferOverThumbnail: false,
+	},
+}));
+const { sceneTilePictureSourceSignatureMock } = vi.hoisted(() => ({
+	sceneTilePictureSourceSignatureMock: vi.fn(
+		(context: SceneTilePictureMockContext) =>
+			sceneTilePictureMockState.preferOverThumbnail
+				? `${context.node.id}:last-live-frame`
+				: null,
+	),
+}));
+const { sceneTilePicturePreferOverThumbnailMock } = vi.hoisted(() => ({
+	sceneTilePicturePreferOverThumbnailMock: vi.fn(
+		(_context?: SceneTilePictureMockContext) =>
+			sceneTilePictureMockState.preferOverThumbnail,
+	),
+}));
+const { sceneTilePictureGenerateMock } = vi.hoisted(() => ({
+	sceneTilePictureGenerateMock: vi.fn(
+		async (context: { node: SceneCanvasNode }) => ({
+			picture: {
+				dispose: vi.fn(),
+			},
+			sourceWidth: Math.max(1, Math.round(Math.abs(context.node.width))),
+			sourceHeight: Math.max(1, Math.round(Math.abs(context.node.height))),
+			dispose: vi.fn(),
+		}),
 	),
 }));
 const { textLivePreparationMockState } = vi.hoisted(() => ({
@@ -518,6 +561,11 @@ vi.mock("@/node-system/registry", async () => {
 		getSourceSignature: imageTilePictureSourceSignatureMock,
 		generate: imageTilePictureGenerateMock,
 	};
+	const sceneTilePictureCapability = {
+		preferOverThumbnail: sceneTilePicturePreferOverThumbnailMock,
+		getSourceSignature: sceneTilePictureSourceSignatureMock,
+		generate: sceneTilePictureGenerateMock,
+	};
 	const imageLivePreparationCapability = {
 		getSourceSignature: imageLivePreparationSourceSignatureMock,
 		prepare: imageLivePreparationPrepareMock,
@@ -548,11 +596,13 @@ vi.mock("@/node-system/registry", async () => {
 			tilePicture:
 				type === "image"
 					? imageTilePictureCapability
-					: type === "text"
-						? textTilePictureCapability
-						: type === "board"
-							? boardTilePictureCapability
-							: undefined,
+					: type === "scene"
+						? sceneTilePictureCapability
+						: type === "text"
+							? textTilePictureCapability
+							: type === "board"
+								? boardTilePictureCapability
+								: undefined,
 			liveRenderPreparation:
 				type === "image"
 					? imageLivePreparationCapability
@@ -769,6 +819,23 @@ const createSceneNode = (id: string, siblingOrder: number) => ({
 	sceneId: "scene-1",
 });
 
+const createSceneDocument = (id = "scene-1"): SceneDocument => ({
+	id,
+	name: id,
+	timeline: {
+		canvas: {
+			width: 320,
+			height: 180,
+		},
+		elements: [],
+		tracks: [],
+		fps: 30,
+	} as unknown as SceneDocument["timeline"],
+	posterFrame: 0,
+	createdAt: 1,
+	updatedAt: 1,
+});
+
 const createBoardNode = (
 	id: string,
 	siblingOrder: number,
@@ -931,9 +998,11 @@ const createEmptyTileFrameResult = (): TileFrameResult => ({
 describe("InfiniteSkiaCanvas", () => {
 	afterEach(() => {
 		cleanup();
+		clearSceneNodeLastLiveFrames();
 	});
 
 	beforeEach(() => {
+		clearSceneNodeLastLiveFrames();
 		rootRenderSpy.mockReset();
 		tilePipelineMockState.enabled = false;
 		skiaSurfaceMockState.defaultPixelRatio = 1;
@@ -1027,6 +1096,30 @@ describe("InfiniteSkiaCanvas", () => {
 		textTilePictureGenerateMock.mockReset();
 		textTilePictureGenerateMock.mockImplementation(
 			async (context: { node: TextCanvasNode }) => ({
+				picture: {
+					dispose: vi.fn(),
+				},
+				sourceWidth: Math.max(1, Math.round(Math.abs(context.node.width))),
+				sourceHeight: Math.max(1, Math.round(Math.abs(context.node.height))),
+				dispose: vi.fn(),
+			}),
+		);
+		sceneTilePictureMockState.preferOverThumbnail = false;
+		sceneTilePictureSourceSignatureMock.mockReset();
+		sceneTilePictureSourceSignatureMock.mockImplementation(
+			(context: SceneTilePictureMockContext) =>
+				sceneTilePictureMockState.preferOverThumbnail
+					? `${context.node.id}:last-live-frame`
+					: null,
+		);
+		sceneTilePicturePreferOverThumbnailMock.mockReset();
+		sceneTilePicturePreferOverThumbnailMock.mockImplementation(
+			(_context?: SceneTilePictureMockContext) =>
+				sceneTilePictureMockState.preferOverThumbnail,
+		);
+		sceneTilePictureGenerateMock.mockReset();
+		sceneTilePictureGenerateMock.mockImplementation(
+			async (context: { node: SceneCanvasNode }) => ({
 				picture: {
 					dispose: vi.fn(),
 				},
@@ -1924,6 +2017,218 @@ describe("InfiniteSkiaCanvas", () => {
 				drawItems?: Array<unknown>;
 			}>(getStaticTileLayerElement(getLatestRenderTree()));
 			expect(staticTileLayerProps?.drawItems?.length ?? 0).toBeGreaterThan(0);
+		});
+	});
+
+	it("scene 节点首屏有 thumbnail capability 时不会请求 tilePicture", async () => {
+		tilePipelineMockState.enabled = true;
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[createSceneNode("node-scene-thumbnail", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+		expect(sceneTilePictureGenerateMock).not.toHaveBeenCalled();
+	});
+
+	it("scene 节点有 last-live-frame 时 tilePicture 会覆盖 thumbnail", async () => {
+		tilePipelineMockState.enabled = true;
+		sceneTilePictureMockState.preferOverThumbnail = true;
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[createSceneNode("node-scene-last-live", 0)]}
+				scenes={emptyScenes}
+				assets={[]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(sceneTilePictureGenerateMock).toHaveBeenCalled();
+		});
+		await waitFor(() => {
+			const staticTileLayerProps = getElementProps<{
+				drawItems?: Array<unknown>;
+			}>(getStaticTileLayerElement(getLatestRenderTree()));
+			expect(staticTileLayerProps?.drawItems?.length ?? 0).toBeGreaterThan(0);
+		});
+	});
+
+	it("scene 取消 active 后会响应随后提交的 last-live-frame", async () => {
+		tilePipelineMockState.enabled = true;
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockImplementation(() => {
+				return {
+					...createEmptyTileFrameResult(),
+					hasPendingWork: true,
+					stats: {
+						...createEmptyTileFrameResult().stats,
+						queuedCount: 1,
+					},
+				};
+			});
+		const sceneNode = createSceneNode("node-scene-retained-last-live", 0);
+		const scene = createSceneDocument(sceneNode.sceneId);
+		const baseProps = {
+			width: 128,
+			height: 128,
+			camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+			nodes: [sceneNode],
+			scenes: {
+				[scene.id]: scene,
+			},
+			assets: [],
+			focusedNodeId: null,
+		};
+		try {
+			const { rerender } = render(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={sceneNode.id}
+					selectedNodeIds={[sceneNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getLiveRenderedNodeIds(getLatestRenderTree())).toContain(
+					sceneNode.id,
+				);
+			});
+
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					activeNodeId={null}
+					selectedNodeIds={[]}
+				/>,
+			);
+
+			await waitFor(() => {
+				const retainedItem = getCanvasNodeRenderItems(
+					getLatestRenderTree(),
+				).find((nodeItem) => {
+					return (
+						getElementProps<{ node?: { id: string } }>(nodeItem)?.node?.id ===
+						sceneNode.id
+					);
+				});
+				const retainedProps = getElementProps<{
+					isActive?: boolean;
+				}>(retainedItem);
+				expect(retainedProps?.isActive).toBe(true);
+			});
+			expect(sceneTilePictureGenerateMock).not.toHaveBeenCalled();
+
+			sceneTilePictureMockState.preferOverThumbnail = true;
+			act(() => {
+				recordSceneNodeLastLiveFrame({
+					node: sceneNode,
+					scene,
+					frame: {
+						kind: "picture",
+						picture: { dispose: vi.fn() },
+						dispose: vi.fn(),
+						frameIndex: 12,
+						displayTime: 0.4,
+						fps: 30,
+						sourceWidth: 320,
+						sourceHeight: 180,
+					} as unknown as Parameters<
+						typeof recordSceneNodeLastLiveFrame
+					>[0]["frame"],
+				});
+			});
+
+			await waitFor(() => {
+				expect(sceneTilePictureGenerateMock).toHaveBeenCalledTimes(1);
+			});
+		} finally {
+			beginFrameSpy.mockRestore();
+		}
+	});
+
+	it("scene 同一帧多次 live 提交会重新请求 tilePicture", async () => {
+		tilePipelineMockState.enabled = true;
+		const sceneNode = createSceneNode("node-scene-repeat-last-live", 0);
+		const scene = createSceneDocument(sceneNode.sceneId);
+		sceneTilePictureSourceSignatureMock.mockImplementation(
+			(context: SceneTilePictureMockContext) =>
+				getSceneNodeLastLiveFrame(context.node, context.scene ?? null)
+					?.sourceSignature ?? null,
+		);
+		sceneTilePicturePreferOverThumbnailMock.mockImplementation(
+			(context?: SceneTilePictureMockContext) =>
+				Boolean(
+					context &&
+						getSceneNodeLastLiveFrame(context.node, context.scene ?? null),
+				),
+		);
+		render(
+			<InfiniteSkiaCanvas
+				width={128}
+				height={128}
+				camera={createCameraShared({ x: 0, y: 0, zoom: 1 })}
+				nodes={[sceneNode]}
+				scenes={{
+					[scene.id]: scene,
+				}}
+				assets={[]}
+				activeNodeId={null}
+				selectedNodeIds={[]}
+				focusedNodeId={null}
+			/>,
+		);
+		await waitFor(() => {
+			expect(rootRenderSpy).toHaveBeenCalled();
+		});
+
+		const frame = {
+			kind: "picture",
+			picture: { dispose: vi.fn() },
+			dispose: vi.fn(),
+			frameIndex: 12,
+			displayTime: 0.4,
+			fps: 30,
+			sourceWidth: 320,
+			sourceHeight: 180,
+		} as unknown as Parameters<typeof recordSceneNodeLastLiveFrame>[0]["frame"];
+		act(() => {
+			recordSceneNodeLastLiveFrame({
+				node: sceneNode,
+				scene,
+				frame,
+			});
+		});
+
+		await waitFor(() => {
+			expect(sceneTilePictureGenerateMock).toHaveBeenCalledTimes(1);
+		});
+
+		act(() => {
+			recordSceneNodeLastLiveFrame({
+				node: sceneNode,
+				scene,
+				frame,
+			});
+		});
+
+		await waitFor(() => {
+			expect(sceneTilePictureGenerateMock).toHaveBeenCalledTimes(2);
 		});
 	});
 

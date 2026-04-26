@@ -172,11 +172,15 @@ export interface CanvasNodeTilePictureGenerationResult {
 	sourceWidth: number;
 	sourceHeight: number;
 	dispose?: () => void;
+	disposeIncludesPicture?: boolean;
 }
 
 export interface CanvasNodeTilePictureCapability<
 	TNode extends CanvasNode = CanvasNode,
 > {
+	preferOverThumbnail?: (
+		context: CanvasNodeTilePictureCapabilityContext<TNode>,
+	) => boolean;
 	getSourceSignature?: (
 		context: CanvasNodeTilePictureCapabilityContext<TNode>,
 	) => string | null;

@@ -13,6 +13,7 @@ import { SceneNodeDrawer } from "./drawer";
 import { SceneNodeInspector } from "./inspector";
 import { SceneNodeSkiaRenderer } from "./renderer";
 import { sceneNodeThumbnailCapability } from "./thumbnail";
+import { sceneNodeTilePictureCapability } from "./tilePicture";
 import { SceneNodeToolbar } from "./toolbar";
 
 const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
@@ -21,6 +22,7 @@ const sceneDefinition: CanvasNodeDefinition<SceneNode> = {
 	create: () => ({ type: "scene" }),
 	skiaRenderer: SceneNodeSkiaRenderer,
 	thumbnail: sceneNodeThumbnailCapability,
+	tilePicture: sceneNodeTilePictureCapability,
 	focusEditorLayer: FocusSceneSkiaLayer as unknown as React.ComponentType<unknown>,
 	focusEditorBridge:
 		SceneFocusEditorBridge as unknown as React.FC<

@@ -44,6 +44,7 @@ export const hdrTestNodeTilePictureCapability: CanvasNodeTilePictureCapability<H
 						picture.dispose?.();
 					} catch {}
 				},
+				disposeIncludesPicture: true,
 			};
 		},
 	};

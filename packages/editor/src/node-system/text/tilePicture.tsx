@@ -70,6 +70,7 @@ export const textNodeTilePictureCapability: CanvasNodeTilePictureCapability<Text
 						picture.dispose?.();
 					} catch {}
 				},
+				disposeIncludesPicture: true,
 			};
 		},
 	};
