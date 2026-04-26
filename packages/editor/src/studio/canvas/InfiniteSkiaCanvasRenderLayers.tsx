@@ -16,6 +16,7 @@ import { getCanvasNodeDefinition } from "@/node-system/registry";
 import type { CanvasNodeSkiaRenderProps } from "@/node-system/types";
 import type { CanvasNodeLayoutState } from "./canvasNodeLabelUtils";
 import { resolveCanvasNodeLayoutWorldRect } from "./canvasNodeLabelUtils";
+import type { CameraState } from "./canvasWorkspaceUtils";
 import type { TileAabb, TileDebugItem, TileDrawItem } from "./tile";
 import { TILE_CAMERA_EPSILON } from "./tile";
 import type { FrozenNodeRasterSnapshot } from "./infiniteSkiaCanvasTilePipeline";
@@ -28,6 +29,23 @@ const TILE_DEBUG_FONT_SIZE_PX = 10;
 const TILE_DEBUG_TEXT_COLOR = "rgba(255,255,255,0.96)";
 const TILE_DEBUG_LABEL_OFFSET_X = 4;
 const TILE_DEBUG_LABEL_OFFSET_Y = 4;
+
+const resolvePixelRoundedTileClip = (
+	tile: TileDrawItem,
+	camera: CameraState,
+) => {
+	const safeZoom = Math.max(camera.zoom, TILE_CAMERA_EPSILON);
+	const screenLeft = Math.round((tile.left + camera.x) * safeZoom);
+	const screenTop = Math.round((tile.top + camera.y) * safeZoom);
+	const screenRight = Math.round((tile.left + tile.size + camera.x) * safeZoom);
+	const screenBottom = Math.round((tile.top + tile.size + camera.y) * safeZoom);
+	return {
+		x: screenLeft / safeZoom - camera.x,
+		y: screenTop / safeZoom - camera.y,
+		width: Math.max(0, (screenRight - screenLeft) / safeZoom),
+		height: Math.max(0, (screenBottom - screenTop) / safeZoom),
+	};
+};
 
 const resolveClippedWorldRect = (
 	layout: CanvasNodeLayoutState,
@@ -204,33 +222,57 @@ const CanvasNodeFrozenRenderItemComponent = ({
 const CanvasNodeFrozenRenderItem = memo(CanvasNodeFrozenRenderItemComponent);
 CanvasNodeFrozenRenderItem.displayName = "CanvasNodeFrozenRenderItem";
 
+const StaticTileImageItemComponent = ({
+	tile,
+	camera,
+}: {
+	tile: TileDrawItem;
+	camera: SharedValue<CameraState>;
+}) => {
+	// Image 仍保留 bleed，clip 只把 tile 归属边界吸附到屏幕像素，避免半透明边界叠画。
+	const clip = useDerivedValue(() => {
+		return resolvePixelRoundedTileClip(tile, camera.value);
+	});
+	// 按纹理 texel 轻微外扩，避免缩放/采样导致 tile 边界出现黑缝
+	const bleed = resolveTileDrawBleed(tile);
+	const drawX = tile.left - bleed;
+	const drawY = tile.top - bleed;
+	const drawSize = tile.size + bleed * 2;
+	return (
+		<Group clip={clip} pointerEvents="none">
+			<Image
+				image={tile.image}
+				x={drawX}
+				y={drawY}
+				width={drawSize}
+				height={drawSize}
+				fit="fill"
+				pointerEvents="none"
+			/>
+		</Group>
+	);
+};
+
+const StaticTileImageItem = memo(StaticTileImageItemComponent);
+StaticTileImageItem.displayName = "StaticTileImageItem";
+
 const StaticTileLayerComponent = ({
 	drawItems,
+	camera,
 }: {
 	drawItems: TileDrawItem[];
+	camera: SharedValue<CameraState>;
 }) => {
 	if (drawItems.length <= 0) return null;
 	return (
 		<Group pointerEvents="none">
-			{drawItems.map((tile) => {
-				// 按纹理 texel 轻微外扩，避免缩放/采样导致 tile 边界出现黑缝
-				const bleed = resolveTileDrawBleed(tile);
-				const drawX = tile.left - bleed;
-				const drawY = tile.top - bleed;
-				const drawSize = tile.size + bleed * 2;
-				return (
-					<Image
-						key={`tile-ready-${tile.key}`}
-						image={tile.image}
-						x={drawX}
-						y={drawY}
-						width={drawSize}
-						height={drawSize}
-						fit="fill"
-						pointerEvents="none"
-					/>
-				);
-			})}
+			{drawItems.map((tile) => (
+				<StaticTileImageItem
+					key={`tile-ready-${tile.key}`}
+					tile={tile}
+					camera={camera}
+				/>
+			))}
 		</Group>
 	);
 };

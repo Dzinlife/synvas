@@ -1332,7 +1332,10 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				/>
 				<Group transform={animatedCameraTransform}>
 					<Group opacity={staticTileOpacity}>
-						<StaticTileLayer drawItems={staticTileDrawItems} />
+						<StaticTileLayer
+							drawItems={staticTileDrawItems}
+							camera={animatedCamera}
+						/>
 					</Group>
 					{tileDebugEnabled && (
 						<TileDebugLayer
