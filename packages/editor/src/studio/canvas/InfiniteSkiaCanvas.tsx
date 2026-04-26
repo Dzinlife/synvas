@@ -94,6 +94,7 @@ import type {
 } from "@/node-system/types";
 import {
 	StaticTileScheduler,
+	isTileAabbIntersected,
 	type TileAabb,
 	type TileDebugItem,
 	type TileDrawItem,
@@ -903,6 +904,38 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				dispose: null,
 			};
 		};
+		const resolveCurrentVisibleAabb = (node: CanvasNode): TileAabb | null => {
+			const aabb = resolveNodeWorldAabb(node);
+			const clipAabbs = resolveNodeAncestorClipAabbs(node, latestNodeById);
+			return resolveClippedTileInputAabb(aabb, clipAabbs);
+		};
+		const canReuseCompositedTileSnapshot = (
+			targetNode: CanvasNode,
+			targetInput: TileInput,
+		): boolean => {
+			if (!canCreateFrozenSnapshotFromCompositedTiles(targetNode)) return false;
+			const targetVisibleAabb =
+				resolveCurrentVisibleAabb(targetNode) ??
+				targetInput.visibleAabb ??
+				targetInput.aabb;
+			const ignoredNodeIds = new Set<string>([targetNode.id]);
+			let parentId = targetNode.parentId ?? null;
+			while (parentId) {
+				if (ignoredNodeIds.has(parentId)) break;
+				ignoredNodeIds.add(parentId);
+				parentId = latestNodeById.get(parentId)?.parentId ?? null;
+			}
+			for (const otherNode of tileNodes) {
+				if (otherNode.hidden || ignoredNodeIds.has(otherNode.id)) continue;
+				if (!tileInputCacheRef.current.get(otherNode.id)?.input) continue;
+				const otherVisibleAabb = resolveCurrentVisibleAabb(otherNode);
+				if (!otherVisibleAabb) continue;
+				if (isTileAabbIntersected(targetVisibleAabb, otherVisibleAabb)) {
+					return false;
+				}
+			}
+			return true;
+		};
 		for (const node of tileNodes) {
 			// 这里直接使用当帧 tileNodes，避免 undo/redo 与拖拽时 tile 输入落后一帧。
 			const latestNode = node;
@@ -917,7 +950,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					const snapshotInput = cachedInput ?? transientInput;
 					const snapshot =
 						(cachedInput &&
-						canCreateFrozenSnapshotFromCompositedTiles(latestNode)
+						canReuseCompositedTileSnapshot(latestNode, cachedInput)
 							? createFrozenNodeRasterSnapshotFromTiles(
 									cachedInput,
 									latestTileFrameResultRef.current?.drawItems ?? [],

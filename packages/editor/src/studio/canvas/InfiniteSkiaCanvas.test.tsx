@@ -2983,6 +2983,112 @@ describe("InfiniteSkiaCanvas", () => {
 		}
 	});
 
+	it("auto layout frozen snapshot 遇到其它节点重叠时不会从合成 tile 截图", async () => {
+		tilePipelineMockState.enabled = true;
+		skiaSurfaceMockState.defaultPixelRatio = 2;
+		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
+		const tileDrawSize = 512;
+		const tilePixelRatio = 2;
+		const tileImageSize = TILE_PIXEL_SIZE * tilePixelRatio;
+		const tileImage = {
+			width: vi.fn(() => tileImageSize),
+			height: vi.fn(() => tileImageSize),
+			dispose: vi.fn(),
+		};
+		const beginFrameSpy = vi
+			.spyOn(StaticTileScheduler.prototype, "beginFrame")
+			.mockReturnValue({
+				...createEmptyTileFrameResult(),
+				drawItems: [
+					{
+						key: 1,
+						lod: 0,
+						sourceLod: 0,
+						tx: 0,
+						ty: 0,
+						left: 0,
+						top: 0,
+						size: tileDrawSize,
+						image: tileImage as unknown as TileDrawItem["image"],
+					},
+				],
+			});
+		try {
+			const frozenNode = createImageNode("node-image-overlap-frozen", 0, {
+				x: 128,
+				y: 64,
+				width: 160,
+				height: 80,
+			});
+			const overlappingNode = createImageNode(
+				"node-image-overlap-dragging",
+				1,
+				{
+					x: 160,
+					y: 80,
+					width: 160,
+					height: 80,
+				},
+			);
+			const baseProps = {
+				width: 512,
+				height: 512,
+				camera: createCameraShared({ x: 0, y: 0, zoom: 1 }),
+				nodes: [frozenNode, overlappingNode],
+				scenes: emptyScenes,
+				assets: [
+					createImageAsset(frozenNode.assetId),
+					createImageAsset(overlappingNode.assetId),
+				],
+				activeNodeId: null,
+				selectedNodeIds: [],
+				focusedNodeId: null,
+			};
+			const { rerender } = render(<InfiniteSkiaCanvas {...baseProps} />);
+
+			await waitFor(() => {
+				const latestInputs =
+					(setInputsSpy.mock.calls.at(-1)?.[0] as TileInput[] | undefined) ??
+					[];
+				expect(
+					latestInputs.some((input) => input.nodeId === frozenNode.id),
+				).toBe(true);
+				expect(
+					latestInputs.some((input) => input.nodeId === overlappingNode.id),
+				).toBe(true);
+			});
+
+			skiaSurfaceMockState.surfaces.length = 0;
+			rerender(
+				<InfiniteSkiaCanvas
+					{...baseProps}
+					animatedLayoutNodeIds={[frozenNode.id]}
+				/>,
+			);
+
+			await waitFor(() => {
+				expect(getFrozenRenderedNodeIds(getLatestRenderTree())).toContain(
+					frozenNode.id,
+				);
+			});
+			expect(
+				skiaSurfaceMockState.surfaces.some(
+					(surface) => surface.pixelRatio === tilePixelRatio,
+				),
+			).toBe(false);
+			const ownSnapshotSurface = skiaSurfaceMockState.surfaces.find(
+				(surface) => surface.pixelRatio === undefined,
+			);
+			expect(ownSnapshotSurface).toBeTruthy();
+			expect(
+				ownSnapshotSurface?.canvas.drawImageRect.mock.calls[0]?.[0],
+			).not.toBe(tileImage);
+		} finally {
+			setInputsSpy.mockRestore();
+			beginFrameSpy.mockRestore();
+		}
+	});
+
 	it("auto layout frozen board snapshot 不会从合成 tile 裁出 children", async () => {
 		tilePipelineMockState.enabled = true;
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
