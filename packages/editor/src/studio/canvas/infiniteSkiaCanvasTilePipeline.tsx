@@ -576,6 +576,9 @@ const createTilePictureFromNodeRenderer = ({
 	asset: TimelineAsset | null;
 	runtimeManager: ReturnType<typeof useStudioRuntimeManager>;
 }): { picture: SkPicture; dispose: () => void } | null => {
+	// 暂时不要把这个通用 fallback 接回 tile pipeline。
+	// 它会直接录制完整 node renderer，绕过 tilePicture 的专用签名和资源准备；
+	// 对依赖字体、shader 或 renderer lifecycle 的节点，static tile 曾出现不 ready / retained live 卡住。
 	const definition = getCanvasNodeDefinition(node.type);
 	const Renderer = definition.skiaRenderer as React.ComponentType<
 		CanvasNodeSkiaRenderProps<CanvasNode>

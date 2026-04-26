@@ -75,10 +75,9 @@ const clampBrightness = (value: number): number => {
 	return Math.min(4, Math.max(0, value));
 };
 
-export const HdrTestNodeSkiaRenderer: React.FC<
-	CanvasNodeSkiaRenderProps<HdrTestCanvasNode>
-> = ({ node }) => {
-	if (node.type !== "hdr-test") return null;
+export const HdrTestNodeSkiaContent: React.FC<{
+	node: HdrTestCanvasNode;
+}> = ({ node }) => {
 	const width = Math.max(1, Math.round(Math.abs(node.width)));
 	const height = Math.max(1, Math.round(Math.abs(node.height)));
 	const effect = getHdrTestEffect();
@@ -97,4 +96,11 @@ export const HdrTestNodeSkiaRenderer: React.FC<
 			/>
 		</Rect>
 	);
+};
+
+export const HdrTestNodeSkiaRenderer: React.FC<
+	CanvasNodeSkiaRenderProps<HdrTestCanvasNode>
+> = ({ node }) => {
+	if (node.type !== "hdr-test") return null;
+	return <HdrTestNodeSkiaContent node={node} />;
 };

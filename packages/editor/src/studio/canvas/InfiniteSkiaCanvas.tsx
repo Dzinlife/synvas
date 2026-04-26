@@ -60,7 +60,6 @@ import {
 	canUseTilePipeline,
 	createFrozenNodeRasterSnapshot,
 	createFrozenNodeRasterSnapshotFromTiles,
-	createTilePictureFromNodeRenderer,
 	disposeFrozenNodeRasterSnapshot,
 	disposeTileAsyncPictureCacheEntry,
 	disposeTileInput,
@@ -854,26 +853,6 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					epoch: 0,
 				};
 			}
-			const pictureInput = createTilePictureFromNodeRenderer({
-				node: latestNode,
-				scene,
-				asset,
-				runtimeManager,
-			});
-			if (pictureInput) {
-				return {
-					kind: "picture",
-					id: inputId,
-					nodeId: latestNode.id,
-					picture: pictureInput.picture,
-					aabb,
-					...(clipAabbs.length > 0 ? { visibleAabb, clipAabbs } : {}),
-					sourceWidth,
-					sourceHeight,
-					epoch: 0,
-					dispose: pictureInput.dispose,
-				};
-			}
 			if (thumbnailCapabilityEnabled) return null;
 			const tilePictureCapability = resolveTilePictureCapability(latestNode);
 			if (!tilePictureCapability) return null;
@@ -994,9 +973,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 			const sourceHeight =
 				rasterEntry?.height ??
 				Math.max(1, Math.round(Math.abs(latestNode.height)));
-			const fallbackToNodeRendererPicture =
-				!image && !thumbnailCapabilityEnabled;
-			const tilePictureCapability = fallbackToNodeRendererPicture
+			const shouldUsePictureFallback = !image && !thumbnailCapabilityEnabled;
+			const tilePictureCapability = shouldUsePictureFallback
 				? resolveTilePictureCapability(latestNode)
 				: null;
 			const tilePictureContext: CanvasNodeTilePictureCapabilityContext<CanvasNode> =
@@ -1012,17 +990,17 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				typeof tilePictureCapabilitySourceSignature === "string"
 					? tilePictureCapabilitySourceSignature
 					: null;
-			const sourceKey = fallbackToNodeRendererPicture
+			const sourceKey = shouldUsePictureFallback
 				? tilePictureCapability
 					? // 当 capability 提供专用签名时，不再混入 updatedAt（拖拽位移也会变化），
 						// 避免位置拖拽触发 picture 缓存抖动导致闪烁。
 						tilePictureSourceSignature !== null
 						? `fallback-picture:async:${tilePictureSourceSignature}`
 						: `${sourceSignature}:fallback-picture:async:none`
-					: `${sourceSignature}:fallback-picture:sync`
+					: `${sourceSignature}:fallback-picture:disabled`
 				: sourceSignature;
 			const inputSourceKey = `${sourceKey}:clip:${clipSignature}`;
-			const modeKey: TileInputCacheEntry["mode"] = fallbackToNodeRendererPicture
+			const modeKey: TileInputCacheEntry["mode"] = shouldUsePictureFallback
 				? "fallback-picture"
 				: "raster";
 			let epoch = cachedEntry?.epoch ?? 0;
@@ -1051,7 +1029,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					sourceHeight,
 					epoch,
 				};
-			} else if (fallbackToNodeRendererPicture) {
+			} else if (shouldUsePictureFallback) {
 				if (tilePictureCapability) {
 					const asyncPictureEntry =
 						tileAsyncPictureCacheRef.current.get(latestNode.id) ?? null;
@@ -1084,26 +1062,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					}
 				} else {
 					disposeTileInput(cachedEntry?.input);
-					const pictureInput = createTilePictureFromNodeRenderer({
-						node: latestNode,
-						scene,
-						asset,
-						runtimeManager,
-					});
-					if (pictureInput) {
-						input = {
-							kind: "picture",
-							id: inputId,
-							nodeId: latestNode.id,
-							picture: pictureInput.picture,
-							aabb,
-							...(clipAabbs.length > 0 ? { visibleAabb, clipAabbs } : {}),
-							sourceWidth,
-							sourceHeight,
-							epoch,
-							dispose: pictureInput.dispose,
-						};
-					}
+					// 通用 renderer -> picture fallback 目前会让部分节点的 static tile
+					// 不稳定，必须显式提供 tilePicture capability 后才进入 tile 层。
 				}
 			} else {
 				disposeTileInput(cachedEntry?.input);

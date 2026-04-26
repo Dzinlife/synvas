@@ -3,6 +3,7 @@ import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
 import { HdrTestNodeInspector } from "./inspector";
 import { HdrTestNodeSkiaRenderer } from "./renderer";
+import { hdrTestNodeTilePictureCapability } from "./tilePicture";
 import { HdrTestNodeToolbar } from "./toolbar";
 
 const hdrTestDefinition: CanvasNodeDefinition<HdrTestCanvasNode> = {
@@ -17,6 +18,7 @@ const hdrTestDefinition: CanvasNodeDefinition<HdrTestCanvasNode> = {
 		brightness: 2,
 	}),
 	skiaRenderer: HdrTestNodeSkiaRenderer,
+	tilePicture: hdrTestNodeTilePictureCapability,
 	toolbar: HdrTestNodeToolbar,
 	inspector: HdrTestNodeInspector,
 	focusable: false,
