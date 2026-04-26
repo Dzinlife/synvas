@@ -19,6 +19,8 @@ import {
 	TILE_CAMERA_EPSILON,
 	TILE_LOD_MAX,
 	TILE_PIXEL_SIZE,
+	TILE_TEXTURE_BLEED_PIXELS,
+	TILE_TEXTURE_PIXEL_SIZE,
 	resolveTileWorldSize,
 	type TileAabb,
 	type TileDrawItem,
@@ -27,7 +29,6 @@ import {
 } from "./tile";
 
 const TILE_AABB_EPSILON = 1e-4;
-const TILE_DRAW_BLEED_TEXEL = 1;
 const FROZEN_NODE_SNAPSHOT_MAX_EDGE_PX = 2048;
 const FROZEN_NODE_SNAPSHOT_MAX_PIXELS = 1024 * 1024;
 
@@ -268,7 +269,7 @@ const subtractTileAabb = (source: TileAabb, clip: TileAabb): TileAabb[] => {
 };
 
 const resolveTileDrawBleed = (tile: TileDrawItem): number => {
-	return (tile.size / TILE_PIXEL_SIZE) * TILE_DRAW_BLEED_TEXEL;
+	return (tile.size / TILE_PIXEL_SIZE) * TILE_TEXTURE_BLEED_PIXELS;
 };
 
 const resolveTileDrawSourceWorldAabb = (tile: TileDrawItem): TileAabb => {
@@ -296,14 +297,18 @@ const resolveTileDrawCoverageAabb = (tile: TileDrawItem): TileAabb => {
 const resolveTileImageSize = (
 	tile: TileDrawItem,
 ): { width: number; height: number } => {
-	return resolveSkImageSize(tile.image, TILE_PIXEL_SIZE, TILE_PIXEL_SIZE);
+	return resolveSkImageSize(
+		tile.image,
+		TILE_TEXTURE_PIXEL_SIZE,
+		TILE_TEXTURE_PIXEL_SIZE,
+	);
 };
 
 const resolveTileImagePixelRatio = (tile: TileDrawItem): number => {
 	const imageSize = resolveTileImageSize(tile);
 	const pixelRatio = Math.min(
-		imageSize.width / TILE_PIXEL_SIZE,
-		imageSize.height / TILE_PIXEL_SIZE,
+		imageSize.width / TILE_TEXTURE_PIXEL_SIZE,
+		imageSize.height / TILE_TEXTURE_PIXEL_SIZE,
 	);
 	return Number.isFinite(pixelRatio) && pixelRatio > 0 ? pixelRatio : 1;
 };
@@ -382,7 +387,8 @@ const createFrozenNodeRasterSnapshotFromTiles = (
 	const baseTile = intersectedTiles[0];
 	if (!baseTile) return null;
 	const baseTileAabb = resolveTileDrawSourceWorldAabb(baseTile);
-	const pixelPerWorld = TILE_PIXEL_SIZE / Math.max(1, baseTileAabb.width);
+	const pixelPerWorld =
+		TILE_TEXTURE_PIXEL_SIZE / Math.max(1, baseTileAabb.width);
 	const rawWidth = Math.max(1, Math.ceil(input.aabb.width * pixelPerWorld));
 	const rawHeight = Math.max(1, Math.ceil(input.aabb.height * pixelPerWorld));
 	const pixelScale = Math.min(

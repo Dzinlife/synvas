@@ -5,6 +5,9 @@ export const TILE_LOD_HYSTERESIS = 0;
 export const TILE_LOD_STEP_PER_FRAME = 3;
 export const TILE_WORLD_SIZE_L0 = 512;
 export const TILE_PIXEL_SIZE = 512;
+export const TILE_TEXTURE_BLEED_PIXELS = 1;
+export const TILE_TEXTURE_PIXEL_SIZE =
+	TILE_PIXEL_SIZE + TILE_TEXTURE_BLEED_PIXELS * 2;
 export const TILE_OVERSCAN_TILES = 1;
 export const TILE_FRAME_BUDGET_MS = 3;
 export const TILE_MAX_TASKS_PER_TICK = 4;

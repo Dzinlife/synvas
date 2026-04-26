@@ -11,6 +11,8 @@ import {
 	TILE_LOD_HYSTERESIS,
 	TILE_LOD_STEP_PER_FRAME,
 	TILE_PIXEL_SIZE,
+	TILE_TEXTURE_BLEED_PIXELS,
+	TILE_TEXTURE_PIXEL_SIZE,
 } from "./constants";
 import type { TileDrawItem, TileInput } from "./types";
 
@@ -563,6 +565,10 @@ describe("tile scheduler", () => {
 		]);
 		scheduler.beginFrame(createFrameInput());
 		expect(makeOffscreenSpy).toHaveBeenCalledTimes(1);
+		expect(makeOffscreenSpy).toHaveBeenCalledWith(
+			TILE_TEXTURE_PIXEL_SIZE,
+			TILE_TEXTURE_PIXEL_SIZE,
+		);
 		scheduler.dispose();
 	});
 
@@ -592,6 +598,36 @@ describe("tile scheduler", () => {
 		expect(firstCanvas.scale).toHaveBeenCalledWith(
 			expectedScale,
 			expectedScale,
+		);
+		scheduler.dispose();
+	});
+
+	it("tile 纹理会渲染真实 bleed，避免显示层拉伸内容", () => {
+		const scheduler = new StaticTileScheduler({
+			maxTasksPerTick: 1,
+		});
+		scheduler.setInputs([
+			createRasterInput({
+				left: -1024,
+				top: -1024,
+				right: 2048,
+				bottom: 2048,
+			}),
+		]);
+		const frame = scheduler.beginFrame(createFrameInput());
+		const renderedTile = frame.drawItems[0];
+		const firstCanvas = createdCanvases[0];
+		expect(renderedTile).toBeTruthy();
+		expect(firstCanvas).toBeTruthy();
+		const bleed =
+			(renderedTile.size / TILE_PIXEL_SIZE) * TILE_TEXTURE_BLEED_PIXELS;
+		expect(firstCanvas.translate).toHaveBeenCalledWith(
+			-(renderedTile.left - bleed),
+			-(renderedTile.top - bleed),
+		);
+		expect(makeOffscreenSpy).toHaveBeenCalledWith(
+			TILE_TEXTURE_PIXEL_SIZE,
+			TILE_TEXTURE_PIXEL_SIZE,
 		);
 		scheduler.dispose();
 	});

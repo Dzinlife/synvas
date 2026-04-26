@@ -237,11 +237,11 @@ const StaticTileImageItemComponent = ({
 	tile: TileDrawItem;
 	camera: SharedValue<CameraState>;
 }) => {
-	// Image 仍保留 bleed，clip 只把 tile 归属边界吸附到屏幕像素，避免半透明边界叠画。
+	// tile 纹理自身包含 bleed，clip 只把 tile 归属边界吸附到屏幕像素。
 	const clip = useDerivedValue(() => {
 		return resolvePixelRoundedTileClip(tile, camera.value);
 	});
-	// 按纹理 texel 轻微外扩，避免缩放/采样导致 tile 边界出现黑缝
+	// 按真实 bleed texel 外扩，中心 512px 仍严格对应 tile 世界坐标。
 	const bleed = resolveTileDrawBleed(tile);
 	const drawX = tile.left - bleed;
 	const drawY = tile.top - bleed;

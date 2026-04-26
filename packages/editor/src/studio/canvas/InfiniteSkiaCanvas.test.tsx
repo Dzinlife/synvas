@@ -24,7 +24,7 @@ import {
 import { resolveTileDrawBleed } from "./infiniteSkiaCanvasTilePipeline";
 import {
 	TILE_MAX_TASKS_PER_TICK_DRAG,
-	TILE_PIXEL_SIZE,
+	TILE_TEXTURE_PIXEL_SIZE,
 } from "./tile/constants";
 import { StaticTileScheduler } from "./tile/scheduler";
 import type { TileDrawItem, TileFrameResult, TileInput } from "./tile/types";
@@ -3862,7 +3862,7 @@ describe("InfiniteSkiaCanvas", () => {
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
 		const tileDrawSize = 512;
 		const tilePixelRatio = 2;
-		const tileImageSize = TILE_PIXEL_SIZE * tilePixelRatio;
+		const tileImageSize = TILE_TEXTURE_PIXEL_SIZE * tilePixelRatio;
 		const tileImage = {
 			width: vi.fn(() => tileImageSize),
 			height: vi.fn(() => tileImageSize),
@@ -3962,7 +3962,7 @@ describe("InfiniteSkiaCanvas", () => {
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
 		const tileDrawSize = 512;
 		const tilePixelRatio = 2;
-		const tileImageSize = TILE_PIXEL_SIZE * tilePixelRatio;
+		const tileImageSize = TILE_TEXTURE_PIXEL_SIZE * tilePixelRatio;
 		const firstTileImage = {
 			width: vi.fn(() => tileImageSize),
 			height: vi.fn(() => tileImageSize),
@@ -4080,7 +4080,7 @@ describe("InfiniteSkiaCanvas", () => {
 		const setInputsSpy = vi.spyOn(StaticTileScheduler.prototype, "setInputs");
 		const tileDrawSize = 512;
 		const tilePixelRatio = 2;
-		const tileImageSize = TILE_PIXEL_SIZE * tilePixelRatio;
+		const tileImageSize = TILE_TEXTURE_PIXEL_SIZE * tilePixelRatio;
 		const tileImage = {
 			width: vi.fn(() => tileImageSize),
 			height: vi.fn(() => tileImageSize),

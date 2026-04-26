@@ -18,6 +18,8 @@ import {
 	TILE_OVERSCAN_TILES,
 	TILE_PIXEL_SIZE,
 	TILE_SURFACE_POOL_SIZE,
+	TILE_TEXTURE_BLEED_PIXELS,
+	TILE_TEXTURE_PIXEL_SIZE,
 } from "./constants";
 import {
 	createTileAabb,
@@ -268,12 +270,7 @@ export class StaticTileScheduler {
 		if (!rect) return;
 		for (const record of this.tileByKey.values()) {
 			if (record.state !== "READY" || !record.image) continue;
-			const tileRect = createTileAabb(
-				record.worldLeft,
-				record.worldTop,
-				record.worldLeft + record.worldSize,
-				record.worldTop + record.worldSize,
-			);
+			const tileRect = this.resolveRecordRenderRect(record);
 			if (!isTileAabbIntersected(tileRect, rect)) continue;
 			record.state = "STALE";
 		}
@@ -508,20 +505,25 @@ export class StaticTileScheduler {
 		return segments.join("|");
 	}
 
-	private resolveRecordTileRect(record: TileRecord): TileAabb {
+	private resolveRecordRenderBleed(record: TileRecord): number {
+		return (record.worldSize / TILE_PIXEL_SIZE) * TILE_TEXTURE_BLEED_PIXELS;
+	}
+
+	private resolveRecordRenderRect(record: TileRecord): TileAabb {
+		const bleed = this.resolveRecordRenderBleed(record);
 		return createTileAabb(
-			record.worldLeft,
-			record.worldTop,
-			record.worldLeft + record.worldSize,
-			record.worldTop + record.worldSize,
+			record.worldLeft - bleed,
+			record.worldTop - bleed,
+			record.worldLeft + record.worldSize + bleed,
+			record.worldTop + record.worldSize + bleed,
 		);
 	}
 
 	private resolveRecordCurrentInputSignature(record: TileRecord): string {
-		const tileRect = this.resolveRecordTileRect(record);
+		const renderRect = this.resolveRecordRenderRect(record);
 		return this.buildTileInputSignature(
-			tileRect,
-			this.queryInputsByRect(tileRect),
+			renderRect,
+			this.queryInputsByRect(renderRect),
 		);
 	}
 
@@ -618,10 +620,10 @@ export class StaticTileScheduler {
 		for (const key of this.visibleCoveredKeySet) {
 			const record = this.ensureTileRecord(key);
 			record.lastUsedTick = this.tick;
-			const tileRect = this.resolveRecordTileRect(record);
-			const candidateInputs = this.queryInputsByRect(tileRect);
+			const renderRect = this.resolveRecordRenderRect(record);
+			const candidateInputs = this.queryInputsByRect(renderRect);
 			const nextInputSignature = this.buildTileInputSignature(
-				tileRect,
+				renderRect,
 				candidateInputs,
 			);
 			if (record.state === "READY" && record.image) {
@@ -704,7 +706,10 @@ export class StaticTileScheduler {
 		if (surface) {
 			return surface;
 		}
-		return Skia.Surface.MakeOffscreen(TILE_PIXEL_SIZE, TILE_PIXEL_SIZE);
+		return Skia.Surface.MakeOffscreen(
+			TILE_TEXTURE_PIXEL_SIZE,
+			TILE_TEXTURE_PIXEL_SIZE,
+		);
 	}
 
 	private releaseSurface(surface: SkSurface): void {
@@ -717,12 +722,7 @@ export class StaticTileScheduler {
 
 	private renderTask(record: TileRecord): void {
 		record.state = "RENDERING";
-		const tileRect = createTileAabb(
-			record.worldLeft,
-			record.worldTop,
-			record.worldLeft + record.worldSize,
-			record.worldTop + record.worldSize,
-		);
+		const renderRect = this.resolveRecordRenderRect(record);
 		const worldToPixel = TILE_PIXEL_SIZE / Math.max(1, record.worldSize);
 		const surface = this.acquireSurface();
 		if (!surface) {
@@ -735,15 +735,16 @@ export class StaticTileScheduler {
 			canvas.save();
 			// 不同 LOD 的 world size 不同，这里统一映射到固定 512 像素纹理。
 			canvas.scale(worldToPixel, worldToPixel);
-			canvas.translate(-tileRect.left, -tileRect.top);
-			const candidateInputs = this.queryInputsByRect(tileRect);
+			// 纹理边缘额外渲染 1px bleed，显示时外扩不会改变 tile 内部采样比例。
+			canvas.translate(-renderRect.left, -renderRect.top);
+			const candidateInputs = this.queryInputsByRect(renderRect);
 			const inputSignature = this.buildTileInputSignature(
-				tileRect,
+				renderRect,
 				candidateInputs,
 			);
 			for (const input of candidateInputs) {
 				if (
-					!isTileAabbIntersected(tileRect, resolveTileInputVisibleAabb(input))
+					!isTileAabbIntersected(renderRect, resolveTileInputVisibleAabb(input))
 				) {
 					continue;
 				}
