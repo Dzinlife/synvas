@@ -1,7 +1,4 @@
-import type {
-	ColorManagementSettings,
-	TimelineAsset,
-} from "core";
+import type { ColorManagementSettings, TimelineAsset } from "core";
 import type {
 	OtCommand,
 	OtOpEnvelope,
@@ -16,7 +13,15 @@ export type CanvasNodeType =
 	| "audio"
 	| "text"
 	| "image"
-	| "board";
+	| "board"
+	| "hdr-test";
+
+export type HdrTestColorPreset =
+	| "sdr-white"
+	| "p3-red"
+	| "hdr-white"
+	| "hdr-red"
+	| "hdr-gradient";
 
 export interface CanvasNodeThumbnail {
 	assetId: string;
@@ -76,13 +81,20 @@ export interface BoardCanvasNode extends CanvasNodeBase {
 	layoutMode?: "free" | "auto";
 }
 
+export interface HdrTestCanvasNode extends CanvasNodeBase {
+	type: "hdr-test";
+	colorPreset: HdrTestColorPreset;
+	brightness: number;
+}
+
 export type CanvasNode =
 	| SceneCanvasNode
 	| VideoCanvasNode
 	| AudioCanvasNode
 	| TextCanvasNode
 	| ImageCanvasNode
-	| BoardCanvasNode;
+	| BoardCanvasNode
+	| HdrTestCanvasNode;
 
 // 兼容存量命名：scene 仍是一等节点
 export type SceneNode = SceneCanvasNode;

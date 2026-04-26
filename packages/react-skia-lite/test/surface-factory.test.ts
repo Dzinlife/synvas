@@ -406,6 +406,230 @@ describe("surfaceFactory", () => {
 		);
 	});
 
+	it("WebGPU HDR canvas surface 会配置 rgba16float 与 extended tone mapping", () => {
+		const previousMatchMedia = window.matchMedia;
+		Object.defineProperty(window, "matchMedia", {
+			configurable: true,
+			value: vi.fn((query: string) => ({
+				matches: query === "(dynamic-range: high)",
+				media: query,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+			})),
+		});
+		const gpuCanvasContext = {
+			id: "canvas-context",
+		};
+		const makeGPUCanvasContextMock = vi.fn(() => gpuCanvasContext);
+		const makeGPUCanvasSurfaceMock = vi.fn(() => ({
+			delete: vi.fn(),
+			flush: vi.fn(),
+			width: () => 64,
+			height: () => 32,
+			getCanvas: () => ({
+				clear: vi.fn(),
+				save: vi.fn(),
+				restore: vi.fn(),
+				scale: vi.fn(),
+				drawPicture: vi.fn(),
+			}),
+			makeImageSnapshot: vi.fn(),
+		}));
+		const canvasKit = {
+			ColorSpace: { SRGB: "srgb", DISPLAY_P3: "display-p3" },
+			MakeGPUCanvasContext: makeGPUCanvasContextMock,
+			MakeGPUCanvasSurface: makeGPUCanvasSurfaceMock,
+		} as never;
+		const canvas = {
+			getContext: vi.fn(() => null),
+		} as unknown as HTMLCanvasElement;
+		const backend = {
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: { id: "ctx" },
+		} as const;
+
+		try {
+			const surface = createSkiaCanvasSurface(canvasKit, canvas, backend, {
+				dynamicRange: "extended",
+			});
+			surface?.dispose();
+		} finally {
+			Object.defineProperty(window, "matchMedia", {
+				configurable: true,
+				value: previousMatchMedia,
+			});
+		}
+
+		expect(makeGPUCanvasContextMock).toHaveBeenCalledWith(
+			backend.deviceContext,
+			canvas,
+			{
+				format: "rgba16float",
+				alphaMode: "opaque",
+				colorSpace: "srgb",
+				toneMapping: { mode: "extended" },
+			},
+		);
+		expect(makeGPUCanvasSurfaceMock).toHaveBeenCalledWith(
+			gpuCanvasContext,
+			"srgb",
+		);
+	});
+
+	it("WebGPU HDR canvas surface 失败时回退 SDR 配置", () => {
+		const previousMatchMedia = window.matchMedia;
+		Object.defineProperty(window, "matchMedia", {
+			configurable: true,
+			value: vi.fn((query: string) => ({
+				matches: query === "(dynamic-range: high)",
+				media: query,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+			})),
+		});
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const gpuCanvasContext = {
+			id: "canvas-context",
+		};
+		const makeGPUCanvasContextMock = vi
+			.fn()
+			.mockReturnValueOnce(null)
+			.mockReturnValueOnce(gpuCanvasContext);
+		const makeGPUCanvasSurfaceMock = vi.fn(() => ({
+			delete: vi.fn(),
+			flush: vi.fn(),
+			width: () => 64,
+			height: () => 32,
+			getCanvas: () => ({
+				clear: vi.fn(),
+				save: vi.fn(),
+				restore: vi.fn(),
+				scale: vi.fn(),
+				drawPicture: vi.fn(),
+			}),
+			makeImageSnapshot: vi.fn(),
+		}));
+		const canvasKit = {
+			ColorSpace: { SRGB: "srgb" },
+			MakeGPUCanvasContext: makeGPUCanvasContextMock,
+			MakeGPUCanvasSurface: makeGPUCanvasSurfaceMock,
+		} as never;
+		const canvas = {
+			getContext: vi.fn(() => null),
+		} as unknown as HTMLCanvasElement;
+		const backend = {
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: { id: "ctx" },
+		} as const;
+		vi.stubGlobal("navigator", {
+			gpu: {
+				getPreferredCanvasFormat: vi.fn(() => "bgra8unorm"),
+			},
+		});
+
+		try {
+			const surface = createSkiaCanvasSurface(canvasKit, canvas, backend, {
+				dynamicRange: "extended",
+			});
+			surface?.dispose();
+		} finally {
+			Object.defineProperty(window, "matchMedia", {
+				configurable: true,
+				value: previousMatchMedia,
+			});
+			warnSpy.mockRestore();
+		}
+
+		expect(makeGPUCanvasContextMock).toHaveBeenNthCalledWith(
+			1,
+			backend.deviceContext,
+			canvas,
+			expect.objectContaining({
+				format: "rgba16float",
+				toneMapping: { mode: "extended" },
+			}),
+		);
+		expect(makeGPUCanvasContextMock).toHaveBeenNthCalledWith(
+			2,
+			backend.deviceContext,
+			canvas,
+			{
+				format: "bgra8unorm",
+				alphaMode: "premultiplied",
+				colorSpace: "srgb",
+			},
+		);
+	});
+
+	it("WebGPU HDR offscreen surface 优先使用 RGBA_F16", () => {
+		const previousMatchMedia = window.matchMedia;
+		Object.defineProperty(window, "matchMedia", {
+			configurable: true,
+			value: vi.fn((query: string) => ({
+				matches: query === "(dynamic-range: high)",
+				media: query,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+			})),
+		});
+		const renderTargetMock = vi.fn(
+			(_deviceContext: unknown, imageInfo: { width: number; height: number }) => ({
+				delete: vi.fn(),
+				flush: vi.fn(),
+				width: () => imageInfo.width,
+				height: () => imageInfo.height,
+				getCanvas: () => ({
+					clear: vi.fn(),
+					save: vi.fn(),
+					restore: vi.fn(),
+					scale: vi.fn(),
+					drawPicture: vi.fn(),
+				}),
+				makeImageSnapshot: vi.fn(),
+			}),
+		);
+		const canvasKit = {
+			ColorType: { RGBA_8888: "rgba8888", RGBA_F16: "rgbaf16" },
+			AlphaType: { Premul: "premul" },
+			ColorSpace: { SRGB: "srgb" },
+			SkSurfaces: {
+				RenderTarget: renderTargetMock,
+			},
+		} as never;
+		const backend = {
+			bundle: "webgpu",
+			kind: "webgpu",
+			device: {} as GPUDevice,
+			deviceContext: { id: "ctx" },
+		} as const;
+
+		try {
+			const surface = createSkiaOffscreenSurface(canvasKit, 64, 32, backend, {
+				dynamicRange: "extended",
+			});
+			surface?.dispose();
+		} finally {
+			Object.defineProperty(window, "matchMedia", {
+				configurable: true,
+				value: previousMatchMedia,
+			});
+		}
+
+		expect(renderTargetMock).toHaveBeenCalledWith(
+			backend.deviceContext,
+			expect.objectContaining({
+				colorType: "rgbaf16",
+			}),
+			false,
+			undefined,
+			"",
+		);
+	});
+
 	it("WebGL offscreen surface 缺少当前 GrDirectContext 时直接失败", () => {
 		const canvasKit = {
 			getCurrentGrDirectContext: vi.fn(() => null),

@@ -9,6 +9,7 @@ export const CANVAS_NODE_ICON_BY_TYPE: Record<CanvasNodeType, string> = {
 	audio: "\uF003",
 	text: "\uF004",
 	image: "\uF005",
+	"hdr-test": "\uF006",
 };
 
 export const resolveCanvasNodeTypeIcon = (type: CanvasNodeType): string => {

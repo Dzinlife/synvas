@@ -1,8 +1,5 @@
 import type { TimelineJSON } from "core/timeline-system/loader";
-import type {
-	ColorManagementSettings,
-	TimelineAsset,
-} from "core";
+import type { ColorManagementSettings, TimelineAsset } from "core";
 import {
 	clearSceneTombstone,
 	ensureStudioProjectOt,
@@ -11,6 +8,7 @@ import {
 import { parseStudioProject } from "@/studio/project/schema";
 import type {
 	CanvasNode,
+	HdrTestColorPreset,
 	SceneDocument,
 	SceneNode,
 	StudioOtTombstoneScene,
@@ -103,6 +101,8 @@ export type CanvasNodeCreateInput =
 			duration?: number;
 			text?: string;
 			fontSize?: number;
+			colorPreset?: HdrTestColorPreset;
+			brightness?: number;
 	  };
 
 export interface EnsureProjectAssetInput {
@@ -299,6 +299,8 @@ const DEFAULT_TEXT_NODE_HEIGHT = 160;
 const DEFAULT_TEXT_FONT_SIZE = 48;
 const DEFAULT_BOARD_NODE_WIDTH = 960;
 const DEFAULT_BOARD_NODE_HEIGHT = 540;
+const DEFAULT_HDR_TEST_NODE_WIDTH = 560;
+const DEFAULT_HDR_TEST_NODE_HEIGHT = 320;
 
 const repairCanvasNodeParentRelations = (nodes: CanvasNode[]): CanvasNode[] => {
 	if (nodes.length === 0) return nodes;
@@ -862,6 +864,28 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 						type: "board",
 						name: input.name?.trim() ? input.name.trim() : "Board",
 						layoutMode: "free",
+						parentId: input.parentId ?? null,
+						x: input.x ?? -width / 2,
+						y: input.y ?? -height / 2,
+						width,
+						height,
+						siblingOrder: 0,
+						locked: false,
+						hidden: false,
+						createdAt: now,
+						updatedAt: now,
+					};
+					break;
+				}
+				case "hdr-test": {
+					const width = input.width ?? DEFAULT_HDR_TEST_NODE_WIDTH;
+					const height = input.height ?? DEFAULT_HDR_TEST_NODE_HEIGHT;
+					node = {
+						id: nodeId,
+						type: "hdr-test",
+						colorPreset: input.colorPreset ?? "hdr-white",
+						brightness: input.brightness ?? 2,
+						name: input.name?.trim() ? input.name.trim() : "HDR Test",
 						parentId: input.parentId ?? null,
 						x: input.x ?? -width / 2,
 						y: input.y ?? -height / 2,

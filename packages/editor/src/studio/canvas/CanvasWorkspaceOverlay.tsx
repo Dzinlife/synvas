@@ -4,7 +4,14 @@ import type {
 	SceneDocument,
 	SceneNode,
 } from "@/studio/project/types";
-import { Bug, PanelLeftOpen, Plus, Search, SearchX } from "lucide-react";
+import {
+	Bug,
+	PanelLeftOpen,
+	Plus,
+	Search,
+	SearchX,
+	SunMedium,
+} from "lucide-react";
 import { AnimatePresence, motion, usePresence } from "motion/react";
 import type React from "react";
 import {
@@ -88,6 +95,7 @@ interface CanvasWorkspaceOverlayProps {
 	toolbarLeftOffset: number;
 	toolbarTopOffset: number;
 	onCreateScene: () => void;
+	onCreateHdrTestNode: () => void;
 	toolMode: CanvasToolMode;
 	onToolModeChange: (mode: CanvasToolMode) => void;
 	onZoomIn: () => void;
@@ -318,6 +326,7 @@ const CanvasWorkspaceOverlay = ({
 	toolbarLeftOffset,
 	toolbarTopOffset,
 	onCreateScene,
+	onCreateHdrTestNode,
 	toolMode,
 	onToolModeChange,
 	onZoomIn,
@@ -562,6 +571,14 @@ const CanvasWorkspaceOverlay = ({
 					>
 						<Plus className="size-3" />
 						<span>新建 Scene</span>
+					</button>
+					<button
+						type="button"
+						onClick={onCreateHdrTestNode}
+						className="flex items-center gap-1 rounded bg-white/10 px-2 py-1 hover:bg-white/20"
+					>
+						<SunMedium className="size-3" />
+						<span>HDR Test</span>
 					</button>
 					<button
 						type="button"

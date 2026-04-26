@@ -15,7 +15,10 @@ import {
 	invalidateSkiaWebGPUCanvasContext,
 } from "../skia/web/surfaceFactory";
 import { createSkiaResourceScope } from "../skia/web/resourceLifecycle";
-import type { SkiaWebCanvasColorSpace } from "../skia/web/canvasColorSpace";
+import type {
+	SkiaWebCanvasColorSpace,
+	SkiaWebCanvasDynamicRange,
+} from "../skia/web/canvasColorSpace";
 import { SkiaViewApi } from "./api";
 import { SkiaViewNativeId } from "./SkiaViewNativeId";
 import type { SkiaPictureViewNativeProps } from "./types";
@@ -89,6 +92,7 @@ class CanvasSurfaceRenderer implements Renderer {
 		private pd: number,
 		private backend: SkiaRenderBackend,
 		private colorSpace: SkiaWebCanvasColorSpace,
+		private dynamicRange: SkiaWebCanvasDynamicRange,
 	) {
 		this.onResize();
 	}
@@ -116,7 +120,7 @@ class CanvasSurfaceRenderer implements Renderer {
 			CanvasKit,
 			this.canvas,
 			this.backend,
-			{ colorSpace: this.colorSpace },
+			{ colorSpace: this.colorSpace, dynamicRange: this.dynamicRange },
 		);
 		if (!surface) {
 			throw new Error("Could not create surface");
@@ -137,7 +141,7 @@ class CanvasSurfaceRenderer implements Renderer {
 			CanvasKit,
 			this.canvas,
 			this.backend,
-			{ colorSpace: this.colorSpace },
+			{ colorSpace: this.colorSpace, dynamicRange: this.dynamicRange },
 		);
 		if (!surface) {
 			throw new Error("Could not create WebGPU surface");
@@ -151,7 +155,7 @@ class CanvasSurfaceRenderer implements Renderer {
 				CanvasKit,
 				this.canvas,
 				this.backend,
-				{ colorSpace: this.colorSpace },
+				{ colorSpace: this.colorSpace, dynamicRange: this.dynamicRange },
 			);
 			if (!surface) {
 				return;
@@ -187,25 +191,37 @@ const createRenderer = (
 	canvas: HTMLCanvasElement,
 	pd: number,
 	colorSpace: SkiaWebCanvasColorSpace,
+	dynamicRange: SkiaWebCanvasDynamicRange,
 ): Renderer => {
 	const backend: SkiaRenderBackend = getSkiaRenderBackend();
-	return new CanvasSurfaceRenderer(canvas, pd, backend, colorSpace);
+	return new CanvasSurfaceRenderer(
+		canvas,
+		pd,
+		backend,
+		colorSpace,
+		dynamicRange,
+	);
 };
 
 type RendererConfig = {
 	pd: number;
 	colorSpace: SkiaWebCanvasColorSpace;
+	dynamicRange: SkiaWebCanvasDynamicRange;
 };
 
 const createRendererConfig = (
 	pd: number,
 	colorSpace: SkiaWebCanvasColorSpace,
-): RendererConfig => ({ pd, colorSpace });
+	dynamicRange: SkiaWebCanvasDynamicRange,
+): RendererConfig => ({ pd, colorSpace, dynamicRange });
 
 const isSameRendererConfig = (
 	current: RendererConfig | null,
 	next: RendererConfig,
-) => current?.pd === next.pd && current.colorSpace === next.colorSpace;
+) =>
+	current?.pd === next.pd &&
+	current.colorSpace === next.colorSpace &&
+	current.dynamicRange === next.dynamicRange;
 
 export interface SkiaPictureViewHandle {
 	setPicture(picture: SkPicture): void;
@@ -235,6 +251,7 @@ export interface SkiaPictureViewProps extends SkiaPictureViewNativeProps {
 export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	const { ref, pd = Platform.PixelRatio } = props;
 	const colorSpace = props.colorSpace ?? "srgb";
+	const dynamicRange = props.dynamicRange ?? "standard";
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const renderer = useRef<Renderer | null>(null);
 	const rendererConfigRef = useRef<RendererConfig | null>(null);
@@ -348,19 +365,20 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 
 	const rebuildRenderer = useCallback(
 		(canvas: HTMLCanvasElement) => {
-			const nextConfig = createRendererConfig(pd, colorSpace);
+			const nextConfig = createRendererConfig(pd, colorSpace, dynamicRange);
 			renderer.current?.dispose();
 			renderer.current = createRenderer(
 				canvas,
 				nextConfig.pd,
 				nextConfig.colorSpace,
+				nextConfig.dynamicRange,
 			);
 			rendererConfigRef.current = nextConfig;
 			if (pictureRef.current) {
 				renderer.current.draw(pictureRef.current);
 			}
 		},
-		[pd, colorSpace],
+		[pd, colorSpace, dynamicRange],
 	);
 
 	const onLayoutEvent = useCallback(
@@ -426,12 +444,12 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 		if (!canvas || !renderer.current) {
 			return;
 		}
-		const nextConfig = createRendererConfig(pd, colorSpace);
+		const nextConfig = createRendererConfig(pd, colorSpace, dynamicRange);
 		if (isSameRendererConfig(rendererConfigRef.current, nextConfig)) {
 			return;
 		}
 		rebuildRenderer(canvas);
-	}, [pd, colorSpace, rebuildRenderer]);
+	}, [pd, colorSpace, dynamicRange, rebuildRenderer]);
 
 	useEffect(() => {
 		return () => {
@@ -461,6 +479,7 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 		debug: _debug,
 		ref: _ref,
 		colorSpace: _colorSpace,
+		dynamicRange: _dynamicRange,
 		...viewProps
 	} = props;
 	return (

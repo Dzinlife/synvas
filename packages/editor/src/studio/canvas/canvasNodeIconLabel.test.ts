@@ -7,7 +7,7 @@ import {
 } from "./canvasNodeIconLabel";
 
 describe("canvasNodeIconLabel", () => {
-	it("为六类 node type 返回固定 icon codepoint", () => {
+	it("为各类 node type 返回固定 icon codepoint", () => {
 		const cases: Array<{ type: CanvasNodeType; expectedIcon: string }> = [
 			{ type: "scene", expectedIcon: "\uF000" },
 			{ type: "video", expectedIcon: "\uF001" },
@@ -15,6 +15,7 @@ describe("canvasNodeIconLabel", () => {
 			{ type: "audio", expectedIcon: "\uF003" },
 			{ type: "text", expectedIcon: "\uF004" },
 			{ type: "image", expectedIcon: "\uF005" },
+			{ type: "hdr-test", expectedIcon: "\uF006" },
 		];
 		for (const testCase of cases) {
 			expect(resolveCanvasNodeTypeIcon(testCase.type)).toBe(

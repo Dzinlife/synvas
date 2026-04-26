@@ -1218,6 +1218,38 @@ export const useCanvasInteractionController = ({
 		});
 	}, [createCanvasNode, pushHistory]);
 
+	const handleCreateHdrTestNode = useCallback(() => {
+		const hdrTestNodeDefinition = getCanvasNodeDefinition("hdr-test");
+		const input = hdrTestNodeDefinition.create();
+		const width = input.width ?? 560;
+		const height = input.height ?? 320;
+		const center = resolveCameraCenterWorld(
+			getCamera(),
+			stageSize.width,
+			stageSize.height,
+		);
+		const nodeId = createCanvasNode({
+			...input,
+			x: center.x - width / 2,
+			y: center.y - height / 2,
+		});
+		const latestProject = useProjectStore.getState().currentProject;
+		if (!latestProject) return;
+		const node = latestProject.canvas.nodes.find((item) => item.id === nodeId);
+		if (!node) return;
+		pushHistory({
+			kind: "canvas.node-create",
+			node,
+			focusNodeId: latestProject.ui.focusedNodeId,
+		});
+	}, [
+		createCanvasNode,
+		getCamera,
+		pushHistory,
+		stageSize.height,
+		stageSize.width,
+	]);
+
 	const handleZoomByStep = useCallback(
 		(multiplier: number) => {
 			const currentCamera = getCamera();
@@ -4841,6 +4873,7 @@ export const useCanvasInteractionController = ({
 		handleCanvasPointerMove,
 		handleCanvasPointerUp,
 		handleCloseDrawer,
+		handleCreateHdrTestNode,
 		handleCreateScene,
 		handleDropTimelineElementsToCanvas,
 		handleEditorMouseOverCapture,

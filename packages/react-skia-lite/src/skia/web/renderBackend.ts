@@ -8,6 +8,14 @@ import type {
 	WebGPUDeviceContext,
 } from "canvaskit-wasm";
 
+export type SkiaWebGPUCanvasToneMappingMode = "standard" | "extended";
+
+export type SkiaWebGPUCanvasOptions = WebGPUCanvasOptions & {
+	toneMapping?: {
+		mode: SkiaWebGPUCanvasToneMappingMode;
+	};
+};
+
 type WebGPUNavigator = Navigator & {
 	gpu?: {
 		requestAdapter?: () => Promise<GPUAdapter | null>;
@@ -15,10 +23,7 @@ type WebGPUNavigator = Navigator & {
 	};
 };
 
-export type SkiaWebBackendPreference =
-	| "auto"
-	| "webgpu"
-	| "webgl";
+export type SkiaWebBackendPreference = "auto" | "webgpu" | "webgl";
 
 export type SkiaBundleKind = "webgpu" | "webgl";
 
@@ -39,7 +44,7 @@ export type CanvasKitWebGPU = CanvasKit & {
 	MakeGPUCanvasContext?: (
 		context: WebGPUDeviceContext,
 		canvas: HTMLCanvasElement | OffscreenCanvas,
-		opts?: WebGPUCanvasOptions,
+		opts?: SkiaWebGPUCanvasOptions,
 	) => WebGPUCanvasContext | null;
 	MakeGPUCanvasSurface?: (
 		canvasContext: WebGPUCanvasContext,

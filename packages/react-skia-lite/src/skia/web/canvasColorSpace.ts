@@ -1,15 +1,18 @@
 import type { CanvasKit, ColorSpace } from "canvaskit-wasm";
 
 export type SkiaWebCanvasColorSpace = "srgb" | "p3";
+export type SkiaWebCanvasDynamicRange = "standard" | "extended";
 
 export type SkiaWebCanvasColorSpaceSupport = {
 	displayP3Gamut: boolean;
 	canvas2DDisplayP3: boolean;
 	webglDrawingBufferDisplayP3: boolean;
 	webgpuCanvasDisplayP3: boolean;
+	hdrDynamicRange: boolean;
 };
 
 const DISPLAY_P3_MEDIA_QUERY = "(color-gamut: p3)";
+const HDR_DYNAMIC_RANGE_MEDIA_QUERY = "(dynamic-range: high)";
 const SRGB_CANVAS_COLOR_SPACE = "srgb" as const;
 const DISPLAY_P3_CANVAS_COLOR_SPACE = "display-p3" as const;
 
@@ -41,6 +44,20 @@ export const canDisplayP3Colors = (): boolean => {
 	}
 	try {
 		return window.matchMedia(DISPLAY_P3_MEDIA_QUERY).matches;
+	} catch {
+		return false;
+	}
+};
+
+export const canDisplayHdrColors = (): boolean => {
+	if (
+		typeof window === "undefined" ||
+		typeof window.matchMedia !== "function"
+	) {
+		return false;
+	}
+	try {
+		return window.matchMedia(HDR_DYNAMIC_RANGE_MEDIA_QUERY).matches;
 	} catch {
 		return false;
 	}
@@ -97,6 +114,7 @@ export const detectSkiaWebCanvasColorSpaceSupport =
 			webglDrawingBufferDisplayP3:
 				displayP3Gamut && canUseDisplayP3WebGLDrawingBuffer(),
 			webgpuCanvasDisplayP3: displayP3Gamut && canUseWebGPUCanvasColorSpace(),
+			hdrDynamicRange: canDisplayHdrColors() && canUseWebGPUCanvasColorSpace(),
 		};
 	};
 
@@ -118,6 +136,15 @@ export const resolveSkiaWebCanvasColorSpace = (
 		return "srgb";
 	}
 	return "p3";
+};
+
+export const resolveSkiaWebCanvasDynamicRange = (
+	requested: SkiaWebCanvasDynamicRange | undefined,
+): SkiaWebCanvasDynamicRange => {
+	if (requested !== "extended") {
+		return "standard";
+	}
+	return canDisplayHdrColors() ? "extended" : "standard";
 };
 
 export const toPredefinedCanvasColorSpace = (

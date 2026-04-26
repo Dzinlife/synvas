@@ -1,4 +1,8 @@
-import { useContext, useMemo, useRef } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+	canDisplayHdrColors,
+	type SkiaWebCanvasDynamicRange,
+} from "react-skia-lite";
 import { useShallow } from "zustand/react/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useProjectStore } from "@/projects/projectStore";
@@ -13,6 +17,33 @@ import { useCanvasInteractionController } from "./useCanvasInteractionController
 import { useCanvasRenderCullController } from "./useCanvasRenderCullController";
 import { useCanvasSceneGraph } from "./useCanvasSceneGraph";
 import { useNodeThumbnailGeneration } from "./useNodeThumbnailGeneration";
+
+const HDR_DYNAMIC_RANGE_MEDIA_QUERY = "(dynamic-range: high)";
+
+const resolveCanvasDynamicRange = (): SkiaWebCanvasDynamicRange =>
+	canDisplayHdrColors() ? "extended" : "standard";
+
+const useCanvasDynamicRange = (): SkiaWebCanvasDynamicRange => {
+	const [dynamicRange, setDynamicRange] = useState(resolveCanvasDynamicRange);
+	useEffect(() => {
+		if (
+			typeof window === "undefined" ||
+			typeof window.matchMedia !== "function"
+		) {
+			return;
+		}
+		const mediaQuery = window.matchMedia(HDR_DYNAMIC_RANGE_MEDIA_QUERY);
+		const updateDynamicRange = () => {
+			setDynamicRange(resolveCanvasDynamicRange());
+		};
+		updateDynamicRange();
+		mediaQuery.addEventListener?.("change", updateDynamicRange);
+		return () => {
+			mediaQuery.removeEventListener?.("change", updateDynamicRange);
+		};
+	}, []);
+	return dynamicRange;
+};
 
 const isProjectEqualExceptCamera = (
 	left: {
@@ -75,6 +106,7 @@ const CanvasWorkspace = () => {
 		() => resolveSkiaCanvasColorSpaceForScene(currentProject, activeScene),
 		[currentProject, activeScene],
 	);
+	const canvasDynamicRange = useCanvasDynamicRange();
 	const activeNodeId = currentProject?.ui.activeNodeId ?? null;
 	const canvasSnapEnabled = currentProject?.ui.canvasSnapEnabled ?? true;
 	const isCanvasInteractionLocked = Boolean(focusedNodeId);
@@ -151,6 +183,7 @@ const CanvasWorkspace = () => {
 		handleCanvasPointerMove,
 		handleCanvasPointerUp,
 		handleCloseDrawer,
+		handleCreateHdrTestNode,
 		handleCreateScene,
 		handleDropTimelineElementsToCanvas,
 		handleEditorMouseOverCapture,
@@ -231,6 +264,7 @@ const CanvasWorkspace = () => {
 				tileMaxTasksPerTick={tileMaxTasksPerTick}
 				tileLodTransition={effectiveTileLodTransition}
 				colorSpace={canvasColorSpace}
+				dynamicRange={canvasDynamicRange}
 				onNodeResize={handleSkiaNodeResize}
 				onSelectionResize={handleSelectionResize}
 				onLabelHitTesterChange={handleLabelHitTesterChange}
@@ -241,6 +275,7 @@ const CanvasWorkspace = () => {
 				toolbarLeftOffset={toolbarLeftOffset}
 				toolbarTopOffset={toolbarTopOffset}
 				onCreateScene={handleCreateScene}
+				onCreateHdrTestNode={handleCreateHdrTestNode}
 				toolMode={canvasToolMode}
 				onToolModeChange={handleToolModeChange}
 				onZoomIn={() => handleZoomByStep(1.1)}

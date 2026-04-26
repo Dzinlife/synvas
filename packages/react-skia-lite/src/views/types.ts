@@ -1,7 +1,10 @@
 import type { Node } from "../dom/types";
 import type { SharedValue, ViewProps } from "../react-native-types";
 import type { SkImage, SkPicture, SkRect, SkSize } from "../skia/types";
-import type { SkiaWebCanvasColorSpace } from "../skia/web/canvasColorSpace";
+import type {
+	SkiaWebCanvasColorSpace,
+	SkiaWebCanvasDynamicRange,
+} from "../skia/web/canvasColorSpace";
 
 export type NativeSkiaViewProps = ViewProps & {
 	debug?: boolean;
@@ -31,6 +34,7 @@ export interface SkiaBaseViewProps extends ViewProps {
 
 	opaque?: boolean;
 	colorSpace?: SkiaWebCanvasColorSpace;
+	dynamicRange?: SkiaWebCanvasDynamicRange;
 }
 
 export interface SkiaPictureViewNativeProps extends SkiaBaseViewProps {

@@ -428,7 +428,7 @@ describe("projectStore", () => {
 		expect(asset?.meta?.asr?.id).toBe("asr-1");
 	});
 
-	it("createCanvasNode 支持 video/audio/image/text 四种类型", () => {
+	it("createCanvasNode 支持 media/text/hdr-test 类型", () => {
 		const activeSceneBefore =
 			useProjectStore.getState().currentProject?.ui.activeSceneId ?? null;
 		const videoId = useProjectStore.getState().createCanvasNode({
@@ -451,6 +451,9 @@ describe("projectStore", () => {
 			text: "hello",
 			name: "text",
 		});
+		const hdrTestId = useProjectStore.getState().createCanvasNode({
+			type: "hdr-test",
+		});
 		const project = useProjectStore.getState().currentProject;
 		expect(
 			project?.canvas.nodes.find((node) => node.id === videoId)?.type,
@@ -464,6 +467,16 @@ describe("projectStore", () => {
 		expect(project?.canvas.nodes.find((node) => node.id === textId)?.type).toBe(
 			"text",
 		);
+		const hdrTestNode = project?.canvas.nodes.find(
+			(node) => node.id === hdrTestId && node.type === "hdr-test",
+		);
+		expect(hdrTestNode).toMatchObject({
+			type: "hdr-test",
+			width: 560,
+			height: 320,
+			colorPreset: "hdr-white",
+			brightness: 2,
+		});
 		expect(project?.ui.activeSceneId).toBe(activeSceneBefore);
 	});
 

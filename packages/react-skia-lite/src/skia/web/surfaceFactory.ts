@@ -10,6 +10,8 @@ import type {
 import { JsiSkSurface } from "./JsiSkSurface";
 import {
 	resolveSkiaWebCanvasColorSpace,
+	resolveSkiaWebCanvasDynamicRange,
+	type SkiaWebCanvasDynamicRange,
 	type SkiaWebCanvasColorSpace,
 	toCanvasKitColorSpace,
 	toPredefinedCanvasColorSpace,
@@ -26,10 +28,12 @@ type CachedWebGPUCanvasContext = {
 	deviceContext: WebGPUDeviceContext;
 	textureFormat: GPUTextureFormat;
 	colorSpace: SkiaWebCanvasColorSpace;
+	dynamicRange: SkiaWebCanvasDynamicRange;
 	canvasContext: WebGPUCanvasContext;
 };
 type SkiaCanvasSurfaceOptions = {
 	colorSpace?: SkiaWebCanvasColorSpace;
+	dynamicRange?: SkiaWebCanvasDynamicRange;
 };
 type SkiaOffscreenSurfaceOptions = SkiaCanvasSurfaceOptions & {
 	pixelRatio?: number;
@@ -45,12 +49,21 @@ type TrackedWebGLSurfaceContext = {
 	grContext: GrDirectContext;
 };
 
-const WEBGPU_CANVAS_ALPHA_MODE = "premultiplied" as const;
+const WEBGPU_STANDARD_CANVAS_ALPHA_MODE = "premultiplied" as const;
+const WEBGPU_HDR_CANVAS_ALPHA_MODE = "opaque" as const;
+const WEBGPU_HDR_CANVAS_FORMAT = "rgba16float" as const;
 const webgpuCanvasContextCache = new WeakMap<
 	CanvasElement,
 	CachedWebGPUCanvasContext
 >();
 let trackedWebGLSurfaceContext: TrackedWebGLSurfaceContext | null = null;
+const emittedSurfaceWarnings = new Set<string>();
+
+const warnSurfaceOnce = (key: string, message: string) => {
+	if (emittedSurfaceWarnings.has(key)) return;
+	emittedSurfaceWarnings.add(key);
+	console.warn(message);
+};
 
 const normalizeOffscreenPixelRatio = (value: number) => {
 	return Math.min(4, Math.max(1, value));
@@ -172,9 +185,8 @@ const isUsableGrContext = (context: GrDirectContext | null | undefined) => {
 	if (!context) {
 		return false;
 	}
-	const isDeleted = (
-		context as GrDirectContext & { isDeleted?: () => boolean }
-	).isDeleted;
+	const isDeleted = (context as GrDirectContext & { isDeleted?: () => boolean })
+		.isDeleted;
 	return !(typeof isDeleted === "function" && isDeleted.call(context));
 };
 
@@ -215,36 +227,62 @@ const getOrCreateWebGPUCanvasContext = (
 	canvas: CanvasElement,
 	backend: Extract<SkiaRenderBackend, { kind: "webgpu" }>,
 	colorSpace: SkiaWebCanvasColorSpace,
+	dynamicRange: SkiaWebCanvasDynamicRange,
 ) => {
-	const textureFormat = getPreferredWebGPUTextureFormat();
 	const cachedContext = webgpuCanvasContextCache.get(canvas);
 	if (
 		cachedContext &&
 		cachedContext.deviceContext === backend.deviceContext &&
-		cachedContext.textureFormat === textureFormat &&
-		cachedContext.colorSpace === colorSpace
+		cachedContext.colorSpace === colorSpace &&
+		cachedContext.dynamicRange === dynamicRange
 	) {
 		return cachedContext.canvasContext;
 	}
-	const canvasContext = toCanvasKitWebGPU(CanvasKit).MakeGPUCanvasContext?.(
-		backend.deviceContext,
-		canvas,
-		{
-			format: textureFormat,
-			alphaMode: WEBGPU_CANVAS_ALPHA_MODE,
-			colorSpace: toPredefinedCanvasColorSpace(colorSpace),
-		},
-	);
-	if (!canvasContext) {
+	const makeCanvasContext = (nextDynamicRange: SkiaWebCanvasDynamicRange) => {
+		const textureFormat =
+			nextDynamicRange === "extended"
+				? WEBGPU_HDR_CANVAS_FORMAT
+				: getPreferredWebGPUTextureFormat();
+		const canvasContext = toCanvasKitWebGPU(CanvasKit).MakeGPUCanvasContext?.(
+			backend.deviceContext,
+			canvas,
+			{
+				format: textureFormat,
+				alphaMode:
+					nextDynamicRange === "extended"
+						? WEBGPU_HDR_CANVAS_ALPHA_MODE
+						: WEBGPU_STANDARD_CANVAS_ALPHA_MODE,
+				colorSpace: toPredefinedCanvasColorSpace(colorSpace),
+				...(nextDynamicRange === "extended"
+					? { toneMapping: { mode: "extended" as const } }
+					: {}),
+			},
+		);
+		return canvasContext ? { canvasContext, textureFormat } : null;
+	};
+	const resolved =
+		(dynamicRange === "extended" ? makeCanvasContext("extended") : null) ??
+		makeCanvasContext("standard");
+	if (!resolved) {
 		return null;
+	}
+	if (
+		dynamicRange === "extended" &&
+		resolved.textureFormat !== WEBGPU_HDR_CANVAS_FORMAT
+	) {
+		warnSurfaceOnce(
+			"webgpu-hdr-canvas-fallback",
+			"WebGPU HDR canvas output is unavailable; falling back to SDR canvas output.",
+		);
 	}
 	webgpuCanvasContextCache.set(canvas, {
 		deviceContext: backend.deviceContext,
-		textureFormat,
+		textureFormat: resolved.textureFormat,
 		colorSpace,
-		canvasContext,
+		dynamicRange,
+		canvasContext: resolved.canvasContext,
 	});
-	return canvasContext;
+	return resolved.canvasContext;
 };
 
 const getCurrentWebGLGrContext = (CanvasKit: CanvasKit) => {
@@ -279,6 +317,7 @@ export const createSkiaCanvasSurface = (
 			options.colorSpace,
 			CanvasKit,
 		);
+		const dynamicRange = resolveSkiaWebCanvasDynamicRange(options.dynamicRange);
 		const canvasKitColorSpace = toCanvasKitColorSpace(CanvasKit, colorSpace);
 		const webgpuCanvasKit = toCanvasKitWebGPU(CanvasKit);
 		const canvasContext = getOrCreateWebGPUCanvasContext(
@@ -286,6 +325,7 @@ export const createSkiaCanvasSurface = (
 			canvas,
 			backend,
 			colorSpace,
+			dynamicRange,
 		);
 		if (!canvasContext) {
 			return null;
@@ -300,6 +340,12 @@ export const createSkiaCanvasSurface = (
 		return new JsiSkSurface(CanvasKit, surface);
 	}
 	if (backend.kind === "webgl") {
+		if (options.dynamicRange === "extended") {
+			warnSurfaceOnce(
+				"webgl-hdr-canvas-fallback",
+				"WebGL does not support HDR canvas output in react-skia-lite; falling back to SDR canvas output.",
+			);
+		}
 		const colorSpace = resolveSkiaWebCanvasColorSpace(
 			options.colorSpace,
 			CanvasKit,
@@ -344,13 +390,30 @@ export const createSkiaOffscreenSurface = (
 			options.colorSpace,
 			CanvasKit,
 		);
+		const dynamicRange = resolveSkiaWebCanvasDynamicRange(options.dynamicRange);
 		const canvasKitColorSpace = toCanvasKitColorSpace(CanvasKit, colorSpace);
+		const webgpuColorTypes = CanvasKit.ColorType as CanvasKit["ColorType"] & {
+			RGBA_F16?: unknown;
+		};
+		const colorType =
+			dynamicRange === "extended" && webgpuColorTypes.RGBA_F16
+				? webgpuColorTypes.RGBA_F16
+				: CanvasKit.ColorType.RGBA_8888;
+		if (
+			dynamicRange === "extended" &&
+			colorType === CanvasKit.ColorType.RGBA_8888
+		) {
+			warnSurfaceOnce(
+				"webgpu-hdr-offscreen-fallback",
+				"WebGPU HDR offscreen surface requested RGBA_F16, but CanvasKit does not expose it; falling back to RGBA_8888.",
+			);
+		}
 		const surface = toCanvasKitWebGPU(CanvasKit).SkSurfaces?.RenderTarget?.(
 			backend.deviceContext,
 			{
 				width: targetWidth,
 				height: targetHeight,
-				colorType: CanvasKit.ColorType.RGBA_8888,
+				colorType,
 				alphaType: CanvasKit.AlphaType.Premul,
 				colorSpace: canvasKitColorSpace,
 			},

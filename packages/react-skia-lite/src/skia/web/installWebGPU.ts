@@ -27,6 +27,28 @@ type SimpleISize = {
 	height: number;
 };
 
+type WebGPUCanvasToneMappingMode = "standard" | "extended";
+
+type WebGPUCanvasToneMapping = {
+	mode: WebGPUCanvasToneMappingMode;
+};
+
+type WebGPUCanvasOptionsWithToneMapping = WebGPUCanvasOptions & {
+	toneMapping?: WebGPUCanvasToneMapping;
+};
+
+type GPUCanvasConfigurationWithToneMapping = GPUCanvasConfiguration & {
+	toneMapping?: WebGPUCanvasToneMapping;
+};
+
+type GPUCanvasContextWithConfiguration = GPUCanvasContext & {
+	getConfiguration?: () => {
+		toneMapping?: {
+			mode?: string;
+		};
+	};
+};
+
 type WebGPUExternalImageCopy = Parameters<
 	GPUQueue["copyExternalImageToTexture"]
 >[0];
@@ -307,7 +329,7 @@ type InternalCanvasKitWebGPU = Omit<
 	MakeGPUCanvasContext?: (
 		context: InternalWebGPUDeviceContext,
 		canvas: HTMLCanvasElement | OffscreenCanvas,
-		opts?: WebGPUCanvasOptions,
+		opts?: WebGPUCanvasOptionsWithToneMapping,
 	) => InternalWebGPUCanvasContext | null;
 	MakeGPUCanvasSurface?: (
 		canvasContext: InternalWebGPUCanvasContext,
@@ -453,7 +475,9 @@ const hasPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 	);
 };
 
-const normalizeWebGPUCanvasOptions = (opts?: WebGPUCanvasOptions) => {
+const normalizeWebGPUCanvasOptions = (
+	opts?: WebGPUCanvasOptionsWithToneMapping,
+) => {
 	return {
 		...opts,
 		alphaMode: opts?.alphaMode ?? DEFAULT_WEBGPU_CANVAS_ALPHA_MODE,
@@ -1139,7 +1163,9 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 	};
 
 	canvasKit.MakeGPUCanvasContext = (context, canvas, opts) => {
-		const canvasContext = canvas.getContext("webgpu");
+		const canvasContext = canvas.getContext(
+			"webgpu",
+		) as GPUCanvasContextWithConfiguration | null;
 		if (!canvasContext || !context._device) {
 			return null;
 		}
@@ -1152,8 +1178,25 @@ const installPublicWebGPUHelpers = (canvasKit: InternalCanvasKitWebGPU) => {
 			...(resolvedOptions.colorSpace
 				? { colorSpace: resolvedOptions.colorSpace }
 				: {}),
-		} as GPUCanvasConfiguration;
-		canvasContext.configure(configuration);
+			...(resolvedOptions.toneMapping
+				? { toneMapping: resolvedOptions.toneMapping }
+				: {}),
+		} as GPUCanvasConfigurationWithToneMapping;
+		try {
+			canvasContext.configure(configuration);
+		} catch {
+			return null;
+		}
+		if (
+			resolvedOptions.toneMapping?.mode === "extended" &&
+			typeof canvasContext.getConfiguration === "function"
+		) {
+			const configuredToneMapping =
+				canvasContext.getConfiguration().toneMapping?.mode;
+			if (configuredToneMapping && configuredToneMapping !== "extended") {
+				return null;
+			}
+		}
 		const webgpuCanvasContext = {
 			_inner: canvasContext,
 			_deviceContext: context,
@@ -1223,11 +1266,11 @@ export const installCanvasKitWebGPU = (canvasKit: CanvasKit) => {
 
 	patchSurfacePrototype(internalCanvasKit);
 
-	if (!hasPublicWebGPUHelpers(internalCanvasKit)) {
-		if (!hasLowLevelWebGPUExports(internalCanvasKit)) {
-			return;
-		}
+	if (hasLowLevelWebGPUExports(internalCanvasKit)) {
 		installPublicWebGPUHelpers(internalCanvasKit);
+		return;
+	}
+	if (!hasPublicWebGPUHelpers(internalCanvasKit)) {
 		return;
 	}
 
@@ -1247,11 +1290,15 @@ export const installCanvasKitWebGPU = (canvasKit: CanvasKit) => {
 	}
 	if (originalMakeGPUCanvasContext) {
 		internalCanvasKit.MakeGPUCanvasContext = (context, canvas, opts) => {
-			return originalMakeGPUCanvasContext(
-				context,
-				canvas,
-				normalizeWebGPUCanvasOptions(opts),
-			);
+			try {
+				return originalMakeGPUCanvasContext(
+					context,
+					canvas,
+					normalizeWebGPUCanvasOptions(opts),
+				);
+			} catch {
+				return null;
+			}
 		};
 	}
 };

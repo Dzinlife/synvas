@@ -25,7 +25,10 @@ import { SkiaSGRoot } from "../sksg/Reconciler";
 import SkiaPictureViewNativeComponent from "../specs/SkiaPictureViewNativeComponent";
 import { SkiaViewApi } from "../views/api";
 import { SkiaViewNativeId } from "../views/SkiaViewNativeId";
-import type { SkiaWebCanvasColorSpace } from "../skia/web/canvasColorSpace";
+import type {
+	SkiaWebCanvasColorSpace,
+	SkiaWebCanvasDynamicRange,
+} from "../skia/web/canvasColorSpace";
 
 export interface CanvasRef extends FC<CanvasProps> {
 	makeImageSnapshot(rect?: SkRect): SkImage;
@@ -65,6 +68,7 @@ export interface CanvasProps extends Omit<ViewProps, "onLayout"> {
 	opaque?: boolean;
 	onSize?: SharedValue<SkSize>;
 	colorSpace?: SkiaWebCanvasColorSpace;
+	dynamicRange?: SkiaWebCanvasDynamicRange;
 	ref?: React.Ref<CanvasRef>;
 	androidWarmup?: boolean;
 	pd?: number;
@@ -81,6 +85,7 @@ export const Canvas = ({
 	children,
 	onSize,
 	colorSpace = "p3",
+	dynamicRange = "standard",
 	androidWarmup = false,
 	ref,
 	// Here know this is a type error but this is done on purpose to check it at runtime
@@ -278,6 +283,7 @@ export const Canvas = ({
 			debug={debug}
 			opaque={opaque}
 			colorSpace={colorSpace}
+			dynamicRange={dynamicRange}
 			// androidWarmup={androidWarmup}
 			onLayout={
 				Platform.OS === "web" && (onSize || onLayout) ? onLayoutWeb : onLayout

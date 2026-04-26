@@ -17,6 +17,7 @@ import {
 	makeMutable,
 	markSkiaRuntimeActivity,
 	type SkiaWebCanvasColorSpace,
+	type SkiaWebCanvasDynamicRange,
 	type SharedValue,
 	useDerivedValue,
 	useSharedValue,
@@ -152,6 +153,7 @@ interface InfiniteSkiaCanvasProps {
 	tileMaxTasksPerTick?: number;
 	tileLodTransition?: TileLodTransition | null;
 	colorSpace?: SkiaWebCanvasColorSpace;
+	dynamicRange?: SkiaWebCanvasDynamicRange;
 	onNodeResize?: (event: CanvasNodeResizeEvent) => void;
 	onSelectionResize?: (event: CanvasSelectionResizeEvent) => void;
 	onLabelHitTesterChange?: (tester: CanvasNodeLabelHitTester | null) => void;
@@ -196,6 +198,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 	tileMaxTasksPerTick,
 	tileLodTransition = null,
 	colorSpace,
+	dynamicRange,
 	onNodeResize,
 	onSelectionResize,
 	onLabelHitTesterChange,
@@ -401,16 +404,32 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		if (liveNodeIds.size === 0) return EMPTY_NODE_ID_SET;
 		return liveNodeIds;
 	}, [forceLiveNodeIdSet, latestNodeById]);
+	const hdrTestLiveNodeIdSet = useMemo(() => {
+		const liveNodeIds = new Set<string>();
+		for (const node of renderNodes) {
+			if (node.type === "hdr-test") {
+				liveNodeIds.add(node.id);
+			}
+		}
+		return liveNodeIds.size === 0 ? EMPTY_NODE_ID_SET : liveNodeIds;
+	}, [renderNodes]);
 	const liveNodeIdSet = useMemo(() => {
-		if (!activeLiveNodeId && forcedLiveRenderableNodeIdSet.size === 0) {
+		if (
+			!activeLiveNodeId &&
+			forcedLiveRenderableNodeIdSet.size === 0 &&
+			hdrTestLiveNodeIdSet.size === 0
+		) {
 			return EMPTY_NODE_ID_SET;
 		}
 		const liveNodeIds = new Set(forcedLiveRenderableNodeIdSet);
+		for (const nodeId of hdrTestLiveNodeIdSet) {
+			liveNodeIds.add(nodeId);
+		}
 		if (activeLiveNodeId) {
 			liveNodeIds.add(activeLiveNodeId);
 		}
 		return liveNodeIds;
-	}, [activeLiveNodeId, forcedLiveRenderableNodeIdSet]);
+	}, [activeLiveNodeId, forcedLiveRenderableNodeIdSet, hdrTestLiveNodeIdSet]);
 	const {
 		effectiveFrozenNodeIdSet,
 		renderFrozenNodeIdSet,
@@ -1498,7 +1517,12 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 				suspendHover ? "pointer-events-none" : "pointer-events-auto"
 			}`}
 		>
-			<Canvas ref={canvasRef} style={{ width, height }} colorSpace={colorSpace} />
+			<Canvas
+				ref={canvasRef}
+				style={{ width, height }}
+				colorSpace={colorSpace}
+				dynamicRange={dynamicRange}
+			/>
 			{!suspendHover && focusedNode && FocusEditorBridge && (
 				<FocusEditorBridge
 					width={width}

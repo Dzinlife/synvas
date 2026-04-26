@@ -72,6 +72,14 @@ const boardNodeSchema = canvasNodeBaseSchema.extend({
 	layoutMode: z.enum(["free", "auto"]).default("free"),
 });
 
+const hdrTestNodeSchema = canvasNodeBaseSchema.extend({
+	type: z.literal("hdr-test"),
+	colorPreset: z
+		.enum(["sdr-white", "p3-red", "hdr-white", "hdr-red", "hdr-gradient"])
+		.default("hdr-white"),
+	brightness: z.number().positive().default(2),
+});
+
 const canvasDocumentSchema = z.object({
 	nodes: z.array(
 		z.discriminatedUnion("type", [
@@ -81,6 +89,7 @@ const canvasDocumentSchema = z.object({
 			imageNodeSchema,
 			textNodeSchema,
 			boardNodeSchema,
+			hdrTestNodeSchema,
 		]),
 	),
 });
@@ -201,12 +210,7 @@ const colorTransferSchema = z.enum([
 	"linear",
 	"unknown",
 ]);
-const colorMatrixSchema = z.enum([
-	"rgb",
-	"bt709",
-	"bt2020-ncl",
-	"unknown",
-]);
+const colorMatrixSchema = z.enum(["rgb", "bt709", "bt2020-ncl", "unknown"]);
 const colorRangeSchema = z.enum(["full", "limited", "unknown"]);
 const colorSpaceDescriptorSchema = z.object({
 	primaries: colorPrimariesSchema,
