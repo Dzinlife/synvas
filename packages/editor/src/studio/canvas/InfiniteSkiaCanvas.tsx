@@ -1452,6 +1452,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		let staticTileDrawItems: TileDrawItem[] = [];
 		let tileDebugItems: TileDebugItem[] = [];
 		let shouldReleaseRetainedFrozenNodes = false;
+		let releaseRetainedFrozenNodeIds: ReadonlySet<string> | undefined;
 		let shouldReleaseRetainedLiveNodes = false;
 		let releaseRetainedLiveNodeIds: ReadonlySet<string> | undefined;
 		const shouldDropRetainedFrozenNodes = shouldDropRetainedFrozenNodesForZoom(
@@ -1482,23 +1483,25 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					(nodeId) => staticTileSnapshot.pendingPictureNodeIdSet.has(nodeId),
 				);
 				const fallbackNodeIdSet = new Set(frameResult.fallbackNodeIds);
-				const releaseImageRetainedLiveNodeIds = new Set<string>();
-				for (const nodeId of retainedLiveNodeIdSet) {
+				const canReleaseRetainedNodeFromStaticTile = (
+					nodeId: string,
+				): boolean => {
 					const node = getLatestNodeById(nodeId);
-					if (!node || node.type !== "image") continue;
-					if (!staticTileSnapshot.inputByNodeId.has(nodeId)) continue;
-					if (staticTileSnapshot.pendingPictureNodeIdSet.has(nodeId)) continue;
-					if (fallbackNodeIdSet.has(nodeId)) continue;
+					if (!node) return false;
+					if (!staticTileSnapshot.inputByNodeId.has(nodeId)) return false;
+					if (staticTileSnapshot.pendingPictureNodeIdSet.has(nodeId)) {
+						return false;
+					}
+					if (fallbackNodeIdSet.has(nodeId)) return false;
 					const nodeAabb = resolveNodeWorldAabb(node);
 					const nodeVisibleAabb = resolveClippedTileInputAabb(
 						nodeAabb,
 						resolveNodeAncestorClipAabbs(node, latestNodeByIdRef.current),
 					);
 					if (!nodeVisibleAabb) {
-						releaseImageRetainedLiveNodeIds.add(nodeId);
-						continue;
+						return true;
 					}
-					const hasStaticDrawItem = frameResult.drawItems.some((item) => {
+					return frameResult.drawItems.some((item) => {
 						const drawAabb =
 							item.clipAabb ??
 							({
@@ -1511,12 +1514,26 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							} satisfies TileAabb);
 						return isTileAabbIntersected(drawAabb, nodeVisibleAabb);
 					});
-					if (hasStaticDrawItem) {
-						releaseImageRetainedLiveNodeIds.add(nodeId);
+				};
+				const releaseReadyRetainedFrozenNodeIds = new Set<string>();
+				for (const nodeId of retainedFrozenNodeIdSet) {
+					if (effectiveFrozenNodeIdSet.has(nodeId)) continue;
+					if (canReleaseRetainedNodeFromStaticTile(nodeId)) {
+						releaseReadyRetainedFrozenNodeIds.add(nodeId);
 					}
 				}
-				if (releaseImageRetainedLiveNodeIds.size > 0) {
-					releaseRetainedLiveNodeIds = releaseImageRetainedLiveNodeIds;
+				if (releaseReadyRetainedFrozenNodeIds.size > 0) {
+					releaseRetainedFrozenNodeIds = releaseReadyRetainedFrozenNodeIds;
+				}
+				const releaseReadyRetainedLiveNodeIds = new Set<string>();
+				for (const nodeId of retainedLiveNodeIdSet) {
+					if (frozenNodeIdSet.has(nodeId)) continue;
+					if (canReleaseRetainedNodeFromStaticTile(nodeId)) {
+						releaseReadyRetainedLiveNodeIds.add(nodeId);
+					}
+				}
+				if (releaseReadyRetainedLiveNodeIds.size > 0) {
+					releaseRetainedLiveNodeIds = releaseReadyRetainedLiveNodeIds;
 				}
 				shouldReleaseRetainedFrozenNodes =
 					retainedFrozenNodeIdSet.size > 0 &&
@@ -1587,6 +1604,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					{frozenLayoutRenderNodes.map((node) => {
 						if (
 							(shouldReleaseRetainedFrozenNodes ||
+								releaseRetainedFrozenNodeIds?.has(node.id) ||
 								shouldDropRetainedFrozenNodes) &&
 							retainedFrozenNodeIdSet.has(node.id) &&
 							!effectiveFrozenNodeIdSet.has(node.id)
@@ -1614,8 +1632,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					})}
 					{liveLayerRenderNodes.map((node) => {
 						if (
-							node.type === "image" &&
 							retainedLiveNodeIdSet.has(node.id) &&
+							!frozenNodeIdSet.has(node.id) &&
 							(shouldReleaseRetainedLiveNodes ||
 								releaseRetainedLiveNodeIds?.has(node.id))
 						) {
@@ -1662,6 +1680,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		);
 		releaseRetainedNodesAfterRender({
 			releaseRetainedFrozenNodes: shouldReleaseRetainedFrozenNodes,
+			releaseRetainedFrozenNodeIds,
 			dropRetainedFrozenNodesForZoom: shouldDropRetainedFrozenNodes,
 			releaseRetainedLiveNodes: shouldReleaseRetainedLiveNodes,
 			releaseRetainedLiveNodeIds,
@@ -1674,6 +1693,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		getNodeLayoutValue,
 		focusedNodeId,
 		frozenLayoutRenderNodes,
+		frozenNodeIdSet,
 		focusEditorLayerState.layerProps,
 		focusLayerEnabled,
 		handleOverlayNodeResize,

@@ -16,6 +16,7 @@ interface UseInfiniteSkiaCanvasRenderRetentionInput {
 
 interface ReleaseRetainedNodesInput {
 	releaseRetainedFrozenNodes: boolean;
+	releaseRetainedFrozenNodeIds?: ReadonlySet<string>;
 	dropRetainedFrozenNodesForZoom: boolean;
 	releaseRetainedLiveNodes: boolean;
 	releaseRetainedLiveNodeIds?: ReadonlySet<string>;
@@ -103,6 +104,7 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 		const releasedNodeIds = new Set<string>();
 		for (const nodeId of previousEffectiveFrozenNodeIdSetRef.current) {
 			if (effectiveFrozenNodeIdSet.has(nodeId)) continue;
+			if (liveNodeIdSet.has(nodeId)) continue;
 			if (!latestNodeById.has(nodeId)) continue;
 			releasedNodeIds.add(nodeId);
 		}
@@ -112,6 +114,7 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 		effectiveFrozenNodeIdSet,
 		frozenRetentionVersion,
 		latestNodeById,
+		liveNodeIdSet,
 		supportsTilePipeline,
 	]);
 	const retainedFrozenNodeIdSet = useMemo(() => {
@@ -121,6 +124,7 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 		const retainedNodeIds = new Set(releasedFrozenNodeIdSet);
 		for (const nodeId of retainedFrozenNodeIds) {
 			if (effectiveFrozenNodeIdSet.has(nodeId)) continue;
+			if (liveNodeIdSet.has(nodeId)) continue;
 			if (!latestNodeById.has(nodeId)) continue;
 			retainedNodeIds.add(nodeId);
 		}
@@ -129,6 +133,7 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 	}, [
 		effectiveFrozenNodeIdSet,
 		latestNodeById,
+		liveNodeIdSet,
 		releasedFrozenNodeIdSet,
 		retainedFrozenNodeIds,
 		supportsTilePipeline,
@@ -216,6 +221,7 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 				for (const nodeId of [...nextNodeIds]) {
 					if (
 						effectiveFrozenNodeIdSet.has(nodeId) ||
+						liveNodeIdSet.has(nodeId) ||
 						!latestNodeById.has(nodeId)
 					) {
 						nextNodeIds.delete(nodeId);
@@ -238,6 +244,7 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 		cameraZoom,
 		effectiveFrozenNodeIdSet,
 		latestNodeById,
+		liveNodeIdSet,
 		releasedFrozenNodeIdSet,
 		retainedFrozenNodeIds.length,
 		supportsTilePipeline,
@@ -263,6 +270,7 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 	const releaseRetainedNodesAfterRender = useCallback(
 		({
 			releaseRetainedFrozenNodes,
+			releaseRetainedFrozenNodeIds,
 			dropRetainedFrozenNodesForZoom,
 			releaseRetainedLiveNodes,
 			releaseRetainedLiveNodeIds,
@@ -276,6 +284,23 @@ export const useInfiniteSkiaCanvasRenderRetention = ({
 				setRetainedFrozenNodeIds((previous) => {
 					const next = previous.filter((nodeId) => {
 						return effectiveFrozenNodeIdSet.has(nodeId);
+					});
+					if (
+						next.length === previous.length &&
+						next.every((nodeId, index) => nodeId === previous[index])
+					) {
+						return previous;
+					}
+					return next;
+				});
+			} else if (releaseRetainedFrozenNodeIds?.size) {
+				previousEffectiveFrozenNodeIdSetRef.current = new Set(
+					effectiveFrozenNodeIdSet,
+				);
+				setFrozenRetentionVersion((previous) => previous + 1);
+				setRetainedFrozenNodeIds((previous) => {
+					const next = previous.filter((nodeId) => {
+						return !releaseRetainedFrozenNodeIds.has(nodeId);
 					});
 					if (
 						next.length === previous.length &&
