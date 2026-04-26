@@ -15,6 +15,7 @@ import {
 } from "@/audio/owner";
 import {
 	closeVideoSample,
+	probeVideoRawFrameAccess,
 	videoSampleToColorManagedSkImage,
 } from "@/lib/videoFrameUtils";
 import { useProjectStore } from "@/projects/projectStore";
@@ -36,7 +37,8 @@ const LOOKAHEAD_FRAMES = 2;
 const PLAYBACK_BACK_JUMP_FRAMES = 3;
 const VIDEO_OWNER_PREFIX = "canvas-node:video:";
 const SCENE_OWNER_PREFIX = "scene:";
-const DEFAULT_TEXTURE_TARGET_COLOR_SPACE: TextureSourceTargetColorSpace = "srgb";
+const DEFAULT_TEXTURE_TARGET_COLOR_SPACE: TextureSourceTargetColorSpace =
+	"srgb";
 
 type ClockMode = "audio" | "perf" | null;
 
@@ -816,6 +818,11 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 			closeVideoSample(frame);
 			return existed;
 		}
+
+		void probeVideoRawFrameAccess(frame, {
+			key: this.binding.assetId ?? this.binding.assetUri ?? this.nodeId,
+			label: `video node ${this.nodeId}`,
+		});
 
 		const decoded = videoSampleToColorManagedSkImage(frame, {
 			targetColorSpace:

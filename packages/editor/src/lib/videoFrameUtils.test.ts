@@ -4,6 +4,7 @@ import {
 	closeVideoFrame,
 	closeVideoSample,
 	normalizeVideoFrameColorSpace,
+	probeVideoRawFrameAccess,
 	videoSampleToColorManagedSkImage,
 	videoSampleToSkImage,
 } from "./videoFrameUtils";
@@ -184,5 +185,103 @@ describe("videoFrameUtils", () => {
 			matrix: "unknown",
 			range: "unknown",
 		});
+	});
+
+	it("会用 clone 探测 VideoSample 与 VideoFrame raw copy 能力", async () => {
+		const sampleAllocationSize = vi.fn((options?: VideoFrameCopyToOptions) =>
+			options?.format === "NV12" ? 10 : 12,
+		);
+		const sampleCopyTo = vi.fn(async () => [{ offset: 0, stride: 4 }]);
+		const frameAllocationSize = vi.fn((options?: VideoFrameCopyToOptions) => {
+			if (options?.format === "NV12") {
+				throw new DOMException("unsupported", "NotSupportedError");
+			}
+			return 12;
+		});
+		const frameCopyTo = vi.fn(async () => [{ offset: 0, stride: 4 }]);
+		const frame = {
+			format: null,
+			codedWidth: 2,
+			codedHeight: 2,
+			displayWidth: 2,
+			displayHeight: 2,
+			visibleRect: { x: 0, y: 0, width: 2, height: 2 },
+			colorSpace: {
+				toJSON: () => ({
+					primaries: "bt2020",
+					transfer: "hlg",
+					matrix: "bt2020-ncl",
+					fullRange: false,
+				}),
+			},
+			allocationSize: frameAllocationSize,
+			copyTo: frameCopyTo,
+			close: vi.fn(),
+		} as unknown as VideoFrame;
+		const clonedSample = {
+			toVideoFrame: vi.fn(() => frame),
+			allocationSize: sampleAllocationSize,
+			copyTo: sampleCopyTo,
+			close: vi.fn(),
+		};
+		const sample = {
+			clone: vi.fn(() => clonedSample),
+			format: null,
+			timestamp: 1,
+			duration: 1 / 30,
+			codedWidth: 2,
+			codedHeight: 2,
+			displayWidth: 2,
+			displayHeight: 2,
+			rotation: 0,
+			visibleRect: { left: 0, top: 0, width: 2, height: 2 },
+			colorSpace: {
+				toJSON: () => ({
+					primaries: "bt2020",
+					transfer: "hlg",
+					matrix: "bt2020-ncl",
+					fullRange: false,
+				}),
+			},
+		} as unknown as VideoSample;
+		const consoleInfoSpy = vi
+			.spyOn(console, "info")
+			.mockImplementation(() => {});
+
+		try {
+			const result = await probeVideoRawFrameAccess(sample, {
+				key: "asset-hlg",
+				label: "unit",
+				force: true,
+			});
+
+			expect(sample.clone).toHaveBeenCalledTimes(1);
+			expect(clonedSample.toVideoFrame).toHaveBeenCalledTimes(1);
+			expect(sampleAllocationSize).toHaveBeenCalledWith(undefined);
+			expect(sampleAllocationSize).toHaveBeenCalledWith({ format: "I420" });
+			expect(sampleAllocationSize).toHaveBeenCalledWith({ format: "NV12" });
+			expect(frameAllocationSize).toHaveBeenCalledWith({ format: "NV12" });
+			expect(sampleCopyTo).toHaveBeenCalledTimes(3);
+			expect(frameCopyTo).toHaveBeenCalledTimes(2);
+			expect(frame.close).toHaveBeenCalledTimes(1);
+			expect(clonedSample.close).toHaveBeenCalledTimes(1);
+			expect(result?.frame?.normalizedColorSpace).toEqual({
+				primaries: "bt2020",
+				transfer: "hlg",
+				matrix: "bt2020-ncl",
+				range: "limited",
+				label: "Rec.2100 HLG",
+			});
+			expect(result?.access.videoFrame.at(-1)).toMatchObject({
+				format: "NV12",
+				allocationError: "NotSupportedError: unsupported",
+			});
+			expect(consoleInfoSpy).toHaveBeenCalledWith(
+				"[VideoRawProbe] raw frame access",
+				expect.objectContaining({ key: "asset-hlg" }),
+			);
+		} finally {
+			consoleInfoSpy.mockRestore();
+		}
 	});
 });

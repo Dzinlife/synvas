@@ -52,6 +52,7 @@ const mocks = vi.hoisted(() => {
 		createFramePrecompileController: vi.fn(),
 		createFrameController,
 		videoSampleToColorManagedSkImage: vi.fn(),
+		probeVideoRawFrameAccess: vi.fn(),
 		closeVideoSample: vi.fn(),
 	};
 });
@@ -85,6 +86,7 @@ vi.mock("core/render-system/framePrecompileController", () => ({
 
 vi.mock("@/lib/videoFrameUtils", () => ({
 	videoSampleToColorManagedSkImage: mocks.videoSampleToColorManagedSkImage,
+	probeVideoRawFrameAccess: mocks.probeVideoRawFrameAccess,
 	closeVideoSample: mocks.closeVideoSample,
 }));
 
@@ -591,8 +593,15 @@ describe("video playbackController", () => {
 			expect(controller.getSnapshot().currentFrame).not.toBeNull();
 		});
 
-		expect(mocks.videoSampleToColorManagedSkImage).toHaveBeenCalledWith(sample, {
-			targetColorSpace: "display-p3",
+		expect(mocks.videoSampleToColorManagedSkImage).toHaveBeenCalledWith(
+			sample,
+			{
+				targetColorSpace: "display-p3",
+			},
+		);
+		expect(mocks.probeVideoRawFrameAccess).toHaveBeenCalledWith(sample, {
+			key: "asset-video-1",
+			label: "video node node-color-meta",
 		});
 		expect(
 			useProjectStore.getState().currentProject?.assets[0]?.meta?.color
