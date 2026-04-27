@@ -231,6 +231,7 @@ export const resolveCanvasBoardAutoLayoutPatches = (
 		boardId,
 		options?.rows ?? deriveCanvasBoardAutoLayoutRows(nodes, boardId, { gap }),
 	);
+	if (rows.length === 0) return [];
 	const patchByNodeId = new Map<string, CanvasBoardAutoLayoutPatch["patch"]>();
 	let y = board.y + gap;
 	let maxRowWidth = 0;
@@ -284,10 +285,7 @@ export const resolveCanvasBoardAutoLayoutPatches = (
 	}
 
 	const nextBoardWidth = gap + maxRowWidth + gap;
-	const nextBoardHeight =
-		rows.length === 0
-			? gap * 2
-			: gap + totalRowHeight + gap * (rows.length - 1) + gap;
+	const nextBoardHeight = gap + totalRowHeight + gap * (rows.length - 1) + gap;
 	pushPatchIfChanged(patchByNodeId, board, {
 		width: nextBoardWidth,
 		height: nextBoardHeight,

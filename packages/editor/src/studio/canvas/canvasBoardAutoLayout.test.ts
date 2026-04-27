@@ -5,7 +5,6 @@ import type {
 } from "@/studio/project/types";
 import { describe, expect, it } from "vitest";
 import {
-	CANVAS_BOARD_AUTO_LAYOUT_GAP,
 	deriveCanvasBoardAutoLayoutRows,
 	resolveCanvasBoardAutoLayoutInsertion,
 	resolveCanvasBoardAutoLayoutPatches,
@@ -138,7 +137,7 @@ describe("canvasBoardAutoLayout", () => {
 		]);
 	});
 
-	it("忽略 hidden child，空 board 保持两侧 gap 尺寸", () => {
+	it("忽略 hidden child，空 board 不变更尺寸", () => {
 		const nodes: CanvasNode[] = [
 			createBoardNode("board", { width: 300, height: 200 }),
 			createTextNode("hidden", {
@@ -149,15 +148,24 @@ describe("canvasBoardAutoLayout", () => {
 			}),
 		];
 
-		expect(resolveCanvasBoardAutoLayoutPatches(nodes, "board")).toEqual([
-			{
-				nodeId: "board",
-				patch: {
-					width: CANVAS_BOARD_AUTO_LAYOUT_GAP * 2,
-					height: CANVAS_BOARD_AUTO_LAYOUT_GAP * 2,
-				},
-			},
-		]);
+		expect(resolveCanvasBoardAutoLayoutPatches(nodes, "board")).toEqual([]);
+	});
+
+	it("所有 visible child 被排除时，空 board 不变更尺寸", () => {
+		const nodes: CanvasNode[] = [
+			createBoardNode("board", { width: 300, height: 200 }),
+			createTextNode("moving", {
+				parentId: "board",
+				width: 120,
+				height: 80,
+			}),
+		];
+
+		expect(
+			resolveCanvasBoardAutoLayoutPatches(nodes, "board", {
+				rows: [],
+			}),
+		).toEqual([]);
 	});
 
 	it("移动 direct child board 时同步平移其 descendants", () => {
