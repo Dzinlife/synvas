@@ -4189,8 +4189,8 @@ export const useCanvasInteractionController = ({
 				});
 				gesture = "marquee";
 			}
-			if (gesture !== "tap") {
-				clearHoveredNode();
+			if (gesture === "node-drag" && node) {
+				commitHoveredNodeId(node.id);
 			}
 			pointerSessionRef.current = {
 				pointerId: event.pointerId,
@@ -4208,6 +4208,7 @@ export const useCanvasInteractionController = ({
 			clearCanvasSnapGuides,
 			clearHoveredNode,
 			clearPendingClickSuppression,
+			commitHoveredNodeId,
 			commitCanvasResizeCursor,
 			commitCanvasResizeCursorByAnchor,
 			getCamera,
@@ -4269,7 +4270,20 @@ export const useCanvasInteractionController = ({
 							resolveCanvasDragEventFromPointer(pointerSession, event, false),
 						);
 					}
-					clearHoveredNode();
+					if (
+						dragSession &&
+						!dragSession.activated &&
+						!dragSession.timelineDropMode
+					) {
+						if (
+							pointerSession.gesture === "node-drag" &&
+							pointerSession.startNodeId
+						) {
+							commitHoveredNodeId(pointerSession.startNodeId);
+						}
+					} else {
+						clearHoveredNode();
+					}
 					commitCanvasResizeCursor(null);
 					return;
 				}
@@ -4301,8 +4315,8 @@ export const useCanvasInteractionController = ({
 					updateMarqueeRectState(nextRect);
 					if (hasActivated) {
 						applyMarqueeSelection(nextRect);
+						clearHoveredNode();
 					}
-					clearHoveredNode();
 					commitCanvasResizeCursor(null);
 					return;
 				}
@@ -4362,6 +4376,7 @@ export const useCanvasInteractionController = ({
 			canvasToolMode,
 			clearHoveredNode,
 			clearPendingClickSuppression,
+			commitHoveredNodeId,
 			commitCanvasResizeCursor,
 			commitCanvasResizeCursorByAnchor,
 			isCanvasInteractionLocked,

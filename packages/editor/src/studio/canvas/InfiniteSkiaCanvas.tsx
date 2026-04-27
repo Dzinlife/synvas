@@ -1876,6 +1876,8 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 							getNodeLayout={getNodeLayoutValue}
 							nodes={renderNodes}
 							focusedNodeId={focusedNodeId}
+							activeNodeId={activeNodeId}
+							hoveredNodeId={hoveredNodeId}
 							onHitTesterChange={onLabelHitTesterChange}
 						/>
 						{shouldRenderNodeOverlay && (
@@ -1924,6 +1926,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 		handleOverlayNodeResize,
 		height,
 		hoverNode,
+		hoveredNodeId,
 		onSelectionResize,
 		onLabelHitTesterChange,
 		liveLayerRenderNodes,

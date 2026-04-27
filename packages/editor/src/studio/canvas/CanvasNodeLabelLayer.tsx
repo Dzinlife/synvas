@@ -75,6 +75,8 @@ interface CanvasNodeLabelLayerProps {
 	getNodeLayout: (nodeId: string) => SharedValue<CanvasNodeLayoutState> | null;
 	nodes: CanvasNode[];
 	focusedNodeId: string | null;
+	activeNodeId?: string | null;
+	hoveredNodeId?: string | null;
 	onHitTesterChange?: (tester: CanvasNodeLabelHitTester | null) => void;
 }
 
@@ -318,6 +320,8 @@ export const CanvasNodeLabelLayer = ({
 	getNodeLayout,
 	nodes,
 	focusedNodeId,
+	activeNodeId = null,
+	hoveredNodeId = null,
 	onHitTesterChange,
 }: CanvasNodeLabelLayerProps) => {
 	const [fontProvider, setFontProvider] =
@@ -326,33 +330,67 @@ export const CanvasNodeLabelLayer = ({
 	const viewport = useMemo(() => {
 		return resolveCanvasViewportRect(width, height);
 	}, [height, width]);
-	const labelCandidates = useMemo<CanvasNodeLabelCandidate[]>(() => {
-		if (width <= 0 || height <= 0) return [];
-		const boardNodeIdSet = new Set(
+	const boardNodeIdSet = useMemo(() => {
+		return new Set(
 			nodes.filter((node) => node.type === "board").map((node) => node.id),
 		);
+	}, [nodes]);
+	const boardChildNodeIdSet = useMemo(() => {
+		const set = new Set<string>();
+		for (const node of nodes) {
+			if (node.parentId && boardNodeIdSet.has(node.parentId)) {
+				set.add(node.id);
+			}
+		}
+		return set;
+	}, [boardNodeIdSet, nodes]);
+	const visibleBoardChildLabelNodeIdSet = useMemo(() => {
+		const set = new Set<string>();
+		if (activeNodeId && boardChildNodeIdSet.has(activeNodeId)) {
+			set.add(activeNodeId);
+		}
+		if (hoveredNodeId && boardChildNodeIdSet.has(hoveredNodeId)) {
+			set.add(hoveredNodeId);
+		}
+		return set;
+	}, [activeNodeId, boardChildNodeIdSet, hoveredNodeId]);
+
+	const labelCandidates = useMemo<CanvasNodeLabelCandidate[]>(() => {
+		if (width <= 0 || height <= 0) return [];
 		return nodes
 			.map((node) => {
-				if (node.parentId && boardNodeIdSet.has(node.parentId)) {
+				const isBoardChild = Boolean(
+					node.parentId && boardNodeIdSet.has(node.parentId),
+				);
+				const isVisibleBoardChildLabel = visibleBoardChildLabelNodeIdSet.has(
+					node.id,
+				);
+				if (isBoardChild && !isVisibleBoardChildLabel) {
 					return null;
 				}
 				const labelText = resolveCanvasNodeLabelText(node);
 				if (!labelText) return null;
+				const baseOpacity =
+					focusedNodeId && node.id !== focusedNodeId ? LABEL_DIMMED_OPACITY : 1;
 				return {
 					nodeId: node.id,
 					node,
 					text: labelText,
 					textColor: resolveCanvasNodeLabelTextColor(node.type),
-					opacity:
-						focusedNodeId && node.id !== focusedNodeId
-							? LABEL_DIMMED_OPACITY
-							: 1,
+					opacity: baseOpacity,
 				};
 			})
 			.filter((candidate): candidate is CanvasNodeLabelCandidate => {
 				return candidate !== null;
 			});
-	}, [focusedNodeId, height, nodes, width]);
+	}, [
+		boardNodeIdSet,
+		focusedNodeId,
+		height,
+		nodes,
+		visibleBoardChildLabelNodeIdSet,
+		width,
+	]);
 	const labelCoverageText = useMemo(() => {
 		if (labelCandidates.length <= 0) return "";
 		// 覆盖集只关心字符集合，不需要换行分隔，避免注入控制字符。
