@@ -265,8 +265,11 @@ const LABEL_FONT_FALLBACK_CHAIN = [
 ];
 
 const VIDEO_LABEL_ICON = "\uF001";
+const BOARD_LABEL_ICON = "\uF002";
 const withVideoLabelIcon = (text: string): string =>
 	`${VIDEO_LABEL_ICON}  ${text}`;
+const withBoardLabelIcon = (text: string): string =>
+	`${BOARD_LABEL_ICON}  ${text}`;
 
 const createVideoNode = (
 	patch: Partial<VideoCanvasNode> = {},
@@ -447,6 +450,85 @@ describe("CanvasNodeLabelLayer", () => {
 				"\uF005  image",
 			]),
 		);
+	});
+
+	it("会隐藏 board 内部节点 label 并保留顶层 board label", async () => {
+		const boardNode: CanvasNode = {
+			...createNodeByType("board", 0),
+			id: "node-board",
+			name: "board-parent",
+		};
+		const nestedBoardNode: CanvasNode = {
+			...createNodeByType("board", 1),
+			id: "node-nested-board",
+			name: "nested-board",
+			parentId: "node-board",
+			x: 360,
+			y: 100,
+		};
+		const childNode = createVideoNode({
+			id: "node-child",
+			name: "child-video",
+			parentId: "node-board",
+			x: 220,
+			y: 100,
+		});
+		const topLevelNode = createVideoNode({
+			id: "node-top",
+			name: "top-video",
+			x: 0,
+			y: 100,
+		});
+		const layoutByNodeId = new Map([
+			[
+				"node-board",
+				createSharedValue({ x: 0, y: 0, width: 200, height: 160 }),
+			],
+			[
+				"node-child",
+				createSharedValue({ x: 220, y: 100, width: 120, height: 60 }),
+			],
+			[
+				"node-nested-board",
+				createSharedValue({ x: 360, y: 100, width: 120, height: 60 }),
+			],
+			["node-top", createSharedValue({ x: 0, y: 100, width: 120, height: 60 })],
+		]);
+		const hitTesterSpy = vi.fn();
+
+		render(
+			<CanvasNodeLabelLayer
+				width={800}
+				height={600}
+				camera={createSharedValue({ x: 0, y: 0, zoom: 1 })}
+				getNodeLayout={(nodeId) => layoutByNodeId.get(nodeId) ?? null}
+				nodes={[boardNode, nestedBoardNode, childNode, topLevelNode]}
+				focusedNodeId={null}
+				onHitTesterChange={hitTesterSpy}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(
+				paragraphInstances.some(
+					(paragraph) => paragraph.paint.mock.calls.length > 0,
+				),
+			).toBe(true);
+		});
+
+		const texts = paragraphInstances.map((paragraph) => paragraph.text);
+		expect(texts).toContain(withBoardLabelIcon("board-parent"));
+		expect(texts).toContain(withVideoLabelIcon("top-video"));
+		expect(texts).not.toContain(withBoardLabelIcon("nested-board"));
+		expect(texts).not.toContain(withVideoLabelIcon("child-video"));
+
+		const tester = [...hitTesterSpy.mock.calls]
+			.map((call) => call[0])
+			.find((value) => Boolean(value));
+		if (!tester || typeof tester !== "object" || !("hitTest" in tester)) {
+			throw new Error("label hit tester 未注册");
+		}
+		expect(tester.hitTest(230, 84, { x: 0, y: 0, zoom: 1 })).toEqual([]);
 	});
 
 	it("会给正文 run 合并省略号字体链", async () => {

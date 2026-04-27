@@ -328,8 +328,14 @@ export const CanvasNodeLabelLayer = ({
 	}, [height, width]);
 	const labelCandidates = useMemo<CanvasNodeLabelCandidate[]>(() => {
 		if (width <= 0 || height <= 0) return [];
+		const boardNodeIdSet = new Set(
+			nodes.filter((node) => node.type === "board").map((node) => node.id),
+		);
 		return nodes
 			.map((node) => {
+				if (node.parentId && boardNodeIdSet.has(node.parentId)) {
+					return null;
+				}
 				const labelText = resolveCanvasNodeLabelText(node);
 				if (!labelText) return null;
 				return {

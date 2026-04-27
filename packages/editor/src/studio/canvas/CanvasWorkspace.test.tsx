@@ -4690,14 +4690,16 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
-	it("board body 不参与 hover/click，label 可命中 board", () => {
+	it("board body 可 hover/click，label 也可命中 board", () => {
 		injectBoardHitFixture();
 		render(<CanvasWorkspace />);
 		const boardBodyPoint = { x: 1120, y: 240 };
 		movePointerAt(boardBodyPoint.x, boardBodyPoint.y);
-		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBeNull();
+		expect(getLatestInfiniteSkiaCanvasProps().hoveredNodeId).toBe(
+			"node-board-hit-1",
+		);
 		clickNodeAt(boardBodyPoint.x, boardBodyPoint.y);
-		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).not.toBe(
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
 			"node-board-hit-1",
 		);
 		const boardLabelPoint = resolveNodeLabelPoint("node-board-hit-1", 24);

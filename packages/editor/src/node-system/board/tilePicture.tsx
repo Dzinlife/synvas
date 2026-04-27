@@ -1,12 +1,20 @@
 import { renderNodeToPicture } from "core/render-system/renderNodeSnapshot";
 import type { BoardCanvasNode } from "@/studio/project/types";
-import { Rect } from "react-skia-lite";
 import type { CanvasNodeTilePictureCapability } from "../types";
+import {
+	BOARD_NODE_BACKGROUND_COLOR,
+	BOARD_NODE_BORDER_COLOR,
+	BOARD_NODE_BORDER_WIDTH,
+	BoardNodeSurface,
+} from "./renderer";
 
 const resolveBoardTilePictureSignature = (node: BoardCanvasNode): string => {
 	return JSON.stringify({
 		width: Math.max(1, Math.round(Math.abs(node.width))),
 		height: Math.max(1, Math.round(Math.abs(node.height))),
+		backgroundColor: BOARD_NODE_BACKGROUND_COLOR,
+		borderColor: BOARD_NODE_BORDER_COLOR,
+		borderWidth: BOARD_NODE_BORDER_WIDTH,
 	});
 };
 
@@ -19,13 +27,7 @@ export const boardNodeTilePictureCapability: CanvasNodeTilePictureCapability<Boa
 			const sourceWidth = Math.max(1, Math.round(Math.abs(node.width)));
 			const sourceHeight = Math.max(1, Math.round(Math.abs(node.height)));
 			const picture = renderNodeToPicture(
-				<Rect
-					x={0}
-					y={0}
-					width={sourceWidth}
-					height={sourceHeight}
-					color="#222"
-				/>,
+				<BoardNodeSurface width={sourceWidth} height={sourceHeight} />,
 				{
 					width: sourceWidth,
 					height: sourceHeight,

@@ -3931,7 +3931,7 @@ export const useCanvasInteractionController = ({
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
-				boardBodyHitMode: "exclude",
+				boardBodyHitMode: "include",
 			});
 			const keepMultiSelectionBounds = Boolean(
 				selectedBounds &&
@@ -4016,7 +4016,7 @@ export const useCanvasInteractionController = ({
 				localX: local.x,
 				localY: local.y,
 				liveCamera: getCamera(),
-				boardBodyHitMode: "exclude",
+				boardBodyHitMode: "include",
 			});
 			commitHoveredNodeId(node?.id ?? null);
 		},
