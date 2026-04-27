@@ -72,7 +72,13 @@ body, html {
   flex: 1;
   min-height: 0;
   touch-action: none;
+  /* 禁止横向 overscroll 触发 Chrome 历史前进/后退手势。 */
+  overscroll-behavior-x: none;
   color-scheme: dark;
+}
+
+#root {
+  overscroll-behavior-x: none;
 }
 
 .canvas-sidebar-node-icon {

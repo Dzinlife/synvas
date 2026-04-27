@@ -5,8 +5,11 @@ import { createEditorRuntime } from "../scene-editor/runtime/createEditorRuntime
 import { EditorRuntimeProvider } from "../scene-editor/runtime/EditorRuntimeProvider";
 import OtLabPanel from "@/studio/history/OtLabPanel";
 import { getEditorSkiaBackendPreference } from "./skiaBackendPreference";
+import { useBlockBrowserHistorySwipe } from "./useBlockBrowserHistorySwipe";
 
 export default function EditorApp() {
+	useBlockBrowserHistorySwipe();
+
 	const runtime = useMemo(() => createEditorRuntime(), []);
 	const skiaBackendPreference = useMemo(
 		() => getEditorSkiaBackendPreference(),
