@@ -168,6 +168,49 @@ describe("canvasBoardAutoLayout", () => {
 		).toEqual([]);
 	});
 
+	it("整体拖入空 board 时按 moving nodes 当前位置推导初始 rows", () => {
+		const nodes: CanvasNode[] = [
+			createBoardNode("board", { x: 0, y: 0, width: 500, height: 400 }),
+			createTextNode("a", {
+				parentId: "board",
+				x: 64,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 0,
+			}),
+			createTextNode("b", {
+				parentId: "board",
+				x: 228,
+				y: 64,
+				width: 100,
+				height: 80,
+				siblingOrder: 1,
+			}),
+			createTextNode("c", {
+				parentId: "board",
+				x: 64,
+				y: 208,
+				width: 100,
+				height: 80,
+				siblingOrder: 2,
+			}),
+		];
+
+		const insertion = resolveCanvasBoardAutoLayoutInsertion(
+			nodes,
+			"board",
+			["a", "b", "c"],
+			{ x: 120, y: 120 },
+		);
+
+		expect(insertion?.rows).toEqual([
+			["a", "b"],
+			["c"],
+		]);
+		expect(insertion?.changesRows).toBe(true);
+	});
+
 	it("移动 direct child board 时同步平移其 descendants", () => {
 		const nodes: CanvasNode[] = [
 			createBoardNode("board", { x: 0, y: 0 }),

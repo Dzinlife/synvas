@@ -585,10 +585,11 @@ export const resolveCanvasBoardAutoLayoutInsertion = (
 	if (rowMetrics.length === 0) {
 		const lineX = board.x + gap / 2;
 		const lineTop = board.y + gap;
+		const initialRows = deriveCanvasBoardAutoLayoutRows(nodes, boardId, { gap });
 		return resolveCanvasBoardAutoLayoutInsertionResult(
 			nodes,
 			boardId,
-			[[...movingRootNodeIds]],
+			initialRows.length > 0 ? initialRows : [[...movingRootNodeIds]],
 			{
 				boardId,
 				orientation: "vertical",
