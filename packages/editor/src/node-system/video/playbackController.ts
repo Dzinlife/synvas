@@ -505,7 +505,7 @@ class VideoNodePlaybackControllerImpl implements VideoNodePlaybackController {
 				return;
 			}
 			if (clearFrameCache) {
-				nextVideoHandle.asset.clearCache?.();
+				nextVideoHandle.asset.clearCache?.({ includePinned: false });
 			}
 
 			nextAudioHandle = await acquireAudioAsset(uri).catch(() => null);

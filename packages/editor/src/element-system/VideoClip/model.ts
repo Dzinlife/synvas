@@ -9,7 +9,7 @@ import type {
 	VideoSample,
 	VideoSampleSink,
 } from "mediabunny";
-import { type SkImage } from "react-skia-lite";
+import type { SkImage } from "react-skia-lite";
 import { subscribeWithSelector } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import type { AssetHandle } from "@/assets/AssetStore";
@@ -21,10 +21,8 @@ import {
 	type AudioPlaybackStepInput,
 	createAudioPlaybackController,
 } from "@/audio/playback";
-import {
-	closeVideoSample,
-	videoSampleToSkImage,
-} from "@/lib/videoFrameUtils";
+import { isDisposedSkImage } from "@/lib/skImageUtils";
+import { closeVideoSample, videoSampleToSkImage } from "@/lib/videoFrameUtils";
 import {
 	getAudioPlaybackSessionKey,
 	getVideoPlaybackSessionKey,
@@ -258,7 +256,7 @@ export function createVideoClipModel(
 	};
 	let audioInitEpoch = 0;
 	let audioPlayback: AudioPlaybackController | null = null;
-	let retainedPlaybackSessionKeyByChannel: Record<
+	const retainedPlaybackSessionKeyByChannel: Record<
 		RenderFrameChannel,
 		string | null
 	> = {
@@ -277,7 +275,6 @@ export function createVideoClipModel(
 	const reversePrewarmInflight = new Set<string>();
 	const reversePrewarmCompleted = new Set<string>();
 	const reversePrewarmCompletedOrder: string[] = [];
-
 
 	const getTimelineFps = () => {
 		const fps = timelineStore.getState().fps;
@@ -528,6 +525,7 @@ export function createVideoClipModel(
 		timestamp: number | undefined,
 		frameChannel: RenderFrameChannel = DEFAULT_FRAME_CHANNEL,
 	) => {
+		if (isDisposedSkImage(skiaImage)) return;
 		// 存入缓存
 		const isTimestampFinite = Number.isFinite(timestamp ?? NaN);
 		if (isTimestampFinite) {
@@ -881,7 +879,7 @@ export function createVideoClipModel(
 
 		// 检查缓存
 		const cachedFrame = assetHandle?.asset.getCachedFrame(alignedTime);
-		if (cachedFrame) {
+		if (cachedFrame && !isDisposedSkImage(cachedFrame)) {
 			updatePinnedFrame(frameChannel, cachedFrame, assetHandle?.asset ?? null);
 			store.setState((state) => ({
 				...state,
@@ -1055,8 +1053,18 @@ export function createVideoClipModel(
 		const alignedVideoTime = framesToSeconds(alignedFrameIndex, fps);
 		const lastPreparedFrameIndex =
 			lastPreparedFrameIndexByChannel[frameChannel];
+		const preparedFrame =
+			frameChannel === "offscreen"
+				? internal.offscreenFrame
+				: internal.currentFrame;
+		const hasPreparedFrame = Boolean(
+			preparedFrame && !isDisposedSkImage(preparedFrame),
+		);
 		// 首帧优先走 seek，避免流式步进在首个可解码帧晚于目标时间时返回空帧。
-		if (lastPreparedFrameIndex === null) {
+		if (lastPreparedFrameIndex === null || !hasPreparedFrame) {
+			if (!hasPreparedFrame) {
+				lastSeekTimeByChannel[frameChannel] = null;
+			}
 			await seekToTime(alignedVideoTime, { frameChannel });
 			lastPreparedFrameIndexByChannel[frameChannel] = alignedFrameIndex;
 			return;
@@ -1118,8 +1126,7 @@ export function createVideoClipModel(
 			observedFrameInterval:
 				observedPlaybackFrameIntervalByChannel[frameChannel],
 			stalledDurationSeconds,
-			driftFloorSeconds:
-				frameInterval * PLAYBACK_DRIFT_FLOOR_TIMELINE_FRAMES,
+			driftFloorSeconds: frameInterval * PLAYBACK_DRIFT_FLOOR_TIMELINE_FRAMES,
 			adaptiveMultiplier: PLAYBACK_DRIFT_ADAPTIVE_MULTIPLIER,
 			startupGraceSeconds: PLAYBACK_DRIFT_STARTUP_GRACE_SECONDS,
 			startupDriftMultiplier: PLAYBACK_DRIFT_STARTUP_MULTIPLIER,
@@ -1325,17 +1332,17 @@ export function createVideoClipModel(
 							isLoading: false,
 							maxDuration: availableDuration ?? durationFrames,
 						},
-							internal: {
-								...state.internal,
-								videoSampleSink: clipSink,
-								input: asset.input,
-								videoDuration: asset.duration,
-								videoRotation: asset.videoRotation,
-								// 模型就绪只表示素材已加载，首帧解码延后到 prepare/renderer 触发。
-								isReady: true,
-								frameCache: asset.frameCache,
-							},
-						}));
+						internal: {
+							...state.internal,
+							videoSampleSink: clipSink,
+							input: asset.input,
+							videoDuration: asset.duration,
+							videoRotation: asset.videoRotation,
+							// 模型就绪只表示素材已加载，首帧解码延后到 prepare/renderer 触发。
+							isReady: true,
+							frameCache: asset.frameCache,
+						},
+					}));
 
 					if (currentInitEpoch !== initEpoch) return;
 
@@ -1442,7 +1449,6 @@ export function createVideoClipModel(
 				initEpoch += 1; // 终止进行中的 init，避免继续写入
 				audioInitEpoch += 1;
 				asyncId++; // 取消所有进行中的异步操作
-				const internal = get().internal as VideoClipInternal;
 
 				resetPinnedFrames();
 				for (const frameChannel of FRAME_CHANNELS) {
@@ -1472,12 +1478,20 @@ export function createVideoClipModel(
 				resetReversePrewarmState();
 
 				// 清理资源
-				internal.videoSampleSink = null;
-				internal.input = null;
-				internal.videoRotation = 0;
-				internal.audioSink = null;
-				internal.audioDuration = 0;
-				internal.hasSourceAudioTrack = null;
+				set((state) => ({
+					internal: {
+						...state.internal,
+						videoSampleSink: null,
+						input: null,
+						currentFrame: null,
+						offscreenFrame: null,
+						videoRotation: 0,
+						isReady: false,
+						audioSink: null,
+						audioDuration: 0,
+						hasSourceAudioTrack: null,
+					},
+				}));
 			},
 
 			waitForReady: () => {

@@ -5,8 +5,9 @@ import {
 	UrlSource,
 	VideoSampleSink,
 } from "mediabunny";
-import { type SkImage } from "react-skia-lite";
+import type { SkImage } from "react-skia-lite";
 import { resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
+import { isDisposedSkImage, readSkImageSize } from "@/lib/skImageUtils";
 import { type AssetHandle, assetStore } from "./AssetStore";
 
 const DEFAULT_MAX_CACHE_BYTES = 500 * 1920 * 1080;
@@ -14,10 +15,16 @@ const ESTIMATED_FRAME_BYTES_PER_PIXEL = 4;
 
 const estimateFrameCacheBytes = (image: SkImage) => {
 	// 视频帧当前统一按 RGBA 纹理估算缓存占用，避免高分辨率素材按帧数缓存时挤爆显存。
-	const width = Math.max(1, Math.ceil(image.width()));
-	const height = Math.max(1, Math.ceil(image.height()));
+	const size = readSkImageSize(image);
+	if (!size) return 0;
+	const width = Math.max(1, Math.ceil(size.width));
+	const height = Math.max(1, Math.ceil(size.height));
 	return width * height * ESTIMATED_FRAME_BYTES_PER_PIXEL;
 };
+
+export interface ClearVideoFrameCacheOptions {
+	includePinned?: boolean;
+}
 
 export type VideoAsset = {
 	uri: string;
@@ -31,7 +38,7 @@ export type VideoAsset = {
 	maxCacheBytes: number;
 	getCachedFrame: (timestamp: number) => SkImage | undefined;
 	storeFrame: (timestamp: number, image: SkImage) => void;
-	clearCache: () => void;
+	clearCache: (options?: ClearVideoFrameCacheOptions) => void;
 	pinFrame: (image: SkImage) => void;
 	unpinFrame: (image: SkImage) => void;
 	releaseSource?: () => void;
@@ -177,6 +184,23 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 
 	const maxCacheBytes = DEFAULT_MAX_CACHE_BYTES;
 
+	const removeCacheEntry = (key: number): SkImage | null => {
+		const image = frameCache.get(key);
+		if (!image) return null;
+		frameCache.delete(key);
+		currentCacheBytes = Math.max(
+			0,
+			currentCacheBytes - (frameCacheBytes.get(key) ?? 0),
+		);
+		frameCacheBytes.delete(key);
+		const accessIndex = cacheAccessOrder.indexOf(key);
+		if (accessIndex > -1) {
+			cacheAccessOrder.splice(accessIndex, 1);
+		}
+		pinnedFrames.delete(image);
+		return image;
+	};
+
 	const cleanupCache = () => {
 		if (currentCacheBytes <= maxCacheBytes) return;
 		let guard = cacheAccessOrder.length;
@@ -190,13 +214,15 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 			if (oldestKey === undefined) continue;
 			const image = frameCache.get(oldestKey);
 			if (!image) continue;
+			if (isDisposedSkImage(image)) {
+				removeCacheEntry(oldestKey);
+				continue;
+			}
 			if (pinnedFrames.has(image)) {
 				cacheAccessOrder.push(oldestKey);
 				continue;
 			}
-			frameCache.delete(oldestKey);
-			currentCacheBytes -= frameCacheBytes.get(oldestKey) ?? 0;
-			frameCacheBytes.delete(oldestKey);
+			removeCacheEntry(oldestKey);
 			image.dispose();
 		}
 	};
@@ -229,29 +255,44 @@ const createVideoAsset = async (uri: string): Promise<VideoAsset> => {
 		getCachedFrame: (timestamp) => {
 			const cached = frameCache.get(timestamp);
 			if (cached) {
+				if (isDisposedSkImage(cached)) {
+					removeCacheEntry(timestamp);
+					return undefined;
+				}
 				updateCacheAccess(timestamp);
 			}
 			return cached;
 		},
 		storeFrame: (timestamp, image) => {
-			if (!frameCache.has(timestamp)) {
-				const cacheBytes = estimateFrameCacheBytes(image);
-				frameCache.set(timestamp, image);
-				frameCacheBytes.set(timestamp, cacheBytes);
-				currentCacheBytes += cacheBytes;
-				updateCacheAccess(timestamp);
-				cleanupCache();
+			const existing = frameCache.get(timestamp);
+			if (existing && !isDisposedSkImage(existing)) {
+				return;
 			}
+			if (existing) {
+				removeCacheEntry(timestamp);
+			}
+			if (isDisposedSkImage(image)) return;
+			const cacheBytes = estimateFrameCacheBytes(image);
+			frameCache.set(timestamp, image);
+			frameCacheBytes.set(timestamp, cacheBytes);
+			currentCacheBytes += cacheBytes;
+			updateCacheAccess(timestamp);
+			cleanupCache();
 		},
-		clearCache: () => {
-			for (const image of frameCache.values()) {
+		clearCache: (options = {}) => {
+			const includePinned = options.includePinned !== false;
+			for (const [key, image] of Array.from(frameCache.entries())) {
+				if (
+					!includePinned &&
+					pinnedFrames.has(image) &&
+					!isDisposedSkImage(image)
+				) {
+					continue;
+				}
+				removeCacheEntry(key);
+				if (isDisposedSkImage(image)) continue;
 				image.dispose();
 			}
-			frameCache.clear();
-			frameCacheBytes.clear();
-			currentCacheBytes = 0;
-			cacheAccessOrder.length = 0;
-			pinnedFrames.clear();
 		},
 		pinFrame,
 		unpinFrame,

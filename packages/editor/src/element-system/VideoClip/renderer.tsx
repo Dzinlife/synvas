@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Group, Image } from "react-skia-lite";
 import type { RenderFrameChannel } from "core/timeline-system/model/types";
+import { readSkImageSize } from "@/lib/skImageUtils";
 import { resolveVideoImageTransform } from "@/lib/videoImageTransform";
 import {
 	useFps,
@@ -59,12 +60,10 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 		id,
 		(state) => state.constraints.hasError ?? false,
 	);
-	const renderFrame = useVideoClipSelector(
-		id,
-		(state) =>
-			frameChannel === "offscreen"
-				? state.internal.offscreenFrame
-				: state.internal.currentFrame,
+	const renderFrame = useVideoClipSelector(id, (state) =>
+		frameChannel === "offscreen"
+			? state.internal.offscreenFrame
+			: state.internal.currentFrame,
 	);
 	const videoRotation = useVideoClipSelector(
 		id,
@@ -218,12 +217,13 @@ const VideoClipRenderer: React.FC<VideoClipRendererProps> = ({
 		return null;
 	}
 
-	if (!renderFrame || width <= 0 || height <= 0) {
+	const sourceSize = readSkImageSize(renderFrame);
+	if (!sourceSize || width <= 0 || height <= 0) {
 		return null;
 	}
 
-	const sourceWidth = Math.max(1, renderFrame.width());
-	const sourceHeight = Math.max(1, renderFrame.height());
+	const sourceWidth = Math.max(1, sourceSize.width);
+	const sourceHeight = Math.max(1, sourceSize.height);
 	const imageTransform = resolveVideoImageTransform({
 		src: { x: 0, y: 0, width: sourceWidth, height: sourceHeight },
 		dst: { x: 0, y: 0, width, height },
