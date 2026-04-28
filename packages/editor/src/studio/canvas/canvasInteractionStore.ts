@@ -97,6 +97,75 @@ const createEmptyFocusRestoreState = (
 	prevFocusedNodeId,
 });
 
+const areStringArraysEqual = (left: string[], right: string[]): boolean => {
+	if (left === right) return true;
+	if (left.length !== right.length) return false;
+	return left.every((value, index) => value === right[index]);
+};
+
+const areNumberArraysEqual = (left: number[], right: number[]): boolean => {
+	if (left === right) return true;
+	if (left.length !== right.length) return false;
+	return left.every((value, index) => value === right[index]);
+};
+
+const areCanvasPointsEqual = (
+	left: CanvasPoint | null,
+	right: CanvasPoint | null,
+): boolean => {
+	if (left === right) return true;
+	if (!left || !right) return left === right;
+	return left.x === right.x && left.y === right.y;
+};
+
+const areCameraStatesEqual = (
+	left: CameraState | null,
+	right: CameraState | null,
+): boolean => {
+	if (left === right) return true;
+	if (!left || !right) return left === right;
+	return left.x === right.x && left.y === right.y && left.zoom === right.zoom;
+};
+
+const areFocusRestoreStatesEqual = (
+	left: FocusRestoreState,
+	right: FocusRestoreState,
+): boolean => {
+	return (
+		areCameraStatesEqual(left.preFocusCamera, right.preFocusCamera) &&
+		areCanvasPointsEqual(
+			left.preFocusCameraCenter,
+			right.preFocusCameraCenter,
+		) &&
+		left.focusCameraZoom === right.focusCameraZoom &&
+		left.prevFocusedNodeId === right.prevFocusedNodeId
+	);
+};
+
+const areMarqueeRectsEqual = (
+	left: CanvasMarqueeRect,
+	right: CanvasMarqueeRect,
+): boolean => {
+	return (
+		left.visible === right.visible &&
+		left.x1 === right.x1 &&
+		left.y1 === right.y1 &&
+		left.x2 === right.x2 &&
+		left.y2 === right.y2
+	);
+};
+
+const areSnapGuidesScreenEqual = (
+	left: CanvasSnapGuidesScreen,
+	right: CanvasSnapGuidesScreen,
+): boolean => {
+	if (left === right) return true;
+	return (
+		areNumberArraysEqual(left.vertical, right.vertical) &&
+		areNumberArraysEqual(left.horizontal, right.horizontal)
+	);
+};
+
 const createInitialCanvasInteractionValues =
 	(): CanvasInteractionStoreValues => ({
 		stageSize: { width: 0, height: 0 },
@@ -217,13 +286,36 @@ export interface CanvasInteractionStoreState {
 export const useCanvasInteractionStore = create<CanvasInteractionStoreState>()(
 	subscribeWithSelector((set, get) => ({
 		...createInitialCanvasInteractionValues(),
-		setStageSize: (stageSize) => set({ stageSize }),
-		setCanvasToolMode: (mode) => set({ canvasToolMode: mode }),
-		setVisibleDrawerHeight: (height) => set({ visibleDrawerHeight: height }),
+		setStageSize: (stageSize) =>
+			set((state) =>
+				state.stageSize.width === stageSize.width &&
+				state.stageSize.height === stageSize.height
+					? state
+					: { stageSize },
+			),
+		setCanvasToolMode: (mode) =>
+			set((state) =>
+				state.canvasToolMode === mode ? state : { canvasToolMode: mode },
+			),
+		setVisibleDrawerHeight: (height) =>
+			set((state) =>
+				state.visibleDrawerHeight === height
+					? state
+					: { visibleDrawerHeight: height },
+			),
 		setContextMenuState: (contextMenuState) => set({ contextMenuState }),
-		setSelectedNodeIds: (selectedNodeIds) => set({ selectedNodeIds }),
+		setSelectedNodeIds: (selectedNodeIds) =>
+			set((state) =>
+				areStringArraysEqual(state.selectedNodeIds, selectedNodeIds)
+					? state
+					: { selectedNodeIds },
+			),
 		commitSelection: (selectedNodeIds, options) => {
-			set({ selectedNodeIds });
+			set((state) =>
+				areStringArraysEqual(state.selectedNodeIds, selectedNodeIds)
+					? state
+					: { selectedNodeIds },
+			);
 			const primaryNodeId =
 				options?.primaryNodeId === undefined
 					? (selectedNodeIds[selectedNodeIds.length - 1] ?? null)
@@ -233,36 +325,103 @@ export const useCanvasInteractionStore = create<CanvasInteractionStoreState>()(
 				options.onActiveSceneChange?.(options.primarySceneId);
 			}
 		},
-		setHoveredNodeId: (hoveredNodeId) => set({ hoveredNodeId }),
-		setCanvasResizeCursor: (canvasResizeCursor) => set({ canvasResizeCursor }),
-		setMarqueeRect: (marqueeRect) => set({ marqueeRect }),
-		setSnapGuidesScreen: (snapGuidesScreen) => set({ snapGuidesScreen }),
+		setHoveredNodeId: (hoveredNodeId) =>
+			set((state) =>
+				state.hoveredNodeId === hoveredNodeId ? state : { hoveredNodeId },
+			),
+		setCanvasResizeCursor: (canvasResizeCursor) =>
+			set((state) =>
+				state.canvasResizeCursor === canvasResizeCursor
+					? state
+					: { canvasResizeCursor },
+			),
+		setMarqueeRect: (marqueeRect) =>
+			set((state) =>
+				areMarqueeRectsEqual(state.marqueeRect, marqueeRect)
+					? state
+					: { marqueeRect },
+			),
+		setSnapGuidesScreen: (snapGuidesScreen) =>
+			set((state) =>
+				areSnapGuidesScreenEqual(state.snapGuidesScreen, snapGuidesScreen)
+					? state
+					: { snapGuidesScreen },
+			),
 		setBoardAutoLayoutIndicator: (boardAutoLayoutIndicator) =>
-			set({ boardAutoLayoutIndicator }),
+			set((state) =>
+				state.boardAutoLayoutIndicator === boardAutoLayoutIndicator
+					? state
+					: { boardAutoLayoutIndicator },
+			),
 		setAutoLayoutAnimatedNodeIds: (autoLayoutAnimatedNodeIds) =>
-			set({ autoLayoutAnimatedNodeIds }),
+			set((state) =>
+				areStringArraysEqual(
+					state.autoLayoutAnimatedNodeIds,
+					autoLayoutAnimatedNodeIds,
+				)
+					? state
+					: { autoLayoutAnimatedNodeIds },
+			),
 		setAutoLayoutFrozenNodeIds: (autoLayoutFrozenNodeIds) =>
-			set({ autoLayoutFrozenNodeIds }),
+			set((state) =>
+				areStringArraysEqual(
+					state.autoLayoutFrozenNodeIds,
+					autoLayoutFrozenNodeIds,
+				)
+					? state
+					: { autoLayoutFrozenNodeIds },
+			),
 		setSelectionResizeFrozenNodeIds: (selectionResizeFrozenNodeIds) =>
-			set({ selectionResizeFrozenNodeIds }),
-		setSidebarExpanded: (sidebarExpanded) => set({ sidebarExpanded }),
-		setTileDebugEnabled: (tileDebugEnabled) => set({ tileDebugEnabled }),
+			set((state) =>
+				areStringArraysEqual(
+					state.selectionResizeFrozenNodeIds,
+					selectionResizeFrozenNodeIds,
+				)
+					? state
+					: { selectionResizeFrozenNodeIds },
+			),
+		setSidebarExpanded: (sidebarExpanded) =>
+			set((state) =>
+				state.sidebarExpanded === sidebarExpanded ? state : { sidebarExpanded },
+			),
+		setTileDebugEnabled: (tileDebugEnabled) =>
+			set((state) =>
+				state.tileDebugEnabled === tileDebugEnabled
+					? state
+					: { tileDebugEnabled },
+			),
 		setIsTileTaskBoostActive: (isTileTaskBoostActive) =>
-			set({ isTileTaskBoostActive }),
-		setNodeDragSession: (nodeDragSession) => set({ nodeDragSession }),
+			set((state) =>
+				state.isTileTaskBoostActive === isTileTaskBoostActive
+					? state
+					: { isTileTaskBoostActive },
+			),
+		setNodeDragSession: (nodeDragSession) =>
+			set((state) =>
+				state.nodeDragSession === nodeDragSession ? state : { nodeDragSession },
+			),
 		patchNodeDragSession: (patch) => {
 			const nodeDragSession = get().nodeDragSession;
 			if (!nodeDragSession) return;
 			set({ nodeDragSession: { ...nodeDragSession, ...patch } });
 		},
-		setNodeResizeSession: (nodeResizeSession) => set({ nodeResizeSession }),
+		setNodeResizeSession: (nodeResizeSession) =>
+			set((state) =>
+				state.nodeResizeSession === nodeResizeSession
+					? state
+					: { nodeResizeSession },
+			),
 		patchNodeResizeSession: (patch) => {
 			const nodeResizeSession = get().nodeResizeSession;
 			if (!nodeResizeSession) return;
 			set({ nodeResizeSession: { ...nodeResizeSession, ...patch } });
 		},
 		setSelectionResizeSession: (selectionResizeSession) =>
-			set({ selectionResizeSession }),
+			set((state) =>
+				state.selectionResizeSession === selectionResizeSession
+					? state
+					: { selectionResizeSession },
+			),
 		patchSelectionResizeSession: (patch) => {
 			const selectionResizeSession = get().selectionResizeSession;
 			if (!selectionResizeSession) return;
@@ -270,43 +429,94 @@ export const useCanvasInteractionStore = create<CanvasInteractionStoreState>()(
 				selectionResizeSession: { ...selectionResizeSession, ...patch },
 			});
 		},
-		setMarqueeSession: (marqueeSession) => set({ marqueeSession }),
+		setMarqueeSession: (marqueeSession) =>
+			set((state) =>
+				state.marqueeSession === marqueeSession ? state : { marqueeSession },
+			),
 		patchMarqueeSession: (patch) => {
 			const marqueeSession = get().marqueeSession;
 			if (!marqueeSession) return;
 			set({ marqueeSession: { ...marqueeSession, ...patch } });
 		},
-		setBoardCreateSession: (boardCreateSession) => set({ boardCreateSession }),
+		setBoardCreateSession: (boardCreateSession) =>
+			set((state) =>
+				state.boardCreateSession === boardCreateSession
+					? state
+					: { boardCreateSession },
+			),
 		patchBoardCreateSession: (patch) => {
 			const boardCreateSession = get().boardCreateSession;
 			if (!boardCreateSession) return;
 			set({ boardCreateSession: { ...boardCreateSession, ...patch } });
 		},
 		setPendingClickSuppression: (pendingClickSuppression) =>
-			set({ pendingClickSuppression }),
+			set((state) =>
+				state.pendingClickSuppression === pendingClickSuppression
+					? state
+					: { pendingClickSuppression },
+			),
 		consumePendingClickSuppression: () => {
 			const pendingClickSuppression = get().pendingClickSuppression;
 			if (!pendingClickSuppression) return null;
 			set({ pendingClickSuppression: null });
 			return pendingClickSuppression;
 		},
-		setPointerSession: (pointerSession) => set({ pointerSession }),
-		setLastTapRecord: (lastTapRecord) => set({ lastTapRecord }),
-		setLastPointerClient: (lastPointerClient) => set({ lastPointerClient }),
+		setPointerSession: (pointerSession) =>
+			set((state) =>
+				state.pointerSession === pointerSession ? state : { pointerSession },
+			),
+		setLastTapRecord: (lastTapRecord) =>
+			set((state) =>
+				state.lastTapRecord === lastTapRecord ? state : { lastTapRecord },
+			),
+		setLastPointerClient: (lastPointerClient) =>
+			set((state) =>
+				areCanvasPointsEqual(state.lastPointerClient, lastPointerClient)
+					? state
+					: { lastPointerClient },
+			),
 		setLastCanvasPointerWorld: (lastCanvasPointerWorld) =>
-			set({ lastCanvasPointerWorld }),
+			set((state) =>
+				areCanvasPointsEqual(
+					state.lastCanvasPointerWorld,
+					lastCanvasPointerWorld,
+				)
+					? state
+					: { lastCanvasPointerWorld },
+			),
 		setFocusRestore: (patch) =>
-			set((state) => ({
-				focusRestore: { ...state.focusRestore, ...patch },
-			})),
+			set((state) => {
+				const focusRestore = { ...state.focusRestore, ...patch };
+				return areFocusRestoreStatesEqual(state.focusRestore, focusRestore)
+					? state
+					: { focusRestore };
+			}),
 		resetFocusRestore: (prevFocusedNodeId = null) =>
-			set({ focusRestore: createEmptyFocusRestoreState(prevFocusedNodeId) }),
+			set((state) => {
+				const focusRestore = createEmptyFocusRestoreState(prevFocusedNodeId);
+				return areFocusRestoreStatesEqual(state.focusRestore, focusRestore)
+					? state
+					: { focusRestore };
+			}),
 		setActiveDrawerAutoPan: (patch) =>
-			set((state) => ({
-				activeDrawerAutoPan: { ...state.activeDrawerAutoPan, ...patch },
-			})),
+			set((state) => {
+				const activeDrawerAutoPan = {
+					...state.activeDrawerAutoPan,
+					...patch,
+				};
+				return state.activeDrawerAutoPan.nodeKey ===
+					activeDrawerAutoPan.nodeKey &&
+					state.activeDrawerAutoPan.signature === activeDrawerAutoPan.signature
+					? state
+					: { activeDrawerAutoPan };
+			}),
 		resetActiveDrawerAutoPan: () =>
-			set({ activeDrawerAutoPan: { nodeKey: null, signature: null } }),
+			set((state) =>
+				state.activeDrawerAutoPan.nodeKey === null &&
+				state.activeDrawerAutoPan.signature === null
+					? state
+					: { activeDrawerAutoPan: { nodeKey: null, signature: null } },
+			),
 		clearMarqueePreview: () =>
 			set({ marqueeSession: null, marqueeRect: createEmptyMarqueeRect() }),
 		clearBoardCreatePreview: () =>

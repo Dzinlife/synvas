@@ -151,6 +151,17 @@ type CanvasProject = NonNullable<
 	ReturnType<typeof useProjectStore.getState>["currentProject"]
 >;
 type StoreRef<T> = { current: T };
+type CanvasPointerLikeEvent = Pick<
+	React.PointerEvent<HTMLDivElement>,
+	| "altKey"
+	| "button"
+	| "buttons"
+	| "clientX"
+	| "clientY"
+	| "ctrlKey"
+	| "metaKey"
+	| "shiftKey"
+>;
 
 const createStoreRef = <T>(
 	getValue: () => T,
@@ -3927,7 +3938,7 @@ export const useCanvasInteractionController = ({
 	const resolveCanvasDragEventFromPointer = useCallback(
 		(
 			session: CanvasBasePointerSession,
-			event: React.PointerEvent<HTMLDivElement>,
+			event: CanvasPointerLikeEvent,
 			last: boolean,
 		): CanvasNodeDragEvent => {
 			return {
@@ -3948,6 +3959,127 @@ export const useCanvasInteractionController = ({
 		},
 		[isPointerTapWithinThreshold],
 	);
+
+	const resetDanglingPointerSession = useCallback(
+		(
+			event?: CanvasPointerLikeEvent,
+			options?: { commitPointerEnd?: boolean },
+		) => {
+			const pointerSession = pointerSessionRef.current;
+			const dragSession = nodeDragSessionRef.current;
+			const shouldCommitPointerEnd = Boolean(
+				pointerSession && event && options?.commitPointerEnd,
+			);
+			pointerSessionRef.current = null;
+			lastTapRecordRef.current = null;
+			if (
+				shouldCommitPointerEnd &&
+				pointerSession &&
+				event &&
+				(pointerSession.gesture === "node-drag" ||
+					pointerSession.gesture === "selection-drag")
+			) {
+				setIsTileTaskBoostActive(false);
+				if (dragSession) {
+					finishCanvasDragSession(
+						resolveCanvasDragEventFromPointer(pointerSession, event, true),
+					);
+				}
+			} else if (
+				shouldCommitPointerEnd &&
+				pointerSession?.gesture === "marquee"
+			) {
+				finishCanvasMarquee();
+			} else if (
+				shouldCommitPointerEnd &&
+				pointerSession?.gesture === "board-create"
+			) {
+				const didCreateBoard = commitBoardCreateFromSession();
+				if (didCreateBoard) {
+					setCanvasToolMode("move");
+				}
+			} else {
+				if (dragSession?.timelineDropMode) {
+					stopCanvasTimelineDropPreview(dragSession);
+				}
+				if (dragSession?.copyEntries.length) {
+					removeCanvasGraphBatch(dragSession.copyEntries);
+				}
+				nodeDragSessionRef.current = null;
+			}
+			nodeResizeSessionRef.current = null;
+			selectionResizeSessionRef.current = null;
+			marqueeSessionRef.current = null;
+			boardCreateSessionRef.current = null;
+			pendingClickSuppressionRef.current = null;
+			setIsTileTaskBoostActive(false);
+			setAutoLayoutFrozenNodeIds([]);
+			setSelectionResizeFrozenNodeIds([]);
+			clearCanvasMarquee();
+			clearBoardCreatePreview();
+			clearCanvasSnapGuides();
+			clearBoardAutoLayoutIndicator();
+			clearHoveredNode();
+			commitCanvasResizeCursor(null);
+		},
+		[
+			boardCreateSessionRef,
+			clearBoardAutoLayoutIndicator,
+			clearBoardCreatePreview,
+			clearCanvasMarquee,
+			clearCanvasSnapGuides,
+			clearHoveredNode,
+			commitBoardCreateFromSession,
+			commitCanvasResizeCursor,
+			finishCanvasDragSession,
+			finishCanvasMarquee,
+			lastTapRecordRef,
+			marqueeSessionRef,
+			nodeDragSessionRef,
+			nodeResizeSessionRef,
+			pendingClickSuppressionRef,
+			pointerSessionRef,
+			removeCanvasGraphBatch,
+			resolveCanvasDragEventFromPointer,
+			selectionResizeSessionRef,
+			setAutoLayoutFrozenNodeIds,
+			setCanvasToolMode,
+			setIsTileTaskBoostActive,
+			setSelectionResizeFrozenNodeIds,
+			stopCanvasTimelineDropPreview,
+		],
+	);
+
+	useEffect(() => {
+		if (typeof window === "undefined" || typeof document === "undefined") {
+			return;
+		}
+		const handlePointerEnd = (event: PointerEvent) => {
+			const pointerSession = pointerSessionRef.current;
+			if (!pointerSession || pointerSession.pointerId !== event.pointerId) {
+				return;
+			}
+			resetDanglingPointerSession(event, { commitPointerEnd: true });
+		};
+		const handlePointerAbort = () => {
+			if (!pointerSessionRef.current) return;
+			resetDanglingPointerSession();
+		};
+		const handleVisibilityChange = () => {
+			if (document.visibilityState !== "hidden") return;
+			handlePointerAbort();
+		};
+		window.addEventListener("pointerup", handlePointerEnd);
+		window.addEventListener("pointercancel", handlePointerEnd);
+		window.addEventListener("blur", handlePointerAbort);
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		return () => {
+			window.removeEventListener("pointerup", handlePointerEnd);
+			window.removeEventListener("pointercancel", handlePointerEnd);
+			window.removeEventListener("blur", handlePointerAbort);
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
+		};
+	}, [pointerSessionRef, resetDanglingPointerSession]);
 
 	const handleCanvasSurfaceTap = useCallback(
 		(tapMeta: CanvasPointerTapMeta) => {
@@ -4087,7 +4219,9 @@ export const useCanvasInteractionController = ({
 			if (event.button !== 0 || !event.isPrimary) return;
 			if (!isCanvasSurfaceTarget(event.target)) return;
 			if (isOverlayWheelTarget(event.target)) return;
-			if (pointerSessionRef.current) return;
+			if (pointerSessionRef.current) {
+				resetDanglingPointerSession();
+			}
 			if (canvasToolMode === "board") {
 				if (isCanvasInteractionLocked) {
 					clearHoveredNode();
@@ -4260,6 +4394,7 @@ export const useCanvasInteractionController = ({
 			resolveResizeAnchorAtWorldPoint,
 			resolveLocalPoint,
 			resolveWorldPoint,
+			resetDanglingPointerSession,
 			selectedBounds,
 			setPendingClickSuppression,
 			updateMarqueeRectState,

@@ -1055,6 +1055,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			) {
 				return state;
 			}
+			if (state.currentProject.ui.activeNodeId === nodeId) return state;
 			const nextProject = {
 				...state.currentProject,
 				ui: {
@@ -1176,6 +1177,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 		set((state) => {
 			if (!state.currentProject) return state;
 			if (!nodeId) {
+				if (state.currentProject.ui.focusedNodeId === null) return state;
 				const nextProject = {
 					...state.currentProject,
 					ui: {
@@ -1191,6 +1193,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 				(node) => node.id === nodeId,
 			);
 			if (!focusedNode) return state;
+			if (
+				state.currentProject.ui.focusedNodeId === nodeId &&
+				state.currentProject.ui.activeNodeId === nodeId &&
+				(focusedNode.type !== "scene" ||
+					state.currentProject.ui.activeSceneId === focusedNode.sceneId)
+			) {
+				return state;
+			}
 			const nextProject = {
 				...state.currentProject,
 				ui: {
@@ -1213,12 +1223,20 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 			if (!state.currentProject) return state;
 			if (sceneId && !state.currentProject.scenes[sceneId]) return state;
 			const sceneNode = findSceneNodeBySceneId(state.currentProject, sceneId);
+			const nextActiveNodeId =
+				sceneNode?.id ?? state.currentProject.ui.activeNodeId;
+			if (
+				state.currentProject.ui.activeSceneId === sceneId &&
+				state.currentProject.ui.activeNodeId === nextActiveNodeId
+			) {
+				return state;
+			}
 			const nextProject = {
 				...state.currentProject,
 				ui: {
 					...state.currentProject.ui,
 					activeSceneId: sceneId,
-					activeNodeId: sceneNode?.id ?? state.currentProject.ui.activeNodeId,
+					activeNodeId: nextActiveNodeId,
 				},
 			};
 			return {

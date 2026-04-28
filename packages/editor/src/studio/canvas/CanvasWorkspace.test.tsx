@@ -6376,6 +6376,35 @@ describe("CanvasWorkspace", () => {
 		});
 	});
 
+	it("残留 pointer session 不会阻止下一次节点拖拽", () => {
+		render(<CanvasWorkspace />);
+		const canvas = screen.getByTestId("infinite-skia-canvas");
+
+		act(() => {
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(720, 360),
+				buttons: 1,
+			});
+			fireEvent.pointerDown(canvas, {
+				...createPointerPatch(720, 360),
+				buttons: 1,
+			});
+			fireEvent.pointerMove(canvas, {
+				...createPointerPatch(820, 420),
+				buttons: 1,
+			});
+			fireEvent.pointerUp(canvas, {
+				...createPointerPatch(820, 420),
+				buttons: 0,
+			});
+		});
+
+		expect(getCanvasNodeForTest("node-image-1")).toMatchObject({
+			x: 780,
+			y: 380,
+		});
+	});
+
 	it("同一拖拽手势会复用吸附 guide 值缓存", () => {
 		const collectSpy = vi.spyOn(
 			canvasSnapUtils,
