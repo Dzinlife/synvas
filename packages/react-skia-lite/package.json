@@ -1,7 +1,7 @@
 {
   "name": "react-skia-lite",
   "version": "0.1.0",
-  "description": "ESM version of react-native-skia for web",
+  "description": "Web-only Skia runtime for React",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

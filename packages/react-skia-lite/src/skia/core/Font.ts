@@ -1,8 +1,8 @@
 /*global SkiaApi*/
 import { useEffect, useMemo, useState } from "react";
-import { Platform } from "../../Platform";
+import { resolveWebAssetSource } from "../../web/assets";
 import { Skia } from "../Skia";
-import type { DataModule, DataSourceParam, SkFontMgr } from "../types";
+import type { DataSource, DataSourceParam, SkFontMgr } from "../types";
 import { FontSlant } from "../types";
 import type { SkTypefaceFontProvider } from "../types/Paragraph/TypefaceFontProvider";
 
@@ -42,14 +42,14 @@ type Weight =
 	| "800"
 	| "900";
 
-interface RNFontStyle {
+interface FontStyle {
 	fontFamily: string;
 	fontSize: number;
 	fontStyle: Slant;
 	fontWeight: Weight;
 }
 
-const defaultFontStyle: RNFontStyle = {
+const defaultFontStyle: FontStyle = {
 	fontFamily: "System",
 	fontSize: defaultFontSize,
 	fontStyle: "normal",
@@ -78,7 +78,7 @@ const weight = (fontWeight: Weight) => {
 };
 
 export const matchFont = (
-	inputStyle: Partial<RNFontStyle> = {},
+	inputStyle: Partial<FontStyle> = {},
 	fontMgr: SkFontMgr = Skia.FontMgr.System(),
 ) => {
 	const fontStyle = {
@@ -104,24 +104,30 @@ export const listFontFamilies = (
 	return Array.from(families);
 };
 
-const loadTypefaces = (typefacesToLoad: Record<string, DataModule[]>) => {
+const loadTypefaceData = (source: DataSource) => {
+	const resolvedSource = resolveWebAssetSource(source);
+	if (resolvedSource instanceof Uint8Array) {
+		return Promise.resolve(Skia.Data.fromBytes(resolvedSource));
+	}
+	return Skia.Data.fromURI(resolvedSource);
+};
+
+const loadTypefaces = (typefacesToLoad: Record<string, DataSource[]>) => {
 	const promises = Object.keys(typefacesToLoad).flatMap((familyName) => {
 		return typefacesToLoad[familyName].map((typefaceToLoad) => {
-			return Skia.Data.fromURI(Platform.resolveAsset(typefaceToLoad)).then(
-				(data) => {
-					const tf = Skia.Typeface.MakeFreeTypeFaceFromData(data);
-					if (tf === null) {
-						throw new Error(`Couldn't create typeface for ${familyName}`);
-					}
-					return [familyName, tf] as const;
-				},
-			);
+			return loadTypefaceData(typefaceToLoad).then((data) => {
+				const tf = Skia.Typeface.MakeFreeTypeFaceFromData(data);
+				if (tf === null) {
+					throw new Error(`Couldn't create typeface for ${familyName}`);
+				}
+				return [familyName, tf] as const;
+			});
 		});
 	});
 	return Promise.all(promises);
 };
 
-export const useFonts = (sources: Record<string, DataModule[]>) => {
+export const useFonts = (sources: Record<string, DataSource[]>) => {
 	const [fontMgr, setFontMgr] = useState<null | SkTypefaceFontProvider>(null);
 
 	useEffect(() => {

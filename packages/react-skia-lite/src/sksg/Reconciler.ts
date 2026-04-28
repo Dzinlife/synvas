@@ -28,7 +28,7 @@ const syncCapableReconciler = skiaReconciler as SyncCapableReconciler;
 skiaReconciler.injectIntoDevTools({
 	bundleType: 1,
 	version: "0.0.1",
-	rendererPackageName: "react-native-skia",
+	rendererPackageName: "react-skia-lite",
 });
 
 type ViteHotContext = {
@@ -77,10 +77,10 @@ export class SkiaSGRoot {
 
 	constructor(
 		public Skia: Skia,
-		nativeId = -1,
+		canvasId = -1,
 	) {
 		const strictMode = false;
-		this.container = createContainer(Skia, nativeId);
+		this.container = createContainer(Skia, canvasId);
 		this.root = skiaReconciler.createContainer(
 			this.container,
 			0,

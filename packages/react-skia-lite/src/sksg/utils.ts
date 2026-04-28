@@ -1,4 +1,4 @@
-import type { SharedValue } from "../react-native-types";
+import type { SharedValue } from "../animation/runtime/types";
 
 import { mapKeys } from "../renderer/typeddash";
 

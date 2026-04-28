@@ -4,101 +4,101 @@ import type { CanvasKitWebGLBuffer, Video, ImageFactory } from "../types";
 
 import { CanvasKitWebGLBufferImpl } from "./CanvasKitWebGLBufferImpl";
 import { JsiSkImageFactory } from "./JsiSkImageFactory";
-import { SKIA_DISPOSE_SYMBOL, throwNotImplementedOnRNWeb } from "./Host";
+import { SKIA_DISPOSE_SYMBOL, throwNotImplementedOnWeb } from "./Host";
 import { getSkiaRenderBackend } from "./renderBackend";
 
 export const createVideo = async (
-  CanvasKit: CanvasKit,
-  url: string
+	CanvasKit: CanvasKit,
+	url: string,
 ): Promise<Video> => {
-  const video = document.createElement("video");
-  return new Promise((resolve, reject) => {
-    video.src = url;
-    video.style.display = "none";
-    video.crossOrigin = "anonymous";
-    video.volume = 0;
-    video.addEventListener("loadedmetadata", () => {
-      document.body.appendChild(video);
-      resolve(new JsiVideo(new JsiSkImageFactory(CanvasKit), video));
-    });
-    video.addEventListener("error", () => {
-      reject(new Error(`Failed to load video from URL: ${url}`));
-    });
-  });
+	const video = document.createElement("video");
+	return new Promise((resolve, reject) => {
+		video.src = url;
+		video.style.display = "none";
+		video.crossOrigin = "anonymous";
+		video.volume = 0;
+		video.addEventListener("loadedmetadata", () => {
+			document.body.appendChild(video);
+			resolve(new JsiVideo(new JsiSkImageFactory(CanvasKit), video));
+		});
+		video.addEventListener("error", () => {
+			reject(new Error(`Failed to load video from URL: ${url}`));
+		});
+	});
 };
 
 export class JsiVideo implements Video {
-  __typename__ = "Video" as const;
+	__typename__ = "Video" as const;
 
-  private webglBuffer: CanvasKitWebGLBuffer | null = null;
+	private webglBuffer: CanvasKitWebGLBuffer | null = null;
 
- constructor(
-    private ImageFactory: ImageFactory,
-    public videoElement: HTMLVideoElement
-  ) {
-    document.body.appendChild(this.videoElement);
-  }
+	constructor(
+		private ImageFactory: ImageFactory,
+		public videoElement: HTMLVideoElement,
+	) {
+		document.body.appendChild(this.videoElement);
+	}
 
-  duration() {
-    return this.videoElement.duration * 1000;
-  }
+	duration() {
+		return this.videoElement.duration * 1000;
+	}
 
-  framerate(): number {
-    return throwNotImplementedOnRNWeb<number>();
-  }
+	framerate(): number {
+		return throwNotImplementedOnWeb<number>();
+	}
 
-  setSurface(surface: Surface) {
-    if (getSkiaRenderBackend().kind !== "webgl") {
-      this.webglBuffer = null;
-      return;
-    }
-    // 只有 WebGL 需要借助 surface 级共享纹理复用；WebGPU 走独立的 lazy texture 路径。
-    this.webglBuffer = new CanvasKitWebGLBufferImpl(surface, this.videoElement);
-  }
+	setSurface(surface: Surface) {
+		if (getSkiaRenderBackend().kind !== "webgl") {
+			this.webglBuffer = null;
+			return;
+		}
+		// 只有 WebGL 需要借助 surface 级共享纹理复用；WebGPU 走独立的 lazy texture 路径。
+		this.webglBuffer = new CanvasKitWebGLBufferImpl(surface, this.videoElement);
+	}
 
-  nextImage() {
-    return this.ImageFactory.MakeImageFromNativeBuffer(
-      this.webglBuffer ? this.webglBuffer : this.videoElement
-    );
-  }
+	nextImage() {
+		return this.ImageFactory.MakeImageFromNativeBuffer(
+			this.webglBuffer ? this.webglBuffer : this.videoElement,
+		);
+	}
 
-  seek(time: number) {
-    if (isNaN(time)) {
-      throw new Error(`Invalid time: ${time}`);
-    }
-    this.videoElement.currentTime = time / 1000;
-  }
+	seek(time: number) {
+		if (isNaN(time)) {
+			throw new Error(`Invalid time: ${time}`);
+		}
+		this.videoElement.currentTime = time / 1000;
+	}
 
-  rotation() {
-    return 0 as const;
-  }
+	rotation() {
+		return 0 as const;
+	}
 
-  size() {
-    return {
-      width: this.videoElement.videoWidth,
-      height: this.videoElement.videoHeight,
-    };
-  }
+	size() {
+		return {
+			width: this.videoElement.videoWidth,
+			height: this.videoElement.videoHeight,
+		};
+	}
 
-  pause() {
-    this.videoElement.pause();
-  }
+	pause() {
+		this.videoElement.pause();
+	}
 
-  play() {
-    this.videoElement.play();
-  }
+	play() {
+		this.videoElement.play();
+	}
 
-  setVolume(volume: number) {
-    this.videoElement.volume = volume;
-  }
+	setVolume(volume: number) {
+		this.videoElement.volume = volume;
+	}
 
-  [SKIA_DISPOSE_SYMBOL]() {
-    if (this.videoElement.parentNode) {
-      this.videoElement.parentNode.removeChild(this.videoElement);
-    }
-  }
+	[SKIA_DISPOSE_SYMBOL]() {
+		if (this.videoElement.parentNode) {
+			this.videoElement.parentNode.removeChild(this.videoElement);
+		}
+	}
 
-  dispose() {
-    this[SKIA_DISPOSE_SYMBOL]();
-  }
+	dispose() {
+		this[SKIA_DISPOSE_SYMBOL]();
+	}
 }

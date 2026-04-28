@@ -6,7 +6,7 @@ import {
 	useDerivedValue,
 	useSharedValue,
 } from "../src/animation/runtime";
-import type { SharedValue } from "../src/react-native-types";
+import type { SharedValue } from "../src/animation/runtime";
 import { installRafStub } from "./testUtils";
 
 const { flushFrame } = installRafStub();

@@ -1,6 +1,6 @@
 /**
  * react-skia-lite
- * ESM version of react-native-skia for web
+ * Web-only Skia runtime.
  */
 
 export * from "./animation";
@@ -9,6 +9,7 @@ export * from "./dom/types";
 export * from "./LoadSkiaWeb";
 export * from "./renderer";
 export * from "./renderer/Canvas";
+export * from "./web";
 export { useContextBridge } from "./renderer/ContextBridge";
 export * from "./skia";
 export { JsiSkImage } from "./skia/web/JsiSkImage";

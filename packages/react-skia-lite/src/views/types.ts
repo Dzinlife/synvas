@@ -1,26 +1,22 @@
 import type { Node } from "../dom/types";
-import type { SharedValue, ViewProps } from "../react-native-types";
+import type { SharedValue } from "../animation/runtime/types";
 import type { SkImage, SkPicture, SkRect, SkSize } from "../skia/types";
 import type {
 	SkiaWebCanvasColorSpace,
 	SkiaWebCanvasDynamicRange,
 } from "../skia/web/canvasColorSpace";
+import type { SkiaWebViewProps } from "../web/types";
 
-export type NativeSkiaViewProps = ViewProps & {
-	debug?: boolean;
-	opaque?: boolean;
-};
-
-export interface ISkiaViewApi {
+export interface SkiaCanvasRegistry {
 	web?: boolean;
-	setJsiProperty: <T>(nativeId: number, name: string, value: T) => void;
-	requestRedraw: (nativeId: number) => void;
-	makeImageSnapshot: (nativeId: number, rect?: SkRect) => SkImage;
-	makeImageSnapshotAsync: (nativeId: number, rect?: SkRect) => Promise<SkImage>;
-	size: (nativeId: number) => SkSize;
+	setCanvasProperty: <T>(canvasId: number, name: string, value: T) => void;
+	requestRedraw: (canvasId: number) => void;
+	makeImageSnapshot: (canvasId: number, rect?: SkRect) => SkImage | null;
+	makeImageSnapshotAsync: (canvasId: number, rect?: SkRect) => Promise<SkImage>;
+	size: (canvasId: number) => SkSize;
 }
 
-export interface SkiaBaseViewProps extends ViewProps {
+export interface SkiaBaseViewProps extends SkiaWebViewProps {
 	/**
 	 * When set to true the view will display information about the
 	 * average time it takes to render.
@@ -37,11 +33,11 @@ export interface SkiaBaseViewProps extends ViewProps {
 	dynamicRange?: SkiaWebCanvasDynamicRange;
 }
 
-export interface SkiaPictureViewNativeProps extends SkiaBaseViewProps {
+export interface SkiaPictureViewBaseProps extends SkiaBaseViewProps {
 	picture?: SkPicture;
-	androidWarmup?: boolean;
+	canvasId?: string;
 }
 
-export interface SkiaDomViewNativeProps extends SkiaBaseViewProps {
+export interface SkiaDomViewProps extends SkiaBaseViewProps {
 	root?: Node<unknown>;
 }

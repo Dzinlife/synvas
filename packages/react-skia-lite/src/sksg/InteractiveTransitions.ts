@@ -8,7 +8,7 @@ import {
 	type WithSpringConfig,
 	type WithTimingConfig,
 } from "../animation/runtime";
-import type { Mutable } from "../react-native-types";
+import type { Mutable } from "../animation/runtime/types";
 import type { Node } from "./Node";
 import type { Container } from "./StaticContainer";
 
@@ -84,7 +84,8 @@ const isObjectLike = (value: unknown): value is Record<string, unknown> => {
 };
 
 const toFiniteNumber = (value: unknown): number | null => {
-	const candidate = isObjectLike(value) && "value" in value ? value.value : value;
+	const candidate =
+		isObjectLike(value) && "value" in value ? value.value : value;
 	if (!Number.isFinite(candidate)) return null;
 	return Number(candidate);
 };
@@ -319,7 +320,9 @@ class ContainerTransitionRuntime {
 
 const runtimeByContainer = new WeakMap<Container, ContainerTransitionRuntime>();
 
-const getContainerRuntime = (container: Container): ContainerTransitionRuntime => {
+const getContainerRuntime = (
+	container: Container,
+): ContainerTransitionRuntime => {
 	const existing = runtimeByContainer.get(container);
 	if (existing) return existing;
 	const next = new ContainerTransitionRuntime();
@@ -345,10 +348,7 @@ class NodeTransitionState {
 		return this.runtime;
 	}
 
-	configure(params: {
-		props: Record<string, unknown>;
-		motionInput: unknown;
-	}) {
+	configure(params: { props: Record<string, unknown>; motionInput: unknown }) {
 		if (this.disposed) return;
 		const { props, motionInput } = params;
 
@@ -520,7 +520,10 @@ class NodeTransitionState {
 
 		const { descriptor } = target;
 		const existingMeta = this.runningMotions.get(key);
-		if (existingMeta?.active && existingMeta.signature === descriptor.signature) {
+		if (
+			existingMeta?.active &&
+			existingMeta.signature === descriptor.signature
+		) {
 			return;
 		}
 		const generation = (existingMeta?.generation ?? 0) + 1;
@@ -592,7 +595,9 @@ export const prepareInteractiveTransitionProps = (params: {
 	delete nextProps.whileActive;
 	delete nextProps.animate;
 
-	const previousState = previousNode ? getNodeTransitionState(previousNode) : null;
+	const previousState = previousNode
+		? getNodeTransitionState(previousNode)
+		: null;
 	const hasMotionConfig = motionInput !== undefined && motionInput !== null;
 
 	if (!hasMotionConfig) {

@@ -9,32 +9,34 @@ import {
 	useState,
 } from "react";
 import type { SkiaPointerEventType } from "../dom/types";
-import { Platform } from "../Platform";
-import type {
-	LayoutChangeEvent,
-	MeasureInWindowOnSuccessCallback,
-	MeasureOnSuccessCallback,
-	SharedValue,
-	ViewProps,
-} from "../react-native-types";
+import type { SharedValue } from "../animation/runtime/types";
 import { Skia } from "../skia";
 import type { SkImage, SkRect, SkSize } from "../skia/types";
 import { SkiaPointerEventManager } from "../sksg/PointerEvents";
 import { SkiaSGRoot } from "../sksg/Reconciler";
-import SkiaPictureViewNativeComponent from "../specs/SkiaPictureViewNativeComponent";
-import { SkiaViewApi } from "../views/api";
-import { SkiaViewNativeId } from "../views/SkiaViewNativeId";
+import { SkiaPictureView } from "../views/SkiaPictureView";
+import {
+	createSkiaCanvasId,
+	skiaCanvasRegistry,
+} from "../views/skiaCanvasRegistry";
 import type {
 	SkiaWebCanvasColorSpace,
 	SkiaWebCanvasDynamicRange,
 } from "../skia/web/canvasColorSpace";
 import type { SkiaPictureViewHandle } from "../views/SkiaPictureView";
+import { getDevicePixelRatio } from "../web";
+import type {
+	MeasureInWindowOnSuccessCallback,
+	MeasureOnSuccessCallback,
+	SkiaLayoutEvent,
+	SkiaWebViewProps,
+} from "../web";
 
 export interface CanvasRef extends FC<CanvasProps> {
-	makeImageSnapshot(rect?: SkRect): SkImage;
+	makeImageSnapshot(rect?: SkRect): SkImage | null;
 	makeImageSnapshotAsync(rect?: SkRect): Promise<SkImage>;
 	redraw(): void;
-	getNativeId(): number;
+	getCanvasId(): number;
 	measure(callback: MeasureOnSuccessCallback): void;
 	measureInWindow(callback: MeasureInWindowOnSuccessCallback): void;
 	/**
@@ -63,21 +65,21 @@ export const useCanvasSize = (userRef?: RefObject<CanvasRef | null>) => {
 	return { ref, size };
 };
 
-export interface CanvasProps extends Omit<ViewProps, "onLayout"> {
+export interface CanvasProps extends Omit<SkiaWebViewProps, "onLayout"> {
 	debug?: boolean;
 	opaque?: boolean;
 	onSize?: SharedValue<SkSize>;
 	colorSpace?: SkiaWebCanvasColorSpace;
 	dynamicRange?: SkiaWebCanvasDynamicRange;
 	ref?: React.Ref<CanvasRef>;
-	androidWarmup?: boolean;
 	pd?: number;
+	onLayout?: (event: SkiaLayoutEvent) => void;
 }
 
 type CanvasPointerEvent = Parameters<
-	NonNullable<ViewProps["onPointerDown"]>
+	NonNullable<SkiaWebViewProps["onPointerDown"]>
 >[0];
-type CanvasMouseEvent = Parameters<NonNullable<ViewProps["onClick"]>>[0];
+type CanvasMouseEvent = Parameters<NonNullable<SkiaWebViewProps["onClick"]>>[0];
 
 export const Canvas = ({
 	debug,
@@ -86,23 +88,17 @@ export const Canvas = ({
 	onSize,
 	colorSpace = "p3",
 	dynamicRange = "standard",
-	androidWarmup = false,
 	ref,
-	// Here know this is a type error but this is done on purpose to check it at runtime
-	// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-	// @ts-expect-error
 	onLayout,
-	pd = Platform.PixelRatio,
+	pd = getDevicePixelRatio(),
 	...viewProps
 }: CanvasProps) => {
 	const viewRef = useCanvasRefPriv(null);
-	// Native ID
-	const nativeId = useMemo(() => {
-		return SkiaViewNativeId.current++;
+	const canvasId = useMemo(() => {
+		return createSkiaCanvasId();
 	}, []);
 
-	// Root
-	const root = useMemo(() => new SkiaSGRoot(Skia, nativeId), [nativeId]);
+	const root = useMemo(() => new SkiaSGRoot(Skia, canvasId), [canvasId]);
 	const pointerEventManager = useMemo(() => {
 		return new SkiaPointerEventManager(() => root.sg.children);
 	}, [root]);
@@ -114,7 +110,7 @@ export const Canvas = ({
 
 	useLayoutEffect(() => {
 		root.render(children);
-	}, [children, root, nativeId]);
+	}, [children, root]);
 
 	useEffect(() => {
 		return () => {
@@ -134,16 +130,16 @@ export const Canvas = ({
 		() =>
 			({
 				makeImageSnapshot: (rect?: SkRect) => {
-					return SkiaViewApi.makeImageSnapshot(nativeId, rect);
+					return skiaCanvasRegistry.makeImageSnapshot(canvasId, rect);
 				},
 				makeImageSnapshotAsync: (rect?: SkRect) => {
-					return SkiaViewApi.makeImageSnapshotAsync(nativeId, rect);
+					return skiaCanvasRegistry.makeImageSnapshotAsync(canvasId, rect);
 				},
 				redraw: () => {
-					SkiaViewApi.requestRedraw(nativeId);
+					skiaCanvasRegistry.requestRedraw(canvasId);
 				},
-				getNativeId: () => {
-					return nativeId;
+				getCanvasId: () => {
+					return canvasId;
 				},
 				measure: (callback) => {
 					viewRef.current?.measure(callback);
@@ -155,18 +151,14 @@ export const Canvas = ({
 					return root;
 				},
 			}) as CanvasRef,
-		[nativeId, root],
+		[canvasId, root],
 	);
 
 	const onLayoutWeb = useCallback(
-		(e: LayoutChangeEvent) => {
-			if (onLayout) {
-				onLayout(e);
-			}
-			if (Platform.OS === "web" && onSize) {
-				const { width, height } = e.nativeEvent.layout;
-				onSize.value = { width, height };
-			}
+		(e: SkiaLayoutEvent) => {
+			onLayout?.(e);
+			const { width, height } = e.nativeEvent.layout;
+			if (onSize) onSize.value = { width, height };
 		},
 		[onLayout, onSize],
 	);
@@ -187,9 +179,6 @@ export const Canvas = ({
 			type: SkiaPointerEventType,
 			event: CanvasPointerEvent | CanvasMouseEvent,
 		) => {
-			if (Platform.OS !== "web") {
-				return;
-			}
 			const domEvent = event as unknown as {
 				nativeEvent: PointerEvent | MouseEvent;
 				currentTarget: EventTarget & HTMLElement;
@@ -213,7 +202,7 @@ export const Canvas = ({
 	);
 
 	const onCanvasPointerDown = useCallback<
-		NonNullable<ViewProps["onPointerDown"]>
+		NonNullable<SkiaWebViewProps["onPointerDown"]>
 	>(
 		(event) => {
 			dispatchPointerEvent("pointerdown", event);
@@ -223,7 +212,7 @@ export const Canvas = ({
 	);
 
 	const onCanvasPointerMove = useCallback<
-		NonNullable<ViewProps["onPointerMove"]>
+		NonNullable<SkiaWebViewProps["onPointerMove"]>
 	>(
 		(event) => {
 			dispatchPointerEvent("pointermove", event);
@@ -232,7 +221,9 @@ export const Canvas = ({
 		[dispatchPointerEvent, onPointerMove],
 	);
 
-	const onCanvasPointerUp = useCallback<NonNullable<ViewProps["onPointerUp"]>>(
+	const onCanvasPointerUp = useCallback<
+		NonNullable<SkiaWebViewProps["onPointerUp"]>
+	>(
 		(event) => {
 			dispatchPointerEvent("pointerup", event);
 			onPointerUp?.(event);
@@ -241,7 +232,7 @@ export const Canvas = ({
 	);
 
 	const onCanvasPointerCancel = useCallback<
-		NonNullable<ViewProps["onPointerCancel"]>
+		NonNullable<SkiaWebViewProps["onPointerCancel"]>
 	>(
 		(event) => {
 			dispatchPointerEvent("pointercancel", event);
@@ -251,7 +242,7 @@ export const Canvas = ({
 	);
 
 	const onCanvasPointerLeave = useCallback<
-		NonNullable<ViewProps["onPointerLeave"]>
+		NonNullable<SkiaWebViewProps["onPointerLeave"]>
 	>(
 		(event) => {
 			dispatchPointerEvent("pointerleave", event);
@@ -260,7 +251,7 @@ export const Canvas = ({
 		[dispatchPointerEvent, onPointerLeave],
 	);
 
-	const onCanvasClick = useCallback<NonNullable<ViewProps["onClick"]>>(
+	const onCanvasClick = useCallback<NonNullable<SkiaWebViewProps["onClick"]>>(
 		(event) => {
 			dispatchPointerEvent("click", event);
 			onClick?.(event);
@@ -269,7 +260,7 @@ export const Canvas = ({
 	);
 
 	const onCanvasDoubleClick = useCallback<
-		NonNullable<ViewProps["onDoubleClick"]>
+		NonNullable<SkiaWebViewProps["onDoubleClick"]>
 	>(
 		(event) => {
 			dispatchPointerEvent("doubleclick", event);
@@ -279,19 +270,15 @@ export const Canvas = ({
 	);
 
 	return (
-		<SkiaPictureViewNativeComponent
+		<SkiaPictureView
 			pd={pd}
 			ref={viewRef}
-			collapsable={false}
-			nativeID={`${nativeId}`}
+			canvasId={`${canvasId}`}
 			debug={debug}
 			opaque={opaque}
 			colorSpace={colorSpace}
 			dynamicRange={dynamicRange}
-			// androidWarmup={androidWarmup}
-			onLayout={
-				Platform.OS === "web" && (onSize || onLayout) ? onLayoutWeb : onLayout
-			}
+			onLayout={onSize || onLayout ? onLayoutWeb : undefined}
 			onPointerDown={onCanvasPointerDown}
 			onPointerMove={onCanvasPointerMove}
 			onPointerUp={onCanvasPointerUp}

@@ -21,12 +21,12 @@ export const SKIA_DISPOSE_SYMBOL: typeof Symbol.dispose =
 		? symbolCtor.dispose
 		: (Symbol.for("Symbol.dispose") as typeof Symbol.dispose);
 
-export const throwNotImplementedOnRNWeb = <T>(): T => {
+export const throwNotImplementedOnWeb = <T>(): T => {
 	const jestFn = (globalThis as { jest?: { fn: () => unknown } }).jest?.fn;
 	if (jestFn) {
 		return jestFn() as T;
 	}
-	throw new Error("Not implemented on React Native Web");
+	throw new Error("Not implemented on web");
 };
 
 export abstract class Host {
@@ -136,14 +136,15 @@ export const getEnum = (
 	name: keyof CanvasKit,
 	v: number,
 ): EmbindEnumEntity => {
-	const e = CanvasKit[name] as unknown as (EmbindEnum &
-		Record<string, unknown>) | null;
+	const e = CanvasKit[name] as unknown as
+		| (EmbindEnum & Record<string, unknown>)
+		| null;
 	if (!e || (typeof e !== "function" && typeof e !== "object")) {
 		throw new Error(`${name} is not an number`);
 	}
 	const enumEntries = [
 		...Object.values(e),
-		...((typeof e.values === "object" && e.values !== null)
+		...(typeof e.values === "object" && e.values !== null
 			? Object.values(e.values)
 			: []),
 	].filter(
@@ -152,9 +153,7 @@ export const getEnum = (
 	);
 	const result = enumEntries.find((entry) => entry.value === v);
 	if (!result) {
-		throw new Error(
-			`Enum ${name} does not have value ${v} on React Native Web`,
-		);
+		throw new Error(`Enum ${name} does not have value ${v} on web`);
 	}
 	return result;
 };

@@ -1,7 +1,5 @@
 /* global HTMLCanvasElement */
 import { useCallback, useEffect, useImperativeHandle, useRef } from "react";
-import { Platform } from "../Platform";
-import type { LayoutChangeEvent } from "../react-native-types";
 import { CanvasKit } from "../skia/Skia";
 import type { SkImage, SkPicture, SkRect } from "../skia/types";
 import { JsiSkSurface } from "../skia/web/JsiSkSurface";
@@ -19,9 +17,10 @@ import type {
 	SkiaWebCanvasColorSpace,
 	SkiaWebCanvasDynamicRange,
 } from "../skia/web/canvasColorSpace";
-import { SkiaViewApi } from "./api";
-import { SkiaViewNativeId } from "./SkiaViewNativeId";
-import type { SkiaPictureViewNativeProps } from "./types";
+import { getDevicePixelRatio, WebView } from "../web";
+import type { SkiaLayoutEvent } from "../web";
+import { createSkiaCanvasId, skiaCanvasRegistry } from "./skiaCanvasRegistry";
+import type { SkiaPictureViewBaseProps } from "./types";
 
 const dp2Pixel = (pd: number, rect?: SkRect) => {
 	if (!rect) {
@@ -243,16 +242,20 @@ export interface SkiaPictureViewHandle {
 	): void;
 }
 
-export interface SkiaPictureViewProps extends SkiaPictureViewNativeProps {
+export interface SkiaPictureViewProps extends SkiaPictureViewBaseProps {
 	ref?: React.Ref<SkiaPictureViewHandle>;
 	pd?: number;
 }
 
 export const SkiaPictureView = (props: SkiaPictureViewProps) => {
-	const { ref, pd = Platform.PixelRatio } = props;
+	const { ref, pd = getDevicePixelRatio() } = props;
 	const colorSpace = props.colorSpace ?? "srgb";
 	const dynamicRange = props.dynamicRange ?? "standard";
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+	const generatedCanvasIdRef = useRef<string | null>(null);
+	if (generatedCanvasIdRef.current === null) {
+		generatedCanvasIdRef.current = `${createSkiaCanvasId()}`;
+	}
 	const renderer = useRef<Renderer | null>(null);
 	const rendererConfigRef = useRef<RendererConfig | null>(null);
 	const redrawRequestsRef = useRef(0);
@@ -382,7 +385,7 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	);
 
 	const onLayoutEvent = useCallback(
-		(evt: LayoutChangeEvent) => {
+		(evt: SkiaLayoutEvent) => {
 			const canvas = canvasRef.current;
 			if (canvas) {
 				rebuildRenderer(canvas);
@@ -411,8 +414,8 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 	);
 
 	useEffect(() => {
-		const nativeID = props.nativeID ?? `${SkiaViewNativeId.current++}`;
-		SkiaViewApi.registerView(nativeID, {
+		const canvasId = props.canvasId ?? generatedCanvasIdRef.current!;
+		skiaCanvasRegistry.registerView(canvasId, {
 			setPicture,
 			getSize,
 			redraw,
@@ -421,7 +424,7 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 			measureInWindow,
 		} as SkiaPictureViewHandle);
 		return () => {
-			SkiaViewApi.unregisterView?.(nativeID);
+			skiaCanvasRegistry.unregisterView(canvasId);
 		};
 	}, [
 		setPicture,
@@ -430,7 +433,7 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 		makeImageSnapshot,
 		measure,
 		measureInWindow,
-		props.nativeID,
+		props.canvasId,
 	]);
 
 	useEffect(() => {
@@ -480,11 +483,12 @@ export const SkiaPictureView = (props: SkiaPictureViewProps) => {
 		ref: _ref,
 		colorSpace: _colorSpace,
 		dynamicRange: _dynamicRange,
+		canvasId: _canvasId,
 		...viewProps
 	} = props;
 	return (
-		<Platform.View {...viewProps} onLayout={onLayoutEvent}>
+		<WebView {...viewProps} onLayout={onLayoutEvent}>
 			<canvas ref={canvasRef} style={{ display: "flex", flex: 1 }} />
-		</Platform.View>
+		</WebView>
 	);
 };

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Mutable, SharedValue } from "../../react-native-types";
+import type { Mutable, SharedValue } from "./types";
 import { Color as normalizeColor } from "../../skia/web/JsiSkColor";
 
 export type EasingFunction = (value: number) => number;
@@ -28,7 +28,8 @@ type AnimationKind = "timing" | "spring";
 
 interface TimingAnimationConfig extends Required<WithTimingConfig> {}
 
-interface SpringAnimationConfig extends Required<Omit<WithSpringConfig, "velocity">> {
+interface SpringAnimationConfig
+	extends Required<Omit<WithSpringConfig, "velocity">> {
 	velocity?: unknown;
 }
 
@@ -98,9 +99,7 @@ const isDevelopment = () => {
 			};
 		};
 	};
-	return (
-		candidate.process?.env?.NODE_ENV !== "production"
-	);
+	return candidate.process?.env?.NODE_ENV !== "production";
 };
 
 const warnedMessages = new Set<string>();
@@ -121,7 +120,9 @@ const isTypedArray = (value: unknown): value is Float32Array => {
 	return value instanceof Float32Array;
 };
 
-const isArrayLike = (value: unknown): value is readonly unknown[] | Float32Array => {
+const isArrayLike = (
+	value: unknown,
+): value is readonly unknown[] | Float32Array => {
 	return Array.isArray(value) || isTypedArray(value);
 };
 
@@ -180,7 +181,9 @@ const normalizeColorVector = (value: unknown) => {
 	if (!isColorLike(value)) {
 		return null;
 	}
-	const normalized = normalizeColor(value as Parameters<typeof normalizeColor>[0]);
+	const normalized = normalizeColor(
+		value as Parameters<typeof normalizeColor>[0],
+	);
 	const channels = Array.from(normalized);
 	if (channels.length === 3) {
 		return [channels[0] ?? 0, channels[1] ?? 0, channels[2] ?? 0, 1];
@@ -201,7 +204,10 @@ const createTemplateObject = (template: unknown) => {
 		return {};
 	}
 	const prototype = Object.getPrototypeOf(template);
-	return Object.create(prototype ?? Object.prototype) as Record<string, unknown>;
+	return Object.create(prototype ?? Object.prototype) as Record<
+		string,
+		unknown
+	>;
 };
 
 const createColorShape = (template: unknown): ValueShape<unknown> => {
@@ -413,7 +419,7 @@ const fillVector = (shape: ValueShape<unknown>, value: unknown) => {
 	return target;
 };
 
-const materializeValue = <Value,>(
+const materializeValue = <Value>(
 	shape: ValueShape<unknown>,
 	vector: readonly number[],
 ): Value => {
@@ -421,7 +427,10 @@ const materializeValue = <Value,>(
 	return value as Value;
 };
 
-const vectorsAlmostEqual = (left: readonly number[], right: readonly number[]) => {
+const vectorsAlmostEqual = (
+	left: readonly number[],
+	right: readonly number[],
+) => {
 	if (left.length !== right.length) {
 		return false;
 	}
@@ -446,7 +455,7 @@ const valuesAlmostEqual = (left: unknown, right: unknown) => {
 	return vectorsAlmostEqual(leftVector, rightVector);
 };
 
-const ensureCompatibleShape = <Value,>(
+const ensureCompatibleShape = <Value>(
 	current: Value,
 	target: Value,
 	animationName: AnimationKind,
@@ -576,25 +585,22 @@ export const scheduleAnimationFrameTask = (callback: () => void) => {
 	runtimeCoordinator.scheduleFrameCallback(callback);
 };
 
-const getMutableHandle = <Value,>(sharedValue: SharedValue<Value>) => {
-	if (
-		!isObjectLike(sharedValue) ||
-		!(MUTABLE_HANDLE in sharedValue)
-	) {
+const getMutableHandle = <Value>(sharedValue: SharedValue<Value>) => {
+	if (!isObjectLike(sharedValue) || !(MUTABLE_HANDLE in sharedValue)) {
 		return null;
 	}
-	return (sharedValue as SharedValue<Value> & {
-		[MUTABLE_HANDLE]: MutableHandle<Value>;
-	})[MUTABLE_HANDLE];
+	return (
+		sharedValue as SharedValue<Value> & {
+			[MUTABLE_HANDLE]: MutableHandle<Value>;
+		}
+	)[MUTABLE_HANDLE];
 };
 
 const trackSharedValueRead = (sharedValue: SharedValue<unknown>) => {
 	activeDependencyCollector?.addDependency(sharedValue);
 };
 
-const cancelMutableAnimation = <Value,>(
-	handle: MutableHandle<Value>,
-) => {
+const cancelMutableAnimation = <Value>(handle: MutableHandle<Value>) => {
 	const runningAnimation = handle.animation;
 	if (!runningAnimation) {
 		return;
@@ -604,7 +610,7 @@ const cancelMutableAnimation = <Value,>(
 	runningAnimation.cancel();
 };
 
-const updateMutableValue = <Value,>(
+const updateMutableValue = <Value>(
 	handle: MutableHandle<Value>,
 	nextValue: Value,
 	forceUpdate = false,
@@ -742,7 +748,10 @@ class SpringAnimation<Value> implements RunningAnimation {
 		if (this.lastTimeMs === null) {
 			this.lastTimeMs = nowMs;
 		}
-		const dtSeconds = Math.max(0.001, Math.min(0.064, (nowMs - this.lastTimeMs) / 1000));
+		const dtSeconds = Math.max(
+			0.001,
+			Math.min(0.064, (nowMs - this.lastTimeMs) / 1000),
+		);
 		this.lastTimeMs = nowMs;
 		let finished = true;
 		for (let index = 0; index < this.currentVector.length; index += 1) {
@@ -768,7 +777,8 @@ class SpringAnimation<Value> implements RunningAnimation {
 			this.velocityVector[index] = nextVelocity;
 
 			const withinDisplacement =
-				Math.abs(nextPosition - target) <= this.config.restDisplacementThreshold;
+				Math.abs(nextPosition - target) <=
+				this.config.restDisplacementThreshold;
 			const withinSpeed =
 				Math.abs(nextVelocity) <= this.config.restSpeedThreshold;
 			if (!withinDisplacement || !withinSpeed) {
@@ -811,7 +821,7 @@ const resolveVelocityVector = (velocity: unknown, dimension: number) => {
 	return fillVector(velocityShape, velocity);
 };
 
-const isAnimationDescriptor = <Value,>(
+const isAnimationDescriptor = <Value>(
 	value: unknown,
 ): value is AnimationDescriptor<Value> => {
 	return (
@@ -821,7 +831,7 @@ const isAnimationDescriptor = <Value,>(
 	);
 };
 
-const startAnimation = <Value,>(
+const startAnimation = <Value>(
 	handle: MutableHandle<Value>,
 	descriptor: AnimationDescriptor<Value>,
 ) => {
@@ -853,7 +863,7 @@ const startAnimation = <Value,>(
 	runtimeCoordinator.addAnimation(animation);
 };
 
-const assignMutable = <Value,>(
+const assignMutable = <Value>(
 	handle: MutableHandle<Value>,
 	nextValue: Value | AnimationDescriptor<Value>,
 	forceUpdate = false,
@@ -866,7 +876,7 @@ const assignMutable = <Value,>(
 	updateMutableValue(handle, nextValue, forceUpdate);
 };
 
-const createMutableObject = <Value,>(initialValue: Value) => {
+const createMutableObject = <Value>(initialValue: Value) => {
 	const handle: MutableHandle<Value> = {
 		current: initialValue,
 		listeners: new Map(),
@@ -922,7 +932,9 @@ const createMutableObject = <Value,>(initialValue: Value) => {
 	return sharedValue;
 };
 
-abstract class BaseObserver implements SharedValueObserver, DependencyCollector {
+abstract class BaseObserver
+	implements SharedValueObserver, DependencyCollector
+{
 	private dependencyIds = new Map<SharedValue<unknown>, number>();
 	private scheduled = false;
 
@@ -1013,7 +1025,10 @@ class AnimatedReactionObserver<Prepared> extends BaseObserver {
 
 	constructor(
 		private readonly prepare: () => Prepared,
-		private readonly reaction: (current: Prepared, previous: Prepared | null) => void,
+		private readonly reaction: (
+			current: Prepared,
+			previous: Prepared | null,
+		) => void,
 	) {
 		super();
 	}
@@ -1031,16 +1046,16 @@ class AnimatedReactionObserver<Prepared> extends BaseObserver {
 	}
 }
 
-export const makeMutable = <Value,>(initialValue: Value) => {
+export const makeMutable = <Value>(initialValue: Value) => {
 	return createMutableObject(initialValue);
 };
 
-export const useSharedValue = <Value,>(initialValue: Value) => {
+export const useSharedValue = <Value>(initialValue: Value) => {
 	const [sharedValue] = useState(() => makeMutable(initialValue));
 	return sharedValue;
 };
 
-export const useDerivedValue = <Value,>(updater: () => Value) => {
+export const useDerivedValue = <Value>(updater: () => Value) => {
 	const updaterRef = useRef(updater);
 	updaterRef.current = updater;
 	const target = useMemo(() => makeMutable(updaterRef.current()), []);
@@ -1048,7 +1063,10 @@ export const useDerivedValue = <Value,>(updater: () => Value) => {
 	const hasCommittedRef = useRef(false);
 
 	useEffect(() => {
-		const observer = new DerivedValueObserver(() => updaterRef.current(), target);
+		const observer = new DerivedValueObserver(
+			() => updaterRef.current(),
+			target,
+		);
 		observerRef.current = observer;
 		observer.run();
 		return () => {
@@ -1068,7 +1086,7 @@ export const useDerivedValue = <Value,>(updater: () => Value) => {
 	return target;
 };
 
-export const useAnimatedReaction = <Prepared,>(
+export const useAnimatedReaction = <Prepared>(
 	prepare: () => Prepared,
 	reaction: (current: Prepared, previous: Prepared | null) => void,
 ) => {
@@ -1103,7 +1121,7 @@ export const useAnimatedReaction = <Prepared,>(
 	});
 };
 
-export const cancelAnimation = <Value,>(sharedValue: SharedValue<Value>) => {
+export const cancelAnimation = <Value>(sharedValue: SharedValue<Value>) => {
 	const handle = getMutableHandle(sharedValue);
 	if (!handle) {
 		return;
@@ -1132,7 +1150,7 @@ export const Easing = {
 	},
 };
 
-export const withTiming = <Value,>(
+export const withTiming = <Value>(
 	toValue: Value,
 	config?: WithTimingConfig,
 	callback?: AnimationCallback<Value>,
@@ -1149,7 +1167,7 @@ export const withTiming = <Value,>(
 	} as unknown as Value;
 };
 
-export const withSpring = <Value,>(
+export const withSpring = <Value>(
 	toValue: Value,
 	config?: WithSpringConfig,
 	callback?: AnimationCallback<Value>,
@@ -1163,14 +1181,12 @@ export const withSpring = <Value,>(
 			mass: config?.mass ?? DEFAULT_SPRING_CONFIG.mass,
 			velocity: config?.velocity ?? DEFAULT_SPRING_CONFIG.velocity,
 			overshootClamping:
-				config?.overshootClamping ??
-				DEFAULT_SPRING_CONFIG.overshootClamping,
+				config?.overshootClamping ?? DEFAULT_SPRING_CONFIG.overshootClamping,
 			restDisplacementThreshold:
 				config?.restDisplacementThreshold ??
 				DEFAULT_SPRING_CONFIG.restDisplacementThreshold,
 			restSpeedThreshold:
-				config?.restSpeedThreshold ??
-				DEFAULT_SPRING_CONFIG.restSpeedThreshold,
+				config?.restSpeedThreshold ?? DEFAULT_SPRING_CONFIG.restSpeedThreshold,
 		},
 		callback,
 		[ANIMATION_DESCRIPTOR]: true,

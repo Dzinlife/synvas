@@ -1,6 +1,6 @@
 # react-skia-lite
 
-ESM version of react-native-skia for web.
+Web-only Skia runtime for React.
 
 ## Installation
 

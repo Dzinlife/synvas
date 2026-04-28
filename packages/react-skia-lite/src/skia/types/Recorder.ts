@@ -28,7 +28,7 @@ import type {
 	TextProps,
 	VerticesProps,
 } from "../../dom/types";
-import type { SharedValue } from "../../react-native-types";
+import type { SharedValue } from "../../animation/runtime/types";
 import type { AnimatedProps } from "../../renderer/processors/Animations/Animations";
 
 import type { SkPicture } from "./Picture";

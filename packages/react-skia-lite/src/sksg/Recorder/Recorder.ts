@@ -29,7 +29,7 @@ import type {
 } from "../../dom/types";
 
 import { NodeType } from "../../dom/types";
-import type { SharedValue } from "../../react-native-types";
+import type { SharedValue } from "../../animation/runtime/types";
 import type { AnimatedProps } from "../../renderer";
 import type { BaseRecorder, SkPaint } from "../../skia/types";
 import { isColorFilter, isImageFilter, isPathEffect, isShader } from "../Node";

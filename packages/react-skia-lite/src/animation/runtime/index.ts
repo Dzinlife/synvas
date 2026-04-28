@@ -16,4 +16,4 @@ export type {
 	WithTimingConfig,
 } from "./core";
 
-export type { Mutable, SharedValue } from "../../react-native-types";
+export type { Mutable, SharedValue } from "./types";

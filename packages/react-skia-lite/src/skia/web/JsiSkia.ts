@@ -11,7 +11,7 @@ import type {
 	SkRuntimeShaderBuilder,
 	SkTypeface,
 } from "../types";
-import { throwNotImplementedOnRNWeb } from "./Host";
+import { throwNotImplementedOnWeb } from "./Host";
 import { JsiSkAnimatedImageFactory } from "./JsiSkAnimatedImageFactory";
 import { Color } from "./JsiSkColor";
 import { JsiSkColorFilterFactory } from "./JsiSkColorFilterFactory";
@@ -56,7 +56,7 @@ export const JsiSkApi = (CanvasKit: CanvasKit): Skia => {
 		Point: (x: number, y: number) =>
 			new JsiSkPoint(CanvasKit, Float32Array.of(x, y)),
 		RuntimeShaderBuilder: (_: SkRuntimeEffect) => {
-			return throwNotImplementedOnRNWeb<SkRuntimeShaderBuilder>();
+			return throwNotImplementedOnWeb<SkRuntimeShaderBuilder>();
 		},
 		RRectXY: (rect: SkRect, rx: number, ry: number) =>
 			new JsiSkRRect(CanvasKit, rect, rx, ry),
@@ -139,10 +139,10 @@ export const JsiSkApi = (CanvasKit: CanvasKit): Skia => {
 		Skottie: new JsiSkottieFactory(CanvasKit),
 		Video: createVideo.bind(null, CanvasKit),
 		Context: (_surface: bigint, _width: number, _height: number) => {
-			return throwNotImplementedOnRNWeb<SkiaContext>();
+			return throwNotImplementedOnWeb<SkiaContext>();
 		},
 		Recorder: () => {
-			return throwNotImplementedOnRNWeb<JsiRecorder>();
+			return throwNotImplementedOnWeb<JsiRecorder>();
 		},
 	};
 };

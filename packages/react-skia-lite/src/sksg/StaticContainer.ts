@@ -1,9 +1,9 @@
 import { scheduleAnimationFrameTask } from "../animation/runtime/core";
-import type { SharedValue } from "../react-native-types";
+import type { SharedValue } from "../animation/runtime/types";
 import type { SkCanvas, Skia, SkPaint } from "../skia/types";
 import type { SkiaOffscreenSurfaceOptions } from "../skia/types/Surface/SurfaceFactory";
 import { attachDisposeCleanup } from "../skia/web/Host";
-import { SkiaViewApi } from "../views/api";
+import { skiaCanvasRegistry } from "../views/skiaCanvasRegistry";
 import {
 	handleContainerRedraw,
 	handleContainerUnmount,
@@ -14,7 +14,6 @@ import { replay } from "./Recorder/Player";
 import type { Recording } from "./Recorder/Recorder";
 import { Recorder } from "./Recorder/Recorder";
 import { visit } from "./Recorder/Visitor";
-import "../views/api";
 
 let nextAnimationListenerId = 1;
 
@@ -103,7 +102,7 @@ export class StaticContainer extends Container {
 
 	constructor(
 		Skia: Skia,
-		private nativeId: number,
+		private canvasId: number,
 	) {
 		super(Skia);
 	}
@@ -127,7 +126,7 @@ export class StaticContainer extends Container {
 	}
 
 	present() {
-		if (this.recording === null || this.unmounted || this.nativeId === -1) {
+		if (this.recording === null || this.unmounted || this.canvasId === -1) {
 			return;
 		}
 		const rec = this.Skia.PictureRecorder();
@@ -145,7 +144,7 @@ export class StaticContainer extends Container {
 					}
 				});
 			}
-			SkiaViewApi.setJsiProperty(this.nativeId, "picture", picture);
+			skiaCanvasRegistry.setCanvasProperty(this.canvasId, "picture", picture);
 		} finally {
 			(canvas as { dispose?: () => void } | null)?.dispose?.();
 			rec.dispose?.();

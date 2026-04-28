@@ -24,7 +24,7 @@ import type {
 	TileMode,
 } from "../types";
 
-import { getEnum, Host, throwNotImplementedOnRNWeb } from "./Host";
+import { getEnum, Host, throwNotImplementedOnWeb } from "./Host";
 import { JsiSkColorFilter } from "./JsiSkColorFilter";
 import { JsiSkImageFilter } from "./JsiSkImageFilter";
 import { JsiSkMatrix } from "./JsiSkMatrix";
@@ -42,7 +42,7 @@ export class JsiSkImageFilterFactory
 		_childShaderNames: string[],
 		_inputs: Array<SkImageFilter | null>,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeArithmetic(
 		_k1: number,
@@ -54,17 +54,17 @@ export class JsiSkImageFilterFactory
 		_foreground?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeCrop(
 		_rect: SkRect,
 		_tileMode?: TileMode | null,
 		_input?: SkImageFilter | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeEmpty(): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeImage(
 		_image: SkImage,
@@ -73,7 +73,7 @@ export class JsiSkImageFilterFactory
 		_filterMode?: FilterMode,
 		_mipmap?: MipmapMode,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeMagnifier(
 		_lensBounds: SkRect,
@@ -84,7 +84,7 @@ export class JsiSkImageFilterFactory
 		_input?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeMatrixConvolution(
 		_kernelSizeX: number,
@@ -99,7 +99,7 @@ export class JsiSkImageFilterFactory
 		_input?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeMatrixTransform(
 		matrix: SkMatrix,
@@ -132,17 +132,17 @@ export class JsiSkImageFilterFactory
 		_filters: Array<SkImageFilter | null>,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakePicture(_picture: SkPicture, _targetRect?: SkRect | null): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeTile(
 		_src: SkRect,
 		_dst: SkRect,
 		_input?: SkImageFilter | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeDistantLitDiffuse(
 		_direction: SkPoint3,
@@ -152,7 +152,7 @@ export class JsiSkImageFilterFactory
 		_input?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakePointLitDiffuse(
 		_location: SkPoint3,
@@ -162,7 +162,7 @@ export class JsiSkImageFilterFactory
 		_input?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeSpotLitDiffuse(
 		_location: SkPoint3,
@@ -175,7 +175,7 @@ export class JsiSkImageFilterFactory
 		_input?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeDistantLitSpecular(
 		_direction: SkPoint3,
@@ -186,7 +186,7 @@ export class JsiSkImageFilterFactory
 		_input?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakePointLitSpecular(
 		_location: SkPoint3,
@@ -197,7 +197,7 @@ export class JsiSkImageFilterFactory
 		_input?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 	MakeSpotLitSpecular(
 		_location: SkPoint3,
@@ -211,7 +211,7 @@ export class JsiSkImageFilterFactory
 		_input?: SkImageFilter | null,
 		_cropRect?: SkRect | null,
 	): SkImageFilter {
-		throw throwNotImplementedOnRNWeb();
+		throw throwNotImplementedOnWeb();
 	}
 
 	MakeOffset(
@@ -225,9 +225,7 @@ export class JsiSkImageFilterFactory
 				? null
 				: JsiSkImageFilter.fromValue<ImageFilter>(input);
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeOffset",
-			);
+			console.warn("cropRect is not supported on web for MakeOffset");
 		}
 		const filter = this.CanvasKit.ImageFilter.MakeOffset(dx, dy, inputFilter);
 		return new JsiSkImageFilter(this.CanvasKit, filter);
@@ -246,9 +244,7 @@ export class JsiSkImageFilterFactory
 				? null
 				: JsiSkImageFilter.fromValue<ImageFilter>(input);
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeDisplacementMap",
-			);
+			console.warn("cropRect is not supported on web for MakeDisplacementMap");
 		}
 		const filter = this.CanvasKit.ImageFilter.MakeDisplacementMap(
 			getEnum(this.CanvasKit, "ColorChannel", channelX),
@@ -266,14 +262,10 @@ export class JsiSkImageFilterFactory
 		cropRect?: SkRect | null,
 	): SkImageFilter {
 		if (dither !== undefined) {
-			console.warn(
-				"dither parameter is not supported on React Native Web for MakeShader",
-			);
+			console.warn("dither parameter is not supported on web for MakeShader");
 		}
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeShader",
-			);
+			console.warn("cropRect is not supported on web for MakeShader");
 		}
 		const filter = this.CanvasKit.ImageFilter.MakeShader(
 			JsiSkImageFilter.fromValue(shader),
@@ -289,9 +281,7 @@ export class JsiSkImageFilterFactory
 		cropRect?: SkRect | null,
 	) {
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeBlur",
-			);
+			console.warn("cropRect is not supported on web for MakeBlur");
 		}
 		return new JsiSkImageFilter(
 			this.CanvasKit,
@@ -312,9 +302,7 @@ export class JsiSkImageFilterFactory
 		cropRect?: SkRect | null,
 	) {
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeColorFilter",
-			);
+			console.warn("cropRect is not supported on web for MakeColorFilter");
 		}
 		return new JsiSkImageFilter(
 			this.CanvasKit,
@@ -351,9 +339,7 @@ export class JsiSkImageFilterFactory
 				? null
 				: JsiSkImageFilter.fromValue<ImageFilter>(input);
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeDropShadow",
-			);
+			console.warn("cropRect is not supported on web for MakeDropShadow");
 		}
 		const filter = this.CanvasKit.ImageFilter.MakeDropShadow(
 			dx,
@@ -380,9 +366,7 @@ export class JsiSkImageFilterFactory
 				? null
 				: JsiSkImageFilter.fromValue<ImageFilter>(input);
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeDropShadowOnly",
-			);
+			console.warn("cropRect is not supported on web for MakeDropShadowOnly");
 		}
 		const filter = this.CanvasKit.ImageFilter.MakeDropShadowOnly(
 			dx,
@@ -406,9 +390,7 @@ export class JsiSkImageFilterFactory
 				? null
 				: JsiSkImageFilter.fromValue<ImageFilter>(input);
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeErode",
-			);
+			console.warn("cropRect is not supported on web for MakeErode");
 		}
 		const filter = this.CanvasKit.ImageFilter.MakeErode(rx, ry, inputFilter);
 		return new JsiSkImageFilter(this.CanvasKit, filter);
@@ -425,9 +407,7 @@ export class JsiSkImageFilterFactory
 				? null
 				: JsiSkImageFilter.fromValue<ImageFilter>(input);
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeDilate",
-			);
+			console.warn("cropRect is not supported on web for MakeDilate");
 		}
 		const filter = this.CanvasKit.ImageFilter.MakeDilate(rx, ry, inputFilter);
 		return new JsiSkImageFilter(this.CanvasKit, filter);
@@ -444,9 +424,7 @@ export class JsiSkImageFilterFactory
 				? null
 				: JsiSkImageFilter.fromValue<ImageFilter>(foreground);
 		if (cropRect) {
-			console.warn(
-				"cropRect is not supported on React Native Web for MakeBlend",
-			);
+			console.warn("cropRect is not supported on web for MakeBlend");
 		}
 		const filter = this.CanvasKit.ImageFilter.MakeBlend(
 			getEnum(this.CanvasKit, "BlendMode", mode),
@@ -461,6 +439,6 @@ export class JsiSkImageFilterFactory
 		_childShaderName: string | null,
 		_input?: SkImageFilter | null,
 	) {
-		return throwNotImplementedOnRNWeb<SkImageFilter>();
+		return throwNotImplementedOnWeb<SkImageFilter>();
 	}
 }

@@ -8,7 +8,7 @@ import type {
 } from "../types";
 import { CanvasKitWebGLBuffer, isNativeBufferWeb } from "../types";
 import type { CanvasKitWebGLBufferImpl } from "./CanvasKitWebGLBufferImpl";
-import { getEnum, Host, throwNotImplementedOnRNWeb } from "./Host";
+import { getEnum, Host, throwNotImplementedOnWeb } from "./Host";
 import { JsiSkData } from "./JsiSkData";
 import { JsiSkImage } from "./JsiSkImage";
 import type { JsiSkSurface } from "./JsiSkSurface";
@@ -71,12 +71,10 @@ export class JsiSkImageFactory extends Host implements ImageFactory {
 			}
 		}
 		if (getSkiaRenderBackend().kind === "webgl" && isTextureBackedSource) {
-			const canvasKit =
-				this.CanvasKit as CanvasKitWithLazyTextureSourceImage;
+			const canvasKit = this.CanvasKit as CanvasKitWithLazyTextureSourceImage;
 			return (
-				canvasKit.MakeLazyImageFromTextureSource?.(
-					source as TextureSource,
-				) ?? this.CanvasKit.MakeImageFromCanvasImageSource(source)
+				canvasKit.MakeLazyImageFromTextureSource?.(source as TextureSource) ??
+				this.CanvasKit.MakeImageFromCanvasImageSource(source)
 			);
 		}
 		return this.CanvasKit.MakeImageFromCanvasImageSource(source);
@@ -84,13 +82,6 @@ export class JsiSkImageFactory extends Host implements ImageFactory {
 
 	MakeNull() {
 		return new JsiSkImage(this.CanvasKit, null as unknown as Image);
-	}
-
-	MakeImageFromViewTag(viewTag: number): Promise<SkImage | null> {
-		const view = viewTag as unknown as HTMLElement;
-		// TODO: Implement screenshot from view in React JS
-		console.log(view);
-		return Promise.resolve(null);
 	}
 
 	MakeImageFromNativeBuffer(
@@ -164,7 +155,7 @@ export class JsiSkImageFactory extends Host implements ImageFactory {
 	}
 
 	MakeImageFromNativeTextureUnstable() {
-		return throwNotImplementedOnRNWeb<SkImage>();
+		return throwNotImplementedOnWeb<SkImage>();
 	}
 
 	MakeImage(info: ImageInfo, data: SkData, bytesPerRow: number) {
