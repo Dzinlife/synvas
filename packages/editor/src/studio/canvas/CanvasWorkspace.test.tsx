@@ -7,6 +7,7 @@ import {
 	screen,
 	waitFor,
 } from "@testing-library/react";
+import type { AgentRun } from "@synvas/agent";
 import type { TimelineAsset } from "core/timeline-system/types";
 import type {
 	BoardCanvasNode,
@@ -21,6 +22,7 @@ import {
 	getOwner,
 	requestOwner,
 } from "@/audio/owner";
+import { useAgentRuntimeStore } from "@/agent-system";
 import { resolveClipboardNodeGeometry } from "@/element-system/model/clipboardTransform";
 import { componentRegistry } from "@/element-system/model/componentRegistry";
 import { createTransformMeta } from "@/element-system/transform";
@@ -1217,6 +1219,7 @@ beforeEach(() => {
 	useCanvasCameraStore.getState().setFromProject(project.ui.camera);
 	useStudioHistoryStore.getState().clear();
 	useStudioClipboardStore.getState().clearPayload();
+	useAgentRuntimeStore.getState().clear();
 	useDragStore.getState().endDrag();
 	useDragStore.getState().setTimelineScrollLeft(0);
 });
@@ -1229,6 +1232,7 @@ afterEach(() => {
 	rafTimers.clear();
 	window.requestAnimationFrame = nativeRequestAnimationFrame;
 	window.cancelAnimationFrame = nativeCancelAnimationFrame;
+	useAgentRuntimeStore.getState().clear();
 	cleanup();
 });
 
@@ -1284,6 +1288,27 @@ const createTimelineSelectionElement = (id = "element-1") => {
 			visible: true,
 			opacity: 1,
 		},
+	};
+};
+
+const createAgentRunForNode = (nodeId: string): AgentRun => {
+	const now = Date.now();
+	return {
+		id: `run-${nodeId}`,
+		sessionId: `session-${nodeId}`,
+		scope: { type: "node", projectId: "project-1", nodeId },
+		kind: "image.edit",
+		status: "running",
+		actorId: "agent:local",
+		input: { instruction: "edit image" },
+		params: {},
+		context: { targetNodeId: nodeId },
+		steps: [],
+		artifacts: [],
+		effects: [],
+		effectApplications: [],
+		createdAt: now,
+		updatedAt: now,
 	};
 };
 
@@ -3004,6 +3029,43 @@ describe("CanvasWorkspace", () => {
 		expect(project?.ui.activeNodeId).toBe(createdNode?.id);
 		expect(useStudioHistoryStore.getState().past.at(-1)?.kind).toBe(
 			"canvas.node-create",
+		);
+	});
+
+	it("agent run 目标节点未选中时仍会进入 live render", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					canvas: {
+						...project.canvas,
+						nodes: project.canvas.nodes.map((node) =>
+							node.type === "image" && node.id === "node-image-1"
+								? { ...node, assetId: null }
+								: node,
+						),
+					},
+					ui: {
+						...project.ui,
+						activeNodeId: "node-scene-1",
+					},
+				},
+			};
+		});
+		useAgentRuntimeStore
+			.getState()
+			.upsertRun(createAgentRunForNode("node-image-1"));
+
+		render(<CanvasWorkspace />);
+
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).not.toContain(
+			"node-image-1",
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().forceLiveNodeIds).toContain(
+			"node-image-1",
 		);
 	});
 

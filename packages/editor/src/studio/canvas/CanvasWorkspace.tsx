@@ -1,6 +1,7 @@
 import { useContext, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
+import { useAgentRuntimeStore } from "@/agent-system";
 import { useProjectStore } from "@/projects/projectStore";
 import { EditorRuntimeContext } from "@/scene-editor/runtime/EditorRuntimeProvider";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
@@ -77,6 +78,13 @@ const CanvasWorkspace = () => {
 			selectedNodeIds: state.selectedNodeIds,
 			stageSize: state.stageSize,
 		})),
+	);
+	const activeAgentNodeIds = useAgentRuntimeStore(
+		useShallow((state) =>
+			Object.keys(state.activeRunIdByNodeId).filter((nodeId) =>
+				Boolean(state.activeRunIdByNodeId[nodeId]),
+			),
+		),
 	);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const {
@@ -174,6 +182,16 @@ const CanvasWorkspace = () => {
 		toolbarLeftOffset,
 		toolbarTopOffset,
 	} = interaction;
+	const forceLiveNodeIds = useMemo(() => {
+		if (activeAgentNodeIds.length === 0) {
+			return forceLiveCanvasNodeIds;
+		}
+		const nodeIds = new Set(forceLiveCanvasNodeIds);
+		for (const nodeId of activeAgentNodeIds) {
+			nodeIds.add(nodeId);
+		}
+		return [...nodeIds];
+	}, [activeAgentNodeIds, forceLiveCanvasNodeIds]);
 	if (!currentProject) {
 		return (
 			<div className="flex h-full w-full items-center justify-center">
@@ -221,7 +239,7 @@ const CanvasWorkspace = () => {
 				boardAutoLayoutIndicator={boardAutoLayoutIndicator}
 				animatedLayoutNodeIds={autoLayoutAnimatedNodeIds}
 				frozenNodeIds={frozenCanvasNodeIds}
-				forceLiveNodeIds={forceLiveCanvasNodeIds}
+				forceLiveNodeIds={forceLiveNodeIds}
 				suspendHover={isCameraAnimating}
 				tileDebugEnabled={tileDebugEnabled}
 				tileMaxTasksPerTick={tileMaxTasksPerTick}
