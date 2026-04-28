@@ -1,5 +1,15 @@
 export { LocalMockAgentClient } from "./localMockAgentClient";
 export type { LocalMockAgentClientOptions } from "./localMockAgentClient";
+export {
+	OPENAI_IMAGE_DEFAULT_ENDPOINT,
+	OPENAI_IMAGE_DEFAULT_MODEL,
+	OpenAiImageAgentClient,
+} from "./openAiImageAgentClient";
+export type {
+	OpenAiImageAgentClientOptions,
+	OpenAiImageConfig,
+	OpenAiImageEditSource,
+} from "./openAiImageAgentClient";
 export type {
 	AgentArtifact,
 	AgentArtifactSource,

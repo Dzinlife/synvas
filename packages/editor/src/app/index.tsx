@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { WithSkiaWeb } from "react-skia-lite/bootstrap";
-import { AgentProvider } from "@/agent-system";
+import { AgentProvider, createEditorAgentClient } from "@/agent-system";
 import Header from "../components/Header";
 import { createEditorRuntime } from "../scene-editor/runtime/createEditorRuntime";
 import { EditorRuntimeProvider } from "../scene-editor/runtime/EditorRuntimeProvider";
@@ -12,6 +12,7 @@ export default function EditorApp() {
 	useBlockBrowserHistorySwipe();
 
 	const runtime = useMemo(() => createEditorRuntime(), []);
+	const agentClient = useMemo(() => createEditorAgentClient(), []);
 	const skiaBackendPreference = useMemo(
 		() => getEditorSkiaBackendPreference(),
 		[],
@@ -19,7 +20,7 @@ export default function EditorApp() {
 
 	return (
 		<EditorRuntimeProvider runtime={runtime}>
-			<AgentProvider>
+			<AgentProvider client={agentClient}>
 				<div className="flex flex-col flex-1 min-h-0">
 					<Header />
 					<div className="flex flex-1 min-h-0">

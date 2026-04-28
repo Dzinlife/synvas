@@ -22,6 +22,7 @@ import {
 	getEditorSkiaBackendPreference,
 	type SkiaWebBackendPreference,
 } from "@/app/skiaBackendPreference";
+import { AiSettingsDialog } from "./AiSettingsDialog";
 
 export default function Header() {
 	const timelineStore = useTimelineStoreApi();
@@ -180,6 +181,7 @@ export default function Header() {
 				>
 					OT Lab
 				</button>
+				<AiSettingsDialog />
 				<label className="flex items-center gap-2 text-xs text-neutral-300">
 					<span>Skia</span>
 					<select

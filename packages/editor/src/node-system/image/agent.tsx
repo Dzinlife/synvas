@@ -1,10 +1,17 @@
-import type { AgentRunKind, AgentRunRequest } from "@synvas/agent";
+import {
+	OPENAI_IMAGE_DEFAULT_MODEL,
+	type AgentQuote,
+	type AgentRunKind,
+	type AgentRunRequest,
+} from "@synvas/agent";
 import type { ImageCanvasNode } from "@/studio/project/types";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Sparkles, Wand2 } from "lucide-react";
 import {
+	useAiProviderConfigStore,
 	useAgentClient,
+	useAgentRuntimeStore,
 	useNodeActiveAgentRun,
 	useStartAgentRun,
 } from "@/agent-system";
@@ -14,19 +21,24 @@ import { useCanvasInteractionStore } from "@/studio/canvas/canvasInteractionStor
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 
 const MODEL_OPTIONS = [
-	{ value: "mock-image-standard", label: "Mock Standard" },
-	{ value: "mock-image-edit", label: "Mock Edit" },
+	{ value: "gpt-image-2", label: "GPT Image 2" },
+	{ value: "gpt-image-1.5", label: "GPT Image 1.5" },
+	{ value: "gpt-image-1", label: "GPT Image 1" },
+	{ value: "gpt-image-1-mini", label: "GPT Image 1 Mini" },
 ];
 
 const QUALITY_OPTIONS = [
-	{ value: "standard", label: "Standard" },
+	{ value: "auto", label: "Auto" },
+	{ value: "low", label: "Low" },
+	{ value: "medium", label: "Medium" },
 	{ value: "high", label: "High" },
 ];
 
-const ASPECT_RATIO_OPTIONS = [
-	{ value: "1:1", label: "1:1" },
-	{ value: "16:9", label: "16:9" },
-	{ value: "9:16", label: "9:16" },
+const SIZE_OPTIONS = [
+	{ value: "auto", label: "Auto" },
+	{ value: "1024x1024", label: "1024 x 1024" },
+	{ value: "1536x1024", label: "1536 x 1024" },
+	{ value: "1024x1536", label: "1024 x 1536" },
 ];
 
 const VARIANT_OPTIONS = [1, 2, 4];
@@ -38,6 +50,32 @@ const isRunBusy = (status: string | null | undefined): boolean => {
 		status === "materializing_artifacts" ||
 		status === "applying_effects"
 	);
+};
+
+const runTouchesNode = (
+	run: {
+		scope: AgentRunRequest["scope"];
+		context: Record<string, unknown>;
+		effects: { type: string; nodeId?: string }[];
+	},
+	nodeId: string,
+): boolean => {
+	if (run.scope.type === "node" && run.scope.nodeId === nodeId) return true;
+	if (run.context.targetNodeId === nodeId) return true;
+	return run.effects.some(
+		(effect) =>
+			effect.type === "image-node.bind-artifact" && effect.nodeId === nodeId,
+	);
+};
+
+const useNodeLatestFailedAgentRunError = (nodeId: string): string | null => {
+	return useAgentRuntimeStore((state) => {
+		const latestRun = Object.values(state.runsById)
+			.filter((run) => runTouchesNode(run, nodeId))
+			.sort((left, right) => right.updatedAt - left.updatedAt)[0];
+		if (latestRun?.status !== "failed") return null;
+		return latestRun.error ?? "图片生成失败。";
+	});
 };
 
 const FieldLabel = ({ children }: { children: React.ReactNode }) => {
@@ -76,9 +114,34 @@ const StatusLine = ({ nodeId }: { nodeId: string }) => {
 		<div className="rounded border border-sky-400/20 bg-sky-400/10 px-2 py-1 text-[11px] text-sky-100">
 			{activeRun.status === "applying_effects"
 				? "正在写入画布..."
-				: "正在生成 mock 图片..."}
+				: "正在生成图片..."}
 		</div>
 	);
+};
+
+const ConfigRequiredLine = () => {
+	return (
+		<div className="rounded border border-amber-400/20 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-100">
+			请先在顶部 AI 设置中配置 OpenAI API Key。
+		</div>
+	);
+};
+
+const ErrorLine = ({ error }: { error: string | null }) => {
+	if (!error) return null;
+	return (
+		<div className="rounded border border-red-400/20 bg-red-400/10 px-2 py-1 text-[11px] text-red-100">
+			{error}
+		</div>
+	);
+};
+
+const QuoteLine = ({ quote }: { quote: AgentQuote | null }) => {
+	if (!quote) return null;
+	if (quote.currency === "mock-credit" && quote.estimatedCredits !== null) {
+		return <span>Estimated {quote.estimatedCredits} mock credits</span>;
+	}
+	return <span>{quote.label ?? "OpenAI BYOK billing"}</span>;
 };
 
 const useCreditQuote = (
@@ -87,7 +150,7 @@ const useCreditQuote = (
 ) => {
 	const client = useAgentClient();
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
-	const [credits, setCredits] = useState<number>(0);
+	const [quote, setQuote] = useState<AgentQuote | null>(null);
 	const params = request.params;
 	const context = request.context;
 
@@ -104,40 +167,50 @@ const useCreditQuote = (
 			})
 			.then((quote) => {
 				if (disposed) return;
-				setCredits(quote.estimatedCredits);
+				setQuote(quote);
+			})
+			.catch(() => {
+				if (disposed) return;
+				setQuote(null);
 			});
 		return () => {
 			disposed = true;
 		};
 	}, [client, context, currentProjectId, kind, params]);
 
-	return credits;
+	return quote;
 };
 
 const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
+	const hasOpenAiApiKey = useAiProviderConfigStore(
+		(state) => state.config.openai.apiKey.trim().length > 0,
+	);
 	const startRun = useStartAgentRun();
 	const activeRun = useNodeActiveAgentRun(node.id);
+	const latestError = useNodeLatestFailedAgentRunError(node.id);
 	const busy = isRunBusy(activeRun?.status);
 	const [prompt, setPrompt] = useState("");
-	const [model, setModel] = useState("mock-image-standard");
-	const [quality, setQuality] = useState("standard");
-	const [aspectRatio, setAspectRatio] = useState("1:1");
+	const [model, setModel] = useState(OPENAI_IMAGE_DEFAULT_MODEL);
+	const [quality, setQuality] = useState("auto");
+	const [size, setSize] = useState("auto");
 	const [variants, setVariants] = useState("1");
 	const quoteParams = useMemo(
 		() => ({
 			params: {
 				model,
 				quality,
-				aspectRatio,
+				size,
 				variants: Number(variants),
 			},
 		}),
-		[aspectRatio, model, quality, variants],
+		[model, quality, size, variants],
 	);
-	const credits = useCreditQuote("image.generate", quoteParams);
+	const quote = useCreditQuote("image.generate", quoteParams);
 
-	const canSubmit = Boolean(currentProjectId && prompt.trim() && !busy);
+	const canSubmit = Boolean(
+		currentProjectId && prompt.trim() && !busy && hasOpenAiApiKey,
+	);
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
 		if (!currentProjectId || !canSubmit) return;
@@ -166,6 +239,8 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 				<span>Image Agent</span>
 			</div>
 			<StatusLine nodeId={node.id} />
+			<ErrorLine error={latestError} />
+			{!hasOpenAiApiKey && <ConfigRequiredLine />}
 			<label className="block">
 				<FieldLabel>Prompt</FieldLabel>
 				<textarea
@@ -179,9 +254,7 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 				<div>
 					<FieldLabel>Model</FieldLabel>
 					<AgentSelect ariaLabel="生图模型" value={model} onChange={setModel}>
-						{MODEL_OPTIONS.filter(
-							(option) => option.value !== "mock-image-edit",
-						).map((option) => (
+						{MODEL_OPTIONS.map((option) => (
 							<option key={option.value} value={option.value}>
 								{option.label}
 							</option>
@@ -203,13 +276,9 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 					</AgentSelect>
 				</div>
 				<div>
-					<FieldLabel>Ratio</FieldLabel>
-					<AgentSelect
-						ariaLabel="图片比例"
-						value={aspectRatio}
-						onChange={setAspectRatio}
-					>
-						{ASPECT_RATIO_OPTIONS.map((option) => (
+					<FieldLabel>Size</FieldLabel>
+					<AgentSelect ariaLabel="图片尺寸" value={size} onChange={setSize}>
+						{SIZE_OPTIONS.map((option) => (
 							<option key={option.value} value={option.value}>
 								{option.label}
 							</option>
@@ -237,7 +306,7 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 			</div>
 			<div className="flex items-center justify-between">
 				<div className="text-[11px] text-white/55">
-					Estimated {credits} mock credits
+					<QuoteLine quote={quote} />
 				</div>
 				<button
 					type="submit"
@@ -254,6 +323,9 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 
 const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
+	const hasOpenAiApiKey = useAiProviderConfigStore(
+		(state) => state.config.openai.apiKey.trim().length > 0,
+	);
 	const createCanvasNode = useProjectStore((state) => state.createCanvasNode);
 	const setSelectedNodeIds = useCanvasInteractionStore(
 		(state) => state.setSelectedNodeIds,
@@ -261,19 +333,26 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	const pushHistory = useStudioHistoryStore((state) => state.push);
 	const startRun = useStartAgentRun();
 	const activeRun = useNodeActiveAgentRun(node.id);
+	const latestError = useNodeLatestFailedAgentRunError(node.id);
 	const busy = isRunBusy(activeRun?.status);
 	const [instruction, setInstruction] = useState("");
+	const [model, setModel] = useState(OPENAI_IMAGE_DEFAULT_MODEL);
+	const [quality, setQuality] = useState("auto");
 	const quoteParams = useMemo(
 		() => ({
 			params: {
-				model: "mock-image-edit",
+				model,
+				quality,
+				size: "auto",
 			},
 		}),
-		[],
+		[model, quality],
 	);
-	const credits = useCreditQuote("image.edit", quoteParams);
+	const quote = useCreditQuote("image.edit", quoteParams);
 
-	const canSubmit = Boolean(currentProjectId && instruction.trim() && !busy);
+	const canSubmit = Boolean(
+		currentProjectId && instruction.trim() && !busy && hasOpenAiApiKey,
+	);
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
 		if (!currentProjectId || !node.assetId || !canSubmit) return;
@@ -309,7 +388,9 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 				instruction: instruction.trim(),
 			},
 			params: {
-				model: "mock-image-edit",
+				model,
+				quality,
+				size: "auto",
 			},
 			context: {
 				sourceAssetId: node.assetId,
@@ -330,15 +411,41 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 				<span>Edit Image</span>
 			</div>
 			<StatusLine nodeId={node.id} />
+			<ErrorLine error={latestError} />
+			{!hasOpenAiApiKey && <ConfigRequiredLine />}
 			<textarea
 				value={instruction}
 				onChange={(event) => setInstruction(event.currentTarget.value)}
 				placeholder="Describe the edit"
 				className="min-h-16 w-full resize-none rounded border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-white/30"
 			/>
+			<div>
+				<FieldLabel>Model</FieldLabel>
+				<AgentSelect ariaLabel="编辑模型" value={model} onChange={setModel}>
+					{MODEL_OPTIONS.map((option) => (
+						<option key={option.value} value={option.value}>
+							{option.label}
+						</option>
+					))}
+				</AgentSelect>
+			</div>
+			<div>
+				<FieldLabel>Quality</FieldLabel>
+				<AgentSelect
+					ariaLabel="编辑图片质量"
+					value={quality}
+					onChange={setQuality}
+				>
+					{QUALITY_OPTIONS.map((option) => (
+						<option key={option.value} value={option.value}>
+							{option.label}
+						</option>
+					))}
+				</AgentSelect>
+			</div>
 			<div className="flex items-center justify-between">
 				<div className="text-[11px] text-white/55">
-					Estimated {credits} mock credits
+					<QuoteLine quote={quote} />
 				</div>
 				<button
 					type="submit"

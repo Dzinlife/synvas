@@ -117,8 +117,9 @@ export interface AgentModel {
 }
 
 export interface AgentQuote {
-	estimatedCredits: number;
-	currency: "mock-credit";
+	estimatedCredits: number | null;
+	currency: "mock-credit" | "external";
+	label?: string;
 }
 
 export interface AgentClient {
