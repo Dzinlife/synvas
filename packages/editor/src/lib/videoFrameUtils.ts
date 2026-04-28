@@ -391,6 +391,9 @@ export interface ColorManagedVideoFrameImage {
 }
 
 type VideoCanvasImageSource = OffscreenCanvas | HTMLCanvasElement;
+type VideoCanvasRenderingContext2D =
+	| CanvasRenderingContext2D
+	| OffscreenCanvasRenderingContext2D;
 
 const toPositiveCanvasSize = (...values: unknown[]): number => {
 	for (const value of values) {
@@ -434,15 +437,20 @@ const createVideoCanvases = (
 const getVideoCanvasContext2D = (
 	canvas: VideoCanvasImageSource,
 	options: TextureSourceImageOptions | undefined,
-): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null => {
+): VideoCanvasRenderingContext2D | null => {
 	const settings: CanvasRenderingContext2DSettings = {
 		alpha: false,
 		colorSpace: options?.targetColorSpace ?? "srgb",
 	};
 	try {
-		return canvas.getContext("2d", settings as never);
+		return canvas.getContext(
+			"2d",
+			settings,
+		) as VideoCanvasRenderingContext2D | null;
 	} catch {
-		return canvas.getContext("2d", { alpha: false } as never);
+		return canvas.getContext("2d", {
+			alpha: false,
+		}) as VideoCanvasRenderingContext2D | null;
 	}
 };
 

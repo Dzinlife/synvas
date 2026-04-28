@@ -15,7 +15,6 @@ import type {
 	MeasureInWindowOnSuccessCallback,
 	MeasureOnSuccessCallback,
 	SharedValue,
-	View,
 	ViewProps,
 } from "../react-native-types";
 import { Skia } from "../skia";
@@ -29,6 +28,7 @@ import type {
 	SkiaWebCanvasColorSpace,
 	SkiaWebCanvasDynamicRange,
 } from "../skia/web/canvasColorSpace";
+import type { SkiaPictureViewHandle } from "../views/SkiaPictureView";
 
 export interface CanvasRef extends FC<CanvasProps> {
 	makeImageSnapshot(rect?: SkRect): SkImage;
@@ -46,7 +46,7 @@ export interface CanvasRef extends FC<CanvasProps> {
 
 export const useCanvasRef = () => useRef<CanvasRef>(null);
 
-const useCanvasRefPriv = useRef<View>;
+const useCanvasRefPriv = useRef<SkiaPictureViewHandle>;
 
 export const useCanvasSize = (userRef?: RefObject<CanvasRef | null>) => {
 	const ourRef = useCanvasRef();

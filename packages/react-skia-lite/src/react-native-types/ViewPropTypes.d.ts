@@ -144,7 +144,6 @@ export interface ViewProps
 		Touchable,
 		PointerEvents,
 		AccessibilityProps {
-	ref?: React.Ref<CanvasRef>;
 	children?: React.ReactNode | undefined;
 	/**
 	 * This defines how far a touch event can start away from the view.

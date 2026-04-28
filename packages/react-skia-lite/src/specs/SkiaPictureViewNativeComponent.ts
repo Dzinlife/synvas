@@ -1,10 +1,14 @@
 import { createElement } from "react";
+import type * as React from "react";
 import type { ViewProps } from "../react-native-types/ViewPropTypes";
 import type {
 	SkiaWebCanvasColorSpace,
 	SkiaWebCanvasDynamicRange,
 } from "../skia/web/canvasColorSpace";
-import { SkiaPictureView } from "../views/SkiaPictureView";
+import {
+	SkiaPictureView,
+	type SkiaPictureViewHandle,
+} from "../views/SkiaPictureView";
 
 export interface NativeProps extends ViewProps {
 	debug?: boolean;
@@ -13,6 +17,7 @@ export interface NativeProps extends ViewProps {
 	dynamicRange?: SkiaWebCanvasDynamicRange;
 	nativeID: string;
 	pd?: number;
+	ref?: React.Ref<SkiaPictureViewHandle>;
 }
 
 const SkiaPictureViewNativeComponent = (props: NativeProps) => {
