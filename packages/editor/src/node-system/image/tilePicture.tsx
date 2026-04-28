@@ -1,10 +1,7 @@
 import { renderNodeToPicture } from "core/render-system/renderNodeSnapshot";
 import type { TimelineAsset } from "core/timeline-system/types";
-import {
-	disposeImageAsset,
-	loadUncachedImageAsset,
-	type ImageAsset,
-} from "@/assets/imageAsset";
+import type { AssetHandle } from "@/assets/AssetStore";
+import { acquireImageAsset, type ImageAsset } from "@/assets/imageAsset";
 import { resolveAssetPlayableUri } from "@/projects/assetLocator";
 import type { ImageCanvasNode } from "@/studio/project/types";
 import type { CanvasNodeTilePictureCapability } from "../types";
@@ -35,9 +32,9 @@ export const imageNodeTilePictureCapability: CanvasNodeTilePictureCapability<Ima
 			const assetUri = resolveAssetPlayableUri(asset, { projectId });
 			if (!assetUri) return null;
 
-			let imageAsset: ImageAsset | null = null;
+			let imageHandle: AssetHandle<ImageAsset> | null = null;
 			try {
-				imageAsset = await loadUncachedImageAsset(assetUri);
+				imageHandle = await acquireImageAsset(assetUri);
 			} catch {
 				return null;
 			}
@@ -46,10 +43,10 @@ export const imageNodeTilePictureCapability: CanvasNodeTilePictureCapability<Ima
 			const sourceHeight = Math.max(1, Math.round(Math.abs(node.height)));
 			const pictureElement = renderImageNodeTilePictureContent(
 				node,
-				imageAsset.image,
+				imageHandle.asset.image,
 			);
 			if (!pictureElement) {
-				disposeImageAsset(imageAsset);
+				imageHandle.release();
 				return null;
 			}
 			const picture = renderNodeToPicture(
@@ -61,7 +58,7 @@ export const imageNodeTilePictureCapability: CanvasNodeTilePictureCapability<Ima
 				offscreenSurfaceOptions,
 			);
 			if (!picture) {
-				disposeImageAsset(imageAsset);
+				imageHandle.release();
 				return null;
 			}
 
@@ -70,9 +67,8 @@ export const imageNodeTilePictureCapability: CanvasNodeTilePictureCapability<Ima
 				sourceWidth,
 				sourceHeight,
 				dispose: () => {
-					if (!imageAsset) return;
-					disposeImageAsset(imageAsset);
-					imageAsset = null;
+					imageHandle?.release();
+					imageHandle = null;
 				},
 			};
 		},

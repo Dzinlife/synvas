@@ -72,6 +72,45 @@ describe("imageAsset", () => {
 		expect(mockImage.dispose).toHaveBeenCalledTimes(1);
 	});
 
+	it("并发 acquire 同 URI 时只加载并解码一次", async () => {
+		const mockImage = createMockImage("inflight-image");
+		mocks.makeImageFromEncoded.mockReturnValue(mockImage);
+		type ImageFetchResponse = {
+			ok: true;
+			arrayBuffer: () => Promise<ArrayBuffer>;
+		};
+		let resolveResponse: (response: ImageFetchResponse) => void = () => {};
+		const responsePromise = new Promise<ImageFetchResponse>((resolve) => {
+			resolveResponse = resolve;
+		});
+		const fetchMock = vi.fn(() => responsePromise);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const handlePromiseA = acquireImageAsset(
+			"https://example.com/inflight.png",
+		);
+		const handlePromiseB = acquireImageAsset(
+			"https://example.com/inflight.png",
+		);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		resolveResponse({
+			ok: true,
+			arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+		});
+		const [handleA, handleB] = await Promise.all([
+			handlePromiseA,
+			handlePromiseB,
+		]);
+
+		expect(mocks.makeImageFromEncoded).toHaveBeenCalledTimes(1);
+		expect(handleA.asset).toBe(handleB.asset);
+
+		handleA.release();
+		handleB.release();
+		expect(mockImage.dispose).toHaveBeenCalledTimes(1);
+	});
+
 	it("uncached 加载不会复用 asset store", async () => {
 		const imageA = createMockImage("uncached-a");
 		const imageB = createMockImage("uncached-b");
