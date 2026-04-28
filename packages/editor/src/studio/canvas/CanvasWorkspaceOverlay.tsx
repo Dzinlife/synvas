@@ -335,7 +335,7 @@ const ActiveNodeToolbarOverlay = ({
 		>
 			<div
 				data-testid="canvas-active-node-toolbar"
-				className="pointer-events-auto absolute bottom-full left-1/2 mb-6.5 w-max max-w-none -translate-x-1/2 rounded-full border border-white/10 bg-black/65 px-3 py-2 backdrop-blur"
+				className="pointer-events-auto absolute bottom-full left-1/2 mb-6.5 w-max max-w-none -translate-x-1/2 rounded-full border border-white/10 bg-black/65 p-2 backdrop-blur"
 			>
 				{children}
 			</div>
@@ -548,6 +548,7 @@ const CanvasWorkspaceOverlay = ({
 							node={activeNode}
 							scene={activeNodeScene}
 							asset={activeNodeAsset}
+							isFocused={activeNode.id === focusedNodeId}
 							updateNode={(patch) => {
 								updateCanvasNode(activeNode.id, patch as never);
 							}}

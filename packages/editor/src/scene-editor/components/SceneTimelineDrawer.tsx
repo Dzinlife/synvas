@@ -6,7 +6,6 @@ import CanvasNodeDrawerShell, {
 	CANVAS_NODE_DRAWER_MIN_HEIGHT,
 } from "@/studio/canvas/CanvasNodeDrawerShell";
 import type { StudioTimelineCanvasDropRequest } from "@/studio/clipboard/studioClipboardStore";
-import ScenePlaybackControlBar from "./ScenePlaybackControlBar";
 
 export const SCENE_TIMELINE_DRAWER_DEFAULT_HEIGHT =
 	CANVAS_NODE_DRAWER_DEFAULT_HEIGHT;
@@ -15,7 +14,6 @@ export const SCENE_TIMELINE_DRAWER_MAX_HEIGHT_RATIO =
 	CANVAS_NODE_DRAWER_MAX_HEIGHT_RATIO;
 
 interface SceneTimelineDrawerContentProps {
-	onExitFocus: () => void;
 	onDropTimelineElementsToCanvas?: (
 		request: StudioTimelineCanvasDropRequest,
 	) => boolean;
@@ -23,6 +21,7 @@ interface SceneTimelineDrawerContentProps {
 }
 
 interface SceneTimelineDrawerProps extends SceneTimelineDrawerContentProps {
+	onExitFocus: () => void;
 	onHeightChange?: (height: number) => void;
 	resizable?: boolean;
 	defaultHeight?: number;
@@ -32,14 +31,9 @@ interface SceneTimelineDrawerProps extends SceneTimelineDrawerContentProps {
 
 export const SceneTimelineDrawerContent: React.FC<
 	SceneTimelineDrawerContentProps
-> = ({
-	onExitFocus,
-	onDropTimelineElementsToCanvas,
-	onRestoreSceneReferenceToCanvas,
-}) => {
+> = ({ onDropTimelineElementsToCanvas, onRestoreSceneReferenceToCanvas }) => {
 	return (
 		<div className="flex h-full min-h-0 flex-col">
-			<ScenePlaybackControlBar onExitFocus={onExitFocus} />
 			<div className="min-h-0 flex-1">
 				<TimelineEditor
 					onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
@@ -51,7 +45,6 @@ export const SceneTimelineDrawerContent: React.FC<
 };
 
 const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
-	onExitFocus,
 	onDropTimelineElementsToCanvas,
 	onRestoreSceneReferenceToCanvas,
 	onHeightChange,
@@ -71,7 +64,6 @@ const SceneTimelineDrawer: React.FC<SceneTimelineDrawerProps> = ({
 			resizeHandleLabel="调整时间线高度"
 		>
 			<SceneTimelineDrawerContent
-				onExitFocus={onExitFocus}
 				onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
 				onRestoreSceneReferenceToCanvas={onRestoreSceneReferenceToCanvas}
 			/>

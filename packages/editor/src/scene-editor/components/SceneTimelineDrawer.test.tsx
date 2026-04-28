@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SceneTimelineDrawer from "./SceneTimelineDrawer";
 
@@ -12,36 +12,16 @@ vi.mock("@/scene-editor/TimelineEditor", () => ({
 	},
 }));
 
-vi.mock("./ScenePlaybackControlBar", () => ({
-	default: ({ onExitFocus }: { onExitFocus: () => void }) => (
-		<button
-			type="button"
-			onClick={onExitFocus}
-			data-testid="scene-playback-bar"
-		>
-			exit
-		</button>
-	),
-}));
-
 afterEach(() => {
 	cleanup();
 	timelineEditorPropsSpy.mockReset();
 });
 
 describe("SceneTimelineDrawer", () => {
-	it("渲染播放器与时间线", () => {
+	it("渲染时间线", () => {
 		render(<SceneTimelineDrawer onExitFocus={vi.fn()} />);
-		expect(screen.getByTestId("scene-playback-bar")).toBeTruthy();
 		expect(screen.getByTestId("timeline-editor")).toBeTruthy();
 		expect(screen.getByLabelText("调整时间线高度")).toBeTruthy();
-	});
-
-	it("退出回调可触发", () => {
-		const onExitFocus = vi.fn();
-		render(<SceneTimelineDrawer onExitFocus={onExitFocus} />);
-		fireEvent.click(screen.getByTestId("scene-playback-bar"));
-		expect(onExitFocus).toHaveBeenCalledTimes(1);
 	});
 
 	it("可通过配置关闭 resize", () => {

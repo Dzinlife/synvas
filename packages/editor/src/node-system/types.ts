@@ -32,6 +32,7 @@ export interface CanvasNodeToolbarProps<TNode extends CanvasNode = CanvasNode> {
 	node: TNode;
 	scene: SceneDocument | null;
 	asset: TimelineAsset | null;
+	isFocused?: boolean;
 	updateNode: (patch: Record<string, unknown>) => void;
 	setFocusedNode: (nodeId: string | null) => void;
 	setActiveScene: (sceneId: string | null) => void;

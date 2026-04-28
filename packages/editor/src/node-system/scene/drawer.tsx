@@ -3,13 +3,11 @@ import { SceneTimelineDrawerContent } from "@/scene-editor/components/SceneTimel
 import type { CanvasNodeDrawerProps } from "../types";
 
 export const SceneNodeDrawer = ({
-	onClose,
 	onDropTimelineElementsToCanvas,
 	onRestoreSceneReferenceToCanvas,
 }: CanvasNodeDrawerProps<SceneNode>) => {
 	return (
 		<SceneTimelineDrawerContent
-			onExitFocus={onClose}
 			onDropTimelineElementsToCanvas={onDropTimelineElementsToCanvas}
 			onRestoreSceneReferenceToCanvas={onRestoreSceneReferenceToCanvas}
 		/>

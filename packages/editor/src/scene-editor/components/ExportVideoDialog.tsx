@@ -14,6 +14,7 @@ import {
 	ProgressValue,
 } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { VideoIcon } from "lucide-react";
 
 type ExportVideoOptions = {
 	filename: string;
@@ -93,9 +94,8 @@ const ExportVideoDialog = ({
 	const [progress, setProgress] = useState(0);
 	const [currentFrame, setCurrentFrame] = useState(0);
 	const [activeTotalFrames, setActiveTotalFrames] = useState(0);
-	const [abortController, setAbortController] = useState<AbortController | null>(
-		null,
-	);
+	const [abortController, setAbortController] =
+		useState<AbortController | null>(null);
 
 	const isRunning = status === "running";
 
@@ -171,7 +171,13 @@ const ExportVideoDialog = ({
 		const filename = ensureMp4Filename(rawFilename);
 		const totalFrames = endFrame - startFrame;
 		return { filename, fps, startFrame, endFrame, totalFrames };
-	}, [endFrameInput, filenameInput, fpsInput, startFrameInput, timelineEndFrame]);
+	}, [
+		endFrameInput,
+		filenameInput,
+		fpsInput,
+		startFrameInput,
+		timelineEndFrame,
+	]);
 
 	const handleOpenChange = useCallback(
 		(
@@ -262,26 +268,32 @@ const ExportVideoDialog = ({
 	}, [abortController]);
 
 	const progressPercentage = Math.round(clamp(progress, 0, 100));
-	const progressTotalFrames = isRunning ? activeTotalFrames : metadata.frameCount;
+	const progressTotalFrames = isRunning
+		? activeTotalFrames
+		: metadata.frameCount;
 	const progressFrameLabel =
-		progressTotalFrames > 0 ? `${currentFrame}/${progressTotalFrames} 帧` : "0 帧";
+		progressTotalFrames > 0
+			? `${currentFrame}/${progressTotalFrames} 帧`
+			: "0 帧";
 
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogTrigger
 				disabled={disabled || isRunning}
 				className={cn(
-					"px-3 py-1 text-sm rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white",
+					"px-3 py-1 text-sm bg-white/10 hover:bg-white/20 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white",
 					triggerClassName,
 				)}
 			>
-				导出视频
+				<VideoIcon className="size-4" aria-hidden="true" />
 			</DialogTrigger>
 			<DialogContent className="max-w-xl">
 				<div className="flex items-start justify-between gap-3 border-b border-neutral-700 px-4 py-3">
 					<div className="grid gap-1">
 						<DialogTitle>导出视频</DialogTitle>
-						<DialogDescription>填写导出参数后开始渲染视频文件。</DialogDescription>
+						<DialogDescription>
+							填写导出参数后开始渲染视频文件。
+						</DialogDescription>
 					</div>
 					<DialogClose
 						disabled={isRunning}
@@ -303,7 +315,10 @@ const ExportVideoDialog = ({
 					}}
 				>
 					<div className="grid gap-3 sm:grid-cols-2">
-						<label className="grid gap-1 text-xs text-neutral-300" htmlFor="export-video-filename">
+						<label
+							className="grid gap-1 text-xs text-neutral-300"
+							htmlFor="export-video-filename"
+						>
 							文件名
 							<input
 								id="export-video-filename"
@@ -314,7 +329,10 @@ const ExportVideoDialog = ({
 								className="h-9 rounded border border-neutral-700 bg-neutral-950 px-2 text-sm text-neutral-100 outline-none focus:border-neutral-500 disabled:opacity-60"
 							/>
 						</label>
-						<label className="grid gap-1 text-xs text-neutral-300" htmlFor="export-video-fps">
+						<label
+							className="grid gap-1 text-xs text-neutral-300"
+							htmlFor="export-video-fps"
+						>
 							FPS
 							<input
 								id="export-video-fps"
@@ -344,7 +362,10 @@ const ExportVideoDialog = ({
 								className="h-9 rounded border border-neutral-700 bg-neutral-950 px-2 text-sm text-neutral-100 outline-none focus:border-neutral-500 disabled:opacity-60"
 							/>
 						</label>
-						<label className="grid gap-1 text-xs text-neutral-300" htmlFor="export-video-end-frame">
+						<label
+							className="grid gap-1 text-xs text-neutral-300"
+							htmlFor="export-video-end-frame"
+						>
 							结束帧（不含）
 							<input
 								id="export-video-end-frame"
@@ -360,7 +381,9 @@ const ExportVideoDialog = ({
 					</div>
 
 					<div className="grid gap-2 rounded border border-neutral-700 bg-neutral-800/70 px-3 py-2 text-xs text-neutral-300 sm:grid-cols-3">
-						<div>分辨率：{canvasSize.width} × {canvasSize.height}</div>
+						<div>
+							分辨率：{canvasSize.width} × {canvasSize.height}
+						</div>
 						<div>总帧数：{metadata.frameCount}</div>
 						<div>时长：{metadata.durationSeconds.toFixed(2)} s</div>
 					</div>
