@@ -51,9 +51,25 @@ const audioNodeSchema = canvasNodeBaseSchema.extend({
 	duration: z.number().positive().optional(),
 });
 
+const imageNodeAiSchema = z
+	.object({
+		sourceRunId: nonEmptyStringSchema.optional(),
+		sourceNodeId: nonEmptyStringSchema.optional(),
+	})
+	.optional();
+
 const imageNodeSchema = canvasNodeBaseSchema.extend({
 	type: z.literal("image"),
-	assetId: nonEmptyStringSchema,
+	assetId: z
+		.string()
+		.nullable()
+		.optional()
+		.transform((value) => {
+			if (typeof value !== "string") return null;
+			const trimmed = value.trim();
+			return trimmed.length > 0 ? trimmed : null;
+		}),
+	ai: imageNodeAiSchema,
 });
 
 const textNodeSchema = canvasNodeBaseSchema.extend({

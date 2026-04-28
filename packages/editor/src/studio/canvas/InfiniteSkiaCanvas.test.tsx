@@ -938,13 +938,15 @@ const createImageNode = (
 	...patch,
 });
 
-const createImageAsset = (id: string): StudioProject["assets"][number] => ({
-	id,
+const createImageAsset = (
+	id: string | null | undefined,
+): StudioProject["assets"][number] => ({
+	id: id ?? "missing-image-asset",
 	kind: "image",
-	name: id,
+	name: id ?? "missing-image-asset",
 	locator: {
 		type: "linked-remote",
-		uri: `https://example.com/${id}.png`,
+		uri: `https://example.com/${id ?? "missing-image-asset"}.png`,
 	},
 });
 

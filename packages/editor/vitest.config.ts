@@ -9,6 +9,14 @@ export default defineConfig({
 				replacement: path.resolve(__dirname, "src/$1"),
 			},
 			{
+				find: /^@synvas\/agent$/,
+				replacement: path.resolve(__dirname, "../agent/src/index.ts"),
+			},
+			{
+				find: /^@synvas\/agent\/(.*)$/,
+				replacement: path.resolve(__dirname, "../agent/src/$1"),
+			},
+			{
 				find: /^core$/,
 				replacement: path.resolve(__dirname, "../core/src/index.ts"),
 			},

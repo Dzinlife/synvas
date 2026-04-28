@@ -222,6 +222,35 @@ describe("studio schema", () => {
 		}
 	});
 
+	it("允许 image node 暂时没有 assetId", () => {
+		const project = createValidProject();
+		appendCanvasNode(project, {
+			id: "node-empty-image",
+			type: "image",
+			assetId: "",
+			name: "Empty Image",
+			x: 0,
+			y: 0,
+			width: 512,
+			height: 512,
+			siblingOrder: 6,
+			locked: false,
+			hidden: false,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+
+		const parsed = parseStudioProject(project);
+		const emptyImage = parsed.canvas.nodes.find(
+			(node) => node.id === "node-empty-image",
+		);
+
+		expect(emptyImage).toMatchObject({
+			type: "image",
+			assetId: null,
+		});
+	});
+
 	it("board 缺失 layoutMode 时应回填 free", () => {
 		const legacy = createValidProject();
 		appendCanvasNode(legacy, {

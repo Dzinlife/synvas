@@ -5,6 +5,7 @@ import { registerCanvasNodeDefinition } from "../registryCore";
 import type { CanvasNodeDefinition } from "../types";
 import { resolveSceneTimelineInsertionSize } from "../timelineInsertionSize";
 import { secondsToFrames } from "@/utils/timecode";
+import { ImageNodeAgentPanel } from "./agent";
 import { imageNodeLiveRenderPreparationCapability } from "./liveRenderPreparation";
 import { ImageNodeSkiaRenderer } from "./renderer";
 import { imageNodeTilePictureCapability } from "./tilePicture";
@@ -68,6 +69,7 @@ const imageDefinition: CanvasNodeDefinition<ImageCanvasNode> = {
 	tilePicture: imageNodeTilePictureCapability,
 	liveRenderPreparation: imageNodeLiveRenderPreparationCapability,
 	toolbar: ImageNodeToolbar,
+	agent: ImageNodeAgentPanel,
 	focusable: true,
 	resolveResizeConstraints: ({ node, asset }) => {
 		const sourceWidth = asset?.meta?.sourceSize?.width ?? node.width;

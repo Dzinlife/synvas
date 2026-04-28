@@ -1250,6 +1250,46 @@ export const useCanvasInteractionController = ({
 		stageSize.width,
 	]);
 
+	const handleCreateImageGeneratorNode = useCallback(() => {
+		const width = 512;
+		const height = 512;
+		const center = resolveCameraCenterWorld(
+			getCamera(),
+			stageSize.width,
+			stageSize.height,
+		);
+		const nodeId = createCanvasNode({
+			type: "image",
+			name: "Image Agent",
+			assetId: null,
+			x: center.x - width / 2,
+			y: center.y - height / 2,
+			width,
+			height,
+		});
+		const latestProject = useProjectStore.getState().currentProject;
+		if (!latestProject) return;
+		const node = latestProject.canvas.nodes.find((item) => item.id === nodeId);
+		if (!node) return;
+		commitSelection([nodeId], {
+			primaryNodeId: nodeId,
+			onActiveNodeChange: setActiveNode,
+		});
+		pushHistory({
+			kind: "canvas.node-create",
+			node,
+			focusNodeId: latestProject.ui.focusedNodeId,
+		});
+	}, [
+		commitSelection,
+		createCanvasNode,
+		getCamera,
+		pushHistory,
+		setActiveNode,
+		stageSize.height,
+		stageSize.width,
+	]);
+
 	const handleZoomByStep = useCallback(
 		(multiplier: number) => {
 			const currentCamera = getCamera();
@@ -4889,6 +4929,7 @@ export const useCanvasInteractionController = ({
 		handleCanvasPointerUp,
 		handleCloseDrawer,
 		handleCreateHdrTestNode,
+		handleCreateImageGeneratorNode,
 		handleCreateScene,
 		handleDropTimelineElementsToCanvas,
 		handleEditorMouseOverCapture,

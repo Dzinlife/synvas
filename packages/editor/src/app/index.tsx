@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { WithSkiaWeb } from "react-skia-lite/bootstrap";
+import { AgentProvider } from "@/agent-system";
 import Header from "../components/Header";
 import { createEditorRuntime } from "../scene-editor/runtime/createEditorRuntime";
 import { EditorRuntimeProvider } from "../scene-editor/runtime/EditorRuntimeProvider";
@@ -18,19 +19,21 @@ export default function EditorApp() {
 
 	return (
 		<EditorRuntimeProvider runtime={runtime}>
-			<div className="flex flex-col flex-1 min-h-0">
-				<Header />
-				<div className="flex flex-1 min-h-0">
-					<div className="flex flex-col flex-1 min-h-0">
-						<WithSkiaWeb
-							fallback={<div>Loading CanvasKit...</div>}
-							getComponent={() => import("../scene-editor/index")}
-							opts={{ backendPreference: skiaBackendPreference }}
-						/>
+			<AgentProvider>
+				<div className="flex flex-col flex-1 min-h-0">
+					<Header />
+					<div className="flex flex-1 min-h-0">
+						<div className="flex flex-col flex-1 min-h-0">
+							<WithSkiaWeb
+								fallback={<div>Loading CanvasKit...</div>}
+								getComponent={() => import("../scene-editor/index")}
+								opts={{ backendPreference: skiaBackendPreference }}
+							/>
+						</div>
+						<OtLabPanel />
 					</div>
-					<OtLabPanel />
 				</div>
-			</div>
+			</AgentProvider>
 		</EditorRuntimeProvider>
 	);
 }

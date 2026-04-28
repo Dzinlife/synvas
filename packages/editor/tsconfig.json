@@ -22,6 +22,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
+      "@synvas/agent": ["../agent/src/index.ts"],
+      "@synvas/agent/*": ["../agent/src/*"],
       "core": ["../core/src/index.ts"],
       "core/*": ["../core/src/*"],
       "react-skia-lite": ["../react-skia-lite/src/index.ts"],

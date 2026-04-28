@@ -73,6 +73,14 @@ export interface CanvasNodeDrawerProps<TNode extends CanvasNode = CanvasNode> {
 	onRestoreSceneReferenceToCanvas?: (sceneId: string) => boolean;
 }
 
+export interface CanvasNodeAgentPanelProps<
+	TNode extends CanvasNode = CanvasNode,
+> {
+	node: TNode;
+	scene: SceneDocument | null;
+	asset: TimelineAsset | null;
+}
+
 export interface CanvasNodeContextMenuAction {
 	key: string;
 	label: string;
@@ -273,6 +281,7 @@ export interface CanvasNodeDefinition<TNode extends CanvasNode = CanvasNode> {
 	focusEditorBridge?: React.FC<CanvasNodeFocusEditorBridgeProps<TNode>>;
 	toolbar: React.FC<CanvasNodeToolbarProps<TNode>>;
 	inspector?: React.FC<CanvasNodeInspectorProps<TNode>>;
+	agent?: React.FC<CanvasNodeAgentPanelProps<TNode>>;
 	focusable?: boolean;
 	drawer?: React.FC<CanvasNodeDrawerProps<TNode>>;
 	drawerOptions?: CanvasNodeDrawerOptions;

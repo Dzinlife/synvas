@@ -16,10 +16,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@base-ui/react": "^1.1.0",
-    "@fontsource-variable/inter": "^5.2.8",
-    "@fontsource/barlow": "^5.2.8",
-    "@tanstack/react-query": "^5.90.16",
+		"@base-ui/react": "^1.1.0",
+		"@fontsource-variable/inter": "^5.2.8",
+		"@fontsource/barlow": "^5.2.8",
+		"@synvas/agent": "workspace:*",
+		"@tanstack/react-query": "^5.90.16",
     "@use-gesture/react": "^10.3.1",
     "canvaskit-wasm": "workspace:*",
     "clsx": "^2.1.1",

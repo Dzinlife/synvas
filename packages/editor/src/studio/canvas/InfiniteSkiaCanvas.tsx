@@ -1786,7 +1786,7 @@ const InfiniteSkiaCanvas: React.FC<InfiniteSkiaCanvasProps> = ({
 					? (scenes[latestNode.sceneId] ?? null)
 					: null;
 			const asset =
-				"assetId" in latestNode
+				"assetId" in latestNode && latestNode.assetId
 					? (assetById.get(latestNode.assetId) ?? null)
 					: null;
 			return (

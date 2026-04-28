@@ -146,6 +146,7 @@ const CanvasWorkspace = () => {
 		handleCanvasPointerUp,
 		handleCloseDrawer,
 		handleCreateHdrTestNode,
+		handleCreateImageGeneratorNode,
 		handleCreateScene,
 		handleDropTimelineElementsToCanvas,
 		handleEditorMouseOverCapture,
@@ -237,6 +238,7 @@ const CanvasWorkspace = () => {
 				toolbarLeftOffset={toolbarLeftOffset}
 				toolbarTopOffset={toolbarTopOffset}
 				onCreateScene={handleCreateScene}
+				onCreateImageGenerator={handleCreateImageGeneratorNode}
 				onCreateHdrTestNode={handleCreateHdrTestNode}
 				toolMode={canvasToolMode}
 				onToolModeChange={handleToolModeChange}

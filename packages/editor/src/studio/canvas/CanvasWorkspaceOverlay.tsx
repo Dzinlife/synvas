@@ -7,6 +7,7 @@ import type {
 } from "@/studio/project/types";
 import {
 	Bug,
+	ImagePlus,
 	Palette,
 	PanelLeftOpen,
 	Plus,
@@ -98,6 +99,7 @@ interface CanvasWorkspaceOverlayProps {
 	toolbarLeftOffset: number;
 	toolbarTopOffset: number;
 	onCreateScene: () => void;
+	onCreateImageGenerator: () => void;
 	onCreateHdrTestNode: () => void;
 	toolMode: CanvasToolMode;
 	onToolModeChange: (mode: CanvasToolMode) => void;
@@ -343,11 +345,94 @@ const ActiveNodeToolbarOverlay = ({
 	);
 };
 
+interface ActiveNodeAgentOverlayProps {
+	node: CanvasNode;
+	cameraSharedValue?: OverlayCameraSharedValue;
+	children: React.ReactNode;
+}
+
+const ActiveNodeAgentOverlay = ({
+	node,
+	cameraSharedValue,
+	children,
+}: ActiveNodeAgentOverlayProps) => {
+	const storeCamera = useCanvasCameraStore((state) => state.camera);
+	const [camera, setCamera] = useState(() => {
+		return cameraSharedValue?.value ?? storeCamera;
+	});
+	const cameraListenerIdRef = useRef(
+		91001 + Math.floor(Math.random() * 100000),
+	);
+	const setCameraIfChanged = useCallback((next: CameraState) => {
+		setCamera((prev) => {
+			if (prev.x === next.x && prev.y === next.y && prev.zoom === next.zoom) {
+				return prev;
+			}
+			return next;
+		});
+	}, []);
+	useEffect(() => {
+		if (!cameraSharedValue) {
+			return;
+		}
+		setCameraIfChanged(cameraSharedValue.value);
+		const addListener = cameraSharedValue.addListener;
+		const removeListener = cameraSharedValue.removeListener;
+		if (
+			typeof addListener !== "function" ||
+			typeof removeListener !== "function"
+		) {
+			return;
+		}
+		const listenerId = cameraListenerIdRef.current;
+		addListener(listenerId, (next) => {
+			setCameraIfChanged(next);
+		});
+		return () => {
+			removeListener(listenerId);
+		};
+	}, [cameraSharedValue, setCameraIfChanged]);
+	useEffect(() => {
+		setCameraIfChanged(storeCamera);
+	}, [setCameraIfChanged, storeCamera]);
+	const overlayFrame = useMemo(() => {
+		return resolveCanvasWorldRectScreenFrame(
+			resolveCanvasNodeLayoutWorldRect(node),
+			camera,
+		);
+	}, [camera, node]);
+
+	return (
+		<motion.div
+			data-testid="canvas-active-node-agent-overlay"
+			className="pointer-events-none absolute z-40 overflow-visible"
+			style={{
+				left: overlayFrame.x,
+				top: overlayFrame.y,
+				width: overlayFrame.width,
+				height: overlayFrame.height,
+			}}
+			initial={{ opacity: 0 }}
+			animate={{ opacity: 1 }}
+			exit={{ opacity: 0 }}
+			transition={ACTIVE_NODE_OVERLAY_PRESENCE_TRANSITION}
+		>
+			<div
+				data-testid="canvas-active-node-agent"
+				className="pointer-events-auto absolute top-full left-1/2 mt-3 w-[420px] max-w-[calc(100vw-32px)] -translate-x-1/2 rounded-lg border border-white/10 bg-neutral-950/90 shadow-2xl backdrop-blur-xl"
+			>
+				{children}
+			</div>
+		</motion.div>
+	);
+};
+
 const CanvasWorkspaceOverlay = ({
 	cameraSharedValue,
 	toolbarLeftOffset,
 	toolbarTopOffset,
 	onCreateScene,
+	onCreateImageGenerator,
 	onCreateHdrTestNode,
 	toolMode,
 	onToolModeChange,
@@ -450,6 +535,7 @@ const CanvasWorkspaceOverlay = ({
 	}, [activeNode]);
 	const ActiveNodeInspector = activeNodeDefinition?.inspector ?? null;
 	const ActiveNodeToolbar = activeNodeDefinition?.toolbar ?? null;
+	const ActiveNodeAgentPanel = activeNodeDefinition?.agent ?? null;
 	const activeNodeScene = useMemo(() => {
 		if (!activeNode || activeNode.type !== "scene") return null;
 		return currentProject?.scenes[activeNode.sceneId] ?? null;
@@ -560,6 +646,22 @@ const CanvasWorkspaceOverlay = ({
 				)}
 			</AnimatePresence>
 
+			<AnimatePresence mode="sync" initial={false}>
+				{activeNode && ActiveNodeAgentPanel && (
+					<ActiveNodeAgentOverlay
+						key={`active-node-agent:${activeNode.id}`}
+						node={activeNode}
+						cameraSharedValue={cameraSharedValue}
+					>
+						<ActiveNodeAgentPanel
+							node={activeNode}
+							scene={activeNodeScene}
+							asset={activeNodeAsset}
+						/>
+					</ActiveNodeAgentOverlay>
+				)}
+			</AnimatePresence>
+
 			{!focusedNodeId && (
 				<div
 					className="absolute z-30 flex items-center gap-2 rounded-lg border border-white/10 bg-black/60 px-3 py-2 text-xs text-white backdrop-blur"
@@ -603,6 +705,15 @@ const CanvasWorkspaceOverlay = ({
 					>
 						<Plus className="size-3" />
 						<span>新建 Scene</span>
+					</button>
+					<button
+						type="button"
+						onClick={onCreateImageGenerator}
+						data-testid="canvas-image-generator-button"
+						className="flex items-center gap-1 rounded bg-white/10 px-2 py-1 hover:bg-white/20"
+					>
+						<ImagePlus className="size-3" />
+						<span>Image Generator</span>
 					</button>
 					<button
 						type="button"

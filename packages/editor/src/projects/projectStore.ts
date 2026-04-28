@@ -97,7 +97,7 @@ export type CanvasNodeCreateInput =
 			name?: string;
 			parentId?: string | null;
 			insertIndex?: number;
-			assetId?: string;
+			assetId?: string | null;
 			duration?: number;
 			text?: string;
 			fontSize?: number;
@@ -814,7 +814,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
 					node = {
 						id: nodeId,
 						type: "image",
-						assetId: input.assetId ?? "",
+						assetId: input.assetId ?? null,
 						name: input.name?.trim() ? input.name.trim() : "Image",
 						parentId: input.parentId ?? null,
 						x: input.x ?? -width / 2,

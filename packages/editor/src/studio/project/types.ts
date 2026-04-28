@@ -73,7 +73,11 @@ export interface TextCanvasNode extends CanvasNodeBase {
 
 export interface ImageCanvasNode extends CanvasNodeBase {
 	type: "image";
-	assetId: string;
+	assetId: string | null;
+	ai?: {
+		sourceRunId?: string;
+		sourceNodeId?: string;
+	};
 }
 
 export interface BoardCanvasNode extends CanvasNodeBase {

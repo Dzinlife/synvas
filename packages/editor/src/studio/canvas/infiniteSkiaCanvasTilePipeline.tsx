@@ -642,7 +642,7 @@ const resolveTileRasterAsset = (
 	assetById: Map<string, TimelineAsset>,
 ): TimelineAsset | null => {
 	const definition = getCanvasNodeDefinition(node.type);
-	if ("assetId" in node) {
+	if ("assetId" in node && node.assetId) {
 		const sourceAsset = assetById.get(node.assetId);
 		if (sourceAsset?.kind === "image" && !definition.tilePicture) {
 			return sourceAsset;

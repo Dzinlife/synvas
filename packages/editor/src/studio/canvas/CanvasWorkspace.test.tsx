@@ -2984,6 +2984,29 @@ describe("CanvasWorkspace", () => {
 		expect(workspace.style.cursor).toBe("crosshair");
 	});
 
+	it("Image Generator 按钮会在当前视口中心创建 empty image node", () => {
+		render(<CanvasWorkspace />);
+
+		fireEvent.click(screen.getByTestId("canvas-image-generator-button"));
+
+		const project = useProjectStore.getState().currentProject;
+		const createdNode = project?.canvas.nodes.find(
+			(node) => node.name === "Image Agent",
+		);
+		expect(createdNode).toMatchObject({
+			type: "image",
+			assetId: null,
+			x: mockDOMRect.width / 2 - 256,
+			y: mockDOMRect.height / 2 - 256,
+			width: 512,
+			height: 512,
+		});
+		expect(project?.ui.activeNodeId).toBe(createdNode?.id);
+		expect(useStudioHistoryStore.getState().past.at(-1)?.kind).toBe(
+			"canvas.node-create",
+		);
+	});
+
 	it("Board 模式下小拖拽不创建 board 且保持当前模式", () => {
 		render(<CanvasWorkspace />);
 		const boardButton = screen.getByTestId(
