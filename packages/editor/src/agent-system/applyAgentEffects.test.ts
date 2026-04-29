@@ -50,7 +50,13 @@ const createProject = (): StudioProject => ({
 	updatedAt: 1,
 });
 
-const createRun = (nodeId = "node-image-1"): AgentRun => ({
+const createRun = (
+	nodeId = "node-image-1",
+	artifactSize: { width: number; height: number } = {
+		width: 2048,
+		height: 1152,
+	},
+): AgentRun => ({
 	id: "run-1",
 	sessionId: "session-1",
 	scope: { type: "node", projectId: "project-1", nodeId },
@@ -69,8 +75,8 @@ const createRun = (nodeId = "node-image-1"): AgentRun => ({
 			status: "ready",
 			name: "mock.png",
 			mimeType: "image/png",
-			width: 1024,
-			height: 1024,
+			width: artifactSize.width,
+			height: artifactSize.height,
 			source: {
 				type: "inline-bytes",
 				mimeType: "image/png",
@@ -136,15 +142,15 @@ describe("applyAgentEffects", () => {
 		expect(project?.assets).toHaveLength(1);
 		expect(node).toMatchObject({
 			type: "image",
+			width: 512,
+			height: 288,
 			assetId: project?.assets[0]?.id,
 			ai: {
 				sourceRunId: "run-1",
 				sourceNodeId: "node-image-1",
 			},
 		});
-		expect(useStudioHistoryStore.getState().past.at(-1)?.kind).toBe(
-			"canvas.node-update",
-		);
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
 	});
 
 	it("目标节点不存在时保留 asset 并跳过 effect", async () => {
@@ -161,7 +167,12 @@ describe("applyAgentEffects", () => {
 		]);
 	});
 
-	it("undo 只回滚 node 更新，不删除生成 asset", async () => {
+	it("undo 不回滚 agent 生成结果绑定", async () => {
+		useStudioHistoryStore.getState().push({
+			kind: "canvas.node-create",
+			node: createProject().canvas.nodes[0]!,
+			focusNodeId: null,
+		});
 		await applyAgentEffects(createRun());
 		const assetId = useProjectStore.getState().currentProject?.assets[0]?.id;
 
@@ -174,7 +185,38 @@ describe("applyAgentEffects", () => {
 		expect(project?.assets[0]?.id).toBe(assetId);
 		expect(node).toMatchObject({
 			type: "image",
-			assetId: null,
+			width: 512,
+			height: 288,
+			assetId,
+			ai: {
+				sourceRunId: "run-1",
+				sourceNodeId: "node-image-1",
+			},
 		});
+	});
+
+	it("artifact 尺寸无效时保留当前 node 尺寸", async () => {
+		useProjectStore.getState().updateCanvasNodeLayout("node-image-1", {
+			width: 512,
+			height: 288,
+		});
+
+		await applyAgentEffects(createRun("node-image-1", { width: 0, height: 0 }));
+
+		const project = useProjectStore.getState().currentProject;
+		const node = project?.canvas.nodes.find(
+			(item) => item.id === "node-image-1",
+		);
+		expect(node).toMatchObject({
+			type: "image",
+			width: 512,
+			height: 288,
+			assetId: project?.assets[0]?.id,
+			ai: {
+				sourceRunId: "run-1",
+				sourceNodeId: "node-image-1",
+			},
+		});
+		expect(useStudioHistoryStore.getState().past).toHaveLength(0);
 	});
 });

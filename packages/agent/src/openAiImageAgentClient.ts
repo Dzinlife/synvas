@@ -3,6 +3,8 @@ import type {
 	AgentClient,
 	AgentEffect,
 	AgentEffectApplication,
+	AgentImageModelCapabilities,
+	AgentImageSize,
 	AgentModel,
 	AgentQuote,
 	AgentRun,
@@ -12,6 +14,11 @@ import type {
 	AgentStep,
 } from "./types";
 import { isTerminalAgentRunStatus } from "./types";
+import {
+	formatAgentImageSize,
+	normalizeAgentImageSize,
+	parseAgentImageSize,
+} from "./imageModelCapabilities";
 
 export const OPENAI_IMAGE_DEFAULT_ENDPOINT = "https://api.openai.com/v1";
 export const OPENAI_IMAGE_DEFAULT_MODEL = "gpt-image-2";
@@ -41,13 +48,139 @@ const OPENAI_IMAGE_MODELS = [
 	{ id: "gpt-image-1-mini", label: "GPT Image 1 Mini" },
 ] as const;
 
-const OPENAI_IMAGE_QUALITIES = new Set(["auto", "low", "medium", "high"]);
-const OPENAI_IMAGE_SIZES = new Set([
-	"auto",
-	"1024x1024",
-	"1536x1024",
-	"1024x1536",
-]);
+const OPENAI_IMAGE_QUALITY_OPTIONS = [
+	{ value: "auto", label: "Auto" },
+	{ value: "low", label: "Low" },
+	{ value: "medium", label: "Medium" },
+	{ value: "high", label: "High" },
+] as const;
+const OPENAI_IMAGE_QUALITIES = new Set<string>(
+	OPENAI_IMAGE_QUALITY_OPTIONS.map((option) => option.value),
+);
+
+const OPENAI_LEGACY_IMAGE_SIZES: AgentImageSize[] = [
+	{ width: 1024, height: 1024 },
+	{ width: 1536, height: 1024 },
+	{ width: 1024, height: 1536 },
+];
+
+const OPENAI_GPT_IMAGE_2_CAPABILITIES: AgentImageModelCapabilities = {
+	qualityOptions: [...OPENAI_IMAGE_QUALITY_OPTIONS],
+	defaultQuality: "auto",
+	aspectRatios: [
+		{
+			value: "1:1",
+			label: "1:1",
+			width: 1,
+			height: 1,
+			size: { width: 1024, height: 1024 },
+		},
+		{
+			value: "3:2",
+			label: "3:2",
+			width: 3,
+			height: 2,
+			size: { width: 1536, height: 1024 },
+		},
+		{
+			value: "2:3",
+			label: "2:3",
+			width: 2,
+			height: 3,
+			size: { width: 1024, height: 1536 },
+		},
+		{
+			value: "16:9",
+			label: "16:9",
+			width: 16,
+			height: 9,
+			size: { width: 2048, height: 1152 },
+		},
+		{
+			value: "9:16",
+			label: "9:16",
+			width: 9,
+			height: 16,
+			size: { width: 1152, height: 2048 },
+		},
+		{ value: "custom", label: "Custom", width: 0, height: 0 },
+	],
+	defaultAspectRatio: "1:1",
+	defaultSize: { width: 1024, height: 1024 },
+	size: {
+		mode: "flexible",
+		minPixels: 655_360,
+		maxPixels: 8_294_400,
+		maxEdge: 3840,
+		multiple: 16,
+		maxLongEdgeRatio: 3,
+	},
+	maxVariants: 10,
+};
+
+const OPENAI_LEGACY_IMAGE_CAPABILITIES: AgentImageModelCapabilities = {
+	qualityOptions: [...OPENAI_IMAGE_QUALITY_OPTIONS],
+	defaultQuality: "auto",
+	aspectRatios: [
+		{
+			value: "1:1",
+			label: "1:1",
+			width: 1,
+			height: 1,
+			size: { width: 1024, height: 1024 },
+		},
+		{
+			value: "3:2",
+			label: "3:2",
+			width: 3,
+			height: 2,
+			size: { width: 1536, height: 1024 },
+		},
+		{
+			value: "2:3",
+			label: "2:3",
+			width: 2,
+			height: 3,
+			size: { width: 1024, height: 1536 },
+		},
+	],
+	defaultAspectRatio: "1:1",
+	defaultSize: { width: 1024, height: 1024 },
+	size: {
+		mode: "fixed",
+		sizes: [...OPENAI_LEGACY_IMAGE_SIZES],
+	},
+	maxVariants: 10,
+};
+
+const OPENAI_IMAGE_CAPABILITIES_BY_MODEL: Record<
+	string,
+	AgentImageModelCapabilities
+> = {
+	"gpt-image-2": OPENAI_GPT_IMAGE_2_CAPABILITIES,
+	"gpt-image-1.5": OPENAI_LEGACY_IMAGE_CAPABILITIES,
+	"gpt-image-1": OPENAI_LEGACY_IMAGE_CAPABILITIES,
+	"gpt-image-1-mini": OPENAI_LEGACY_IMAGE_CAPABILITIES,
+};
+
+export const OPENAI_IMAGE_AGENT_MODELS: AgentModel[] =
+	OPENAI_IMAGE_MODELS.flatMap((model) => {
+		const image = OPENAI_IMAGE_CAPABILITIES_BY_MODEL[model.id];
+		return [
+			{
+				id: model.id,
+				label: model.label,
+				kind: "image.generate" as const,
+				image: image ? { ...image, maxVariants: 10 } : undefined,
+			},
+			{
+				id: model.id,
+				label: model.label,
+				kind: "image.edit" as const,
+				image: image ? { ...image, maxVariants: undefined } : undefined,
+			},
+		];
+	});
 
 const createId = (prefix: string): string => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -142,13 +275,18 @@ const resolveQuality = (params: Record<string, unknown>): string => {
 };
 
 const resolveSize = (params: Record<string, unknown>): string => {
-	const size = readString(params, "size", "").trim();
-	if (OPENAI_IMAGE_SIZES.has(size)) return size;
+	const model = resolveModel(params);
+	const capabilities =
+		OPENAI_IMAGE_CAPABILITIES_BY_MODEL[model] ??
+		OPENAI_IMAGE_CAPABILITIES_BY_MODEL[OPENAI_IMAGE_DEFAULT_MODEL] ??
+		OPENAI_GPT_IMAGE_2_CAPABILITIES;
 	const aspectRatio = readString(params, "aspectRatio", "").trim();
-	if (aspectRatio === "16:9") return "1536x1024";
-	if (aspectRatio === "9:16") return "1024x1536";
-	if (aspectRatio === "1:1") return "1024x1024";
-	return "auto";
+	const size = normalizeAgentImageSize(
+		capabilities,
+		readString(params, "size", "").trim(),
+		aspectRatio,
+	);
+	return formatAgentImageSize(size);
 };
 
 const resolveVariantCount = (params: Record<string, unknown>): number => {
@@ -173,9 +311,7 @@ const resolveFallbackSize = (
 	params: Record<string, unknown>,
 ): { width: number; height: number } => {
 	const size = resolveSize(params);
-	if (size === "1536x1024") return { width: 1536, height: 1024 };
-	if (size === "1024x1536") return { width: 1024, height: 1536 };
-	return { width: 1024, height: 1024 };
+	return parseAgentImageSize(size) ?? { width: 1024, height: 1024 };
 };
 
 const normalizeOutputFormat = (format: unknown): "png" | "jpeg" | "webp" => {
@@ -333,18 +469,7 @@ export class OpenAiImageAgentClient implements AgentClient {
 	}
 
 	async listModels(): Promise<AgentModel[]> {
-		return OPENAI_IMAGE_MODELS.flatMap((model) => [
-			{
-				id: model.id,
-				label: model.label,
-				kind: "image.generate" as const,
-			},
-			{
-				id: model.id,
-				label: model.label,
-				kind: "image.edit" as const,
-			},
-		]);
+		return OPENAI_IMAGE_AGENT_MODELS;
 	}
 
 	async quote(): Promise<AgentQuote> {

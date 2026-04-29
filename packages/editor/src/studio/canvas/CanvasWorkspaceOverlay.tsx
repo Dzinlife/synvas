@@ -31,6 +31,7 @@ import {
 	setSkiaResourceTrackerConfig,
 } from "react-skia-lite";
 import { useStoreWithEqualityFn } from "zustand/traditional";
+import { useAgentRuntimeStore } from "@/agent-system";
 import { getOwner, releaseOwner, subscribeOwnerChange } from "@/audio/owner";
 import { SnapIcon } from "@/components/icons";
 import { useProjectStore } from "@/projects/projectStore";
@@ -162,6 +163,15 @@ const SKIA_RESOURCE_TRACKER_DEFAULT_SAMPLE_LIMIT = 3;
 const SKIA_RESOURCE_TRACKER_DEBUG_SAMPLE_LIMIT = 200;
 const IS_JSDOM_ENV =
 	typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent);
+
+const isAgentRunBusy = (status: string | null | undefined): boolean => {
+	return (
+		status === "queued" ||
+		status === "running" ||
+		status === "materializing_artifacts" ||
+		status === "applying_effects"
+	);
+};
 
 const PREVIEW_COLOR_SPACE_OPTIONS: Array<{
 	value: PreviewColorSpaceTarget;
@@ -529,6 +539,12 @@ const CanvasWorkspaceOverlay = ({
 			null
 		);
 	}, [activeNodeId, currentProject]);
+	const activeNodeAgentRunBusy = useAgentRuntimeStore((state) => {
+		if (!activeNodeId) return false;
+		const runId = state.activeRunIdByNodeId[activeNodeId];
+		const run = runId ? state.runsById[runId] : null;
+		return isAgentRunBusy(run?.status);
+	});
 	const activeNodeDefinition = useMemo(() => {
 		if (!activeNode) return null;
 		return getCanvasNodeDefinition(activeNode.type);
@@ -647,7 +663,7 @@ const CanvasWorkspaceOverlay = ({
 			</AnimatePresence>
 
 			<AnimatePresence mode="sync" initial={false}>
-				{activeNode && ActiveNodeAgentPanel && (
+				{activeNode && ActiveNodeAgentPanel && !activeNodeAgentRunBusy && (
 					<ActiveNodeAgentOverlay
 						key={`active-node-agent:${activeNode.id}`}
 						node={activeNode}

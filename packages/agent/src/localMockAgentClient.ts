@@ -12,6 +12,7 @@ import type {
 	AgentStep,
 } from "./types";
 import { isTerminalAgentRunStatus } from "./types";
+import { parseAgentImageSize } from "./imageModelCapabilities";
 
 const MOCK_PNG_BASE64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
@@ -286,17 +287,11 @@ export class LocalMockAgentClient implements AgentClient {
 	}
 
 	private resolveArtifactWidth(run: AgentRun): number {
-		const aspectRatio = readString(run.params, "aspectRatio", "1:1");
-		if (aspectRatio === "16:9") return 1024;
-		if (aspectRatio === "9:16") return 768;
-		return 1024;
+		return parseAgentImageSize(readString(run.params, "size"))?.width ?? 1024;
 	}
 
 	private resolveArtifactHeight(run: AgentRun): number {
-		const aspectRatio = readString(run.params, "aspectRatio", "1:1");
-		if (aspectRatio === "16:9") return 576;
-		if (aspectRatio === "9:16") return 1365;
-		return 1024;
+		return parseAgentImageSize(readString(run.params, "size"))?.height ?? 1024;
 	}
 
 	private markStepRunning(runId: string, index: number): void {

@@ -350,6 +350,7 @@ vi.mock("@/node-system/registry", () => {
 			drawer
 		</button>
 	);
+	const ImageAgent = () => <div data-testid="mock-image-agent-panel" />;
 	const wouldCreateCycle = (
 		project: {
 			scenes: Record<
@@ -753,6 +754,7 @@ vi.mock("@/node-system/registry", () => {
 			create: () => ({ type: "image" }),
 			skiaRenderer: GenericSkiaRenderer,
 			toolbar: createToolbar("image"),
+			agent: ImageAgent,
 			resolveResizeConstraints: ({
 				asset,
 				node,
@@ -3216,6 +3218,53 @@ describe("CanvasWorkspace", () => {
 		expect(useStudioHistoryStore.getState().past.at(-1)?.kind).toBe(
 			"canvas.node-create",
 		);
+	});
+
+	it("active image node 没有运行中的 agent run 时显示 agent 浮动面板", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					ui: {
+						...project.ui,
+						activeNodeId: "node-image-1",
+					},
+				},
+			};
+		});
+
+		render(<CanvasWorkspace />);
+
+		expect(screen.getByTestId("canvas-active-node-agent")).toBeTruthy();
+		expect(screen.getByTestId("mock-image-agent-panel")).toBeTruthy();
+	});
+
+	it("active image node 有运行中的 agent run 时隐藏 agent 浮动面板", () => {
+		useProjectStore.setState((state) => {
+			const project = state.currentProject;
+			if (!project) return state;
+			return {
+				...state,
+				currentProject: {
+					...project,
+					ui: {
+						...project.ui,
+						activeNodeId: "node-image-1",
+					},
+				},
+			};
+		});
+		useAgentRuntimeStore
+			.getState()
+			.upsertRun(createAgentRunForNode("node-image-1"));
+
+		render(<CanvasWorkspace />);
+
+		expect(screen.queryByTestId("canvas-active-node-agent")).toBeNull();
+		expect(screen.queryByTestId("mock-image-agent-panel")).toBeNull();
 	});
 
 	it("agent run 目标节点未选中时仍会进入 live render", () => {

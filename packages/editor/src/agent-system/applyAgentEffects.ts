@@ -54,6 +54,35 @@ const isImageNode = (node: CanvasNode | null): node is ImageCanvasNode => {
 	return node?.type === "image";
 };
 
+const roundCanvasDimension = (value: number): number =>
+	Math.round(value * 1000) / 1000;
+
+const resolveImageNodeDisplaySize = (
+	baseNode: Pick<ImageCanvasNode, "width" | "height">,
+	imageSize: { width: number; height: number },
+): Pick<ImageCanvasNode, "width" | "height"> => {
+	if (
+		baseNode.width <= 0 ||
+		imageSize.width <= 0 ||
+		imageSize.height <= 0 ||
+		!Number.isFinite(baseNode.width) ||
+		!Number.isFinite(imageSize.width) ||
+		!Number.isFinite(imageSize.height)
+	) {
+		return {
+			width: baseNode.width,
+			height: baseNode.height,
+		};
+	}
+	return {
+		width: baseNode.width,
+		height: Math.max(
+			1,
+			roundCanvasDimension((baseNode.width * imageSize.height) / imageSize.width),
+		),
+	};
+};
+
 export const applyAgentEffects = async (
 	run: AgentRun,
 ): Promise<AgentEffectApplication[]> => {
@@ -70,6 +99,7 @@ export const applyAgentEffects = async (
 	}
 
 	const assetIdByArtifactId = new Map<string, string>();
+	const artifactById = new Map<string, AgentArtifact>();
 	for (const artifact of run.artifacts) {
 		if (artifact.kind !== "image") continue;
 		const file = await createFileFromArtifact(artifact);
@@ -93,6 +123,7 @@ export const applyAgentEffects = async (
 			},
 		});
 		assetIdByArtifactId.set(artifact.id, assetId);
+		artifactById.set(artifact.id, artifact);
 	}
 
 	const applications: AgentEffectApplication[] = [];
@@ -114,8 +145,8 @@ export const applyAgentEffects = async (
 			});
 			continue;
 		}
-		const beforeNode = resolveNodeById(effect.nodeId);
-		if (!isImageNode(beforeNode)) {
+		const targetNode = resolveNodeById(effect.nodeId);
+		if (!isImageNode(targetNode)) {
 			applications.push({
 				effectId: effect.id,
 				status: "skipped",
@@ -123,12 +154,25 @@ export const applyAgentEffects = async (
 			});
 			continue;
 		}
+		const ai = {
+			sourceRunId: run.id,
+			sourceNodeId: effect.metadata?.sourceNodeId,
+		};
+		const artifact = artifactById.get(effect.artifactId);
+		const displaySize = artifact
+			? resolveImageNodeDisplaySize(targetNode, {
+					width: artifact.width,
+					height: artifact.height,
+				})
+			: {
+					width: targetNode.width,
+					height: targetNode.height,
+				};
 		projectStore.updateCanvasNode(effect.nodeId, {
+			width: displaySize.width,
+			height: displaySize.height,
 			assetId,
-			ai: {
-				sourceRunId: run.id,
-				sourceNodeId: effect.metadata?.sourceNodeId,
-			},
+			ai,
 		} as never);
 		const afterNode = resolveNodeById(effect.nodeId);
 		if (!afterNode) {
@@ -139,13 +183,7 @@ export const applyAgentEffects = async (
 			});
 			continue;
 		}
-		historyStore.push({
-			kind: "canvas.node-update",
-			nodeId: effect.nodeId,
-			before: beforeNode,
-			after: afterNode,
-			focusNodeId: project.ui.focusedNodeId,
-		});
+		historyStore.appendNonUndoableCanvasNodeToBaseline(afterNode);
 		applications.push({
 			effectId: effect.id,
 			status: "applied",

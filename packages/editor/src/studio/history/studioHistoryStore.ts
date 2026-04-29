@@ -229,6 +229,11 @@ interface StudioHistoryState {
 	baselineCanvas: CanvasDocument | null;
 	baselineScenes: Record<string, SceneDocument> | null;
 	push: (entry: StudioHistoryEntry) => void;
+	applyNonUndoableCanvasNodePatchToBaseline: (
+		nodeId: string,
+		patch: Partial<CanvasNode>,
+	) => void;
+	appendNonUndoableCanvasNodeToBaseline: (node: CanvasNode) => void;
 	undo: (options?: HistoryApplyOptions) => void;
 	redo: (options?: HistoryApplyOptions) => void;
 	clear: () => void;
@@ -1527,6 +1532,47 @@ export const useStudioHistoryStore = create<StudioHistoryState>((set, get) => ({
 			};
 		});
 		syncProjectOtSnapshot();
+	},
+	applyNonUndoableCanvasNodePatchToBaseline: (nodeId, patch) => {
+		set((state) => {
+			if (!state.baselineCanvas) return state;
+			let didUpdate = false;
+			const nextNodes = state.baselineCanvas.nodes.map((node) => {
+				if (node.id !== nodeId) return node;
+				didUpdate = true;
+				return {
+					...node,
+					...patch,
+					id: node.id,
+					createdAt: node.createdAt,
+				} as CanvasNode;
+			});
+			if (!didUpdate) return state;
+			return {
+				baselineCanvas: {
+					...state.baselineCanvas,
+					nodes: nextNodes,
+				},
+			};
+		});
+	},
+	appendNonUndoableCanvasNodeToBaseline: (node) => {
+		set((state) => {
+			if (!state.baselineCanvas) return state;
+			const nodeExists = state.baselineCanvas.nodes.some(
+				(item) => item.id === node.id,
+			);
+			return {
+				baselineCanvas: {
+					...state.baselineCanvas,
+					nodes: nodeExists
+						? state.baselineCanvas.nodes.map((item) =>
+								item.id === node.id ? node : item,
+							)
+						: [...state.baselineCanvas.nodes, node],
+				},
+			};
+		});
 	},
 	undo: (options) => {
 		const scope = ensureProjectScope(get(), set);

@@ -97,6 +97,99 @@ describe("OpenAiImageAgentClient", () => {
 		]);
 	});
 
+	it("gpt-image-2 会透传符合约束的灵活尺寸", async () => {
+		const fetchMock = vi.fn(async () =>
+			createImageResponse({
+				data: [
+					{
+						b64_json: MOCK_PNG_BASE64,
+						output_format: "png",
+						size: "2048x1152",
+					},
+				],
+			}),
+		) as unknown as typeof fetch;
+		const client = new OpenAiImageAgentClient({
+			config: {
+				endpoint: "https://api.openai.test/v1",
+				apiKey: "sk-test-flex-size",
+			},
+			fetch: fetchMock,
+		});
+
+		const run = await client.createRun({
+			kind: "image.generate",
+			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
+			input: { prompt: "wide image" },
+			params: {
+				model: "gpt-image-2",
+				size: "2048x1152",
+				aspectRatio: "16:9",
+			},
+		});
+		let latest: AgentRun = run;
+		client.subscribeRun(run.id, (event) => {
+			latest = event.run;
+		});
+		await flushAsyncWork();
+
+		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(JSON.parse(String(init.body))).toMatchObject({
+			model: "gpt-image-2",
+			size: "2048x1152",
+		});
+		expect(latest.artifacts[0]).toMatchObject({
+			width: 2048,
+			height: 1152,
+		});
+	});
+
+	it("旧 GPT Image 模型会把任意尺寸归一化到固定尺寸", async () => {
+		const fetchMock = vi.fn(async () =>
+			createImageResponse({
+				data: [
+					{
+						b64_json: MOCK_PNG_BASE64,
+						output_format: "png",
+					},
+				],
+			}),
+		) as unknown as typeof fetch;
+		const client = new OpenAiImageAgentClient({
+			config: {
+				endpoint: "https://api.openai.test/v1",
+				apiKey: "sk-test-legacy-size",
+			},
+			fetch: fetchMock,
+		});
+
+		const run = await client.createRun({
+			kind: "image.generate",
+			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
+			input: { prompt: "legacy wide image" },
+			params: {
+				model: "gpt-image-1.5",
+				size: "2048x1152",
+				aspectRatio: "16:9",
+			},
+		});
+		let latest: AgentRun = run;
+		client.subscribeRun(run.id, (event) => {
+			latest = event.run;
+		});
+		await flushAsyncWork();
+
+		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(JSON.parse(String(init.body))).toMatchObject({
+			model: "gpt-image-1.5",
+			size: "1536x1024",
+		});
+		expect(latest.artifacts[0]).toMatchObject({
+			width: 1536,
+			height: 1024,
+		});
+	});
+
 	it("默认 fetch 会保留 globalThis 绑定", async () => {
 		const fetchMock = vi.fn(function (
 			this: unknown,
@@ -172,7 +265,7 @@ describe("OpenAiImageAgentClient", () => {
 			params: {
 				model: "gpt-image-1.5",
 				quality: "auto",
-				size: "auto",
+				size: "1024x1024",
 			},
 			context: {
 				sourceAssetId: "asset-1",
@@ -195,7 +288,7 @@ describe("OpenAiImageAgentClient", () => {
 		expect(form.get("model")).toBe("gpt-image-1.5");
 		expect(form.get("prompt")).toBe("add a sunset");
 		expect(form.get("quality")).toBe("auto");
-		expect(form.get("size")).toBe("auto");
+		expect(form.get("size")).toBe("1024x1024");
 		expect(form.get("output_format")).toBe("png");
 		expect(form.get("image")).toBeInstanceOf(File);
 		expect(JSON.stringify(latest)).not.toContain("sk-test-edit");

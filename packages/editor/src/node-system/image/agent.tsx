@@ -1,5 +1,12 @@
 import {
+	formatAgentImageSize,
+	normalizeAgentImageSize,
+	OPENAI_IMAGE_AGENT_MODELS,
 	OPENAI_IMAGE_DEFAULT_MODEL,
+	resolveAgentImageAspectRatio,
+	type AgentImageModelCapabilities,
+	type AgentImageSize,
+	type AgentModel,
 	type AgentQuote,
 	type AgentRunKind,
 	type AgentRunRequest,
@@ -15,33 +22,23 @@ import {
 	useNodeActiveAgentRun,
 	useStartAgentRun,
 } from "@/agent-system";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { ScrubbableNumberInput } from "@/components/ui/scrubbable-number-input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useProjectStore } from "@/projects/projectStore";
 import type { CanvasNodeAgentPanelProps } from "../types";
 import { useCanvasInteractionStore } from "@/studio/canvas/canvasInteractionStore";
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 
-const MODEL_OPTIONS = [
-	{ value: "gpt-image-2", label: "GPT Image 2" },
-	{ value: "gpt-image-1.5", label: "GPT Image 1.5" },
-	{ value: "gpt-image-1", label: "GPT Image 1" },
-	{ value: "gpt-image-1-mini", label: "GPT Image 1 Mini" },
-];
-
-const QUALITY_OPTIONS = [
-	{ value: "auto", label: "Auto" },
-	{ value: "low", label: "Low" },
-	{ value: "medium", label: "Medium" },
-	{ value: "high", label: "High" },
-];
-
-const SIZE_OPTIONS = [
-	{ value: "auto", label: "Auto" },
-	{ value: "1024x1024", label: "1024 x 1024" },
-	{ value: "1536x1024", label: "1536 x 1024" },
-	{ value: "1024x1536", label: "1024 x 1536" },
-];
-
-const VARIANT_OPTIONS = [1, 2, 4];
+const DEFAULT_IMAGE_SIZE: AgentImageSize = { width: 1024, height: 1024 };
 
 const isRunBusy = (status: string | null | undefined): boolean => {
 	return (
@@ -78,9 +75,118 @@ const useNodeLatestFailedAgentRunError = (nodeId: string): string | null => {
 	});
 };
 
-const FieldLabel = ({ children }: { children: React.ReactNode }) => {
+const sameSize = (left: AgentImageSize, right: AgentImageSize): boolean =>
+	left.width === right.width && left.height === right.height;
+
+const clampNumber = (value: number, min: number, max: number): number =>
+	Math.min(max, Math.max(min, value));
+
+const roundCanvasDimension = (value: number): number =>
+	Math.round(value * 1000) / 1000;
+
+const resolveImageNodeDisplaySize = (
+	baseNode: Pick<ImageCanvasNode, "width" | "height">,
+	imageSize: AgentImageSize,
+): Pick<ImageCanvasNode, "width" | "height"> => {
+	if (
+		baseNode.width <= 0 ||
+		imageSize.width <= 0 ||
+		imageSize.height <= 0 ||
+		!Number.isFinite(baseNode.width) ||
+		!Number.isFinite(imageSize.width) ||
+		!Number.isFinite(imageSize.height)
+	) {
+		return {
+			width: baseNode.width,
+			height: baseNode.height,
+		};
+	}
+	return {
+		width: baseNode.width,
+		height: Math.max(
+			1,
+			roundCanvasDimension((baseNode.width * imageSize.height) / imageSize.width),
+		),
+	};
+};
+
+const getFallbackModels = (kind: AgentRunKind): AgentModel[] =>
+	OPENAI_IMAGE_AGENT_MODELS.filter((model) => model.kind === kind);
+
+const getDefaultCapabilities = (
+	kind: AgentRunKind,
+): AgentImageModelCapabilities =>
+	getFallbackModels(kind).find(
+		(model) => model.id === OPENAI_IMAGE_DEFAULT_MODEL,
+	)?.image ?? {
+		qualityOptions: [{ value: "auto", label: "Auto" }],
+		defaultQuality: "auto",
+		aspectRatios: [
+			{
+				value: "1:1",
+				label: "1:1",
+				width: 1,
+				height: 1,
+				size: DEFAULT_IMAGE_SIZE,
+			},
+		],
+		defaultAspectRatio: "1:1",
+		defaultSize: DEFAULT_IMAGE_SIZE,
+		size: {
+			mode: "fixed",
+			sizes: [DEFAULT_IMAGE_SIZE],
+		},
+	};
+
+const resolveModelsWithImageCapabilities = (
+	models: AgentModel[],
+	kind: AgentRunKind,
+): AgentModel[] => {
+	const nextModels = models.filter(
+		(model) => model.kind === kind && model.image,
+	);
+	return nextModels.length > 0 ? nextModels : getFallbackModels(kind);
+};
+
+const useImageAgentModels = (kind: AgentRunKind): AgentModel[] => {
+	const client = useAgentClient();
+	const fallbackModels = useMemo(() => getFallbackModels(kind), [kind]);
+	const [models, setModels] = useState<AgentModel[]>(fallbackModels);
+
+	useEffect(() => {
+		let disposed = false;
+		void client
+			.listModels()
+			.then((items) => {
+				if (disposed) return;
+				setModels(resolveModelsWithImageCapabilities(items, kind));
+			})
+			.catch(() => {
+				if (disposed) return;
+				setModels(fallbackModels);
+			});
+		return () => {
+			disposed = true;
+		};
+	}, [client, fallbackModels, kind]);
+
+	return models;
+};
+
+const FieldLabel = ({
+	children,
+	htmlFor,
+}: {
+	children: React.ReactNode;
+	htmlFor?: string;
+}) => {
 	return (
-		<div className="mb-1 text-[11px] font-medium text-white/55">{children}</div>
+		<Label
+			htmlFor={htmlFor}
+			className="mb-1 block text-[11px] font-medium text-white/55"
+		>
+			{children}
+		</Label>
 	);
 };
 
@@ -88,22 +194,37 @@ const AgentSelect = ({
 	value,
 	onChange,
 	ariaLabel,
-	children,
+	options,
 }: {
 	value: string;
 	onChange: (value: string) => void;
 	ariaLabel: string;
-	children: React.ReactNode;
+	options: { value: string; label: string }[];
 }) => {
 	return (
-		<select
-			aria-label={ariaLabel}
+		<Select
 			value={value}
-			onChange={(event) => onChange(event.currentTarget.value)}
-			className="h-8 w-full rounded border border-white/10 bg-black/40 px-2 text-xs text-white outline-none"
+			items={options}
+			onValueChange={(nextValue) => onChange(String(nextValue))}
 		>
-			{children}
-		</select>
+			<SelectTrigger
+				aria-label={ariaLabel}
+				className="h-8 min-w-0 w-full rounded border border-white/10 bg-black/40 px-2 text-xs text-white outline-none hover:bg-white/10 focus-visible:outline-sky-500 data-popup-open:bg-white/10"
+			>
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent className="bg-neutral-950 text-white shadow-black/40 outline-white/10">
+				{options.map((option) => (
+					<SelectItem
+						key={option.value}
+						value={option.value}
+						className="text-xs data-highlighted:text-white data-highlighted:before:bg-sky-500"
+					>
+						{option.label}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
 	);
 };
 
@@ -181,30 +302,208 @@ const useCreditQuote = (
 	return quote;
 };
 
+const useImageModelSettings = (kind: AgentRunKind) => {
+	const models = useImageAgentModels(kind);
+	const [model, setModel] = useState(OPENAI_IMAGE_DEFAULT_MODEL);
+	const [quality, setQuality] = useState("auto");
+	const [size, setSize] = useState<AgentImageSize>(DEFAULT_IMAGE_SIZE);
+	const [aspectRatio, setAspectRatio] = useState("1:1");
+	const selectedModel = useMemo(
+		() => models.find((item) => item.id === model) ?? null,
+		[model, models],
+	);
+	const effectiveModel = selectedModel ?? models[0] ?? null;
+	const modelValue = effectiveModel?.id ?? OPENAI_IMAGE_DEFAULT_MODEL;
+	const capabilities = effectiveModel?.image ?? getDefaultCapabilities(kind);
+	const qualityOptions = capabilities.qualityOptions;
+	const aspectRatioOptions = capabilities.aspectRatios;
+
+	useEffect(() => {
+		if (!effectiveModel || model === effectiveModel.id) return;
+		setModel(effectiveModel.id);
+	}, [effectiveModel, model]);
+
+	useEffect(() => {
+		setQuality((current) =>
+			qualityOptions.some((option) => option.value === current)
+				? current
+				: capabilities.defaultQuality,
+		);
+		const normalized = normalizeAgentImageSize(capabilities, size, aspectRatio);
+		if (!sameSize(size, normalized)) {
+			setSize(normalized);
+		}
+		setAspectRatio(resolveAgentImageAspectRatio(capabilities, normalized));
+	}, [aspectRatio, capabilities, qualityOptions, size]);
+
+	const handleModelChange = (nextModel: string): AgentImageSize => {
+		const nextCapabilities =
+			models.find((item) => item.id === nextModel)?.image ??
+			getDefaultCapabilities(kind);
+		setModel(nextModel);
+		setQuality((current) =>
+			nextCapabilities.qualityOptions.some((option) => option.value === current)
+				? current
+				: nextCapabilities.defaultQuality,
+		);
+		const normalized = normalizeAgentImageSize(
+			nextCapabilities,
+			size,
+			aspectRatio,
+		);
+		setSize(normalized);
+		setAspectRatio(resolveAgentImageAspectRatio(nextCapabilities, normalized));
+		return normalized;
+	};
+
+	const handleAspectRatioChange = (
+		nextAspectRatio: string,
+	): AgentImageSize => {
+		const option = aspectRatioOptions.find(
+			(item) => item.value === nextAspectRatio,
+		);
+		if (!option) return size;
+		setAspectRatio(nextAspectRatio);
+		if (!option.size) return size;
+		const normalized = normalizeAgentImageSize(
+			capabilities,
+			option.size,
+			nextAspectRatio,
+		);
+		setSize(normalized);
+		setAspectRatio(resolveAgentImageAspectRatio(capabilities, normalized));
+		return normalized;
+	};
+
+	const handleSizeChange = (patch: Partial<AgentImageSize>): AgentImageSize => {
+		const normalized = normalizeAgentImageSize(capabilities, {
+			width: patch.width ?? size.width,
+			height: patch.height ?? size.height,
+		});
+		setSize(normalized);
+		setAspectRatio(resolveAgentImageAspectRatio(capabilities, normalized));
+		return normalized;
+	};
+
+	return {
+		models,
+		model: modelValue,
+		quality,
+		size,
+		aspectRatio,
+		capabilities,
+		qualityOptions,
+		aspectRatioOptions,
+		setQuality,
+		setModel: handleModelChange,
+		setAspectRatio: handleAspectRatioChange,
+		setWidth: (width: number) => handleSizeChange({ width }),
+		setHeight: (height: number) => handleSizeChange({ height }),
+	};
+};
+
+const ImageSizeControls = ({
+	capabilities,
+	aspectRatio,
+	aspectRatioOptions,
+	size,
+	onAspectRatioChange,
+	onWidthChange,
+	onHeightChange,
+}: {
+	capabilities: AgentImageModelCapabilities;
+	aspectRatio: string;
+	aspectRatioOptions: { value: string; label: string }[];
+	size: AgentImageSize;
+	onAspectRatioChange: (value: string) => void;
+	onWidthChange: (value: number) => void;
+	onHeightChange: (value: number) => void;
+}) => {
+	const flexibleSize =
+		capabilities.size.mode === "flexible" ? capabilities.size : null;
+	const widthHeightStep = flexibleSize?.multiple ?? 1;
+	const minSize = flexibleSize?.multiple ?? 1;
+	const maxSize = flexibleSize?.maxEdge;
+	const dimensionsDisabled = capabilities.size.mode === "fixed";
+	return (
+		<div className="space-y-2">
+			<div>
+				<FieldLabel>Aspect Ratio</FieldLabel>
+				<AgentSelect
+					ariaLabel="图片比例"
+					value={aspectRatio}
+					onChange={onAspectRatioChange}
+					options={aspectRatioOptions}
+				/>
+			</div>
+			<div className="grid grid-cols-2 gap-2">
+				<ScrubbableNumberInput
+					ariaLabel="图片宽度"
+					label="W"
+					value={size.width}
+					step={widthHeightStep}
+					min={minSize}
+					max={maxSize}
+					disabled={dimensionsDisabled}
+					onValueChange={(value) => onWidthChange(Math.round(value))}
+					className="h-8 rounded border border-white/10 bg-black/40 pr-2"
+				/>
+				<ScrubbableNumberInput
+					ariaLabel="图片高度"
+					label="H"
+					value={size.height}
+					step={widthHeightStep}
+					min={minSize}
+					max={maxSize}
+					disabled={dimensionsDisabled}
+					onValueChange={(value) => onHeightChange(Math.round(value))}
+					className="h-8 rounded border border-white/10 bg-black/40 pr-2"
+				/>
+			</div>
+		</div>
+	);
+};
+
 const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
+	const updateCanvasNodeLayout = useProjectStore(
+		(state) => state.updateCanvasNodeLayout,
+	);
 	const hasOpenAiApiKey = useAiProviderConfigStore(
 		(state) => state.config.openai.apiKey.trim().length > 0,
+	);
+	const appendNonUndoableCanvasNodeToBaseline = useStudioHistoryStore(
+		(state) => state.appendNonUndoableCanvasNodeToBaseline,
 	);
 	const startRun = useStartAgentRun();
 	const activeRun = useNodeActiveAgentRun(node.id);
 	const latestError = useNodeLatestFailedAgentRunError(node.id);
 	const busy = isRunBusy(activeRun?.status);
 	const [prompt, setPrompt] = useState("");
-	const [model, setModel] = useState(OPENAI_IMAGE_DEFAULT_MODEL);
-	const [quality, setQuality] = useState("auto");
-	const [size, setSize] = useState("auto");
-	const [variants, setVariants] = useState("1");
+	const settings = useImageModelSettings("image.generate");
+	const [variants, setVariants] = useState(1);
+	const maxVariants = settings.capabilities.maxVariants ?? 1;
+	useEffect(() => {
+		setVariants((current) => clampNumber(Math.round(current), 1, maxVariants));
+	}, [maxVariants]);
 	const quoteParams = useMemo(
 		() => ({
 			params: {
-				model,
-				quality,
-				size,
-				variants: Number(variants),
+				model: settings.model,
+				quality: settings.quality,
+				size: formatAgentImageSize(settings.size),
+				aspectRatio: settings.aspectRatio,
+				variants,
 			},
+			context: {},
 		}),
-		[model, quality, size, variants],
+		[
+			settings.aspectRatio,
+			settings.model,
+			settings.quality,
+			settings.size,
+			variants,
+		],
 	);
 	const quote = useCreditQuote("image.generate", quoteParams);
 
@@ -214,6 +513,28 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
 		if (!currentProjectId || !canSubmit) return;
+		const projectBefore = useProjectStore.getState().currentProject;
+		const beforeNode = projectBefore?.canvas.nodes.find(
+			(item) => item.id === node.id,
+		);
+		if (beforeNode?.type === "image") {
+			const displaySize = resolveImageNodeDisplaySize(beforeNode, settings.size);
+			if (
+				beforeNode.width !== displaySize.width ||
+				beforeNode.height !== displaySize.height
+			) {
+				updateCanvasNodeLayout(beforeNode.id, {
+					width: displaySize.width,
+					height: displaySize.height,
+				});
+			}
+			const latestNode = useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.find((item) => item.id === beforeNode.id);
+			if (latestNode) {
+				appendNonUndoableCanvasNodeToBaseline(latestNode);
+			}
+		}
 		void startRun({
 			kind: "image.generate",
 			scope: {
@@ -241,81 +562,74 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 			<StatusLine nodeId={node.id} />
 			<ErrorLine error={latestError} />
 			{!hasOpenAiApiKey && <ConfigRequiredLine />}
-			<label className="block">
+			<div>
 				<FieldLabel>Prompt</FieldLabel>
-				<textarea
+				<Textarea
 					value={prompt}
 					onChange={(event) => setPrompt(event.currentTarget.value)}
 					placeholder="Describe the image to generate"
-					className="min-h-20 w-full resize-none rounded border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-white/30"
+					className="min-h-20 border-white/10 bg-black/40 text-xs text-white placeholder:text-white/30 focus:outline-sky-500"
 				/>
-			</label>
+			</div>
 			<div className="grid grid-cols-2 gap-2">
 				<div>
 					<FieldLabel>Model</FieldLabel>
-					<AgentSelect ariaLabel="生图模型" value={model} onChange={setModel}>
-						{MODEL_OPTIONS.map((option) => (
-							<option key={option.value} value={option.value}>
-								{option.label}
-							</option>
-						))}
-					</AgentSelect>
+					<AgentSelect
+						ariaLabel="生图模型"
+						value={settings.model}
+						onChange={settings.setModel}
+						options={settings.models.map((option) => ({
+							value: option.id,
+							label: option.label,
+						}))}
+					/>
 				</div>
 				<div>
 					<FieldLabel>Quality</FieldLabel>
 					<AgentSelect
 						ariaLabel="图片质量"
-						value={quality}
-						onChange={setQuality}
-					>
-						{QUALITY_OPTIONS.map((option) => (
-							<option key={option.value} value={option.value}>
-								{option.label}
-							</option>
-						))}
-					</AgentSelect>
-				</div>
-				<div>
-					<FieldLabel>Size</FieldLabel>
-					<AgentSelect ariaLabel="图片尺寸" value={size} onChange={setSize}>
-						{SIZE_OPTIONS.map((option) => (
-							<option key={option.value} value={option.value}>
-								{option.label}
-							</option>
-						))}
-					</AgentSelect>
-				</div>
-				<div>
-					<FieldLabel>Variants</FieldLabel>
-					<AgentSelect
-						ariaLabel="Variant 数量"
-						value={variants}
-						onChange={setVariants}
-					>
-						{VARIANT_OPTIONS.map((option) => (
-							<option key={option} value={String(option)}>
-								{option}
-							</option>
-						))}
-					</AgentSelect>
+						value={settings.quality}
+						onChange={settings.setQuality}
+						options={settings.qualityOptions}
+					/>
 				</div>
 			</div>
-			<div className="flex items-center justify-between rounded border border-white/10 bg-white/5 px-2 py-1.5 text-[11px] text-white/70">
-				<span>Reference</span>
-				<span>Coming soon</span>
+			<ImageSizeControls
+				capabilities={settings.capabilities}
+				aspectRatio={settings.aspectRatio}
+				aspectRatioOptions={settings.aspectRatioOptions}
+				size={settings.size}
+				onAspectRatioChange={settings.setAspectRatio}
+				onWidthChange={settings.setWidth}
+				onHeightChange={settings.setHeight}
+			/>
+			<div>
+				<FieldLabel>Variants</FieldLabel>
+				<ScrubbableNumberInput
+					ariaLabel="Variant 数量"
+					label="N"
+					value={variants}
+					step={1}
+					min={1}
+					max={maxVariants}
+					onValueChange={(value) =>
+						setVariants(clampNumber(Math.round(value), 1, maxVariants))
+					}
+					className="h-8 rounded border border-white/10 bg-black/40 pr-2"
+				/>
 			</div>
 			<div className="flex items-center justify-between">
 				<div className="text-[11px] text-white/55">
 					<QuoteLine quote={quote} />
 				</div>
-				<button
+				<Button
 					type="submit"
 					disabled={!canSubmit}
-					className="inline-flex h-8 items-center gap-1 rounded bg-sky-500 px-3 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/35"
+					className="h-8 gap-1 rounded bg-sky-500 px-3 text-xs font-medium text-white hover:bg-sky-400 active:bg-sky-600 data-disabled:cursor-not-allowed data-disabled:bg-white/10 data-disabled:text-white/35"
 				>
 					<Sparkles className="size-3" />
 					Generate
-				</button>
+				</Button>
 			</div>
 		</form>
 	);
@@ -330,23 +644,26 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	const setSelectedNodeIds = useCanvasInteractionStore(
 		(state) => state.setSelectedNodeIds,
 	);
-	const pushHistory = useStudioHistoryStore((state) => state.push);
+	const appendNonUndoableCanvasNodeToBaseline = useStudioHistoryStore(
+		(state) => state.appendNonUndoableCanvasNodeToBaseline,
+	);
 	const startRun = useStartAgentRun();
 	const activeRun = useNodeActiveAgentRun(node.id);
 	const latestError = useNodeLatestFailedAgentRunError(node.id);
 	const busy = isRunBusy(activeRun?.status);
 	const [instruction, setInstruction] = useState("");
-	const [model, setModel] = useState(OPENAI_IMAGE_DEFAULT_MODEL);
-	const [quality, setQuality] = useState("auto");
+	const settings = useImageModelSettings("image.edit");
 	const quoteParams = useMemo(
 		() => ({
 			params: {
-				model,
-				quality,
-				size: "auto",
+				model: settings.model,
+				quality: settings.quality,
+				size: formatAgentImageSize(settings.size),
+				aspectRatio: settings.aspectRatio,
 			},
+			context: {},
 		}),
-		[model, quality],
+		[settings.aspectRatio, settings.model, settings.quality, settings.size],
 	);
 	const quote = useCreditQuote("image.edit", quoteParams);
 
@@ -356,25 +673,22 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	const handleSubmit = (event: React.FormEvent) => {
 		event.preventDefault();
 		if (!currentProjectId || !node.assetId || !canSubmit) return;
+		const targetDisplaySize = resolveImageNodeDisplaySize(node, settings.size);
 		const targetNodeId = createCanvasNode({
 			type: "image",
 			name: "Image Edit",
 			assetId: null,
 			x: node.x + node.width + 40,
 			y: node.y,
-			width: node.width,
-			height: node.height,
+			width: targetDisplaySize.width,
+			height: targetDisplaySize.height,
 		});
 		const latestProject = useProjectStore.getState().currentProject;
 		const targetNode = latestProject?.canvas.nodes.find(
 			(item) => item.id === targetNodeId,
 		);
 		if (targetNode) {
-			pushHistory({
-				kind: "canvas.node-create",
-				node: targetNode,
-				focusNodeId: latestProject?.ui.focusedNodeId ?? null,
-			});
+			appendNonUndoableCanvasNodeToBaseline(targetNode);
 		}
 		setSelectedNodeIds([targetNodeId]);
 		void startRun({
@@ -388,9 +702,10 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 				instruction: instruction.trim(),
 			},
 			params: {
-				model,
-				quality,
-				size: "auto",
+				model: settings.model,
+				quality: settings.quality,
+				size: formatAgentImageSize(settings.size),
+				aspectRatio: settings.aspectRatio,
 			},
 			context: {
 				sourceAssetId: node.assetId,
@@ -413,48 +728,54 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 			<StatusLine nodeId={node.id} />
 			<ErrorLine error={latestError} />
 			{!hasOpenAiApiKey && <ConfigRequiredLine />}
-			<textarea
+			<Textarea
 				value={instruction}
 				onChange={(event) => setInstruction(event.currentTarget.value)}
 				placeholder="Describe the edit"
-				className="min-h-16 w-full resize-none rounded border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-white/30"
+				className="min-h-16 border-white/10 bg-black/40 text-xs text-white placeholder:text-white/30 focus:outline-violet-500"
 			/>
 			<div>
 				<FieldLabel>Model</FieldLabel>
-				<AgentSelect ariaLabel="编辑模型" value={model} onChange={setModel}>
-					{MODEL_OPTIONS.map((option) => (
-						<option key={option.value} value={option.value}>
-							{option.label}
-						</option>
-					))}
-				</AgentSelect>
+				<AgentSelect
+					ariaLabel="编辑模型"
+					value={settings.model}
+					onChange={settings.setModel}
+					options={settings.models.map((option) => ({
+						value: option.id,
+						label: option.label,
+					}))}
+				/>
 			</div>
 			<div>
 				<FieldLabel>Quality</FieldLabel>
 				<AgentSelect
 					ariaLabel="编辑图片质量"
-					value={quality}
-					onChange={setQuality}
-				>
-					{QUALITY_OPTIONS.map((option) => (
-						<option key={option.value} value={option.value}>
-							{option.label}
-						</option>
-					))}
-				</AgentSelect>
+					value={settings.quality}
+					onChange={settings.setQuality}
+					options={settings.qualityOptions}
+				/>
 			</div>
+			<ImageSizeControls
+				capabilities={settings.capabilities}
+				aspectRatio={settings.aspectRatio}
+				aspectRatioOptions={settings.aspectRatioOptions}
+				size={settings.size}
+				onAspectRatioChange={settings.setAspectRatio}
+				onWidthChange={settings.setWidth}
+				onHeightChange={settings.setHeight}
+			/>
 			<div className="flex items-center justify-between">
 				<div className="text-[11px] text-white/55">
 					<QuoteLine quote={quote} />
 				</div>
-				<button
+				<Button
 					type="submit"
 					disabled={!canSubmit}
-					className="inline-flex h-8 items-center gap-1 rounded bg-violet-500 px-3 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/35"
+					className="h-8 gap-1 rounded bg-violet-500 px-3 text-xs font-medium text-white hover:bg-violet-400 active:bg-violet-600 data-disabled:cursor-not-allowed data-disabled:bg-white/10 data-disabled:text-white/35"
 				>
 					<Wand2 className="size-3" />
 					Edit
-				</button>
+				</Button>
 			</div>
 		</form>
 	);

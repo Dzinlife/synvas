@@ -114,6 +114,53 @@ export interface AgentModel {
 	id: string;
 	label: string;
 	kind: AgentRunKind;
+	image?: AgentImageModelCapabilities;
+}
+
+export interface AgentImageQualityOption {
+	value: string;
+	label: string;
+}
+
+export interface AgentImageSize {
+	width: number;
+	height: number;
+}
+
+export interface AgentImageAspectRatioOption {
+	value: string;
+	label: string;
+	width: number;
+	height: number;
+	size?: AgentImageSize;
+}
+
+export interface AgentImageFixedSizeConstraint {
+	mode: "fixed";
+	sizes: AgentImageSize[];
+}
+
+export interface AgentImageFlexibleSizeConstraint {
+	mode: "flexible";
+	minPixels: number;
+	maxPixels: number;
+	maxEdge: number;
+	multiple: number;
+	maxLongEdgeRatio: number;
+}
+
+export type AgentImageSizeConstraint =
+	| AgentImageFixedSizeConstraint
+	| AgentImageFlexibleSizeConstraint;
+
+export interface AgentImageModelCapabilities {
+	qualityOptions: AgentImageQualityOption[];
+	defaultQuality: string;
+	aspectRatios: AgentImageAspectRatioOption[];
+	defaultAspectRatio: string;
+	defaultSize: AgentImageSize;
+	size: AgentImageSizeConstraint;
+	maxVariants?: number;
 }
 
 export interface AgentQuote {
