@@ -117,6 +117,8 @@ const createActiveRun = (nodeId = "node-1"): AgentRun => {
 	return {
 		id: "run-1",
 		sessionId: "session-1",
+		providerId: "openai",
+		modelId: "gpt-image-2",
 		scope: { type: "node", projectId: "project-1", nodeId },
 		kind: "image.generate",
 		status: "running",

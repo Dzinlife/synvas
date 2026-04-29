@@ -8,7 +8,19 @@ export type AgentRunStatus =
 	| "failed"
 	| "cancelled";
 
-export type AgentRunKind = "image.generate" | "image.edit";
+export type AgentRunKind =
+	| "llm.chat"
+	| "image.generate"
+	| "image.edit"
+	| "audio.generate"
+	| "video.generate";
+
+export type AgentArtifactKind = "text" | "image" | "audio" | "video" | "file";
+
+export interface AgentModelListFilter {
+	kind?: AgentRunKind;
+	providerId?: string;
+}
 
 export interface AgentScope {
 	type: "node" | "project";
@@ -17,6 +29,8 @@ export interface AgentScope {
 }
 
 export interface AgentRunRequest {
+	providerId: string;
+	modelId: string;
 	scope: AgentScope;
 	kind: AgentRunKind;
 	input: Record<string, unknown>;
@@ -43,18 +57,28 @@ export interface AgentRemoteUrlSource {
 	url: string;
 }
 
-export type AgentArtifactSource = AgentInlineBytesSource | AgentRemoteUrlSource;
+export interface AgentInlineTextSource {
+	type: "inline-text";
+	text: string;
+}
+
+export type AgentArtifactSource =
+	| AgentInlineBytesSource
+	| AgentRemoteUrlSource
+	| AgentInlineTextSource;
 
 export interface AgentArtifact {
 	id: string;
 	runId: string;
-	kind: "image";
+	kind: AgentArtifactKind;
 	status: "ready";
 	name: string;
-	mimeType: string;
-	width: number;
-	height: number;
+	mimeType?: string;
+	width?: number;
+	height?: number;
+	duration?: number;
 	source: AgentArtifactSource;
+	metadata?: Record<string, unknown>;
 	createdAt: number;
 }
 
@@ -86,6 +110,8 @@ export interface AgentEffectApplication {
 export interface AgentRun {
 	id: string;
 	sessionId?: string;
+	providerId: string;
+	modelId: string;
 	scope: AgentScope;
 	kind: AgentRunKind;
 	status: AgentRunStatus;
@@ -111,10 +137,24 @@ export interface AgentRunEvent {
 export type AgentRunListener = (event: AgentRunEvent) => void;
 
 export interface AgentModel {
-	id: string;
+	providerId: string;
+	providerLabel: string;
+	modelId: string;
 	label: string;
 	kind: AgentRunKind;
-	image?: AgentImageModelCapabilities;
+	enabled: boolean;
+	capabilities: AgentModelCapabilities;
+	defaultParams: Record<string, unknown>;
+	paramsSchema?: AgentJsonSchema;
+}
+
+export type AgentJsonSchema = Record<string, unknown>;
+
+export interface AgentLlmModelCapabilities {
+	type: "llm";
+	supportsStreaming?: boolean;
+	maxInputTokens?: number;
+	maxOutputTokens?: number;
 }
 
 export interface AgentImageQualityOption {
@@ -154,6 +194,7 @@ export type AgentImageSizeConstraint =
 	| AgentImageFlexibleSizeConstraint;
 
 export interface AgentImageModelCapabilities {
+	type: "image";
 	qualityOptions: AgentImageQualityOption[];
 	defaultQuality: string;
 	aspectRatios: AgentImageAspectRatioOption[];
@@ -162,6 +203,28 @@ export interface AgentImageModelCapabilities {
 	size: AgentImageSizeConstraint;
 	maxVariants?: number;
 }
+
+export interface AgentAudioModelCapabilities {
+	type: "audio";
+	inputMimeTypes?: string[];
+	outputMimeTypes: string[];
+	maxDurationSeconds?: number;
+}
+
+export interface AgentVideoModelCapabilities {
+	type: "video";
+	inputMimeTypes?: string[];
+	outputMimeTypes: string[];
+	aspectRatios?: AgentImageAspectRatioOption[];
+	defaultAspectRatio?: string;
+	maxDurationSeconds?: number;
+}
+
+export type AgentModelCapabilities =
+	| AgentLlmModelCapabilities
+	| AgentImageModelCapabilities
+	| AgentAudioModelCapabilities
+	| AgentVideoModelCapabilities;
 
 export interface AgentQuote {
 	estimatedCredits: number | null;
@@ -182,9 +245,14 @@ export interface AgentClient {
 		applications: AgentEffectApplication[],
 		error: string,
 	) => Promise<AgentRun | null>;
-	listModels: () => Promise<AgentModel[]>;
+	listModels: (filter?: AgentModelListFilter) => Promise<AgentModel[]>;
 	quote: (request: AgentRunRequest) => Promise<AgentQuote>;
 }
 
 export const isTerminalAgentRunStatus = (status: AgentRunStatus): boolean =>
 	status === "succeeded" || status === "failed" || status === "cancelled";
+
+export const isAgentImageModelCapabilities = (
+	capabilities: AgentModelCapabilities | null | undefined,
+): capabilities is AgentImageModelCapabilities =>
+	capabilities?.type === "image";

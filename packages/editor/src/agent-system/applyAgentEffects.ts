@@ -35,13 +35,16 @@ const createFileFromArtifact = async (
 			type: artifact.source.mimeType,
 		});
 	}
+	if (artifact.source.type !== "remote-url") {
+		throw new Error("Unsupported agent image artifact source.");
+	}
 	const response = await fetch(artifact.source.url);
 	if (!response.ok) {
 		throw new Error(`Agent artifact fetch failed: ${response.status}`);
 	}
 	const blob = await response.blob();
 	return new File([blob], normalizeFileName(artifact.name), {
-		type: artifact.mimeType,
+		type: artifact.mimeType ?? blob.type,
 	});
 };
 
@@ -78,9 +81,26 @@ const resolveImageNodeDisplaySize = (
 		width: baseNode.width,
 		height: Math.max(
 			1,
-			roundCanvasDimension((baseNode.width * imageSize.height) / imageSize.width),
+			roundCanvasDimension(
+				(baseNode.width * imageSize.height) / imageSize.width,
+			),
 		),
 	};
+};
+
+const resolveArtifactImageSize = (
+	artifact: AgentArtifact,
+): { width: number; height: number } | null => {
+	if (
+		typeof artifact.width !== "number" ||
+		typeof artifact.height !== "number"
+	) {
+		return null;
+	}
+	if (!Number.isFinite(artifact.width) || !Number.isFinite(artifact.height)) {
+		return null;
+	}
+	return { width: artifact.width, height: artifact.height };
 };
 
 export const applyAgentEffects = async (
@@ -102,6 +122,7 @@ export const applyAgentEffects = async (
 	const artifactById = new Map<string, AgentArtifact>();
 	for (const artifact of run.artifacts) {
 		if (artifact.kind !== "image") continue;
+		const artifactSize = resolveArtifactImageSize(artifact);
 		const file = await createFileFromArtifact(artifact);
 		const ingested = await ingestExternalFileAsset({
 			file,
@@ -115,10 +136,7 @@ export const applyAgentEffects = async (
 			locator: ingested.locator,
 			meta: {
 				...(ingested.meta ?? {}),
-				sourceSize: {
-					width: artifact.width,
-					height: artifact.height,
-				},
+				...(artifactSize ? { sourceSize: artifactSize } : {}),
 				agentRunId: run.id,
 			},
 		});
@@ -159,11 +177,9 @@ export const applyAgentEffects = async (
 			sourceNodeId: effect.metadata?.sourceNodeId,
 		};
 		const artifact = artifactById.get(effect.artifactId);
-		const displaySize = artifact
-			? resolveImageNodeDisplaySize(targetNode, {
-					width: artifact.width,
-					height: artifact.height,
-				})
+		const artifactSize = artifact ? resolveArtifactImageSize(artifact) : null;
+		const displaySize = artifactSize
+			? resolveImageNodeDisplaySize(targetNode, artifactSize)
 			: {
 					width: targetNode.width,
 					height: targetNode.height,

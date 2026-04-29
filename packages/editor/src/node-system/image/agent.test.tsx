@@ -82,6 +82,8 @@ const createRun = (request: AgentRunRequest): AgentRun => {
 	return {
 		id: "run-1",
 		sessionId: "session-1",
+		providerId: request.providerId,
+		modelId: request.modelId,
 		scope: request.scope,
 		kind: request.kind,
 		status: "queued",
@@ -275,10 +277,14 @@ describe("ImageNodeAgentPanel", () => {
 		const client = createClient();
 		vi.mocked(client.listModels).mockResolvedValue([
 			{
-				id: "vendor-image",
+				providerId: "vendor",
+				providerLabel: "Vendor",
+				modelId: "vendor-image",
 				label: "Vendor Image",
 				kind: "image.generate",
-				image: {
+				enabled: true,
+				capabilities: {
+					type: "image",
 					qualityOptions: [{ value: "standard", label: "Standard" }],
 					defaultQuality: "standard",
 					aspectRatios: [
@@ -297,6 +303,12 @@ describe("ImageNodeAgentPanel", () => {
 						sizes: [{ width: 512, height: 512 }],
 					},
 					maxVariants: 3,
+				},
+				defaultParams: {
+					quality: "standard",
+					aspectRatio: "1:1",
+					size: "512x512",
+					variants: 1,
 				},
 			},
 		]);

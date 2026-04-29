@@ -1352,6 +1352,8 @@ const createAgentRunForNode = (nodeId: string): AgentRun => {
 	return {
 		id: `run-${nodeId}`,
 		sessionId: `session-${nodeId}`,
+		providerId: "openai",
+		modelId: "gpt-image-2",
 		scope: { type: "node", projectId: "project-1", nodeId },
 		kind: "image.edit",
 		status: "running",

@@ -1,8 +1,10 @@
 import {
 	formatAgentImageSize,
+	isAgentImageModelCapabilities,
 	normalizeAgentImageSize,
-	OPENAI_IMAGE_AGENT_MODELS,
 	OPENAI_IMAGE_DEFAULT_MODEL,
+	OPENAI_PROVIDER_ID,
+	OPENAI_PROVIDER_MODELS,
 	resolveAgentImageAspectRatio,
 	type AgentImageModelCapabilities,
 	type AgentImageSize,
@@ -39,6 +41,7 @@ import { useCanvasInteractionStore } from "@/studio/canvas/canvasInteractionStor
 import { useStudioHistoryStore } from "@/studio/history/studioHistoryStore";
 
 const DEFAULT_IMAGE_SIZE: AgentImageSize = { width: 1024, height: 1024 };
+const OPENAI_IMAGE_DEFAULT_MODEL_KEY = `${OPENAI_PROVIDER_ID}:${OPENAI_IMAGE_DEFAULT_MODEL}`;
 
 const isRunBusy = (status: string | null | undefined): boolean => {
 	return (
@@ -105,20 +108,33 @@ const resolveImageNodeDisplaySize = (
 		width: baseNode.width,
 		height: Math.max(
 			1,
-			roundCanvasDimension((baseNode.width * imageSize.height) / imageSize.width),
+			roundCanvasDimension(
+				(baseNode.width * imageSize.height) / imageSize.width,
+			),
 		),
 	};
 };
 
 const getFallbackModels = (kind: AgentRunKind): AgentModel[] =>
-	OPENAI_IMAGE_AGENT_MODELS.filter((model) => model.kind === kind);
+	OPENAI_PROVIDER_MODELS.filter((model) => model.kind === kind);
+
+const getModelKey = (
+	model: Pick<AgentModel, "providerId" | "modelId">,
+): string => `${model.providerId}:${model.modelId}`;
 
 const getDefaultCapabilities = (
 	kind: AgentRunKind,
-): AgentImageModelCapabilities =>
-	getFallbackModels(kind).find(
-		(model) => model.id === OPENAI_IMAGE_DEFAULT_MODEL,
-	)?.image ?? {
+): AgentImageModelCapabilities => {
+	const defaultCapabilities = getFallbackModels(kind).find(
+		(model) =>
+			model.providerId === OPENAI_PROVIDER_ID &&
+			model.modelId === OPENAI_IMAGE_DEFAULT_MODEL,
+	)?.capabilities;
+	if (isAgentImageModelCapabilities(defaultCapabilities)) {
+		return defaultCapabilities;
+	}
+	return {
+		type: "image",
 		qualityOptions: [{ value: "auto", label: "Auto" }],
 		defaultQuality: "auto",
 		aspectRatios: [
@@ -137,13 +153,17 @@ const getDefaultCapabilities = (
 			sizes: [DEFAULT_IMAGE_SIZE],
 		},
 	};
+};
 
 const resolveModelsWithImageCapabilities = (
 	models: AgentModel[],
 	kind: AgentRunKind,
 ): AgentModel[] => {
 	const nextModels = models.filter(
-		(model) => model.kind === kind && model.image,
+		(model) =>
+			model.kind === kind &&
+			model.enabled &&
+			isAgentImageModelCapabilities(model.capabilities),
 	);
 	return nextModels.length > 0 ? nextModels : getFallbackModels(kind);
 };
@@ -156,7 +176,7 @@ const useImageAgentModels = (kind: AgentRunKind): AgentModel[] => {
 	useEffect(() => {
 		let disposed = false;
 		void client
-			.listModels()
+			.listModels({ kind })
 			.then((items) => {
 				if (disposed) return;
 				setModels(resolveModelsWithImageCapabilities(items, kind));
@@ -267,7 +287,10 @@ const QuoteLine = ({ quote }: { quote: AgentQuote | null }) => {
 
 const useCreditQuote = (
 	kind: AgentRunKind,
-	request: Pick<AgentRunRequest, "params" | "context">,
+	request: Pick<
+		AgentRunRequest,
+		"providerId" | "modelId" | "params" | "context"
+	>,
 ) => {
 	const client = useAgentClient();
 	const currentProjectId = useProjectStore((state) => state.currentProjectId);
@@ -280,6 +303,8 @@ const useCreditQuote = (
 		let disposed = false;
 		void client
 			.quote({
+				providerId: request.providerId,
+				modelId: request.modelId,
 				kind,
 				scope: { type: "project", projectId: currentProjectId },
 				input: {},
@@ -297,30 +322,46 @@ const useCreditQuote = (
 		return () => {
 			disposed = true;
 		};
-	}, [client, context, currentProjectId, kind, params]);
+	}, [
+		client,
+		context,
+		currentProjectId,
+		kind,
+		params,
+		request.modelId,
+		request.providerId,
+	]);
 
 	return quote;
 };
 
 const useImageModelSettings = (kind: AgentRunKind) => {
 	const models = useImageAgentModels(kind);
-	const [model, setModel] = useState(OPENAI_IMAGE_DEFAULT_MODEL);
+	const [model, setModel] = useState(OPENAI_IMAGE_DEFAULT_MODEL_KEY);
 	const [quality, setQuality] = useState("auto");
 	const [size, setSize] = useState<AgentImageSize>(DEFAULT_IMAGE_SIZE);
 	const [aspectRatio, setAspectRatio] = useState("1:1");
 	const selectedModel = useMemo(
-		() => models.find((item) => item.id === model) ?? null,
+		() => models.find((item) => getModelKey(item) === model) ?? null,
 		[model, models],
 	);
 	const effectiveModel = selectedModel ?? models[0] ?? null;
-	const modelValue = effectiveModel?.id ?? OPENAI_IMAGE_DEFAULT_MODEL;
-	const capabilities = effectiveModel?.image ?? getDefaultCapabilities(kind);
+	const modelValue = effectiveModel
+		? getModelKey(effectiveModel)
+		: OPENAI_IMAGE_DEFAULT_MODEL_KEY;
+	const providerId = effectiveModel?.providerId ?? OPENAI_PROVIDER_ID;
+	const modelId = effectiveModel?.modelId ?? OPENAI_IMAGE_DEFAULT_MODEL;
+	const capabilities = isAgentImageModelCapabilities(
+		effectiveModel?.capabilities,
+	)
+		? effectiveModel.capabilities
+		: getDefaultCapabilities(kind);
 	const qualityOptions = capabilities.qualityOptions;
 	const aspectRatioOptions = capabilities.aspectRatios;
 
 	useEffect(() => {
-		if (!effectiveModel || model === effectiveModel.id) return;
-		setModel(effectiveModel.id);
+		if (!effectiveModel || model === getModelKey(effectiveModel)) return;
+		setModel(getModelKey(effectiveModel));
 	}, [effectiveModel, model]);
 
 	useEffect(() => {
@@ -337,9 +378,13 @@ const useImageModelSettings = (kind: AgentRunKind) => {
 	}, [aspectRatio, capabilities, qualityOptions, size]);
 
 	const handleModelChange = (nextModel: string): AgentImageSize => {
-		const nextCapabilities =
-			models.find((item) => item.id === nextModel)?.image ??
-			getDefaultCapabilities(kind);
+		const nextModelDefinition =
+			models.find((item) => getModelKey(item) === nextModel) ?? null;
+		const nextCapabilities = isAgentImageModelCapabilities(
+			nextModelDefinition?.capabilities,
+		)
+			? nextModelDefinition.capabilities
+			: getDefaultCapabilities(kind);
 		setModel(nextModel);
 		setQuality((current) =>
 			nextCapabilities.qualityOptions.some((option) => option.value === current)
@@ -356,9 +401,7 @@ const useImageModelSettings = (kind: AgentRunKind) => {
 		return normalized;
 	};
 
-	const handleAspectRatioChange = (
-		nextAspectRatio: string,
-	): AgentImageSize => {
+	const handleAspectRatioChange = (nextAspectRatio: string): AgentImageSize => {
 		const option = aspectRatioOptions.find(
 			(item) => item.value === nextAspectRatio,
 		);
@@ -388,6 +431,8 @@ const useImageModelSettings = (kind: AgentRunKind) => {
 	return {
 		models,
 		model: modelValue,
+		modelId,
+		providerId,
 		quality,
 		size,
 		aspectRatio,
@@ -488,8 +533,10 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	}, [maxVariants]);
 	const quoteParams = useMemo(
 		() => ({
+			providerId: settings.providerId,
+			modelId: settings.modelId,
 			params: {
-				model: settings.model,
+				model: settings.modelId,
 				quality: settings.quality,
 				size: formatAgentImageSize(settings.size),
 				aspectRatio: settings.aspectRatio,
@@ -499,7 +546,8 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 		}),
 		[
 			settings.aspectRatio,
-			settings.model,
+			settings.modelId,
+			settings.providerId,
 			settings.quality,
 			settings.size,
 			variants,
@@ -518,7 +566,10 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 			(item) => item.id === node.id,
 		);
 		if (beforeNode?.type === "image") {
-			const displaySize = resolveImageNodeDisplaySize(beforeNode, settings.size);
+			const displaySize = resolveImageNodeDisplaySize(
+				beforeNode,
+				settings.size,
+			);
 			if (
 				beforeNode.width !== displaySize.width ||
 				beforeNode.height !== displaySize.height
@@ -536,6 +587,8 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 			}
 		}
 		void startRun({
+			providerId: settings.providerId,
+			modelId: settings.modelId,
 			kind: "image.generate",
 			scope: {
 				type: "node",
@@ -579,7 +632,7 @@ const GenerateImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 						value={settings.model}
 						onChange={settings.setModel}
 						options={settings.models.map((option) => ({
-							value: option.id,
+							value: getModelKey(option),
 							label: option.label,
 						}))}
 					/>
@@ -655,15 +708,23 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 	const settings = useImageModelSettings("image.edit");
 	const quoteParams = useMemo(
 		() => ({
+			providerId: settings.providerId,
+			modelId: settings.modelId,
 			params: {
-				model: settings.model,
+				model: settings.modelId,
 				quality: settings.quality,
 				size: formatAgentImageSize(settings.size),
 				aspectRatio: settings.aspectRatio,
 			},
 			context: {},
 		}),
-		[settings.aspectRatio, settings.model, settings.quality, settings.size],
+		[
+			settings.aspectRatio,
+			settings.modelId,
+			settings.providerId,
+			settings.quality,
+			settings.size,
+		],
 	);
 	const quote = useCreditQuote("image.edit", quoteParams);
 
@@ -692,6 +753,8 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 		}
 		setSelectedNodeIds([targetNodeId]);
 		void startRun({
+			providerId: settings.providerId,
+			modelId: settings.modelId,
 			kind: "image.edit",
 			scope: {
 				type: "node",
@@ -702,7 +765,7 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 				instruction: instruction.trim(),
 			},
 			params: {
-				model: settings.model,
+				model: settings.modelId,
 				quality: settings.quality,
 				size: formatAgentImageSize(settings.size),
 				aspectRatio: settings.aspectRatio,
@@ -741,7 +804,7 @@ const EditImageAgentPanel = ({ node }: { node: ImageCanvasNode }) => {
 					value={settings.model}
 					onChange={settings.setModel}
 					options={settings.models.map((option) => ({
-						value: option.id,
+						value: getModelKey(option),
 						label: option.label,
 					}))}
 				/>

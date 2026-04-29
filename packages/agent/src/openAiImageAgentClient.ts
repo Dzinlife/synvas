@@ -6,6 +6,7 @@ import type {
 	AgentImageModelCapabilities,
 	AgentImageSize,
 	AgentModel,
+	AgentModelListFilter,
 	AgentQuote,
 	AgentRun,
 	AgentRunEvent,
@@ -21,6 +22,8 @@ import {
 } from "./imageModelCapabilities";
 
 export const OPENAI_IMAGE_DEFAULT_ENDPOINT = "https://api.openai.com/v1";
+export const OPENAI_PROVIDER_ID = "openai";
+export const OPENAI_PROVIDER_LABEL = "OpenAI";
 export const OPENAI_IMAGE_DEFAULT_MODEL = "gpt-image-2";
 
 export interface OpenAiImageConfig {
@@ -33,13 +36,15 @@ export interface OpenAiImageEditSource {
 	name: string;
 }
 
-export interface OpenAiImageAgentClientOptions {
+export interface OpenAiProviderClientOptions {
 	config: OpenAiImageConfig | (() => OpenAiImageConfig | null | undefined);
 	fetch?: typeof fetch;
 	resolveEditSource?: (
 		request: AgentRunRequest,
 	) => Promise<OpenAiImageEditSource | null>;
 }
+
+export type OpenAiImageAgentClientOptions = OpenAiProviderClientOptions;
 
 const OPENAI_IMAGE_MODELS = [
 	{ id: "gpt-image-2", label: "GPT Image 2" },
@@ -65,6 +70,7 @@ const OPENAI_LEGACY_IMAGE_SIZES: AgentImageSize[] = [
 ];
 
 const OPENAI_GPT_IMAGE_2_CAPABILITIES: AgentImageModelCapabilities = {
+	type: "image",
 	qualityOptions: [...OPENAI_IMAGE_QUALITY_OPTIONS],
 	defaultQuality: "auto",
 	aspectRatios: [
@@ -119,6 +125,7 @@ const OPENAI_GPT_IMAGE_2_CAPABILITIES: AgentImageModelCapabilities = {
 };
 
 const OPENAI_LEGACY_IMAGE_CAPABILITIES: AgentImageModelCapabilities = {
+	type: "image",
 	qualityOptions: [...OPENAI_IMAGE_QUALITY_OPTIONS],
 	defaultQuality: "auto",
 	aspectRatios: [
@@ -163,24 +170,53 @@ const OPENAI_IMAGE_CAPABILITIES_BY_MODEL: Record<
 	"gpt-image-1-mini": OPENAI_LEGACY_IMAGE_CAPABILITIES,
 };
 
-export const OPENAI_IMAGE_AGENT_MODELS: AgentModel[] =
-	OPENAI_IMAGE_MODELS.flatMap((model) => {
+export const OPENAI_PROVIDER_MODELS: AgentModel[] = OPENAI_IMAGE_MODELS.flatMap(
+	(model) => {
 		const image = OPENAI_IMAGE_CAPABILITIES_BY_MODEL[model.id];
 		return [
 			{
-				id: model.id,
+				providerId: OPENAI_PROVIDER_ID,
+				providerLabel: OPENAI_PROVIDER_LABEL,
+				modelId: model.id,
 				label: model.label,
 				kind: "image.generate" as const,
-				image: image ? { ...image, maxVariants: 10 } : undefined,
+				enabled: true,
+				capabilities: image
+					? { ...image, maxVariants: 10 }
+					: {
+							...OPENAI_GPT_IMAGE_2_CAPABILITIES,
+						},
+				defaultParams: {
+					quality: "auto",
+					aspectRatio: "1:1",
+					size: "1024x1024",
+					variants: 1,
+				},
 			},
 			{
-				id: model.id,
+				providerId: OPENAI_PROVIDER_ID,
+				providerLabel: OPENAI_PROVIDER_LABEL,
+				modelId: model.id,
 				label: model.label,
 				kind: "image.edit" as const,
-				image: image ? { ...image, maxVariants: undefined } : undefined,
+				enabled: true,
+				capabilities: image
+					? { ...image, maxVariants: undefined }
+					: {
+							...OPENAI_GPT_IMAGE_2_CAPABILITIES,
+							maxVariants: undefined,
+						},
+				defaultParams: {
+					quality: "auto",
+					aspectRatio: "1:1",
+					size: "1024x1024",
+				},
 			},
 		];
-	});
+	},
+);
+
+export const OPENAI_IMAGE_AGENT_MODELS = OPENAI_PROVIDER_MODELS;
 
 const createId = (prefix: string): string => {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -264,9 +300,12 @@ const redactSecrets = (message: string, secrets: string[]): string => {
 	return sanitized;
 };
 
-const resolveModel = (params: Record<string, unknown>): string => {
-	const model = readString(params, "model", OPENAI_IMAGE_DEFAULT_MODEL).trim();
-	return model || OPENAI_IMAGE_DEFAULT_MODEL;
+const resolveModel = (
+	params: Record<string, unknown>,
+	fallbackModel = OPENAI_IMAGE_DEFAULT_MODEL,
+): string => {
+	const model = readString(params, "model", fallbackModel).trim();
+	return model || fallbackModel || OPENAI_IMAGE_DEFAULT_MODEL;
 };
 
 const resolveQuality = (params: Record<string, unknown>): string => {
@@ -274,8 +313,11 @@ const resolveQuality = (params: Record<string, unknown>): string => {
 	return OPENAI_IMAGE_QUALITIES.has(quality) ? quality : "auto";
 };
 
-const resolveSize = (params: Record<string, unknown>): string => {
-	const model = resolveModel(params);
+const resolveSize = (
+	params: Record<string, unknown>,
+	fallbackModel?: string,
+): string => {
+	const model = resolveModel(params, fallbackModel);
 	const capabilities =
 		OPENAI_IMAGE_CAPABILITIES_BY_MODEL[model] ??
 		OPENAI_IMAGE_CAPABILITIES_BY_MODEL[OPENAI_IMAGE_DEFAULT_MODEL] ??
@@ -309,8 +351,9 @@ const parseSize = (
 
 const resolveFallbackSize = (
 	params: Record<string, unknown>,
+	fallbackModel?: string,
 ): { width: number; height: number } => {
-	const size = resolveSize(params);
+	const size = resolveSize(params, fallbackModel);
 	return parseAgentImageSize(size) ?? { width: 1024, height: 1024 };
 };
 
@@ -354,7 +397,9 @@ class OpenAiImageHttpError extends Error {
 	}
 }
 
-export class OpenAiImageAgentClient implements AgentClient {
+export class OpenAiProviderClient implements AgentClient {
+	readonly providerId = OPENAI_PROVIDER_ID;
+
 	private readonly config:
 		| OpenAiImageConfig
 		| (() => OpenAiImageConfig | null | undefined);
@@ -367,7 +412,7 @@ export class OpenAiImageAgentClient implements AgentClient {
 	private readonly listenersByRunId = new Map<string, Set<AgentRunListener>>();
 	private readonly abortControllersByRunId = new Map<string, AbortController>();
 
-	constructor(options: OpenAiImageAgentClientOptions) {
+	constructor(options: OpenAiProviderClientOptions) {
 		this.config = options.config;
 		this.fetchImpl =
 			options.fetch ?? ((input, init) => globalThis.fetch(input, init));
@@ -379,6 +424,8 @@ export class OpenAiImageAgentClient implements AgentClient {
 		const run: AgentRun = {
 			id: createId("run"),
 			sessionId: createId("session"),
+			providerId: request.providerId,
+			modelId: request.modelId,
 			scope: request.scope,
 			kind: request.kind,
 			status: "queued",
@@ -468,8 +515,11 @@ export class OpenAiImageAgentClient implements AgentClient {
 		});
 	}
 
-	async listModels(): Promise<AgentModel[]> {
-		return OPENAI_IMAGE_AGENT_MODELS;
+	async listModels(filter?: AgentModelListFilter): Promise<AgentModel[]> {
+		if (filter?.providerId && filter.providerId !== this.providerId) return [];
+		return OPENAI_PROVIDER_MODELS.filter(
+			(model) => !filter?.kind || model.kind === filter.kind,
+		);
 	}
 
 	async quote(): Promise<AgentQuote> {
@@ -560,10 +610,10 @@ export class OpenAiImageAgentClient implements AgentClient {
 		if (!prompt) throw new Error("Prompt 不能为空。");
 		const params = request.params ?? {};
 		const body: Record<string, unknown> = {
-			model: resolveModel(params),
+			model: resolveModel(params, request.modelId),
 			prompt,
 			quality: resolveQuality(params),
-			size: resolveSize(params),
+			size: resolveSize(params, request.modelId),
 			output_format: "png",
 		};
 		const variants = resolveVariantCount(params);
@@ -601,11 +651,11 @@ export class OpenAiImageAgentClient implements AgentClient {
 		}
 		const params = request.params ?? {};
 		const form = new FormData();
-		form.append("model", resolveModel(params));
+		form.append("model", resolveModel(params, request.modelId));
 		form.append("prompt", instruction);
 		form.append("image", source.data, source.name);
 		form.append("quality", resolveQuality(params));
-		form.append("size", resolveSize(params));
+		form.append("size", resolveSize(params, request.modelId));
 		form.append("output_format", "png");
 		return this.requestImages({
 			config,
@@ -653,7 +703,7 @@ export class OpenAiImageAgentClient implements AgentClient {
 			run.kind === "image.edit"
 				? readString(run.input, "instruction", "image edit")
 				: readString(run.input, "prompt", "image");
-		const fallbackSize = resolveFallbackSize(run.params);
+		const fallbackSize = resolveFallbackSize(run.params, run.modelId);
 		const now = Date.now();
 		return images.map((image, index): AgentArtifact => {
 			const outputFormat = normalizeOutputFormat(image.outputFormat);
@@ -763,6 +813,8 @@ export class OpenAiImageAgentClient implements AgentClient {
 		}
 	}
 }
+
+export { OpenAiProviderClient as OpenAiImageAgentClient };
 
 interface OpenAiImageResult {
 	b64Json?: string;

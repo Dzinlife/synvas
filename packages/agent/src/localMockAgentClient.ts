@@ -3,7 +3,9 @@ import type {
 	AgentClient,
 	AgentEffect,
 	AgentEffectApplication,
+	AgentImageModelCapabilities,
 	AgentModel,
+	AgentModelListFilter,
 	AgentQuote,
 	AgentRun,
 	AgentRunEvent,
@@ -16,8 +18,72 @@ import { parseAgentImageSize } from "./imageModelCapabilities";
 
 const MOCK_PNG_BASE64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+export const LOCAL_MOCK_PROVIDER_ID = "local-mock";
+export const LOCAL_MOCK_PROVIDER_LABEL = "Local Mock";
 export const LOCAL_MOCK_AGENT_RUN_DURATION_MS = 10_000;
 const LOCAL_MOCK_AGENT_SCHEDULE_STEP_COUNT = 3;
+const LOCAL_MOCK_IMAGE_CAPABILITIES: AgentImageModelCapabilities = {
+	type: "image",
+	qualityOptions: [{ value: "auto", label: "Auto" }],
+	defaultQuality: "auto",
+	aspectRatios: [
+		{
+			value: "1:1",
+			label: "1:1",
+			width: 1,
+			height: 1,
+			size: { width: 1024, height: 1024 },
+		},
+		{
+			value: "16:9",
+			label: "16:9",
+			width: 16,
+			height: 9,
+			size: { width: 1024, height: 576 },
+		},
+	],
+	defaultAspectRatio: "1:1",
+	defaultSize: { width: 1024, height: 1024 },
+	size: {
+		mode: "fixed",
+		sizes: [
+			{ width: 1024, height: 1024 },
+			{ width: 1024, height: 576 },
+		],
+	},
+	maxVariants: 4,
+};
+const LOCAL_MOCK_AGENT_MODELS: AgentModel[] = [
+	{
+		providerId: LOCAL_MOCK_PROVIDER_ID,
+		providerLabel: LOCAL_MOCK_PROVIDER_LABEL,
+		modelId: "mock-image-standard",
+		label: "Mock Image Standard",
+		kind: "image.generate",
+		enabled: true,
+		capabilities: LOCAL_MOCK_IMAGE_CAPABILITIES,
+		defaultParams: {
+			quality: "auto",
+			aspectRatio: "1:1",
+			size: "1024x1024",
+			variants: 1,
+		},
+	},
+	{
+		providerId: LOCAL_MOCK_PROVIDER_ID,
+		providerLabel: LOCAL_MOCK_PROVIDER_LABEL,
+		modelId: "mock-image-edit",
+		label: "Mock Image Edit",
+		kind: "image.edit",
+		enabled: true,
+		capabilities: { ...LOCAL_MOCK_IMAGE_CAPABILITIES, maxVariants: undefined },
+		defaultParams: {
+			quality: "auto",
+			aspectRatio: "1:1",
+			size: "1024x1024",
+		},
+	},
+];
 
 export interface LocalMockAgentClientOptions {
 	stepDelayMs?: number;
@@ -73,6 +139,8 @@ export class LocalMockAgentClient implements AgentClient {
 		const run: AgentRun = {
 			id: createId("run"),
 			sessionId: createId("session"),
+			providerId: request.providerId,
+			modelId: request.modelId,
 			scope: request.scope,
 			kind: request.kind,
 			status: "queued",
@@ -161,19 +229,13 @@ export class LocalMockAgentClient implements AgentClient {
 		});
 	}
 
-	async listModels(): Promise<AgentModel[]> {
-		return [
-			{
-				id: "mock-image-standard",
-				label: "Mock Image Standard",
-				kind: "image.generate",
-			},
-			{
-				id: "mock-image-edit",
-				label: "Mock Image Edit",
-				kind: "image.edit",
-			},
-		];
+	async listModels(filter?: AgentModelListFilter): Promise<AgentModel[]> {
+		if (filter?.providerId && filter.providerId !== LOCAL_MOCK_PROVIDER_ID) {
+			return [];
+		}
+		return LOCAL_MOCK_AGENT_MODELS.filter(
+			(model) => !filter?.kind || model.kind === filter.kind,
+		);
 	}
 
 	async quote(request: AgentRunRequest): Promise<AgentQuote> {

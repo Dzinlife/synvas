@@ -59,6 +59,8 @@ const createRun = (
 ): AgentRun => ({
 	id: "run-1",
 	sessionId: "session-1",
+	providerId: "openai",
+	modelId: "gpt-image-2",
 	scope: { type: "node", projectId: "project-1", nodeId },
 	kind: "image.generate",
 	status: "applying_effects",
@@ -168,9 +170,11 @@ describe("applyAgentEffects", () => {
 	});
 
 	it("undo 不回滚 agent 生成结果绑定", async () => {
+		const historyNode = createProject().canvas.nodes[0];
+		if (!historyNode) throw new Error("Missing test node.");
 		useStudioHistoryStore.getState().push({
 			kind: "canvas.node-create",
-			node: createProject().canvas.nodes[0]!,
+			node: historyNode,
 			focusNodeId: null,
 		});
 		await applyAgentEffects(createRun());

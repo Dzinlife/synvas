@@ -9,6 +9,8 @@ describe("LocalMockAgentClient", () => {
 		vi.useFakeTimers();
 		const client = new LocalMockAgentClient({ stepDelayMs: 10 });
 		const run = await client.createRun({
+			providerId: "local-mock",
+			modelId: "mock-image-standard",
 			kind: "image.generate",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { prompt: "blue house" },
@@ -38,6 +40,8 @@ describe("LocalMockAgentClient", () => {
 		vi.useFakeTimers();
 		const client = new LocalMockAgentClient();
 		const run = await client.createRun({
+			providerId: "local-mock",
+			modelId: "mock-image-standard",
 			kind: "image.generate",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { prompt: "long loading" },
@@ -59,6 +63,8 @@ describe("LocalMockAgentClient", () => {
 		vi.useFakeTimers();
 		const client = new LocalMockAgentClient({ stepDelayMs: 10 });
 		const run = await client.createRun({
+			providerId: "local-mock",
+			modelId: "mock-image-edit",
 			kind: "image.edit",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { instruction: "make it brighter" },
@@ -81,6 +87,8 @@ describe("LocalMockAgentClient", () => {
 		vi.useFakeTimers();
 		const client = new LocalMockAgentClient({ stepDelayMs: 10 });
 		const run = await client.createRun({
+			providerId: "local-mock",
+			modelId: "mock-image-edit",
 			kind: "image.edit",
 			scope: { type: "node", projectId: "project-1", nodeId: "source-node" },
 			input: { instruction: "add a sunset" },

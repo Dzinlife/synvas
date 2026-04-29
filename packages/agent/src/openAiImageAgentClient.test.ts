@@ -45,6 +45,8 @@ describe("OpenAiImageAgentClient", () => {
 		});
 
 		const run = await client.createRun({
+			providerId: "openai",
+			modelId: "gpt-image-2",
 			kind: "image.generate",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { prompt: "blue house" },
@@ -118,6 +120,8 @@ describe("OpenAiImageAgentClient", () => {
 		});
 
 		const run = await client.createRun({
+			providerId: "openai",
+			modelId: "gpt-image-2",
 			kind: "image.generate",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { prompt: "wide image" },
@@ -164,6 +168,8 @@ describe("OpenAiImageAgentClient", () => {
 		});
 
 		const run = await client.createRun({
+			providerId: "openai",
+			modelId: "gpt-image-1.5",
 			kind: "image.generate",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { prompt: "legacy wide image" },
@@ -218,6 +224,8 @@ describe("OpenAiImageAgentClient", () => {
 		});
 
 		const run = await client.createRun({
+			providerId: "openai",
+			modelId: "gpt-image-2",
 			kind: "image.generate",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { prompt: "blue house" },
@@ -259,6 +267,8 @@ describe("OpenAiImageAgentClient", () => {
 		});
 
 		const run = await client.createRun({
+			providerId: "openai",
+			modelId: "gpt-image-1.5",
 			kind: "image.edit",
 			scope: { type: "node", projectId: "project-1", nodeId: "source-node" },
 			input: { instruction: "add a sunset" },
@@ -321,6 +331,8 @@ describe("OpenAiImageAgentClient", () => {
 		});
 
 		const run = await client.createRun({
+			providerId: "openai",
+			modelId: "gpt-image-2",
 			kind: "image.generate",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { prompt: "blue house" },
@@ -354,6 +366,8 @@ describe("OpenAiImageAgentClient", () => {
 		});
 
 		const run = await client.createRun({
+			providerId: "openai",
+			modelId: "gpt-image-2",
 			kind: "image.generate",
 			scope: { type: "node", projectId: "project-1", nodeId: "node-1" },
 			input: { prompt: "blue house" },
