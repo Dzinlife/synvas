@@ -119,6 +119,7 @@ interface CanvasWorkspaceOverlayProps {
 		options?: CanvasSidebarNodeSelectOptions,
 	) => void;
 	onSidebarNodeReorder?: (request: CanvasSidebarNodeReorderRequest) => void;
+	onSidebarAssetCreateNode?: (asset: TimelineAsset) => void;
 	onCollapseSidebar: () => void;
 	onExpandSidebar: () => void;
 	rightPanelShouldRender: boolean;
@@ -458,6 +459,7 @@ const CanvasWorkspaceOverlay = ({
 	selectedNodeIds,
 	onSidebarNodeSelect,
 	onSidebarNodeReorder,
+	onSidebarAssetCreateNode,
 	onCollapseSidebar,
 	onExpandSidebar,
 	rightPanelShouldRender,
@@ -867,10 +869,13 @@ const CanvasWorkspaceOverlay = ({
 						<CanvasSidebar
 							mode={sidebarMode}
 							nodes={sidebarNodes}
+							assets={currentProject?.assets ?? []}
+							projectId={currentProject?.id ?? null}
 							activeNodeId={activeNodeId}
 							selectedNodeIds={selectedNodeIds}
 							onNodeSelect={onSidebarNodeSelect}
 							onNodeReorder={onSidebarNodeReorder}
+							onAssetCreateNode={onSidebarAssetCreateNode}
 							onCollapse={onCollapseSidebar}
 						/>
 					</div>

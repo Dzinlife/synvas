@@ -152,6 +152,7 @@ const CanvasWorkspace = () => {
 		handleCanvasPointerLeave,
 		handleCanvasPointerMove,
 		handleCanvasPointerUp,
+		handleAssetCreateNode,
 		handleCloseDrawer,
 		handleCreateHdrTestNode,
 		handleCreateImageGeneratorNode,
@@ -274,6 +275,7 @@ const CanvasWorkspace = () => {
 				selectedNodeIds={normalizedSelectedNodeIds}
 				onSidebarNodeSelect={handleSidebarNodeSelect}
 				onSidebarNodeReorder={handleSidebarNodeReorder}
+				onSidebarAssetCreateNode={handleAssetCreateNode}
 				onCollapseSidebar={() => setSidebarExpanded(false)}
 				onExpandSidebar={() => setSidebarExpanded(true)}
 				rightPanelShouldRender={rightPanelShouldRender}

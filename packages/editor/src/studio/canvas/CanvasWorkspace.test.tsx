@@ -2169,6 +2169,88 @@ describe("CanvasWorkspace", () => {
 		);
 	});
 
+	it("左侧栏默认展示 Node tab，并可切换到 Assets tab", () => {
+		render(<CanvasWorkspace />);
+
+		expect(
+			screen
+				.getByTestId("canvas-sidebar-tab-nodes")
+				.getAttribute("aria-pressed"),
+		).toBe("true");
+		expect(screen.getByTestId("canvas-sidebar-node-list")).toBeTruthy();
+		expect(screen.queryByTestId("canvas-sidebar-asset-list")).toBeNull();
+
+		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-assets"));
+
+		expect(
+			screen
+				.getByTestId("canvas-sidebar-tab-assets")
+				.getAttribute("aria-pressed"),
+		).toBe("true");
+		expect(screen.getByTestId("canvas-sidebar-asset-list")).toBeTruthy();
+		expect(
+			screen.getByTestId("canvas-sidebar-asset-item-asset-scene").textContent,
+		).toContain("scene.png");
+	});
+
+	it("删除 asset-backed node 后 Assets tab 仍显示原 asset", () => {
+		render(<CanvasWorkspace />);
+		clickNodeAt(300, 160);
+
+		fireEvent.keyDown(window, { key: "Delete" });
+		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-assets"));
+
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.some(
+					(node) => node.id === "node-video-1",
+				),
+		).toBe(false);
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.assets.some((asset) => asset.id === "asset-scene"),
+		).toBe(true);
+		expect(
+			screen.getByTestId("canvas-sidebar-asset-item-asset-scene"),
+		).toBeTruthy();
+	});
+
+	it("Asset 面板可复用素材创建 canvas node", () => {
+		render(<CanvasWorkspace />);
+		const beforeNodeIds = new Set(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.map((node) => node.id) ?? [],
+		);
+
+		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-assets"));
+		fireEvent.click(
+			screen.getByTestId("canvas-sidebar-asset-create-asset-scene"),
+		);
+
+		const project = useProjectStore.getState().currentProject;
+		const createdNode = project?.canvas.nodes.find(
+			(node) => !beforeNodeIds.has(node.id),
+		);
+		expect(createdNode).toBeTruthy();
+		if (!createdNode) return;
+		expect(createdNode).toMatchObject({
+			type: "image",
+			assetId: "asset-scene",
+			name: "scene.png",
+			width: 640,
+			height: 360,
+		});
+		expect(useStudioHistoryStore.getState().past.at(-1)?.kind).toBe(
+			"canvas.node-create",
+		);
+		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
+			createdNode.id,
+		]);
+	});
+
 	it("侧边栏会按 board 的 parentId 树进行分组缩进", () => {
 		useProjectStore.setState((state) => {
 			const project = state.currentProject;
@@ -2321,8 +2403,7 @@ describe("CanvasWorkspace", () => {
 
 		const spacer = screen.getByTestId("canvas-sidebar-node-virtual-spacer");
 		expect(Number.parseFloat(spacer.style.height)).toBe(
-			(240 + 6) * SIDEBAR_NODE_ROW_HEIGHT_PX +
-				SIDEBAR_NODE_LIST_PADDING_PX * 2,
+			(240 + 6) * SIDEBAR_NODE_ROW_HEIGHT_PX + SIDEBAR_NODE_LIST_PADDING_PX * 2,
 		);
 	});
 
@@ -2367,11 +2448,11 @@ describe("CanvasWorkspace", () => {
 		expect(
 			screen.queryByTestId("canvas-sidebar-node-item-node-virtual-child-000"),
 		).toBeNull();
-		const afterSpacer = screen.getByTestId("canvas-sidebar-node-virtual-spacer");
-		const afterHeight = Number.parseFloat(afterSpacer.style.height);
-		expect(afterHeight).toBe(
-			beforeHeight - 80 * SIDEBAR_NODE_ROW_HEIGHT_PX,
+		const afterSpacer = screen.getByTestId(
+			"canvas-sidebar-node-virtual-spacer",
 		);
+		const afterHeight = Number.parseFloat(afterSpacer.style.height);
+		expect(afterHeight).toBe(beforeHeight - 80 * SIDEBAR_NODE_ROW_HEIGHT_PX);
 	});
 
 	it("overlay 布局不改变画布渲染尺寸", () => {
@@ -3148,11 +3229,12 @@ describe("CanvasWorkspace", () => {
 		}
 	});
 
-	it("Focus 模式左侧栏只保留禁用的 Node 导航", () => {
+	it("Focus 模式左侧栏保留 Node/Assets tab，且禁用创建动作", () => {
 		render(<CanvasWorkspace />);
 		doubleClickNodeAt(80, 80);
 		expect(screen.queryByTestId("canvas-sidebar-tab-element")).toBeNull();
-		expect(screen.queryByTestId("canvas-sidebar-tab-nodes")).toBeNull();
+		expect(screen.getByTestId("canvas-sidebar-tab-nodes")).toBeTruthy();
+		expect(screen.getByTestId("canvas-sidebar-tab-assets")).toBeTruthy();
 		expect(screen.queryByTestId("canvas-element-library")).toBeNull();
 
 		expect(screen.getByText("拖拽 node asset 到时间线（待实现）")).toBeTruthy();
@@ -3169,6 +3251,16 @@ describe("CanvasWorkspace", () => {
 		expect(afterUi).toBeTruthy();
 		expect(afterUi?.activeNodeId).toBe(beforeUi?.activeNodeId);
 		expect(afterCamera).toEqual(beforeCamera);
+
+		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-assets"));
+		expect(
+			screen.getByTestId("canvas-sidebar-asset-item-asset-scene"),
+		).toBeTruthy();
+		expect(
+			screen
+				.getByTestId("canvas-sidebar-asset-create-asset-scene")
+				.getAttribute("aria-disabled"),
+		).toBe("true");
 	});
 
 	it("工具模式按钮仅启用 Move/Board，Pan/Text 为禁用态", () => {

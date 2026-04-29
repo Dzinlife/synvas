@@ -566,6 +566,52 @@ describe("projectStore", () => {
 		).toBeNull();
 	});
 
+	it("删除单个 asset-backed node 不会删除 project asset", () => {
+		const nodeId = useProjectStore.getState().createCanvasNode({
+			type: "video",
+			assetId: "asset-1",
+			name: "Video 1",
+		});
+		const assetsBefore =
+			useProjectStore.getState().currentProject?.assets ?? [];
+
+		useProjectStore.getState().removeCanvasNodeForHistory(nodeId);
+
+		const project = useProjectStore.getState().currentProject;
+		expect(project?.canvas.nodes.some((node) => node.id === nodeId)).toBe(
+			false,
+		);
+		expect(project?.assets).toEqual(assetsBefore);
+		expect(project?.assets.some((asset) => asset.id === "asset-1")).toBe(true);
+	});
+
+	it("批量删除 asset-backed nodes 不会删除 project assets", () => {
+		const videoId = useProjectStore.getState().createCanvasNode({
+			type: "video",
+			assetId: "asset-1",
+			name: "Video 1",
+		});
+		const imageId = useProjectStore.getState().createCanvasNode({
+			type: "image",
+			assetId: "asset-1",
+			name: "Image 1",
+		});
+		const assetsBefore =
+			useProjectStore.getState().currentProject?.assets ?? [];
+
+		useProjectStore.getState().removeCanvasGraphBatch([videoId, imageId]);
+
+		const project = useProjectStore.getState().currentProject;
+		expect(project?.canvas.nodes.some((node) => node.id === videoId)).toBe(
+			false,
+		);
+		expect(project?.canvas.nodes.some((node) => node.id === imageId)).toBe(
+			false,
+		);
+		expect(project?.assets).toEqual(assetsBefore);
+		expect(project?.assets.some((asset) => asset.id === "asset-1")).toBe(true);
+	});
+
 	it("removeCanvasGraphBatch 会保留仍被引用的 scene 文档，只移除 scene node", () => {
 		const project = createProjectWithReferencedScene();
 		useProjectStore.setState({

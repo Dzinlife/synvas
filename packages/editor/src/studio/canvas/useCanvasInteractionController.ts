@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { TimelineContextMenuAction } from "@/scene-editor/components/TimelineContextMenu";
+import type { TimelineAsset } from "core/timeline-system/types";
 import type { StudioRuntimeManager } from "@/scene-editor/runtime/types";
 import { CANVAS_NODE_DRAWER_DEFAULT_HEIGHT } from "@/studio/canvas/CanvasNodeDrawerShell";
 import { getCanvasNodeDefinition } from "@/node-system/registry";
@@ -162,6 +163,42 @@ type CanvasPointerLikeEvent = Pick<
 	| "metaKey"
 	| "shiftKey"
 >;
+
+const ASSET_NODE_MAX_SIZE = {
+	width: 640,
+	height: 360,
+} as const;
+
+const AUDIO_ASSET_NODE_SIZE = {
+	width: 640,
+	height: 180,
+} as const;
+
+const resolveAssetBackedNodeSize = (
+	asset: TimelineAsset,
+): { width: number; height: number } | null => {
+	if (asset.kind === "audio") return AUDIO_ASSET_NODE_SIZE;
+	if (asset.kind !== "image" && asset.kind !== "video") return null;
+	const sourceSize = asset.meta?.sourceSize;
+	const sourceWidth = sourceSize?.width ?? 0;
+	const sourceHeight = sourceSize?.height ?? 0;
+	if (
+		!Number.isFinite(sourceWidth) ||
+		!Number.isFinite(sourceHeight) ||
+		sourceWidth <= 0 ||
+		sourceHeight <= 0
+	) {
+		return ASSET_NODE_MAX_SIZE;
+	}
+	const scale = Math.min(
+		ASSET_NODE_MAX_SIZE.width / sourceWidth,
+		ASSET_NODE_MAX_SIZE.height / sourceHeight,
+	);
+	return {
+		width: Math.max(1, Math.round(sourceWidth * scale)),
+		height: Math.max(1, Math.round(sourceHeight * scale)),
+	};
+};
 
 const createStoreRef = <T>(
 	getValue: () => T,
@@ -1300,6 +1337,70 @@ export const useCanvasInteractionController = ({
 		stageSize.height,
 		stageSize.width,
 	]);
+
+	const handleAssetCreateNode = useCallback(
+		(asset: TimelineAsset) => {
+			if (focusedNodeId) return;
+			const size = resolveAssetBackedNodeSize(asset);
+			if (!size) return;
+			const center = resolveCameraCenterWorld(
+				getCamera(),
+				stageSize.width,
+				stageSize.height,
+			);
+			const baseInput = {
+				assetId: asset.id,
+				name: asset.name,
+				x: center.x - size.width / 2,
+				y: center.y - size.height / 2,
+				width: size.width,
+				height: size.height,
+			};
+			let nodeId = "";
+			if (asset.kind === "image") {
+				nodeId = createCanvasNode({
+					type: "image",
+					...baseInput,
+				});
+			} else if (asset.kind === "video") {
+				nodeId = createCanvasNode({
+					type: "video",
+					...baseInput,
+				});
+			} else if (asset.kind === "audio") {
+				nodeId = createCanvasNode({
+					type: "audio",
+					...baseInput,
+				});
+			}
+			if (!nodeId) return;
+			const latestProject = useProjectStore.getState().currentProject;
+			if (!latestProject) return;
+			const node = latestProject.canvas.nodes.find(
+				(item) => item.id === nodeId,
+			);
+			if (!node) return;
+			commitSelection([nodeId], {
+				primaryNodeId: nodeId,
+				onActiveNodeChange: setActiveNode,
+			});
+			pushHistory({
+				kind: "canvas.node-create",
+				node,
+				focusNodeId: latestProject.ui.focusedNodeId,
+			});
+		},
+		[
+			commitSelection,
+			createCanvasNode,
+			focusedNodeId,
+			getCamera,
+			pushHistory,
+			setActiveNode,
+			stageSize.height,
+			stageSize.width,
+		],
+	);
 
 	const handleZoomByStep = useCallback(
 		(multiplier: number) => {
@@ -5066,6 +5167,7 @@ export const useCanvasInteractionController = ({
 		handleCreateHdrTestNode,
 		handleCreateImageGeneratorNode,
 		handleCreateScene,
+		handleAssetCreateNode,
 		handleDropTimelineElementsToCanvas,
 		handleEditorMouseOverCapture,
 		handleRestoreSceneReferenceToCanvas,

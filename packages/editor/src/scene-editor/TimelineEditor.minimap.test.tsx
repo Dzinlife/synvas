@@ -7,7 +7,10 @@ import {
 	screen,
 	waitFor,
 } from "@testing-library/react";
-import type { TimelineElement } from "core/timeline-system/types";
+import type {
+	TimelineAsset,
+	TimelineElement,
+} from "core/timeline-system/types";
 import type { StudioProject } from "@/studio/project/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -66,17 +69,18 @@ vi.mock("./components/TimelineElement", () => ({
 	}: {
 		element: TimelineElement;
 		onRequestContextMenu?: (
-			event: React.MouseEvent<HTMLDivElement>,
+			event: React.MouseEvent<HTMLButtonElement>,
 			elementId: string,
 		) => void;
 	}) => (
-		<div
+		<button
+			type="button"
 			data-testid={`timeline-element-${element.id}`}
 			data-timeline-element="true"
 			onContextMenu={(event) => onRequestContextMenu?.(event, element.id)}
 		>
 			{element.name}
-		</div>
+		</button>
 	),
 }));
 
@@ -422,6 +426,53 @@ describe("TimelineEditor minimap sync", () => {
 		expect(timelineStore.getState().elements).toHaveLength(0);
 		expect(timelineStore.getState().selectedIds).toEqual([]);
 		expect(timelineStore.getState().primarySelectedId).toBeNull();
+	});
+
+	it("删除带 assetId 的 timeline element 不会删除 project asset", () => {
+		const asset: TimelineAsset = {
+			id: "asset-clip",
+			kind: "video",
+			name: "clip.mp4",
+			locator: {
+				type: "linked-file",
+				filePath: "/clip.mp4",
+			},
+			meta: {
+				fileName: "clip.mp4",
+			},
+		};
+		const project = createProject();
+		useProjectStore.setState({
+			currentProject: {
+				...project,
+				assets: [asset],
+			},
+		});
+		timelineStore.setState({
+			elements: [
+				{
+					...createElement({
+						id: "clip-delete-asset",
+						start: 0,
+						end: 60,
+						trackIndex: 0,
+					}),
+					assetId: asset.id,
+				},
+			],
+			selectedIds: ["clip-delete-asset"],
+			primarySelectedId: "clip-delete-asset",
+		});
+		render(<TimelineEditor />, { wrapper });
+
+		fireEvent.keyDown(window, { key: "Delete" });
+
+		expect(timelineStore.getState().elements).toHaveLength(0);
+		expect(
+			useProjectStore
+				.getState()
+				.currentProject?.assets.some((item) => item.id === asset.id),
+		).toBe(true);
 	});
 
 	it("rulerWidth 变化会同步到 timelineViewportWidth", async () => {

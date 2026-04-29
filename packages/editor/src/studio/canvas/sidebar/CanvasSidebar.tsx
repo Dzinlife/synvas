@@ -1,5 +1,13 @@
 import { useDrag } from "@use-gesture/react";
-import { ChevronRight } from "lucide-react";
+import type { TimelineAsset } from "core/timeline-system/types";
+import {
+	ChevronRight,
+	FileImage,
+	FileQuestionMark,
+	Music2,
+	Plus,
+	VideoIcon,
+} from "lucide-react";
 import type React from "react";
 import {
 	useCallback,
@@ -10,6 +18,7 @@ import {
 	useState,
 } from "react";
 import { cn } from "@/lib/utils";
+import { resolveAssetDisplayLabel } from "@/projects/assetLocator";
 import {
 	buildLayerTreeOrder,
 	compareSiblingOrderDesc,
@@ -34,6 +43,8 @@ export interface CanvasSidebarNodeReorderRequest {
 interface CanvasSidebarProps {
 	mode: CanvasSidebarMode;
 	nodes: CanvasNode[];
+	assets?: TimelineAsset[];
+	projectId?: string | null;
 	activeNodeId: string | null;
 	selectedNodeIds: string[];
 	onNodeSelect: (
@@ -41,6 +52,7 @@ interface CanvasSidebarProps {
 		options?: CanvasSidebarNodeSelectOptions,
 	) => void;
 	onNodeReorder?: (request: CanvasSidebarNodeReorderRequest) => void;
+	onAssetCreateNode?: (asset: TimelineAsset) => void;
 	onCollapse?: () => void;
 }
 
@@ -55,6 +67,19 @@ interface NodeListProps {
 		options?: CanvasSidebarNodeSelectOptions,
 	) => void;
 	onNodeReorder?: (request: CanvasSidebarNodeReorderRequest) => void;
+}
+
+type CanvasSidebarTab = "nodes" | "assets";
+type ReusableAssetKind = Extract<
+	TimelineAsset["kind"],
+	"image" | "video" | "audio"
+>;
+
+interface AssetListProps {
+	assets: TimelineAsset[];
+	projectId?: string | null;
+	disabled: boolean;
+	onAssetCreateNode?: (asset: TimelineAsset) => void;
 }
 
 interface NestedNodeItem {
@@ -111,6 +136,41 @@ const NODE_ROW_HEIGHT_PX = 36;
 const NODE_LIST_PADDING_PX = 12;
 const VIRTUAL_OVERSCAN_ROWS = 8;
 
+const ASSET_KIND_LABELS: Record<TimelineAsset["kind"], string> = {
+	video: "Video",
+	audio: "Audio",
+	image: "Image",
+	lottie: "Lottie",
+	unknown: "Unknown",
+};
+
+const REUSABLE_ASSET_KIND_SET = new Set<TimelineAsset["kind"]>([
+	"image",
+	"video",
+	"audio",
+]);
+
+const isReusableAssetKind = (
+	kind: TimelineAsset["kind"],
+): kind is ReusableAssetKind => REUSABLE_ASSET_KIND_SET.has(kind);
+
+const resolveAssetKindIcon = (kind: TimelineAsset["kind"]) => {
+	if (kind === "image") return FileImage;
+	if (kind === "video") return VideoIcon;
+	if (kind === "audio") return Music2;
+	return FileQuestionMark;
+};
+
+const resolveShortAssetLocatorLabel = (
+	asset: TimelineAsset,
+	projectId?: string | null,
+): string => {
+	const label = resolveAssetDisplayLabel(asset, { projectId }) ?? "";
+	const normalized = label.replace(/\\/g, "/");
+	const chunks = normalized.split("/").filter(Boolean);
+	return chunks[chunks.length - 1] ?? label;
+};
+
 const isSameDropIntent = (
 	left: DropIntent | null,
 	right: DropIntent | null,
@@ -145,15 +205,12 @@ const resolveDropLineTop = ({
 	if (!overIntent.targetNodeId) {
 		if (overIntent.position === "before") return 0;
 		return clampLineTop(
-			resolveViewportTop(
-				NODE_LIST_PADDING_PX + rowCount * NODE_ROW_HEIGHT_PX,
-			),
+			resolveViewportTop(NODE_LIST_PADDING_PX + rowCount * NODE_ROW_HEIGHT_PX),
 		);
 	}
 	const targetRow = rowByNodeId.get(overIntent.targetNodeId);
 	if (!targetRow) return null;
-	const targetTop =
-		NODE_LIST_PADDING_PX + targetRow.index * NODE_ROW_HEIGHT_PX;
+	const targetTop = NODE_LIST_PADDING_PX + targetRow.index * NODE_ROW_HEIGHT_PX;
 	const boundaryY =
 		overIntent.position === "before"
 			? targetTop
@@ -246,7 +303,10 @@ const resolveDropIntentFromVirtualRows = ({
 				"after",
 			);
 			if (stableIntent) return stableIntent;
-			const fallbackIntent = resolveSiblingIntentIfAllowed(nextNodeId, "before");
+			const fallbackIntent = resolveSiblingIntentIfAllowed(
+				nextNodeId,
+				"before",
+			);
 			if (fallbackIntent) return fallbackIntent;
 		}
 	}
@@ -263,10 +323,7 @@ const resolveDropIntentFromVirtualRows = ({
 	const targetNode = nodeById.get(targetNodeId);
 	if (!targetNode) return null;
 	const relativeY = contentY - targetIndex * NODE_ROW_HEIGHT_PX;
-	const clampedRatio = Math.max(
-		0,
-		Math.min(1, relativeY / NODE_ROW_HEIGHT_PX),
-	);
+	const clampedRatio = Math.max(0, Math.min(1, relativeY / NODE_ROW_HEIGHT_PX));
 	if (targetNode.type === "board") {
 		const beforeBoundaryY = NODE_ROW_HEIGHT_PX * ROW_INSIDE_TOP_RATIO;
 		const afterBoundaryY = NODE_ROW_HEIGHT_PX * ROW_INSIDE_BOTTOM_RATIO;
@@ -715,8 +772,7 @@ const NodeList: React.FC<NodeListProps> = ({
 	const rawVirtualStartIndex = Math.max(
 		0,
 		Math.floor(
-			(virtualViewport.scrollTop - NODE_LIST_PADDING_PX) /
-				NODE_ROW_HEIGHT_PX,
+			(virtualViewport.scrollTop - NODE_LIST_PADDING_PX) / NODE_ROW_HEIGHT_PX,
 		) - VIRTUAL_OVERSCAN_ROWS,
 	);
 	const virtualStartIndex = Math.min(
@@ -1129,25 +1185,170 @@ const NodeList: React.FC<NodeListProps> = ({
 	);
 };
 
+const AssetList: React.FC<AssetListProps> = ({
+	assets,
+	projectId,
+	disabled,
+	onAssetCreateNode,
+}) => {
+	if (assets.length === 0) {
+		return (
+			<div className="rounded-md border border-white/10 bg-black/20 px-2 py-3 text-center text-xs text-neutral-400">
+				暂无素材
+			</div>
+		);
+	}
+
+	return (
+		<div
+			data-testid="canvas-sidebar-asset-list"
+			className="-m-3 flex h-full min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3"
+		>
+			{assets.map((asset) => {
+				const Icon = resolveAssetKindIcon(asset.kind);
+				const canCreate =
+					isReusableAssetKind(asset.kind) &&
+					!disabled &&
+					typeof onAssetCreateNode === "function";
+				const locatorLabel = resolveShortAssetLocatorLabel(asset, projectId);
+				const createFromAsset = () => {
+					if (!canCreate) return;
+					onAssetCreateNode?.(asset);
+				};
+				const handleAssetRowClick = (
+					event: React.MouseEvent<HTMLButtonElement>,
+				) => {
+					const target = event.target;
+					if (!(target instanceof Element)) return;
+					if (!target.closest("[data-asset-create-trigger]")) return;
+					createFromAsset();
+				};
+				const handleAssetRowDoubleClick = (
+					event: React.MouseEvent<HTMLButtonElement>,
+				) => {
+					const target = event.target;
+					if (
+						target instanceof Element &&
+						target.closest("[data-asset-create-trigger]")
+					) {
+						return;
+					}
+					createFromAsset();
+				};
+				const handleAssetRowKeyDown = (
+					event: React.KeyboardEvent<HTMLButtonElement>,
+				) => {
+					if (!canCreate) return;
+					if (event.key !== "Enter" && event.key !== " ") return;
+					event.preventDefault();
+					createFromAsset();
+				};
+				return (
+					<button
+						type="button"
+						key={asset.id}
+						data-testid={`canvas-sidebar-asset-item-${asset.id}`}
+						data-asset-id={asset.id}
+						disabled={!canCreate}
+						className={cn(
+							"group flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left",
+							"bg-transparent text-white/90",
+							canCreate && "cursor-pointer hover:bg-white/5",
+							!canCreate && "cursor-default",
+						)}
+						onClick={handleAssetRowClick}
+						onDoubleClick={handleAssetRowDoubleClick}
+						onKeyDown={handleAssetRowKeyDown}
+					>
+						<div className="flex size-8 shrink-0 items-center justify-center rounded bg-white/10 text-white/75">
+							<Icon className="size-4" aria-hidden="true" />
+						</div>
+						<div className="min-w-0 flex-1">
+							<div className="truncate text-xs font-medium">{asset.name}</div>
+							<div className="flex min-w-0 items-center gap-1 text-[10px] text-white/45">
+								<span className="shrink-0">
+									{ASSET_KIND_LABELS[asset.kind]}
+								</span>
+								{locatorLabel ? (
+									<>
+										<span className="shrink-0">·</span>
+										<span className="truncate">{locatorLabel}</span>
+									</>
+								) : null}
+							</div>
+						</div>
+						<span
+							data-asset-create-trigger="true"
+							data-testid={`canvas-sidebar-asset-create-${asset.id}`}
+							aria-disabled={!canCreate}
+							className={cn(
+								"flex size-7 shrink-0 items-center justify-center rounded text-white/75 transition",
+								canCreate && "bg-white/10 hover:bg-white/20 hover:text-white",
+								!canCreate && "cursor-not-allowed bg-white/5 text-white/25",
+							)}
+						>
+							<Plus className="size-3.5" aria-hidden="true" />
+						</span>
+					</button>
+				);
+			})}
+		</div>
+	);
+};
+
 const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 	mode,
 	nodes,
+	assets = [],
+	projectId,
 	activeNodeId,
 	selectedNodeIds,
 	onNodeSelect,
 	onNodeReorder,
+	onAssetCreateNode,
 	onCollapse,
 }) => {
 	const [isNodeListDragging, setIsNodeListDragging] = useState(false);
+	const [activeTab, setActiveTab] = useState<CanvasSidebarTab>("nodes");
 	const nodeTabDisabled = mode === "focus";
+	const assetCreateDisabled = mode === "focus";
 
 	return (
 		<div
 			data-testid="canvas-sidebar"
 			className="flex h-full min-h-0 w-full flex-col overflow-hidden ring-2 ring-neutral-800/80 bg-neutral-900/90 shadow-2xl backdrop-blur-xl"
 		>
-			<div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-				<div className="text-xs font-medium text-white/90">Node 导航</div>
+			<div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+				<div className="flex min-w-0 items-center rounded bg-white/5 p-0.5">
+					<button
+						type="button"
+						data-testid="canvas-sidebar-tab-nodes"
+						aria-pressed={activeTab === "nodes"}
+						onClick={() => setActiveTab("nodes")}
+						className={cn(
+							"rounded px-2 py-1 text-[11px] font-medium transition",
+							activeTab === "nodes"
+								? "bg-white/15 text-white"
+								: "text-white/60 hover:bg-white/10 hover:text-white",
+						)}
+					>
+						Node 导航
+					</button>
+					<button
+						type="button"
+						data-testid="canvas-sidebar-tab-assets"
+						aria-pressed={activeTab === "assets"}
+						onClick={() => setActiveTab("assets")}
+						className={cn(
+							"rounded px-2 py-1 text-[11px] font-medium transition",
+							activeTab === "assets"
+								? "bg-white/15 text-white"
+								: "text-white/60 hover:bg-white/10 hover:text-white",
+						)}
+					>
+						Assets
+					</button>
+				</div>
 				{onCollapse && (
 					<button
 						type="button"
@@ -1162,16 +1363,25 @@ const CanvasSidebar: React.FC<CanvasSidebarProps> = ({
 					</button>
 				)}
 			</div>
-			<div className="min-h-0 flex-1 p-3">
-				<NodeList
-					nodes={nodes}
-					activeNodeId={activeNodeId}
-					selectedNodeIds={selectedNodeIds}
-					disabled={nodeTabDisabled}
-					onDraggingChange={setIsNodeListDragging}
-					onNodeSelect={onNodeSelect}
-					onNodeReorder={onNodeReorder}
-				/>
+			<div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+				{activeTab === "nodes" ? (
+					<NodeList
+						nodes={nodes}
+						activeNodeId={activeNodeId}
+						selectedNodeIds={selectedNodeIds}
+						disabled={nodeTabDisabled}
+						onDraggingChange={setIsNodeListDragging}
+						onNodeSelect={onNodeSelect}
+						onNodeReorder={onNodeReorder}
+					/>
+				) : (
+					<AssetList
+						assets={assets}
+						projectId={projectId}
+						disabled={assetCreateDisabled}
+						onAssetCreateNode={onAssetCreateNode}
+					/>
+				)}
 			</div>
 		</div>
 	);
