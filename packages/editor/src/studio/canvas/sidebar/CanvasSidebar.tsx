@@ -74,15 +74,17 @@ interface NodeListDragState {
 	overIntent: DropIntent | null;
 }
 
-interface NodeRowLayout {
-	nodeId: string | null;
-	rect: DOMRect;
+interface VirtualNodeRow {
+	item: NestedNodeItem;
+	depth: number;
+	index: number;
 }
 
-interface ResolveDropIntentFromLayoutsOptions {
+interface ResolveDropIntentFromVirtualRowsOptions {
 	clientY: number;
 	containerRect: DOMRect;
-	rowLayouts: NodeRowLayout[];
+	scrollTop: number;
+	rows: VirtualNodeRow[];
 	previousIntent: DropIntent | null;
 	dragNodeIds: string[];
 	nodeById: Map<string, CanvasNode>;
@@ -90,11 +92,12 @@ interface ResolveDropIntentFromLayoutsOptions {
 
 interface ResolveDropLineTopOptions {
 	overIntent: DropIntent | null;
+	scrollContainer: HTMLElement;
 	positioningContainer: HTMLElement;
-	rowLayouts: NodeRowLayout[];
+	rowByNodeId: Map<string, VirtualNodeRow>;
+	rowCount: number;
 }
 
-const NODE_ROW_SELECTOR = "[data-node-row-container='true']";
 const ROW_INSIDE_TOP_RATIO = 0.25;
 const ROW_INSIDE_BOTTOM_RATIO = 0.75;
 const AUTO_EXPAND_DELAY_MS = 500;
@@ -104,6 +107,9 @@ const ROOT_DROP_EDGE_PX = 18;
 const INTENT_HYSTERESIS_PX = 2;
 const ROW_BOUNDARY_HYSTERESIS_PX = 4;
 const NODE_ROW_INDENT_PX = 21;
+const NODE_ROW_HEIGHT_PX = 36;
+const NODE_LIST_PADDING_PX = 12;
+const VIRTUAL_OVERSCAN_ROWS = 8;
 
 const isSameDropIntent = (
 	left: DropIntent | null,
@@ -115,66 +121,56 @@ const isSameDropIntent = (
 	);
 };
 
-const collectNodeRowLayouts = (container: HTMLElement): NodeRowLayout[] => {
-	return [...container.querySelectorAll<HTMLElement>(NODE_ROW_SELECTOR)].map(
-		(element) => ({
-			nodeId: element.dataset.nodeId ?? null,
-			rect: element.getBoundingClientRect(),
-		}),
-	);
-};
-
 const resolveDropLineTop = ({
 	overIntent,
+	scrollContainer,
 	positioningContainer,
-	rowLayouts,
+	rowByNodeId,
+	rowCount,
 }: ResolveDropLineTopOptions): number | null => {
 	if (!overIntent || overIntent.position === "inside") return null;
 	const clampLineTop = (value: number): number => {
-		const maxTop = Math.max(positioningContainer.clientHeight - 1, 0);
+		const viewportHeight =
+			positioningContainer.clientHeight ||
+			positioningContainer.getBoundingClientRect().height;
+		const maxTop = Math.max(viewportHeight - 1, 0);
 		return Math.max(0, Math.min(Math.round(value), maxTop));
+	};
+	const scrollRect = scrollContainer.getBoundingClientRect();
+	const positioningRect = positioningContainer.getBoundingClientRect();
+	const viewportOffsetTop = scrollRect.top - positioningRect.top;
+	const resolveViewportTop = (contentY: number): number => {
+		return contentY - scrollContainer.scrollTop + viewportOffsetTop;
 	};
 	if (!overIntent.targetNodeId) {
 		if (overIntent.position === "before") return 0;
-		return clampLineTop(positioningContainer.clientHeight);
+		return clampLineTop(
+			resolveViewportTop(
+				NODE_LIST_PADDING_PX + rowCount * NODE_ROW_HEIGHT_PX,
+			),
+		);
 	}
-	if (rowLayouts.length === 0) return null;
-	const targetIndex = rowLayouts.findIndex((layout) => {
-		return layout.nodeId === overIntent.targetNodeId;
-	});
-	if (targetIndex < 0) return null;
-	const targetLayout = rowLayouts[targetIndex];
-	if (!targetLayout) return null;
-	let boundaryY =
+	const targetRow = rowByNodeId.get(overIntent.targetNodeId);
+	if (!targetRow) return null;
+	const targetTop =
+		NODE_LIST_PADDING_PX + targetRow.index * NODE_ROW_HEIGHT_PX;
+	const boundaryY =
 		overIntent.position === "before"
-			? targetLayout.rect.top
-			: targetLayout.rect.bottom;
-	if (overIntent.position === "before" && targetIndex > 0) {
-		const previousLayout = rowLayouts[targetIndex - 1];
-		if (previousLayout) {
-			boundaryY = (previousLayout.rect.bottom + targetLayout.rect.top) * 0.5;
-		}
-	}
-	if (overIntent.position === "after" && targetIndex < rowLayouts.length - 1) {
-		const nextLayout = rowLayouts[targetIndex + 1];
-		if (nextLayout) {
-			boundaryY = (targetLayout.rect.bottom + nextLayout.rect.top) * 0.5;
-		}
-	}
-	const positioningRect = positioningContainer.getBoundingClientRect();
-	const viewportTop = boundaryY - positioningRect.top;
-	return clampLineTop(viewportTop);
+			? targetTop
+			: targetTop + NODE_ROW_HEIGHT_PX;
+	return clampLineTop(resolveViewportTop(boundaryY));
 };
 
-const resolveDropIntentFromLayouts = ({
+const resolveDropIntentFromVirtualRows = ({
 	clientY,
 	containerRect,
-	rowLayouts,
+	scrollTop,
+	rows,
 	previousIntent,
 	dragNodeIds,
 	nodeById,
-}: ResolveDropIntentFromLayoutsOptions): DropIntent | null => {
-	if (rowLayouts.length === 0) return null;
+}: ResolveDropIntentFromVirtualRowsOptions): DropIntent | null => {
+	if (rows.length === 0) return null;
 	const resolveSiblingIntentIfAllowed = (
 		targetNodeId: string,
 		position: "before" | "after",
@@ -201,133 +197,132 @@ const resolveDropIntentFromLayouts = ({
 			position: "after",
 		};
 	}
-	const firstRect = rowLayouts[0]?.rect;
-	const lastRect = rowLayouts.at(-1)?.rect;
-	if (!firstRect || !lastRect) return null;
-	if (clientY < firstRect.top) {
+	const contentY =
+		clientY - containerRect.top + scrollTop - NODE_LIST_PADDING_PX;
+	const listHeight = rows.length * NODE_ROW_HEIGHT_PX;
+	if (contentY < 0) {
 		return {
 			targetNodeId: null,
 			position: "before",
 		};
 	}
-	if (clientY > lastRect.bottom) {
+	if (contentY > listHeight) {
 		return {
 			targetNodeId: null,
 			position: "after",
 		};
 	}
-	for (let index = 0; index < rowLayouts.length - 1; index += 1) {
-		const currentRow = rowLayouts[index];
-		const nextRow = rowLayouts[index + 1];
-		if (!currentRow || !nextRow) continue;
-		if (!currentRow.nodeId || !nextRow.nodeId) continue;
-		const boundaryY = (currentRow.rect.bottom + nextRow.rect.top) * 0.5;
-		if (Math.abs(clientY - boundaryY) > ROW_BOUNDARY_HYSTERESIS_PX) continue;
-		const shouldKeepCurrentAfter =
-			previousIntent?.targetNodeId === currentRow.nodeId &&
-			previousIntent.position === "after";
-		if (shouldKeepCurrentAfter) {
-			const keepIntent = resolveSiblingIntentIfAllowed(
-				currentRow.nodeId,
+	const boundaryIndex = Math.round(contentY / NODE_ROW_HEIGHT_PX);
+	if (boundaryIndex > 0 && boundaryIndex < rows.length) {
+		const boundaryY = boundaryIndex * NODE_ROW_HEIGHT_PX;
+		const currentRow = rows[boundaryIndex - 1];
+		const nextRow = rows[boundaryIndex];
+		if (
+			currentRow &&
+			nextRow &&
+			Math.abs(contentY - boundaryY) <= ROW_BOUNDARY_HYSTERESIS_PX
+		) {
+			const currentNodeId = currentRow.item.node.id;
+			const nextNodeId = nextRow.item.node.id;
+			const shouldKeepCurrentAfter =
+				previousIntent?.targetNodeId === currentNodeId &&
+				previousIntent.position === "after";
+			if (shouldKeepCurrentAfter) {
+				const keepIntent = resolveSiblingIntentIfAllowed(
+					currentNodeId,
+					"after",
+				);
+				if (keepIntent) return keepIntent;
+			}
+			const shouldKeepNextBefore =
+				previousIntent?.targetNodeId === nextNodeId &&
+				previousIntent.position === "before";
+			if (shouldKeepNextBefore) {
+				const keepIntent = resolveSiblingIntentIfAllowed(nextNodeId, "before");
+				if (keepIntent) return keepIntent;
+			}
+			const stableIntent = resolveSiblingIntentIfAllowed(
+				currentNodeId,
 				"after",
 			);
-			if (keepIntent) return keepIntent;
-		}
-		const shouldKeepNextBefore =
-			previousIntent?.targetNodeId === nextRow.nodeId &&
-			previousIntent.position === "before";
-		if (shouldKeepNextBefore) {
-			const keepIntent = resolveSiblingIntentIfAllowed(
-				nextRow.nodeId,
-				"before",
-			);
-			if (keepIntent) return keepIntent;
-		}
-		const stableIntent = resolveSiblingIntentIfAllowed(
-			currentRow.nodeId,
-			"after",
-		);
-		if (stableIntent) return stableIntent;
-		const fallbackIntent = resolveSiblingIntentIfAllowed(
-			nextRow.nodeId,
-			"before",
-		);
-		if (fallbackIntent) return fallbackIntent;
-	}
-	let targetLayout = rowLayouts[0];
-	for (const layout of rowLayouts) {
-		if (clientY <= layout.rect.bottom) {
-			targetLayout = layout;
-			break;
+			if (stableIntent) return stableIntent;
+			const fallbackIntent = resolveSiblingIntentIfAllowed(nextNodeId, "before");
+			if (fallbackIntent) return fallbackIntent;
 		}
 	}
-	if (!targetLayout?.nodeId) return null;
-	if (isNodeInsideDragSubtree(targetLayout.nodeId, dragNodeIds, nodeById)) {
+	const targetIndex = Math.min(
+		rows.length - 1,
+		Math.max(0, Math.floor(contentY / NODE_ROW_HEIGHT_PX)),
+	);
+	const targetRow = rows[targetIndex];
+	if (!targetRow) return null;
+	const targetNodeId = targetRow.item.node.id;
+	if (isNodeInsideDragSubtree(targetNodeId, dragNodeIds, nodeById)) {
 		return null;
 	}
-	const targetNode = nodeById.get(targetLayout.nodeId);
+	const targetNode = nodeById.get(targetNodeId);
 	if (!targetNode) return null;
-	const relativeY = clientY - targetLayout.rect.top;
+	const relativeY = contentY - targetIndex * NODE_ROW_HEIGHT_PX;
 	const clampedRatio = Math.max(
 		0,
-		Math.min(1, relativeY / Math.max(targetLayout.rect.height, 1)),
+		Math.min(1, relativeY / NODE_ROW_HEIGHT_PX),
 	);
 	if (targetNode.type === "board") {
-		const beforeBoundaryY = targetLayout.rect.height * ROW_INSIDE_TOP_RATIO;
-		const afterBoundaryY = targetLayout.rect.height * ROW_INSIDE_BOTTOM_RATIO;
+		const beforeBoundaryY = NODE_ROW_HEIGHT_PX * ROW_INSIDE_TOP_RATIO;
+		const afterBoundaryY = NODE_ROW_HEIGHT_PX * ROW_INSIDE_BOTTOM_RATIO;
 		const canKeepBeforeOrInside =
-			previousIntent?.targetNodeId === targetLayout.nodeId &&
+			previousIntent?.targetNodeId === targetNodeId &&
 			(previousIntent.position === "before" ||
 				previousIntent.position === "inside") &&
 			Math.abs(relativeY - beforeBoundaryY) <= INTENT_HYSTERESIS_PX;
 		if (canKeepBeforeOrInside) {
 			return {
-				targetNodeId: targetLayout.nodeId,
+				targetNodeId,
 				position: previousIntent.position,
 			};
 		}
 		const canKeepInsideOrAfter =
-			previousIntent?.targetNodeId === targetLayout.nodeId &&
+			previousIntent?.targetNodeId === targetNodeId &&
 			(previousIntent.position === "inside" ||
 				previousIntent.position === "after") &&
 			Math.abs(relativeY - afterBoundaryY) <= INTENT_HYSTERESIS_PX;
 		if (canKeepInsideOrAfter) {
 			return {
-				targetNodeId: targetLayout.nodeId,
+				targetNodeId,
 				position: previousIntent.position,
 			};
 		}
 		if (clampedRatio < ROW_INSIDE_TOP_RATIO) {
 			return {
-				targetNodeId: targetLayout.nodeId,
+				targetNodeId,
 				position: "before",
 			};
 		}
 		if (clampedRatio > ROW_INSIDE_BOTTOM_RATIO) {
 			return {
-				targetNodeId: targetLayout.nodeId,
+				targetNodeId,
 				position: "after",
 			};
 		}
 		return {
-			targetNodeId: targetLayout.nodeId,
+			targetNodeId,
 			position: "inside",
 		};
 	}
-	const middleBoundaryY = targetLayout.rect.height * 0.5;
+	const middleBoundaryY = NODE_ROW_HEIGHT_PX * 0.5;
 	const canKeepBeforeOrAfter =
-		previousIntent?.targetNodeId === targetLayout.nodeId &&
+		previousIntent?.targetNodeId === targetNodeId &&
 		(previousIntent.position === "before" ||
 			previousIntent.position === "after") &&
 		Math.abs(relativeY - middleBoundaryY) <= INTENT_HYSTERESIS_PX;
 	if (canKeepBeforeOrAfter) {
 		return {
-			targetNodeId: targetLayout.nodeId,
+			targetNodeId,
 			position: previousIntent.position,
 		};
 	}
 	return {
-		targetNodeId: targetLayout.nodeId,
+		targetNodeId,
 		position: clampedRatio < 0.5 ? "before" : "after",
 	};
 };
@@ -416,6 +411,28 @@ const buildNestedNodeItems = (
 		});
 	}
 	return items;
+};
+
+const flattenNestedNodeItems = (
+	items: NestedNodeItem[],
+	depth = 0,
+	rows: VirtualNodeRow[] = [],
+): VirtualNodeRow[] => {
+	for (const item of items) {
+		rows.push({
+			item,
+			depth,
+			index: rows.length,
+		});
+		if (item.children.length > 0 && !item.isCollapsed) {
+			flattenNestedNodeItems(item.children, depth + 1, rows);
+		}
+	}
+	return rows;
+};
+
+const resolveVirtualViewportHeight = (container: HTMLElement): number => {
+	return container.clientHeight || container.getBoundingClientRect().height;
 };
 
 const hasAncestorInSet = (
@@ -560,6 +577,7 @@ const NodeListRow: React.FC<NodeListRowProps> = ({
 			data-node-id={item.node.id}
 			data-node-row-container="true"
 			disabled={disabled}
+			style={{ height: NODE_ROW_HEIGHT_PX }}
 			onClick={(event) => {
 				const target = event.target as HTMLElement;
 				if (target.closest("[data-node-toggle='true']")) {
@@ -669,6 +687,10 @@ const NodeList: React.FC<NodeListProps> = ({
 	const [globalDropLineTop, setGlobalDropLineTop] = useState<number | null>(
 		null,
 	);
+	const [virtualViewport, setVirtualViewport] = useState({
+		scrollTop: 0,
+		viewportHeight: 0,
+	});
 	const empty = nodes.length === 0;
 	const nodeById = useMemo(() => {
 		return new Map(nodes.map((node) => [node.id, node]));
@@ -680,6 +702,75 @@ const NodeList: React.FC<NodeListProps> = ({
 	const nestedItems = useMemo(() => {
 		return buildNestedNodeItems(nodes, collapsedBoardIds);
 	}, [collapsedBoardIds, nodes]);
+	const flattenedRows = useMemo(() => {
+		return flattenNestedNodeItems(nestedItems);
+	}, [nestedItems]);
+	const rowByNodeId = useMemo(() => {
+		return new Map(
+			flattenedRows.map((row) => [row.item.node.id, row] as const),
+		);
+	}, [flattenedRows]);
+	const virtualTotalHeight =
+		NODE_LIST_PADDING_PX * 2 + flattenedRows.length * NODE_ROW_HEIGHT_PX;
+	const rawVirtualStartIndex = Math.max(
+		0,
+		Math.floor(
+			(virtualViewport.scrollTop - NODE_LIST_PADDING_PX) /
+				NODE_ROW_HEIGHT_PX,
+		) - VIRTUAL_OVERSCAN_ROWS,
+	);
+	const virtualStartIndex = Math.min(
+		flattenedRows.length,
+		rawVirtualStartIndex,
+	);
+	const virtualEndIndex = Math.max(
+		virtualStartIndex,
+		Math.min(
+			flattenedRows.length,
+			Math.ceil(
+				(virtualViewport.scrollTop +
+					virtualViewport.viewportHeight -
+					NODE_LIST_PADDING_PX) /
+					NODE_ROW_HEIGHT_PX,
+			) + VIRTUAL_OVERSCAN_ROWS,
+		),
+	);
+	const virtualRows = flattenedRows.slice(virtualStartIndex, virtualEndIndex);
+
+	const syncVirtualViewport = useCallback(
+		(container: HTMLElement | null = listRef.current) => {
+			if (!container) return;
+			const viewportHeight = resolveVirtualViewportHeight(container);
+			const scrollTop = container.scrollTop;
+			setVirtualViewport((prev) => {
+				if (
+					prev.scrollTop === scrollTop &&
+					prev.viewportHeight === viewportHeight
+				) {
+					return prev;
+				}
+				return {
+					scrollTop,
+					viewportHeight,
+				};
+			});
+		},
+		[],
+	);
+
+	useLayoutEffect(() => {
+		const container = listRef.current;
+		if (!container) return;
+		syncVirtualViewport(container);
+		if (typeof ResizeObserver === "undefined") return;
+		const observer = new ResizeObserver(() => {
+			syncVirtualViewport(container);
+		});
+		observer.observe(container);
+		return () => {
+			observer.disconnect();
+		};
+	}, [syncVirtualViewport]);
 
 	useEffect(() => {
 		dragStateRef.current = dragState;
@@ -727,11 +818,13 @@ const NodeList: React.FC<NodeListProps> = ({
 			if (!container || !positioningContainer) return null;
 			return resolveDropLineTop({
 				overIntent,
+				scrollContainer: container,
 				positioningContainer,
-				rowLayouts: collectNodeRowLayouts(container),
+				rowByNodeId,
+				rowCount: flattenedRows.length,
 			});
 		},
-		[],
+		[flattenedRows.length, rowByNodeId],
 	);
 
 	useLayoutEffect(() => {
@@ -741,45 +834,6 @@ const NodeList: React.FC<NodeListProps> = ({
 		}
 		setGlobalDropLineTop(resolveGlobalDropLineTop(dragState.overIntent));
 	}, [disabled, dragState?.overIntent, resolveGlobalDropLineTop]);
-
-	useEffect(() => {
-		if (!dragState) return;
-		let frameHandle = 0;
-		const tick = () => {
-			const container = listRef.current;
-			const pointer = pointerRef.current;
-			if (container && pointer) {
-				const rect = container.getBoundingClientRect();
-				const topDistance = pointer.y - rect.top;
-				const bottomDistance = rect.bottom - pointer.y;
-				let delta = 0;
-				if (topDistance >= 0 && topDistance < AUTO_SCROLL_EDGE_PX) {
-					const ratio =
-						(AUTO_SCROLL_EDGE_PX - topDistance) / AUTO_SCROLL_EDGE_PX;
-					delta = -AUTO_SCROLL_MAX_SPEED * ratio;
-				} else if (
-					bottomDistance >= 0 &&
-					bottomDistance < AUTO_SCROLL_EDGE_PX
-				) {
-					const ratio =
-						(AUTO_SCROLL_EDGE_PX - bottomDistance) / AUTO_SCROLL_EDGE_PX;
-					delta = AUTO_SCROLL_MAX_SPEED * ratio;
-				}
-				if (delta !== 0) {
-					container.scrollTop += delta;
-				}
-				const currentIntent = dragStateRef.current?.overIntent ?? null;
-				if (currentIntent) {
-					setGlobalDropLineTop(resolveGlobalDropLineTop(currentIntent));
-				}
-			}
-			frameHandle = window.requestAnimationFrame(tick);
-		};
-		frameHandle = window.requestAnimationFrame(tick);
-		return () => {
-			window.cancelAnimationFrame(frameHandle);
-		};
-	}, [dragState, resolveGlobalDropLineTop]);
 
 	const toggleCollapse = useCallback((nodeId: string) => {
 		setCollapsedBoardIds((prev) => {
@@ -810,16 +864,17 @@ const NodeList: React.FC<NodeListProps> = ({
 			) {
 				return null;
 			}
-			return resolveDropIntentFromLayouts({
+			return resolveDropIntentFromVirtualRows({
 				clientY,
 				containerRect,
-				rowLayouts: collectNodeRowLayouts(container),
+				scrollTop: container.scrollTop,
+				rows: flattenedRows,
 				previousIntent: dragStateRef.current?.overIntent ?? null,
 				dragNodeIds,
 				nodeById,
 			});
 		},
-		[nodeById],
+		[flattenedRows, nodeById],
 	);
 
 	const scheduleAutoExpand = useCallback(
@@ -892,6 +947,21 @@ const NodeList: React.FC<NodeListProps> = ({
 		],
 	);
 
+	const updateDragOverIntent = useCallback((nextIntent: DropIntent | null) => {
+		setDragState((prev) => {
+			if (!prev) return prev;
+			if (isSameDropIntent(prev.overIntent, nextIntent)) {
+				return prev;
+			}
+			const nextState = {
+				...prev,
+				overIntent: nextIntent,
+			};
+			dragStateRef.current = nextState;
+			return nextState;
+		});
+	}, []);
+
 	const handleRowDragMove = useCallback(
 		(clientX: number, clientY: number) => {
 			const currentDragState = dragStateRef.current;
@@ -903,21 +973,62 @@ const NodeList: React.FC<NodeListProps> = ({
 				currentDragState.dragNodeIds,
 			);
 			scheduleAutoExpand(nextIntent);
-			setDragState((prev) => {
-				if (!prev) return prev;
-				if (isSameDropIntent(prev.overIntent, nextIntent)) {
-					return prev;
-				}
-				const nextState = {
-					...prev,
-					overIntent: nextIntent,
-				};
-				dragStateRef.current = nextState;
-				return nextState;
-			});
+			updateDragOverIntent(nextIntent);
 		},
-		[resolveOverIntentFromPointer, scheduleAutoExpand],
+		[resolveOverIntentFromPointer, scheduleAutoExpand, updateDragOverIntent],
 	);
+
+	useEffect(() => {
+		if (!dragState) return;
+		let frameHandle = 0;
+		const tick = () => {
+			const container = listRef.current;
+			const pointer = pointerRef.current;
+			const currentDragState = dragStateRef.current;
+			if (container && pointer && currentDragState) {
+				const rect = container.getBoundingClientRect();
+				const topDistance = pointer.y - rect.top;
+				const bottomDistance = rect.bottom - pointer.y;
+				let delta = 0;
+				if (topDistance >= 0 && topDistance < AUTO_SCROLL_EDGE_PX) {
+					const ratio =
+						(AUTO_SCROLL_EDGE_PX - topDistance) / AUTO_SCROLL_EDGE_PX;
+					delta = -AUTO_SCROLL_MAX_SPEED * ratio;
+				} else if (
+					bottomDistance >= 0 &&
+					bottomDistance < AUTO_SCROLL_EDGE_PX
+				) {
+					const ratio =
+						(AUTO_SCROLL_EDGE_PX - bottomDistance) / AUTO_SCROLL_EDGE_PX;
+					delta = AUTO_SCROLL_MAX_SPEED * ratio;
+				}
+				if (delta !== 0) {
+					container.scrollTop += delta;
+					syncVirtualViewport(container);
+				}
+				const nextIntent = resolveOverIntentFromPointer(
+					pointer.x,
+					pointer.y,
+					currentDragState.dragNodeIds,
+				);
+				scheduleAutoExpand(nextIntent);
+				updateDragOverIntent(nextIntent);
+				setGlobalDropLineTop(resolveGlobalDropLineTop(nextIntent));
+			}
+			frameHandle = window.requestAnimationFrame(tick);
+		};
+		frameHandle = window.requestAnimationFrame(tick);
+		return () => {
+			window.cancelAnimationFrame(frameHandle);
+		};
+	}, [
+		dragState,
+		resolveGlobalDropLineTop,
+		resolveOverIntentFromPointer,
+		scheduleAutoExpand,
+		syncVirtualViewport,
+		updateDragOverIntent,
+	]);
 
 	const handleRowDragEnd = useCallback(() => {
 		const currentDragState = dragStateRef.current;
@@ -931,17 +1042,22 @@ const NodeList: React.FC<NodeListProps> = ({
 		clearDragState();
 	}, [clearDragState, onNodeReorder]);
 
-	const renderNestedItem = (
-		item: NestedNodeItem,
-		depth: number,
-	): React.ReactNode => {
+	const renderVirtualRow = (row: VirtualNodeRow): React.ReactNode => {
+		const item = row.item;
 		const isSelected = selectedNodeIdSet.has(item.node.id);
 		const highlightBoardGroup = item.node.type === "board" && isSelected;
 		return (
 			<div
 				key={item.node.id}
 				data-testid={`canvas-sidebar-node-group-${item.node.id}`}
-				className="relative"
+				data-virtual-row-index={row.index}
+				className="absolute"
+				style={{
+					top: NODE_LIST_PADDING_PX + row.index * NODE_ROW_HEIGHT_PX,
+					left: NODE_LIST_PADDING_PX,
+					right: NODE_LIST_PADDING_PX,
+					height: NODE_ROW_HEIGHT_PX,
+				}}
 			>
 				<div
 					className={cn(
@@ -951,7 +1067,7 @@ const NodeList: React.FC<NodeListProps> = ({
 				/>
 				<NodeListRow
 					item={item}
-					depth={depth}
+					depth={row.depth}
 					isActive={item.node.id === activeNodeId}
 					isSelected={isSelected}
 					isDragging={dragState !== null}
@@ -963,11 +1079,6 @@ const NodeList: React.FC<NodeListProps> = ({
 					onRowDragMove={handleRowDragMove}
 					onRowDragEnd={handleRowDragEnd}
 				/>
-				{item.children.length > 0 && !item.isCollapsed && (
-					<div className="flex flex-col">
-						{item.children.map((child) => renderNestedItem(child, depth + 1))}
-					</div>
-				)}
 			</div>
 		);
 	};
@@ -991,9 +1102,18 @@ const NodeList: React.FC<NodeListProps> = ({
 					<div
 						ref={listRef}
 						data-testid="canvas-sidebar-node-list"
-						className="flex min-h-0 flex-1 flex-col overflow-y-auto -m-3 p-3"
+						className="relative min-h-0 flex-1 overflow-y-auto -m-3"
+						onScroll={() => {
+							syncVirtualViewport();
+						}}
 					>
-						{nestedItems.map((item) => renderNestedItem(item, 0))}
+						<div
+							data-testid="canvas-sidebar-node-virtual-spacer"
+							className="relative w-full"
+							style={{ height: virtualTotalHeight }}
+						>
+							{virtualRows.map(renderVirtualRow)}
+						</div>
 					</div>
 					{!disabled &&
 						dragState?.overIntent?.position !== "inside" &&

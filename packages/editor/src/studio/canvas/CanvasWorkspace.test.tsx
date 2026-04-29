@@ -2002,6 +2002,119 @@ const clickSidebarNode = (nodeId: string): void => {
 	fireEvent.click(screen.getByTestId(`canvas-sidebar-node-item-${nodeId}`));
 };
 
+const SIDEBAR_NODE_ROW_HEIGHT_PX = 36;
+const SIDEBAR_NODE_LIST_PADDING_PX = 12;
+
+const createBulkSidebarNodes = (count: number): CanvasNode[] => {
+	return Array.from({ length: count }, (_, index): CanvasNode => {
+		const paddedIndex = String(index).padStart(3, "0");
+		return {
+			id: `node-bulk-${paddedIndex}`,
+			type: "image",
+			assetId: "asset-scene",
+			name: `Bulk ${paddedIndex}`,
+			x: 320 + index * 8,
+			y: 220 + index * 4,
+			width: 240,
+			height: 140,
+			siblingOrder: 10000 - index,
+			locked: false,
+			hidden: false,
+			createdAt: 20 + index,
+			updatedAt: 20 + index,
+		};
+	});
+};
+
+const appendBulkSidebarNodes = (count: number): void => {
+	useProjectStore.setState((state) => {
+		const project = state.currentProject;
+		if (!project) return state;
+		return {
+			...state,
+			currentProject: {
+				...project,
+				canvas: {
+					...project.canvas,
+					nodes: [...createBulkSidebarNodes(count), ...project.canvas.nodes],
+				},
+			},
+		};
+	});
+};
+
+const injectVirtualBoardFixture = (childCount: number): void => {
+	useProjectStore.setState((state) => {
+		const project = state.currentProject;
+		if (!project) return state;
+		const boardNode: BoardCanvasNode = {
+			id: "node-virtual-board",
+			type: "board",
+			name: "Virtual Board",
+			x: 120,
+			y: 80,
+			width: 860,
+			height: 520,
+			siblingOrder: 20000,
+			locked: false,
+			hidden: false,
+			parentId: null,
+			createdAt: 30,
+			updatedAt: 30,
+		};
+		const childNodes = Array.from(
+			{ length: childCount },
+			(_, index): CanvasNode => {
+				const paddedIndex = String(index).padStart(3, "0");
+				return {
+					id: `node-virtual-child-${paddedIndex}`,
+					type: "image",
+					assetId: "asset-scene",
+					name: `Virtual Child ${paddedIndex}`,
+					x: 160 + index * 4,
+					y: 120 + index * 4,
+					width: 180,
+					height: 100,
+					siblingOrder: childCount - index,
+					locked: false,
+					hidden: false,
+					parentId: boardNode.id,
+					createdAt: 40 + index,
+					updatedAt: 40 + index,
+				};
+			},
+		);
+		return {
+			...state,
+			currentProject: {
+				...project,
+				canvas: {
+					...project.canvas,
+					nodes: [
+						boardNode,
+						...childNodes,
+						...project.canvas.nodes.filter((node) => {
+							return (
+								node.id !== boardNode.id &&
+								!node.id.startsWith("node-virtual-child-")
+							);
+						}),
+					],
+				},
+			},
+		};
+	});
+};
+
+const scrollSidebarNodeListTo = (scrollTop: number): HTMLElement => {
+	const list = screen.getByTestId("canvas-sidebar-node-list");
+	act(() => {
+		list.scrollTop = scrollTop;
+		fireEvent.scroll(list);
+	});
+	return list;
+};
+
 describe("CanvasWorkspace", () => {
 	it("编辑器区域 mouseover 不会冒泡到 document", () => {
 		const onDocumentMouseOver = vi.fn();
@@ -2108,7 +2221,9 @@ describe("CanvasWorkspace", () => {
 			"canvas-sidebar-node-group-node-board-1",
 		);
 		expect(boardGroup.contains(boardItem)).toBe(true);
-		expect(boardGroup.contains(childItem)).toBe(true);
+		expect((childItem.firstElementChild as HTMLElement).style.paddingLeft).toBe(
+			"21px",
+		);
 	});
 
 	it("board 收起后不会把子节点提升到根层，且可再次展开", () => {
@@ -2169,10 +2284,13 @@ describe("CanvasWorkspace", () => {
 		const childItem = screen.getByTestId(
 			"canvas-sidebar-node-item-node-image-1",
 		);
-		const boardGroup = screen.getByTestId(
-			"canvas-sidebar-node-group-node-board-1",
+		const nodeItems = screen.getAllByTestId(/canvas-sidebar-node-item-/);
+		const order = nodeItems.map((item) => item.getAttribute("data-node-id"));
+		const boardIndex = order.indexOf("node-board-1");
+		expect(order[boardIndex + 1]).toBe("node-image-1");
+		expect((childItem.firstElementChild as HTMLElement).style.paddingLeft).toBe(
+			"21px",
 		);
-		expect(boardGroup.contains(childItem)).toBe(true);
 	});
 
 	it("侧边栏列表不使用 gap 间距，节点行使用 padding 作为插入通道", () => {
@@ -2184,6 +2302,74 @@ describe("CanvasWorkspace", () => {
 			item.className.includes("py-1") ||
 			Boolean(item.parentElement?.className.includes("py-1"));
 		expect(hasPaddingChannel).toBe(true);
+	});
+
+	it("大量 node 导航只挂载虚拟窗口内的行", () => {
+		appendBulkSidebarNodes(240);
+		render(<CanvasWorkspace />);
+
+		const nodeItems = screen.getAllByTestId(/canvas-sidebar-node-item-/);
+		expect(nodeItems.length).toBeLessThan(80);
+		expect(
+			screen.getByTestId("canvas-sidebar-node-item-node-bulk-000"),
+		).toBeTruthy();
+		expect(
+			screen.queryByTestId("canvas-sidebar-node-item-node-bulk-120"),
+		).toBeNull();
+
+		const spacer = screen.getByTestId("canvas-sidebar-node-virtual-spacer");
+		expect(Number.parseFloat(spacer.style.height)).toBe(
+			(240 + 6) * SIDEBAR_NODE_ROW_HEIGHT_PX +
+				SIDEBAR_NODE_LIST_PADDING_PX * 2,
+		);
+	});
+
+	it("虚拟滚动后可以显示并选择远端 node", () => {
+		appendBulkSidebarNodes(240);
+		render(<CanvasWorkspace />);
+
+		scrollSidebarNodeListTo(
+			SIDEBAR_NODE_LIST_PADDING_PX + 120 * SIDEBAR_NODE_ROW_HEIGHT_PX,
+		);
+
+		expect(
+			screen.queryByTestId("canvas-sidebar-node-item-node-bulk-000"),
+		).toBeNull();
+		const targetItem = screen.getByTestId(
+			"canvas-sidebar-node-item-node-bulk-120",
+		);
+		fireEvent.click(targetItem);
+
+		expect(useProjectStore.getState().currentProject?.ui.activeNodeId).toBe(
+			"node-bulk-120",
+		);
+	});
+
+	it("board 折叠后虚拟列表不再计入子节点高度", () => {
+		injectVirtualBoardFixture(80);
+		render(<CanvasWorkspace />);
+
+		const beforeSpacer = screen.getByTestId(
+			"canvas-sidebar-node-virtual-spacer",
+		);
+		const beforeHeight = Number.parseFloat(beforeSpacer.style.height);
+		expect(
+			screen.getByTestId("canvas-sidebar-node-item-node-virtual-child-000"),
+		).toBeTruthy();
+
+		fireEvent.pointerDown(
+			screen.getByTestId("canvas-sidebar-node-toggle-node-virtual-board"),
+			createPointerPatch(16, 16),
+		);
+
+		expect(
+			screen.queryByTestId("canvas-sidebar-node-item-node-virtual-child-000"),
+		).toBeNull();
+		const afterSpacer = screen.getByTestId("canvas-sidebar-node-virtual-spacer");
+		const afterHeight = Number.parseFloat(afterSpacer.style.height);
+		expect(afterHeight).toBe(
+			beforeHeight - 80 * SIDEBAR_NODE_ROW_HEIGHT_PX,
+		);
 	});
 
 	it("overlay 布局不改变画布渲染尺寸", () => {
