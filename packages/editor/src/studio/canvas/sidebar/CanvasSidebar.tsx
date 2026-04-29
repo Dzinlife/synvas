@@ -17,8 +17,14 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { acquireVideoAsset } from "@/assets/videoAsset";
+import { getThumbnail } from "@/element-system/VideoClip/thumbnailCache";
+import { OPFS_PREFIX, resolveProjectOpfsFile } from "@/lib/projectOpfsStorage";
 import { cn } from "@/lib/utils";
-import { resolveAssetDisplayLabel } from "@/projects/assetLocator";
+import {
+	resolveAssetDisplayLabel,
+	resolveAssetPlayableUri,
+} from "@/projects/assetLocator";
 import {
 	buildLayerTreeOrder,
 	compareSiblingOrderDesc,
@@ -135,6 +141,8 @@ const NODE_ROW_INDENT_PX = 21;
 const NODE_ROW_HEIGHT_PX = 36;
 const NODE_LIST_PADDING_PX = 12;
 const VIRTUAL_OVERSCAN_ROWS = 8;
+const ASSET_COVER_WIDTH_PX = 160;
+const ASSET_COVER_HEIGHT_PX = 90;
 
 const ASSET_KIND_LABELS: Record<TimelineAsset["kind"], string> = {
 	video: "Video",
@@ -169,6 +177,168 @@ const resolveShortAssetLocatorLabel = (
 	const normalized = label.replace(/\\/g, "/");
 	const chunks = normalized.split("/").filter(Boolean);
 	return chunks[chunks.length - 1] ?? label;
+};
+
+type AssetCoverState =
+	| { status: "idle"; imageUrl?: undefined; videoCanvas?: undefined }
+	| { status: "loading"; imageUrl?: undefined; videoCanvas?: undefined }
+	| { status: "ready"; imageUrl: string; videoCanvas?: undefined }
+	| { status: "ready"; imageUrl?: undefined; videoCanvas: HTMLCanvasElement }
+	| { status: "error"; imageUrl?: undefined; videoCanvas?: undefined };
+
+const useAssetCover = (
+	asset: TimelineAsset,
+	projectId?: string | null,
+): AssetCoverState => {
+	const [cover, setCover] = useState<AssetCoverState>({ status: "idle" });
+
+	useEffect(() => {
+		if (asset.kind !== "image" && asset.kind !== "video") {
+			setCover({ status: "idle" });
+			return;
+		}
+		const playableUri = resolveAssetPlayableUri(asset, { projectId });
+		if (!playableUri) {
+			setCover({ status: "error" });
+			return;
+		}
+		let disposed = false;
+		let objectUrl: string | null = null;
+		let videoHandle: Awaited<ReturnType<typeof acquireVideoAsset>> | null =
+			null;
+		setCover({ status: "loading" });
+
+		if (asset.kind === "image") {
+			if (!playableUri.startsWith(OPFS_PREFIX)) {
+				setCover({ status: "ready", imageUrl: playableUri });
+				return;
+			}
+			void (async () => {
+				try {
+					const file = await resolveProjectOpfsFile(playableUri);
+					const nextObjectUrl = URL.createObjectURL(file);
+					if (disposed) {
+						URL.revokeObjectURL(nextObjectUrl);
+						return;
+					}
+					objectUrl = nextObjectUrl;
+					setCover({ status: "ready", imageUrl: objectUrl });
+				} catch {
+					if (disposed) return;
+					setCover({ status: "error" });
+				}
+			})();
+			return () => {
+				disposed = true;
+				if (objectUrl) {
+					URL.revokeObjectURL(objectUrl);
+				}
+			};
+		}
+
+		void (async () => {
+			try {
+				const nextVideoHandle = await acquireVideoAsset(playableUri);
+				if (disposed) {
+					nextVideoHandle.release();
+					return;
+				}
+				videoHandle = nextVideoHandle;
+				const videoSampleSink = videoHandle.asset.createVideoSampleSink();
+				const thumbnail = await getThumbnail({
+					uri: playableUri,
+					time: 0,
+					timeKey: 0,
+					width: ASSET_COVER_WIDTH_PX,
+					height: ASSET_COVER_HEIGHT_PX,
+					pixelRatio: 1,
+					videoSampleSink,
+					input: videoHandle.asset.input,
+					preferKeyframes: true,
+				});
+				if (disposed) return;
+				if (!thumbnail) {
+					setCover({ status: "error" });
+					return;
+				}
+				setCover({ status: "ready", videoCanvas: thumbnail });
+			} catch {
+				if (disposed) return;
+				setCover({ status: "error" });
+			}
+		})();
+		return () => {
+			disposed = true;
+			videoHandle?.release();
+		};
+	}, [asset, projectId]);
+
+	return cover;
+};
+
+interface AssetCoverProps {
+	asset: TimelineAsset;
+	projectId?: string | null;
+}
+
+const AssetCover: React.FC<AssetCoverProps> = ({ asset, projectId }) => {
+	const Icon = resolveAssetKindIcon(asset.kind);
+	const cover = useAssetCover(asset, projectId);
+	const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
+	const videoCoverRef = useRef<HTMLDivElement | null>(null);
+	const imageCoverUrl =
+		cover.status === "ready" && cover.imageUrl ? cover.imageUrl : null;
+
+	useLayoutEffect(() => {
+		const host = videoCoverRef.current;
+		if (!host || cover.status !== "ready" || !cover.videoCanvas) return;
+		const canvas = cover.videoCanvas;
+		canvas.classList.add("block", "h-full", "w-full");
+		host.replaceChildren(canvas);
+		return () => {
+			if (host.contains(canvas)) {
+				host.removeChild(canvas);
+			}
+			canvas.classList.remove("block", "h-full", "w-full");
+		};
+	}, [cover]);
+
+	const showImageCover =
+		Boolean(imageCoverUrl) && failedImageUrl !== imageCoverUrl;
+	const showVideoCover = cover.status === "ready" && Boolean(cover.videoCanvas);
+
+	if (showImageCover && imageCoverUrl) {
+		return (
+			<img
+				data-testid={`canvas-sidebar-asset-cover-image-${asset.id}`}
+				src={imageCoverUrl}
+				alt=""
+				className="h-full w-full object-cover"
+				onError={() => setFailedImageUrl(imageCoverUrl)}
+				draggable={false}
+			/>
+		);
+	}
+
+	if (showVideoCover) {
+		return (
+			<div
+				ref={videoCoverRef}
+				data-testid={`canvas-sidebar-asset-cover-video-${asset.id}`}
+				className="h-full w-full"
+			/>
+		);
+	}
+
+	return (
+		<div
+			data-testid={`canvas-sidebar-asset-cover-fallback-${asset.id}`}
+			data-cover-status={cover.status}
+			className="flex h-full w-full items-center justify-center bg-white/[0.07] text-white/60"
+		>
+			<Icon className="size-6" aria-hidden="true" />
+		</div>
+	);
 };
 
 const isSameDropIntent = (
@@ -1202,10 +1372,9 @@ const AssetList: React.FC<AssetListProps> = ({
 	return (
 		<div
 			data-testid="canvas-sidebar-asset-list"
-			className="-m-3 flex h-full min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3"
+			className="-m-3 grid h-full min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto p-3"
 		>
 			{assets.map((asset) => {
-				const Icon = resolveAssetKindIcon(asset.kind);
 				const canCreate =
 					isReusableAssetKind(asset.kind) &&
 					!disabled &&
@@ -1250,22 +1419,38 @@ const AssetList: React.FC<AssetListProps> = ({
 						data-testid={`canvas-sidebar-asset-item-${asset.id}`}
 						data-asset-id={asset.id}
 						disabled={!canCreate}
+						title={asset.name}
 						className={cn(
-							"group flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left",
-							"bg-transparent text-white/90",
-							canCreate && "cursor-pointer hover:bg-white/5",
+							"group relative flex min-w-0 flex-col overflow-hidden rounded-md border border-white/10 text-left",
+							"bg-white/[0.03] text-white/90 transition",
+							canCreate &&
+								"cursor-pointer hover:border-white/20 hover:bg-white/[0.06]",
 							!canCreate && "cursor-default",
 						)}
 						onClick={handleAssetRowClick}
 						onDoubleClick={handleAssetRowDoubleClick}
 						onKeyDown={handleAssetRowKeyDown}
 					>
-						<div className="flex size-8 shrink-0 items-center justify-center rounded bg-white/10 text-white/75">
-							<Icon className="size-4" aria-hidden="true" />
+						<div className="relative aspect-video w-full overflow-hidden bg-black/25">
+							<AssetCover asset={asset} projectId={projectId} />
+							<span
+								data-asset-create-trigger="true"
+								data-testid={`canvas-sidebar-asset-create-${asset.id}`}
+								aria-disabled={!canCreate}
+								className={cn(
+									"absolute right-1 top-1 flex size-6 items-center justify-center rounded bg-black/55 text-white/80 shadow-sm backdrop-blur transition",
+									canCreate && "hover:bg-black/75 hover:text-white",
+									!canCreate && "cursor-not-allowed text-white/30",
+								)}
+							>
+								<Plus className="size-3.5" aria-hidden="true" />
+							</span>
 						</div>
-						<div className="min-w-0 flex-1">
-							<div className="truncate text-xs font-medium">{asset.name}</div>
-							<div className="flex min-w-0 items-center gap-1 text-[10px] text-white/45">
+						<div className="min-w-0 px-2 py-1.5">
+							<div className="truncate text-[11px] font-medium leading-4">
+								{asset.name}
+							</div>
+							<div className="flex min-w-0 items-center gap-1 text-[10px] leading-3 text-white/45">
 								<span className="shrink-0">
 									{ASSET_KIND_LABELS[asset.kind]}
 								</span>
@@ -1277,18 +1462,6 @@ const AssetList: React.FC<AssetListProps> = ({
 								) : null}
 							</div>
 						</div>
-						<span
-							data-asset-create-trigger="true"
-							data-testid={`canvas-sidebar-asset-create-${asset.id}`}
-							aria-disabled={!canCreate}
-							className={cn(
-								"flex size-7 shrink-0 items-center justify-center rounded text-white/75 transition",
-								canCreate && "bg-white/10 hover:bg-white/20 hover:text-white",
-								!canCreate && "cursor-not-allowed bg-white/5 text-white/25",
-							)}
-						>
-							<Plus className="size-3.5" aria-hidden="true" />
-						</span>
 					</button>
 				);
 			})}

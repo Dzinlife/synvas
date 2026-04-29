@@ -58,6 +58,17 @@ import {
 
 const togglePlaybackMock = vi.fn();
 const infiniteSkiaCanvasPropsMock = vi.fn();
+const {
+	acquireVideoAssetMock,
+	getThumbnailMock,
+	getVideoSizeMock,
+	videoAssetReleaseMock,
+} = vi.hoisted(() => ({
+	acquireVideoAssetMock: vi.fn(),
+	getThumbnailMock: vi.fn(),
+	getVideoSizeMock: vi.fn(),
+	videoAssetReleaseMock: vi.fn(),
+}));
 const rafTimers = new Map<number, ReturnType<typeof setTimeout>>();
 let rafCounter = 1;
 let nativeRequestAnimationFrame: typeof window.requestAnimationFrame;
@@ -158,6 +169,15 @@ vi.mock("@/studio/scene/usePlaybackOwnerController", () => ({
 		togglePlayback: togglePlaybackMock,
 		isOwnerPlaying: () => false,
 	}),
+}));
+
+vi.mock("@/assets/videoAsset", () => ({
+	acquireVideoAsset: acquireVideoAssetMock,
+}));
+
+vi.mock("@/element-system/VideoClip/thumbnailCache", () => ({
+	getThumbnail: getThumbnailMock,
+	getVideoSize: getVideoSizeMock,
 }));
 
 vi.mock("./InfiniteSkiaCanvas", () => ({
@@ -942,11 +962,27 @@ const createProject = (): StudioProject => ({
 			kind: "image",
 			name: "scene.png",
 			locator: {
-				type: "linked-file",
-				filePath: "/scene.png",
+				type: "linked-remote",
+				uri: "https://example.com/scene.png",
 			},
 			meta: {
 				fileName: "scene.png",
+			},
+		},
+		{
+			id: "asset-video-cover",
+			kind: "video",
+			name: "cover.mp4",
+			locator: {
+				type: "linked-remote",
+				uri: "https://example.com/cover.mp4",
+			},
+			meta: {
+				fileName: "cover.mp4",
+				sourceSize: {
+					width: 1920,
+					height: 1080,
+				},
 			},
 		},
 	],
@@ -1186,6 +1222,24 @@ const registerClipboardConvertersForTests = (): void => {
 beforeEach(() => {
 	togglePlaybackMock.mockReset();
 	infiniteSkiaCanvasPropsMock.mockReset();
+	acquireVideoAssetMock.mockReset();
+	getThumbnailMock.mockReset();
+	getVideoSizeMock.mockReset();
+	videoAssetReleaseMock.mockReset();
+	acquireVideoAssetMock.mockResolvedValue({
+		asset: {
+			input: {},
+			createVideoSampleSink: () => ({}),
+		},
+		release: videoAssetReleaseMock,
+	});
+	getThumbnailMock.mockImplementation(async () => {
+		const canvas = document.createElement("canvas");
+		canvas.width = 160;
+		canvas.height = 90;
+		return canvas;
+	});
+	getVideoSizeMock.mockResolvedValue({ width: 160, height: 90 });
 	latestSceneDrawerPropsRef.current = null;
 	__resetAudioOwnerForTests();
 	registerClipboardConvertersForTests();
@@ -2187,10 +2241,71 @@ describe("CanvasWorkspace", () => {
 				.getByTestId("canvas-sidebar-tab-assets")
 				.getAttribute("aria-pressed"),
 		).toBe("true");
-		expect(screen.getByTestId("canvas-sidebar-asset-list")).toBeTruthy();
+		const assetList = screen.getByTestId("canvas-sidebar-asset-list");
+		expect(assetList).toBeTruthy();
+		expect(assetList.className).toContain("grid-cols-2");
+		expect(assetList.className).toContain("overflow-y-auto");
 		expect(
 			screen.getByTestId("canvas-sidebar-asset-item-asset-scene").textContent,
 		).toContain("scene.png");
+		expect(
+			screen.getByTestId("canvas-sidebar-asset-item-asset-video-cover")
+				.textContent,
+		).toContain("cover.mp4");
+	});
+
+	it("Asset 面板为 image/video 素材显示封面", async () => {
+		render(<CanvasWorkspace />);
+
+		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-assets"));
+
+		await waitFor(() => {
+			const imageCover = screen.getByTestId(
+				"canvas-sidebar-asset-cover-image-asset-scene",
+			);
+			expect(imageCover.getAttribute("src")).toBe(
+				"https://example.com/scene.png",
+			);
+		});
+		await waitFor(() => {
+			expect(
+				screen.getByTestId(
+					"canvas-sidebar-asset-cover-video-asset-video-cover",
+				),
+			).toBeTruthy();
+		});
+		expect(getThumbnailMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				uri: "https://example.com/cover.mp4",
+				time: 0,
+				timeKey: 0,
+				width: 160,
+				height: 90,
+				preferKeyframes: true,
+			}),
+		);
+	});
+
+	it("Asset 封面加载失败时回退类型图标", async () => {
+		getThumbnailMock.mockResolvedValueOnce(null);
+		render(<CanvasWorkspace />);
+
+		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-assets"));
+		const imageCover = await waitFor(() =>
+			screen.getByTestId("canvas-sidebar-asset-cover-image-asset-scene"),
+		);
+		fireEvent.error(imageCover);
+
+		expect(
+			screen.getByTestId("canvas-sidebar-asset-cover-fallback-asset-scene"),
+		).toBeTruthy();
+		await waitFor(() => {
+			expect(
+				screen
+					.getByTestId("canvas-sidebar-asset-cover-fallback-asset-video-cover")
+					.getAttribute("data-cover-status"),
+			).toBe("error");
+		});
 	});
 
 	it("删除 asset-backed node 后 Assets tab 仍显示原 asset", () => {
@@ -2249,6 +2364,34 @@ describe("CanvasWorkspace", () => {
 		expect(getLatestInfiniteSkiaCanvasProps().selectedNodeIds).toEqual([
 			createdNode.id,
 		]);
+	});
+
+	it("Asset 面板可双击视频素材创建 canvas node", () => {
+		render(<CanvasWorkspace />);
+		const beforeNodeIds = new Set(
+			useProjectStore
+				.getState()
+				.currentProject?.canvas.nodes.map((node) => node.id) ?? [],
+		);
+
+		fireEvent.click(screen.getByTestId("canvas-sidebar-tab-assets"));
+		fireEvent.doubleClick(
+			screen.getByTestId("canvas-sidebar-asset-item-asset-video-cover"),
+		);
+
+		const project = useProjectStore.getState().currentProject;
+		const createdNode = project?.canvas.nodes.find(
+			(node) => !beforeNodeIds.has(node.id),
+		);
+		expect(createdNode).toBeTruthy();
+		if (!createdNode) return;
+		expect(createdNode).toMatchObject({
+			type: "video",
+			assetId: "asset-video-cover",
+			name: "cover.mp4",
+			width: 640,
+			height: 360,
+		});
 	});
 
 	it("侧边栏会按 board 的 parentId 树进行分组缩进", () => {
