@@ -1,121 +1,59 @@
-# Agent 系统初版设计决策记录
+# Agent 系统设计方案
 
-日期：2026-04-29
+日期：2026-04-30
 
-本文记录本轮关于 Synvas agent 系统，尤其是 Image Agent 初版的关键产品与架构决策。目标是让当前实现保持简单，同时给未来 project agent、云端 worker、素材面板和真实模型后端留出稳定演进空间。
+本文记录 Synvas agent 系统当前设计。当前实现已经从 image-only mock 协议演进为 provider / model / capabilities 驱动的通用 agent 协议，同时保留 Image Agent 作为第一条落地路径。
 
-## 1. 初版范围
+## 1. 设计目标
 
-当前只实现 node agent，不实现完整 project agent。
+Agent 系统的核心目标是让模型 runner、editor project mutation、artifact 持久化和 UI 控件解耦。
 
-初版只接入 image node 的本地 mock 生图/修图流程：
+关键原则：
 
-- 空 image node 走 image generate。
-- 已有图片的 image node 走 image edit。
-- 模型调用全部 mock，不接真实模型。
-- 不做素材面板。
-- 不做云端 worker。
-- 不做多人协作。
-- 不做复杂 collision / auto layout。
+- `@synvas/agent` 定义协议，不依赖 editor UI 或 project store。
+- editor 只通过 `AgentClient` 创建、取消、订阅 run，并在 `applying_effects` 阶段应用结果。
+- runner 不直接修改 project，只输出 artifact 和 effect。
+- provider/model catalog 不写死在 UI，UI 根据 `AgentModel.capabilities` 渲染可用参数。
+- 同一协议要能覆盖本地 mock、OpenAI BYOK、未来云端 worker 和 project agent。
 
-这个范围的核心目的不是把完整 AI 工作流一次做完，而是先搭好 agent 协议、run 状态机、artifact/effect 边界和 editor 集成点。后续所有节点都需要可配置 node agent，因此框架优先级高于 image 功能完整度。
+## 2. 包与职责边界
 
-## 2. 包结构决策
+`packages/agent` 是协议与 client 实现包，包名为 `@synvas/agent`。
 
-新增独立 workspace 包 `packages/agent`，包名为 `@synvas/agent`。
+它负责：
 
-原因：
+- `AgentRunRequest`、`AgentRun`、`AgentArtifact`、`AgentEffect` 等协议类型。
+- `AgentClient` 接口。
+- `LocalMockAgentClient`。
+- `OpenAiProviderClient`，并用 `OpenAiImageAgentClient` 作为兼容导出。
+- OpenAI provider 的 model catalog 和 image capabilities。
 
-- agent 协议不应该被 editor UI 细节绑定。
-- 未来本地 runner、云端 worker、桌面端后台进程都应复用同一套类型。
-- project agent 会比 node agent 更复杂，如果一开始放在 editor 内部，后续容易和 React state、project store、canvas history 混在一起。
-
-`@synvas/agent` 负责导出协议与本地 mock client：
-
-- `AgentRun`
-- `AgentRunEvent`
-- `AgentArtifact`
-- `AgentEffect`
-- `AgentEffectApplication`
-- `AgentClient`
-- `LocalMockAgentClient`
-
-editor 侧新增 `agent-system`，只负责把 agent run 接入当前 project：
+editor 侧 `agent-system` 负责：
 
 - `AgentProvider` 注入 `AgentClient`。
-- `agentRuntimeStore` 维护当前前端运行态。
-- `applyAgentEffects` 在 editor 内把 artifact 持久化为 project asset，再应用 node effects。
-- node agent UI 通过 node definition 配置接入。
+- `agentRuntimeStore` 维护前端运行态。
+- `applyAgentEffects` 把 artifacts materialize 成 project assets，再应用 effects。
+- `createEditorAgentClient` 从 editor config 创建 OpenAI client，并解析 image edit 的源图文件。
 
-## 3. Node Agent 配置模型
+node UI 只负责收集用户输入、读取 model capabilities、提交 `AgentRunRequest`。
 
-`CanvasNodeDefinition` 增加可选 `agent` 配置。
+## 3. Run 协议
 
-决策：
+`AgentRunRequest` 必须包含：
 
-- agent panel 是 node definition 的能力，不写死到 image node 以外的 canvas 逻辑。
-- editor 只知道 active node 是否有 agent panel。
-- 每种 node 自己决定 agent panel 的 layout、输入项、提交动作和目标 run kind。
+- `providerId`：执行 provider，例如 `openai`、`local-mock`。
+- `modelId`：provider 内部模型 ID，例如 `gpt-image-2`。
+- `kind`：任务类型，例如 `image.generate`、`image.edit`。
+- `scope`：project / node 作用域。
+- `input`：用户输入或语义输入。
+- `params`：模型参数。
+- `context`：editor 上下文，例如 source asset、target node。
 
-image node 当前声明：
+`params.model` 当前仍保留，用于兼容已有调用和 provider adapter，但执行模型以顶层 `modelId` 为准。
 
-- 空 image node 使用 generate layout。
-- 已有图片的 image node 使用 edit layout。
+`AgentRun` 记录同样保存 `providerId` 和 `modelId`，让事件流、artifact metadata、失败排查和未来持久化都能明确来源。
 
-这个模型后续可以自然扩展到 video node、scene node、text node，而不需要改 canvas overlay 的核心逻辑。
-
-## 4. Image Agent 产品行为
-
-顶部 canvas toolbar 新增 image generator 按钮。
-
-点击后创建一个 empty image node：
-
-- 位置直接使用当前视口中心。
-- 自动设为 active / selected node。
-- 第一版不根据 active node 放右侧或下方。
-- 第一版不做 board 归属。
-- 第一版不做 collision / auto layout 空位查找。
-
-empty image node：
-
-- `assetId` 允许为空。
-- renderer 必须显示占位或 loading，不能因为没有 asset 就返回空。
-- schema 兼容旧项目：已有 image node 不变，新 empty image node 可通过校验。
-
-generate layout 包含：
-
-- prompt input
-- 生图模型选择
-- 预计 credit 消耗
-- 质量等级
-- 图片比例
-- variant 数量
-- 单张 reference 占位 UI
-
-这些控件第一版只作为 mock 参数和产品骨架，不接真实上传、真实模型 catalog 或真实计费。
-
-已有图片的 image node 使用 edit layout：
-
-- UI 只有输入框，不暴露模型、比例、质量等选项。
-- 用户输入先交给 LLM 判断意图并生成 image-edit prompt。
-- 再交给特定 image-edit 模型修改。
-- 第一版这两步都用 mock。
-- 提交后在画布上创建新的 image placeholder node，并在该 node 上 loading。
-
-## 5. Loading 行为
-
-Image Agent 运行期间，目标 image node 不断播放 loading 动画。
-
-当前 mock run 默认拉长到 10 秒，主要用于调试和展示 loading 状态。真实模型接入后，loading 时长由 run 事件驱动，不依赖固定 timeout。
-
-loading 动画由 image node renderer 负责：
-
-- 使用 Skia `RuntimeEffect` shader。
-- 用 `useSharedValue + requestAnimationFrame` 更新 uniforms。
-- 不在 React 组件里每帧 `setState`。
-- shader 失败时回退到静态占位。
-
-## 6. Run 状态机
+## 4. 状态机
 
 当前 run 状态：
 
@@ -134,235 +72,258 @@ loading 动画由 image node renderer 负责：
 - `failed`
 - `cancelled`
 
-状态含义：
+关键边界：
 
-- `queued`：任务已创建，runner 尚未开始实际工作。
-- `running`：runner 正在理解输入、调用模型或执行工具。
-- `materializing_artifacts`：runner 已产出结果，正在准备 artifact 描述。
-- `applying_effects`：runner 不再直接改 project，等待 editor 把 artifact/effect 写入当前 project。
-- `awaiting_input`：预留给未来需要用户确认、补充信息、选择分支的 agent。
-- `succeeded`：所有必要 effect application 已完成。
-- `failed`：runner 或 editor application 失败。
-- `cancelled`：用户或系统取消。
+- `running` 前后都由 runner 推进。
+- `materializing_artifacts` 表示 runner 已产出可描述的 artifacts。
+- `applying_effects` 是 runner 与 editor mutation 的分界线。
+- editor 应用完 effects 后调用 `completeRunApplication`。
+- editor 应用失败时调用 `failRunApplication`。
 
-决策：
+React 组件不直接模拟 run 状态，也不直接在模型完成后写 project。所有 agent 行为必须经过事件流和 `AgentClient`。
 
-- run 通过事件流推进，本地 mock 也必须走事件流。
-- React 组件不允许直接 `setTimeout + updateNode` 模拟 agent 行为。
-- `awaiting_input` 当前可以不用，但状态机先保留，避免未来 project agent 需要中断确认时重做协议。
-- `applying_effects` 是明确的边界：runner 只产出结果和意图，editor 才能写 project。
+## 5. Model Catalog
 
-## 7. Artifact / Effect 分离
+`AgentModel` 当前结构：
 
-这是最重要的架构边界。
+- `providerId`
+- `providerLabel`
+- `modelId`
+- `label`
+- `kind`
+- `enabled`
+- `capabilities`
+- `defaultParams`
+- `paramsSchema`
 
-runner 输出两类东西：
+`AgentClient.listModels(filter)` 支持按 `kind` 和 `providerId` 过滤。
 
-- `AgentArtifact`：模型产生的资产，例如图片、视频、文本文件、mask、prompt rewrite 等。
-- `AgentEffect`：希望 editor 对 project 做的变更意图，例如把某个 artifact 绑定到某个 image node。
+capabilities 使用 tagged union：
 
-editor 在 `applyAgentEffects` 中做两步：
+- `AgentLlmModelCapabilities`：`type: "llm"`
+- `AgentImageModelCapabilities`：`type: "image"`
+- `AgentAudioModelCapabilities`：`type: "audio"`
+- `AgentVideoModelCapabilities`：`type: "video"`
 
-1. 先把 artifact 持久化为 project asset。
-2. 再应用 node effect，并把 node create / update 写入 history。
+UI 必须先检查 capability type，例如用 `isAgentImageModelCapabilities`，再读取 image 专属字段。不要再依赖旧的 `model.image` 字段。
 
-原因：
+## 6. Image Capabilities
 
-- runner 可能在本地，也可能在云端，不能直接持有 editor project store。
-- artifact 持久化和 project mutation 是 editor 的职责。
-- 云端 worker 完成后，即使用户关闭窗口，artifact 仍应能保留下来。
-- effect 可能因为目标 node 已不存在而失败或 skipped，但 artifact 不应该丢失。
+Image model capabilities 描述 UI 和 provider adapter 共同需要的约束：
 
-当前支持的 image effect：
+- quality options
+- default quality
+- aspect ratios
+- default aspect ratio
+- default size
+- size constraint
+- max variants
+
+size constraint 分两类：
+
+- fixed：只允许列出的尺寸。
+- flexible：允许按像素范围、最大边、倍数和长边比例归一化。
+
+当前 OpenAI catalog：
+
+- provider：`openai`
+- provider label：`OpenAI`
+- 默认模型：`gpt-image-2`
+- 支持模型：`gpt-image-2`、`gpt-image-1.5`、`gpt-image-1`、`gpt-image-1-mini`
+
+`gpt-image-2` 支持 flexible size 和 `custom` ratio。旧 GPT Image 模型使用 fixed size。
+
+## 7. OpenAI Provider Client
+
+`OpenAiProviderClient` 是当前真实 provider 实现。
+
+它负责：
+
+- 读取 editor 中配置的 OpenAI endpoint 和 API key。
+- 标准化 endpoint。
+- 调用 `/images/generations`。
+- 调用 `/images/edits`。
+- 把 OpenAI 返回的 `b64_json` 或 URL 转成 `AgentArtifact`。
+- 在错误信息中隐藏 API key。
+- 支持 abort/cancel。
+
+执行模型解析规则：
+
+- 优先使用 `params.model`。
+- 缺失时使用 `request.modelId`。
+- 再缺失才退回 `OPENAI_IMAGE_DEFAULT_MODEL`。
+
+这样既兼容旧参数，又让新的 provider/model request contract 成为主路径。
+
+## 8. Local Mock Client
+
+`LocalMockAgentClient` 仍然保留，用于开发、测试和没有真实 provider 时的 fallback。
+
+当前 mock provider：
+
+- providerId：`local-mock`
+- providerLabel：`Local Mock`
+- generate model：`mock-image-standard`
+- edit model：`mock-image-edit`
+
+mock client 也必须遵守 `AgentModel`、`AgentRunRequest` 和 `listModels(filter)` 的新协议。测试 fixture 不应再省略 `providerId` 和 `modelId`。
+
+## 9. Artifact / Effect 分离
+
+runner 输出两类结果：
+
+- `AgentArtifact`：模型产物，例如 image、text、audio、video、file。
+- `AgentEffect`：希望 editor 执行的 project 变更意图。
+
+当前 effect 只有：
 
 - `image-node.bind-artifact`
 
-后续可以扩展：
+`applyAgentEffects` 的职责：
 
-- 创建 node
-- 批量更新 node
-- 创建 scene element
-- 修改 prompt/history metadata
-- 请求用户确认
+1. 遍历 run artifacts。
+2. 只 materialize `kind === "image"` 的 artifacts。
+3. 支持 inline bytes 和 remote URL source。
+4. 将 image artifact 持久化为 project asset。
+5. 再执行 image node bind effect。
+6. 把 effect application 结果返回给 runner client。
 
-## 8. 目标 Node 不存在时的处理
+artifact 的 `mimeType`、`width`、`height` 现在都是可选字段，因为协议已经面向 text/audio/video/file 扩展。应用 image effect 时必须先收窄和校验尺寸，不可假设所有 artifact 都是图片。
 
-如果 run 完成时目标 node 已被删除：
+## 10. 目标 Node 缺失
 
-- artifact 仍然创建并保留。
-- node effect 不再写回。
-- effect application 标记为 `skipped`，reason 为 `target_missing`。
+如果 run 完成时目标 node 不存在：
 
-这个决策对云端 agent 很重要。
-
-用户创建任务后可能关闭窗口，或者任务运行期间 undo / delete 了目标 node。下次打开项目时，即使画布上已经没有目标 node，用户也应能在未来的 assets 面板里找到生成结果。
-
-当前项目 undo 本来不会删除 assets，因此初版不需要额外增加 asset 保留逻辑。
-
-## 9. History / OT / Actor 决策
-
-当前项目已经有简单 OT 模型，但还没有多人编辑。
-
-初版决策：
-
-- agent 对 canvas 的实际修改写入现有 history。
-- 使用已有 `canvas.node-create`、`canvas.node-update`、`canvas.node-create.batch`。
-- 用户 undo / redo 可以影响 agent 创建或更新的 node。
-- asset 创建不进入普通 undo 删除链路。
-- agent metadata 暂时保留在 run / effect 记录中，不强行扩展完整 OT metadata。
-
-Actor 语义：
-
-- 初版使用稳定本地 actor：`agent:local`。
-- 不为每个 agent session 创建一个 OT actor。
-- sessionId 用来表达一次任务会话，不承担 actor 身份。
+- artifact 仍然 materialize 并保留为 project asset。
+- effect application 返回 `skipped`。
+- reason 使用 `target_missing`。
 
 原因：
 
-- 每个 session 一个 actor 会让 history / audit / collaboration 维度过早膨胀。
-- 当前更重要的是区分 user action 与 agent action。
-- 未来有云端 worker 时，可以用稳定 runner actor，例如 `agent:cloud:image` 或 `agent:worker:<id>`，session 仍作为 run metadata。
+- 云端 run 可能在用户关闭窗口后完成。
+- 用户可能在 run 期间 undo/delete 目标 node。
+- 模型产物不应因为 effect 目标失效而丢失。
 
-当未来实现多人协作时，agent 应作为 OT actor 接入，但 actor 应表示执行主体，而不是每一次 run。
+## 11. History 与 Undo
 
-## 10. 本地 Runner 与云端 Worker
+agent 对 canvas node 的实际修改由 editor 应用，因此仍通过现有 project store/history 体系处理。
 
-初期 agent 都在本地运行。
+当前约定：
 
-但协议必须按未来云端 worker 可替换设计：
+- artifact 创建为 project asset。
+- asset 创建不进入普通 undo 删除链路。
+- node bind / resize 进入 editor 可观察状态。
+- agent 写入后的 node baseline 使用非撤销方式同步，避免 undo 回滚 agent 结果时误删生成产物。
 
-- editor 只依赖 `AgentClient`。
-- `LocalMockAgentClient` 是本地实现。
-- 未来可以新增 `RemoteAgentClient`，通过 HTTP / WebSocket / SSE 订阅 run events。
-- run event 是前端和 runner 的同步边界。
-- artifact source 可以是 inline bytes、remote URL、云端 asset handle 或临时 signed URL。
-- editor 仍负责把 artifact materialize 到 project asset。
+未来多人协作时，agent 应作为 OT actor 接入。但 actor 应表示执行主体，例如 `agent:openai`、`agent:cloud:image`，不应为每次 session 创建新 actor。
 
-云端 worker 需要额外考虑：
+## 12. Image Agent UI
 
-- run 需要服务端持久化。
-- event log 需要可重放。
-- artifact 需要先写入持久存储。
-- effect application 需要幂等。
-- 用户关闭窗口后，任务仍可完成。
-- 下次打开项目时，至少能同步 artifacts；是否自动应用 effects 要根据目标 project/node 状态判断。
+image node 的 agent panel 根据节点状态分两种：
 
-当前不实现这些能力，但初版协议不应阻碍这些能力。
+- 空 image node：generate。
+- 已有 asset 的 image node：edit。
 
-## 11. 模型后端设计方向
+generate 提交：
 
-editor 不直接调用具体模型 API。
+- 使用当前选中 model 的 `providerId` 和 `modelId`。
+- `params` 包含 quality、size、aspectRatio、variants。
+- 提交前根据目标生成尺寸更新 placeholder node 的显示比例。
 
-推荐后端层次：
+edit 提交：
 
-1. `AgentClient`：前端看到的任务接口，负责 create/cancel/subscribe/listModels/quote。
-2. agent runner：执行任务状态机，负责编排 LLM、image model、工具和 artifact/effect。
-3. model gateway：统一模型 catalog、quote、调用、限流、鉴权、provider adapter。
-4. provider adapter：对接具体供应商，例如 OpenAI、Replicate、Fal、内部模型服务等。
-5. artifact store：保存模型输出，返回可 materialize 的 artifact source。
+- 使用当前选中 edit model 的 `providerId` 和 `modelId`。
+- 从当前 image node 的 asset 解析源图。
+- 在源节点右侧创建新的 placeholder image node 作为 target。
+- run context 包含 `sourceAssetId` 和 `targetNodeId`。
 
-image edit 的推荐链路：
+模型选择 UI 使用 `${providerId}:${modelId}` 作为 option value，避免不同 provider 出现相同 modelId 时冲突。
 
-1. 用户输入自然语言 instruction。
-2. LLM 判断意图、必要时生成结构化 edit plan。
-3. LLM 或规则生成 image-edit prompt。
-4. image-edit 模型执行修改。
-5. runner 输出 image artifact 和 bind/create effect。
+## 13. Editor Client 创建
 
-generate 的推荐链路：
+`createEditorAgentClient` 当前返回 OpenAI provider client。
 
-1. 根据 panel 参数生成 request。
-2. quote 返回预计 credit。
-3. runner 调用 image generation model。
-4. runner 输出 image artifact 和 bind effect。
+配置来源：
 
-后端原则：
+- `useAiProviderConfigStore.getState().config.openai.endpoint`
+- `useAiProviderConfigStore.getState().config.openai.apiKey`
 
-- model catalog 不写死在 UI。
+image edit source resolver 支持：
+
+- managed asset：从 project OPFS 解析。
+- linked file：通过 Electron file bridge 读取。
+- linked remote：通过 fetch 读取。
+
+resolver 只返回 `Blob/File` 和文件名，不把 editor project store 暴露给 provider adapter。
+
+## 14. Quote
+
+`AgentClient.quote(request)` 与 `createRun(request)` 使用同一 request contract。
+
+当前：
+
+- OpenAI BYOK 返回外部计费说明。
+- Local mock 返回 mock-credit 估算。
+
+后续真实计费不要写死在 UI。UI 只渲染 quote 的结果。
+
+## 15. Project Agent 预留
+
+当前已经为 project agent 预留：
+
+- `AgentRunKind` 包含 `llm.chat`、`audio.generate`、`video.generate`。
+- artifact kind 支持 text/image/audio/video/file。
+- model capabilities 已经是通用 union。
+- `awaiting_input` 支持未来中途等待用户确认。
+- `AgentEffect` 可以扩展成 project / scene / batch effects。
+- `applying_effects` 保证 runner 不直接写 project。
+
+project agent 不应绕过 `AgentEffect` 直接调用 project store，否则 node agent 和 project agent 会形成两套 mutation 体系。
+
+## 16. 云端 Worker 预留
+
+未来可以新增 `RemoteAgentClient`，通过 HTTP、WebSocket 或 SSE 实现：
+
+- create run
+- cancel run
+- subscribe run events
+- list models
+- quote
+
+云端 worker 需要额外保证：
+
+- run 持久化。
+- event log 可重放。
+- artifact 先写入持久存储。
+- effect application 幂等。
+- 用户关闭窗口后 run 仍可完成。
+- 重新打开项目后可以同步 artifacts 和 effect application 状态。
+
+即使迁移到云端，editor 仍然负责最终 project mutation。
+
+## 17. 不变量
+
+后续改动必须保持这些不变量：
+
+- UI 不直接调用模型 provider API。
+- UI 不读取未收窄的 capabilities 专属字段。
+- `AgentRunRequest` 必须带 `providerId` 和 `modelId`。
+- runner 不直接改 project store。
+- artifact 和 effect 必须分离。
+- effect 失败不应导致已生成 artifact 丢失。
+- `applying_effects` 是 editor mutation 的唯一入口。
+- provider/model catalog 通过 `AgentClient.listModels` 暴露。
 - quote 通过 `AgentClient.quote` 获取。
-- provider 私有参数不要泄漏到 canvas node schema。
-- run input / params 可以保留产品语义，provider adapter 再转换为具体 API 参数。
-- prompt rewrite、safety、reference image 预处理都属于 runner 或 model gateway，不属于 React component。
 
-## 12. Project Agent 的预留
-
-Project agent 未来会比 node agent 更复杂，可能涉及：
-
-- 多步骤规划。
-- 多 node / 多 scene 修改。
-- 用户确认。
-- 工具调用。
-- 分支结果。
-- 长时间运行。
-- 云端恢复。
-
-当前状态机为 project agent 预留了几个关键点：
-
-- `awaiting_input` 支持中途等待用户输入。
-- `AgentEffect` 可以扩展成批量 project effects。
-- `AgentArtifact` 可以承载中间文件和最终素材。
-- actorId 与 sessionId 分离。
-- event stream 可以扩展成持久 event log。
-- `applying_effects` 把 runner 与 editor mutation 解耦。
-
-project agent 不应该直接绕过 effect application 去改 project store。否则 node agent 和 project agent 会形成两套 mutation 体系。
-
-## 13. 当前 Mock 行为
-
-当前本地 mock 约定：
-
-- generate：根据 prompt 延迟生成 mock PNG artifact，绑定到当前 empty image node。
-- edit：提交文字后先创建右侧结果 placeholder node，再 mock rewrite + mock edit，完成后绑定新 asset。
-- run 默认约 10 秒进入 `applying_effects`，用于展示 loading。
-- 如果目标 node 已删除，artifact 保留，effect skipped。
-
-mock 图片当前只是协议占位，不代表真实模型输出能力。
-
-## 14. 不做的事情
-
-初版明确不做：
-
-- 真实模型调用。
-- 真实 credit 计费。
-- 真实 reference 上传 / 选择。
-- 素材面板。
-- 云端 worker。
-- 多人编辑。
-- agent run 持久化。
-- 完整 OT actor metadata。
-- canvas 自动找空位。
-- board 自动归属。
-- project agent。
-
-这些能力后续都应基于当前协议逐步扩展，而不是在 UI 组件里临时堆逻辑。
-
-## 15. 后续演进顺序建议
+## 18. 后续演进顺序
 
 建议按以下顺序推进：
 
-1. 完善 `AgentRun` 持久化和 run event log。
-2. 接入真实 image generate provider，但保持 `AgentClient` 不变。
-3. 接入真实 image edit provider 和 prompt rewrite。
-4. 做 assets 面板，让 orphan artifact 可见。
-5. 引入 `RemoteAgentClient` 和云端 worker。
-6. 增强 effect 类型，支持批量 node / scene 修改。
-7. 接入更完整 OT actor metadata。
+1. 持久化 run 和 run event log。
+2. 增加 assets 面板，让 orphan artifact 可见。
+3. 增强 OpenAI image edit 的 prompt rewrite / edit plan。
+4. 引入 `RemoteAgentClient` 和云端 worker。
+5. 扩展 effect 类型，支持 create node、batch update、scene element mutation。
+6. 接入视频、音频和文本模型 catalog。
+7. 增加完整 OT actor metadata。
 8. 实现 project agent。
-9. 做 collision / auto layout / board 归属。
-
-## 16. 当前决策摘要
-
-- agent 协议放在独立 `@synvas/agent` 包。
-- editor 通过 `agent-system` 接入 agent，不让 React component 直接模拟 runner。
-- node agent 是 node definition 的可选能力。
-- Image Agent 初版只做 mock generate/edit。
-- image generator button 第一版直接在当前视口中心创建 empty image node。
-- empty image node 是合法状态。
-- run 必须走事件流。
-- artifact/effect 必须分离。
-- editor 在 `applying_effects` 阶段写 project。
-- agent canvas 修改进入普通 history，asset 创建不随普通 undo 删除。
-- 初版 actor 固定为 `agent:local`，不是每个 session 一个 actor。
-- 目标 node 不存在时，artifact 保留，effect skipped。
-- 本地 runner 和未来云端 worker 共用 `AgentClient` 协议。
-- 模型后端应通过 runner / model gateway / provider adapter 分层，不让 UI 直接调用模型。
